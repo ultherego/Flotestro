@@ -202,6 +202,16 @@ func (o *Orchestrator) afterReplan(ctx context.Context, campaign Campaign, targe
 		o.finishTarget(ctx, campaign, target, TargetIneligible, "plan_refused", reason)
 		return nil
 	}
+	if planNoChange(plan) {
+		// The host came back already in the desired state - somebody
+		// brought it there while it was away. That is not a changed plan
+		// the consent missed; it is nothing left to do, and the host ends
+		// the way a host planned that way from the start does. The
+		// approved plan stays on record as approved: the set digest the
+		// consent named is not rewritten under a settled host.
+		o.settleNoChange(ctx, campaign, target, hash)
+		return nil
+	}
 	approved, _, _, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 	if err != nil {
 		return err

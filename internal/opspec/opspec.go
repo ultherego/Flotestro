@@ -1686,6 +1686,7 @@ var InventoryModules = []string{
 	"system", "packages", "services", "identity", "accounts", "network",
 	"dns", "firewall", "storage", "ssh", "kernel", "time", "power",
 	"security", "certificates", "backups", "files", "containers", "schedules",
+	"sudoers",
 }
 
 // IsInventoryModule says whether a name describes an inventory module.

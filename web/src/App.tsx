@@ -20,6 +20,7 @@ import { HostLayout } from "./pages/host/Layout";
 import { DEFAULT_MODULE, groupedModules, modules } from "./pages/host/modules";
 import { REFRESH_INTERVAL } from "./lib/stream";
 import { Overview } from "./pages/host/Overview";
+import { System } from "./pages/host/System";
 import { Packages } from "./pages/host/Packages";
 import { Services } from "./pages/host/Services";
 import { Containers } from "./pages/host/Containers";
@@ -260,6 +261,7 @@ export function App() {
           <Route path="/hosts/:id" element={<HostLayout />}>
             <Route index element={<Navigate to="overview" replace />} />
             <Route path="overview" element={<Overview />} />
+            <Route path="system" element={<System />} />
             <Route path="packages" element={<Packages />} />
             <Route path="services" element={<Services />} />
             <Route path="processes" element={<Processes />} />

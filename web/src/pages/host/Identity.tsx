@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
-import type { Host, HostAccess, Job, OfflineVerdict } from "../../lib/types";
+import type { Host, HostAccess, Job, LocalSudoRule, OfflineVerdict } from "../../lib/types";
 import { Time, OptionalFlag } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import {
@@ -250,10 +250,12 @@ function VerdictChip({ verdict }: { verdict?: OfflineVerdict }) {
 
 /**
  * The effective access: the host's groups and the access and sudo rules
- * that reach it, as the directory holds them. Nothing here is decided by
- * the panel - the host's SSSD applies the rules - so the section shows the
- * projection and says plainly when it could not be read. An unavailable
- * directory or a host the directory does not know is "unknown", never "no
+ * that reach it, as the directory holds them, and next to them the rules
+ * of the host's own sudoers files, as the helper parsed them. Nothing here
+ * is decided by the panel - the host's SSSD and sudo apply the rules - so
+ * the section shows the projection and says plainly when either half
+ * could not be read. An unavailable directory, a host the directory does
+ * not know or a policy the helper did not read is "unknown", never "no
  * access".
  */
 function EffectiveAccess({ host }: { host: Host }) {
@@ -266,13 +268,11 @@ function EffectiveAccess({ host }: { host: Host }) {
 
   if (access.error) {
     const error = access.error;
-    const detail = error instanceof ApiError && error.status === 501
-      ? t("No directory connector is configured; the panel cannot tell which rules reach this host.")
-      : error instanceof ApiError && error.forbidden
-        ? t("You do not have permission to read the directory.")
-        : t("The directory did not answer: {error}", { error: error instanceof Error ? error.message : String(error) });
+    const detail = error instanceof ApiError && error.forbidden
+      ? t("You do not have permission to read the directory.")
+      : t("The access view could not be read: {error}", { error: error instanceof Error ? error.message : String(error) });
     return (
-      <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")}>
+      <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules and the local sudoers say.")}>
         <p className="hm-message"><Unknown /> {detail}</p>
       </Section>
     );
@@ -286,82 +286,187 @@ function EffectiveAccess({ host }: { host: Host }) {
       </Section>
     );
   }
-  if (!data.known) {
-    return (
-      <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")}>
-        <p className="hm-message"><Unknown /> {data.detail}</p>
-      </Section>
-    );
-  }
 
   return (
     <>
-      <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")} flush>
-        <Facts>
-          <Fact label={t("Directory entry")}><span className="hm-mono">{data.fqdn}</span></Fact>
-          <Fact label={t("Enrolled in the directory")}>
-            {data.enrolled ? <span className="badge ok">{t("yes")}</span> : <span className="badge">{t("no")}</span>}
-          </Fact>
-          <Fact label={t("Host groups")} wide>{data.host_groups.join(", ") || t("none")}</Fact>
-        </Facts>
-      </Section>
+      {/* A root-equivalent local grant is the first thing on the page: it is
+          the answer to "who can become root here" whatever the directory
+          says. */}
+      {data.root_equivalent_warnings.length > 0 && (
+        <p className="warning">
+          <span>
+            {t("Local sudoers make somebody root on this host:")}{" "}
+            {data.root_equivalent_warnings.join("; ")}
+          </span>
+        </p>
+      )}
 
-      <Section title={t("HBAC rules reaching this host")} count={data.hbac_rules.length} flush>
-        <Table>
-          <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Services")}</th></tr></thead>
-          <tbody>
-            {data.hbac_rules.length === 0 ? (
-              <tr><td colSpan={5} className="empty">{t("No HBAC rule reaches this host: nobody from the directory can sign in.")}</td></tr>
-            ) : data.hbac_rules.map((rule) => (
-              <tr key={rule.name}>
-                <td>
-                  {rule.name}
-                  {rule.allows_everything && <> <span className="badge error">{t("covers the whole fleet")}</span></>}
-                </td>
-                <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
-                <td>{rule.via.join(", ")}</td>
-                <td>
-                  {rule.all_users
-                    ? t("every user")
-                    : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}
-                </td>
-                <td>{rule.all_services ? t("every service") : [...(rule.services ?? []), ...(rule.service_groups ?? [])].join(", ") || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-        <Foot>{t("A disabled rule is listed because it would apply the moment somebody enables it.")}</Foot>
-      </Section>
+      {!data.known ? (
+        <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")}>
+          <p className="hm-message"><Unknown /> {data.detail}</p>
+        </Section>
+      ) : (
+        <>
+          <Section title={t("Effective access")} description={t("Who may enter this host and with what privileges, as the directory's rules say.")} flush>
+            <Facts>
+              <Fact label={t("Directory entry")}><span className="hm-mono">{data.fqdn}</span></Fact>
+              <Fact label={t("Enrolled in the directory")}>
+                {data.enrolled ? <span className="badge ok">{t("yes")}</span> : <span className="badge">{t("no")}</span>}
+              </Fact>
+              <Fact label={t("Host groups")} wide>{data.host_groups.join(", ") || t("none")}</Fact>
+            </Facts>
+          </Section>
 
-      <Section title={t("sudo rules reaching this host")} count={data.sudo_rules.length} flush>
-        <Table>
-          <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Commands")}</th><th>{t("Run as")}</th><th>{t("Risk")}</th></tr></thead>
-          <tbody>
-            {data.sudo_rules.length === 0 ? (
-              <tr><td colSpan={7} className="empty">{t("No sudo rule from the directory reaches this host.")}</td></tr>
-            ) : data.sudo_rules.map((rule) => (
-              <tr key={rule.name}>
-                <td>{rule.name}</td>
-                <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
-                <td>{rule.via.join(", ")}</td>
-                <td>
-                  {rule.all_users
-                    ? t("every user")
-                    : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}
-                </td>
-                <td className="hm-mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
-                <td>{rule.run_as_any_user ? t("any user") : [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])].join(", ") || "—"}</td>
-                <td>
-                  {rule.critical
-                    ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
-                    : "—"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-        <Foot>{t("Local sudoers entries on the host are not part of this list; only what the directory grants.")}</Foot>
-      </Section>
+          <Section title={t("HBAC rules reaching this host")} count={data.hbac_rules.length} flush>
+            <Table>
+              <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Services")}</th></tr></thead>
+              <tbody>
+                {data.hbac_rules.length === 0 ? (
+                  <tr><td colSpan={5} className="empty">{t("No HBAC rule reaches this host: nobody from the directory can sign in.")}</td></tr>
+                ) : data.hbac_rules.map((rule) => (
+                  <tr key={rule.name}>
+                    <td>
+                      {rule.name}
+                      {rule.allows_everything && <> <span className="badge error">{t("covers the whole fleet")}</span></>}
+                    </td>
+                    <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
+                    <td>{rule.via.join(", ")}</td>
+                    <td>
+                      {rule.all_users
+                        ? t("every user")
+                        : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}
+                    </td>
+                    <td>{rule.all_services ? t("every service") : [...(rule.services ?? []), ...(rule.service_groups ?? [])].join(", ") || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            <Foot>{t("A disabled rule is listed because it would apply the moment somebody enables it.")}</Foot>
+          </Section>
+
+          <Section title={t("sudo rules reaching this host")} count={data.sudo_rules.length} flush>
+            <Table>
+              <thead><tr><th>{t("Rule")}</th><th>{t("Enabled")}</th><th>{t("Via")}</th><th>{t("Who")}</th><th>{t("Commands")}</th><th>{t("Run as")}</th><th>{t("Risk")}</th></tr></thead>
+              <tbody>
+                {data.sudo_rules.length === 0 ? (
+                  <tr><td colSpan={7} className="empty">{t("No sudo rule from the directory reaches this host.")}</td></tr>
+                ) : data.sudo_rules.map((rule) => (
+                  <tr key={rule.name}>
+                    <td>{rule.name}</td>
+                    <td>{rule.enabled ? t("yes") : <span className="badge">{t("no")}</span>}</td>
+                    <td>{rule.via.join(", ")}</td>
+                    <td>
+                      {rule.all_users
+                        ? t("every user")
+                        : (rule.reached_users ?? []).join(", ") || [...(rule.users ?? []), ...(rule.user_groups ?? [])].join(", ") || "—"}
+                    </td>
+                    <td className="hm-mono">{rule.all_commands ? t("every command") : [...(rule.commands ?? []), ...(rule.command_groups ?? [])].join(", ") || "—"}</td>
+                    <td>{rule.run_as_any_user ? t("any user") : [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])].join(", ") || "—"}</td>
+                    <td>
+                      {rule.critical
+                        ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Section>
+        </>
+      )}
+
+      <LocalSudoRules access={data} />
     </>
+  );
+}
+
+/**
+ * The rules of the host's own sudoers files. They apply next to the
+ * directory's rules - or instead of them on a host outside the domain -
+ * and they are the ones an administrator writes by hand, so each is shown
+ * with the file and line it comes from. A policy the helper did not read
+ * is unknown with its reason, never "no local rules".
+ */
+function LocalSudoRules({ access }: { access: HostAccess }) {
+  const t = useT();
+  const state = access.local_sudoers;
+  const rules = access.local_sudo_rules ?? [];
+  const runAs = (rule: LocalSudoRule) => {
+    if (rule.run_as_any_user) return t("any user");
+    const names = [...(rule.run_as ?? []), ...(rule.run_as_groups ?? [])];
+    if (rule.run_as_self) return t("self") + (names.length ? `: ${names.join(", ")}` : "");
+    return names.join(", ") || "root";
+  };
+
+  return (
+    <Section
+      title={t("Local sudoers rules")}
+      count={state.read ? rules.length : undefined}
+      description={t("What /etc/sudoers and its drop-ins grant on this host, as the helper parsed them. A rule that names other hosts is listed but does not reach this one.")}
+      flush
+    >
+      {!state.read ? (
+        <p className="hm-message"><Unknown /> {state.reason}</p>
+      ) : (
+        <>
+          {state.passwordless_globally && (
+            <p className="warning">
+              <span>{t("A global Defaults line turns authentication off: every local rule is passwordless whatever its tags say.")}</span>
+            </p>
+          )}
+          <Table>
+            <thead><tr><th>{t("Who")}</th><th>{t("Hosts")}</th><th>{t("Commands")}</th><th>{t("Run as")}</th><th>{t("Password")}</th><th>{t("Risk")}</th><th>{t("Source")}</th></tr></thead>
+            <tbody>
+              {rules.length === 0 ? (
+                <tr><td colSpan={7} className="empty">{t("The local sudoers files grant nothing.")}</td></tr>
+              ) : rules.map((rule) => (
+                <tr key={`${rule.source}:${rule.line}:${rule.commands.join(",")}:${rule.nopasswd}`} style={rule.reaches_host ? undefined : { opacity: 0.55 }}>
+                  <td>
+                    {rule.all_users ? t("every user") : rule.users.join(", ")}
+                    {(rule.reached_users ?? []).length > 0 && !rule.all_users && rule.users.some((user) => user.startsWith("%") || user.startsWith("#")) && (
+                      <div className="source">{t("members: {users}", { users: (rule.reached_users ?? []).join(", ") })}</div>
+                    )}
+                  </td>
+                  <td>
+                    {rule.reaches_host
+                      ? rule.via.join(", ")
+                      : <span className="badge unknown" title={rule.hosts.join(", ")}>{t("not this host")}</span>}
+                  </td>
+                  <td className="hm-mono">{rule.all_commands ? t("every command") : rule.commands.join(", ")}</td>
+                  <td>{runAs(rule)}</td>
+                  <td>{rule.nopasswd || state.passwordless_globally ? <span className="badge warn">{t("none")}</span> : t("required")}</td>
+                  <td>
+                    {rule.root_equivalent
+                      ? <span className="badge error" title={(rule.critical_reasons ?? []).join("; ")}>{t("root")}</span>
+                      : rule.critical
+                        ? <span className="badge warn" title={(rule.critical_reasons ?? []).join("; ")}>{t("critical")}</span>
+                        : "—"}
+                  </td>
+                  <td className="hm-mono">{rule.source}:{rule.line}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {(state.problems ?? []).length > 0 && (
+            <Foot>
+              <Unknown />{" "}
+              {t("{count} lines were not understood and may grant something the table does not show:", { count: (state.problems ?? []).length })}{" "}
+              {(state.problems ?? []).map((problem) => `${problem.source}:${problem.line}`).join(", ")}
+            </Foot>
+          )}
+          {(state.files ?? []).some((file) => file.reason) && (
+            <Foot>
+              <Unknown />{" "}
+              {t("Files not read:")}{" "}
+              {(state.files ?? []).filter((file) => file.reason).map((file) => `${file.path} (${file.reason})`).join("; ")}
+            </Foot>
+          )}
+          <Foot>
+            {t("Read from {files} files", { files: (state.files ?? []).length })}
+            {state.observed_at && <>, <Time value={state.observed_at} /></>}
+          </Foot>
+        </>
+      )}
+    </Section>
   );
 }

@@ -491,7 +491,7 @@ func (c *Collector) campaignMetrics(ctx context.Context) []metric {
 		select t.state, coalesce(nullif(t.error_code, ''), 'none'), count(*)
 		  from campaign_targets t
 		  join campaigns c on c.id = t.campaign_id
-		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'paused')
+		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate', 'running', 'paused', 'canceling')
 		 group by 1, 2`, "state", "reason_code"); err == nil {
 		result = append(result, metric{
 			name: "flotestro_campaign_targets", kind: "gauge",

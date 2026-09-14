@@ -228,6 +228,25 @@ message Hello {
   // this is the only source of the host's own address. Empty means an
   // undetermined address.
   string local_address = 5;
+  // The commit the agent was built from. The version names a release; the
+  // commit names the sources, which the version alone does not once a
+  // package was rebuilt. Empty from a build outside a checkout.
+  string build_commit = 6;
+  // The protocols the agent speaks, oldest and newest. The panel judges
+  // compatibility by the overlap with its own range before it consults
+  // its table of releases. A max of zero is an agent from before the
+  // range was announced; the table decides then.
+  uint32 protocol_min = 7;
+  uint32 protocol_max = 8;
+  // The digest of the effective configuration the agent runs on: the file
+  // after the defaults filled in what it left out. Two files that mean the
+  // same have the same digest. Empty on a host that runs on the
+  // environment variables of the old flow and has no file.
+  string config_fingerprint = 9;
+  // The schema_version of the configuration file on disk. Zero next to a
+  // protocol range means no file: the host is still on the environment
+  // variables, which the panel shows as a legacy configuration.
+  uint32 config_schema_version = 10;
 }
 
 message SessionConfig {

@@ -76,6 +76,10 @@ message HelperRequest {
     // with enrolled = false: the checks before and the verifications after
     // have the same shape as the join's, so the panel reads one shape.
     DomainLeaveRequest domain_leave = 52;
+    // The platform facts and the sudo policy only root can read: the DMI
+    // serial numbers and the UUID, and /etc/sudoers with its drop-ins.
+    // The scope is a closed list of facts, not a path.
+    SystemRequest system = 53;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -270,6 +274,30 @@ message HelperResponse {
   HostnameResult hostname_result = 38;
   SmartResult smart_result = 39;
   FinalWipeResult final_wipe_result = 40;
+  SystemResult system_result = 41;
+}
+
+// SystemRequest names the facts of the system module the helper is to
+// read. The agent reads the rest of the platform picture itself; only
+// what the kernel refuses to an unprivileged reader comes here.
+message SystemRequest {
+  enum Fact {
+    FACT_UNSPECIFIED = 0;
+    // The product serial number, the board and chassis serial numbers and
+    // the product UUID from /sys/class/dmi/id.
+    FACT_DMI_IDENTITY = 1;
+    // The local sudo policy: /etc/sudoers and every file it includes,
+    // parsed into rules with their file and line.
+    FACT_SUDOERS = 2;
+  }
+  repeated Fact facts = 1;
+}
+
+message SystemResult {
+  // Dmi is the JSON supplement of the system module; sudoers the JSON
+  // snapshot of the sudoers module. Each is present only when asked for.
+  bytes dmi = 1;
+  bytes sudoers = 2;
 }
 
 // DockerReadRequest describes what to read from the engine. The scope is

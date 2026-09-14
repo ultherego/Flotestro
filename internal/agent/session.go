@@ -21,9 +21,12 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // SessionOptions configures the connection of the agent to the control plane.
@@ -161,6 +164,34 @@ func Run(ctx context.Context, opts SessionOptions) error {
 // connection already goes with the new identity.
 var errIdentityRenewed = errors.New("the identity of the agent was renewed")
 
+// hello introduces the agent to the panel: what it is running, what it can
+// talk, and what it was configured with.
+//
+// The build commit says which sources the binary came from, which the
+// version alone does not once a package was rebuilt. The protocol range
+// lets the panel judge compatibility from what the agent says it speaks
+// rather than from a table of releases it may not know yet. The
+// configuration fingerprint and schema say what the host runs on: a host
+// still on the environment file has no file to fingerprint and reports no
+// schema, which is what the panel shows as a legacy configuration.
+func hello(facts Facts, revision, localAddress string) *agentv1.Hello {
+	message := &agentv1.Hello{
+		AgentVersion:      Version,
+		BuildCommit:       buildinfo.FullCommit(),
+		ProtocolMin:       buildinfo.AgentProtocolMin,
+		ProtocolMax:       buildinfo.AgentProtocol,
+		BootId:            facts.BootID,
+		Capabilities:      capabilitiesToProto(facts.Capabilities),
+		InventoryRevision: revision,
+		LocalAddress:      localAddress,
+	}
+	if loaded, ok := agentconfig.Current(); ok {
+		message.ConfigFingerprint = loaded.Fingerprint
+		message.ConfigSchemaVersion = uint32(loaded.SchemaVersion)
+	}
+	return message
+}
+
 func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	opts SessionOptions) (result error) {
 	sessionCtx, cancel := context.WithCancel(ctx)
@@ -214,13 +245,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	}
 
 	if err := stream.Send(&agentv1.AgentMessage{
-		Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
-			AgentVersion:      Version,
-			BootId:            facts.BootID,
-			Capabilities:      capabilitiesToProto(facts.Capabilities),
-			InventoryRevision: revision,
-			LocalAddress:      localAddress,
-		}},
+		Payload: &agentv1.AgentMessage_Hello{Hello: hello(facts, revision, localAddress)},
 	}); err != nil {
 		return err
 	}
@@ -340,7 +365,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		// second: a task waiting for a busy resource has no reason to hold
 		// a slot that would be useful to an operation without a collision.
 		opts.Executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope,
-			claims []string, waiting func(blocker string)) (func(), string) {
+			claims []opspec.ResourceClaim, waiting func(blocker string)) (func(), string) {
 			releaseResources, reason := acquireResources(ctx, resources, task, claims, waiting)
 			if releaseResources == nil {
 				return nil, reason
@@ -352,7 +377,7 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 			if len(claims) > 0 {
 				opts.Log.Info("the resources were taken", "task_id", task.GetTaskId(),
-					"claims", strings.Join(claims, ","))
+					"claims", strings.Join(claimNames(claims), ","))
 			}
 			return func() {
 				releaseSlot()

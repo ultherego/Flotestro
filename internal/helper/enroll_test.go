@@ -498,9 +498,11 @@ func TestTheLeaveVerificationsNameWhatIsLeftBehind(t *testing.T) {
 	useFakeIdentityTool(t)
 
 	checks := verifyLeave(context.Background(), "flotestro.test")
-	for _, name := range []string{"ipa_config", "keytab"} {
+	// The configuration decides membership; the keytab is a warning, since
+	// the uninstall may leave the file where it holds keys of its own.
+	for name, blocking := range map[string]bool{"ipa_config": true, "keytab": false} {
 		item := findCheck(t, checks, name)
-		if !item.GetPassed() || !item.GetBlocking() {
+		if !item.GetPassed() || item.GetBlocking() != blocking {
 			t.Errorf("%s: %+v", name, item)
 		}
 		if !strings.Contains(item.GetDetail(), "gone") {

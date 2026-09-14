@@ -22,14 +22,15 @@ import (
 //
 // The names are the same ones the inventory is split into fragments by - the
 // operator asks to refresh what they are looking at, not an internal field of
-// the facts. ModuleSystem has no entry here: the basic facts are always
-// collected, because they are what decides which of the other modules make
-// sense.
+// the facts. The basic facts of ModuleSystem - the system, the hardware, the
+// hostname - are always collected, because they are what decides which of
+// the other modules make sense; its entry here covers the platform picture
+// laid over them, which is read at its own, slow pace.
 var ModuleOrder = []string{
-	ModuleServices, ModulePackages, ModuleIdentity, ModuleAccounts, ModuleContainers,
-	ModuleSchedules, ModuleNetwork, ModuleDNS, ModuleStorage, ModuleFiles,
-	ModuleKernel, ModuleSecurity, ModuleBackups, ModuleCerts, ModulePower,
-	ModuleTime, ModuleSSH, ModuleFirewall,
+	ModuleSystem, ModuleServices, ModulePackages, ModuleIdentity, ModuleAccounts,
+	ModuleContainers, ModuleSchedules, ModuleNetwork, ModuleDNS, ModuleStorage,
+	ModuleFiles, ModuleKernel, ModuleSecurity, ModuleBackups, ModuleCerts,
+	ModulePower, ModuleTime, ModuleSSH, ModuleFirewall, ModuleSudoers,
 }
 
 // InventoryModule knows one module: it can collect it and it can carry over the
@@ -40,6 +41,17 @@ type InventoryModule struct {
 }
 
 var moduleCollectors = map[string]InventoryModule{
+	ModuleSystem: {
+		collect: func(ctx context.Context, facts *Facts, _ string) {
+			// The platform picture: what the machine is, as far as procfs,
+			// sysfs and the DMI tables say. Static, so it goes at the slow
+			// pace; the serial numbers come through the helper.
+			platform := CollectSystem(ctx)
+			facts.System = &platform
+		},
+		carry: func(facts *Facts, previous Facts) { facts.System = previous.System },
+	},
+
 	ModuleServices: {
 		collect: func(ctx context.Context, facts *Facts, _ string) {
 			if facts.Capabilities.Available(CapSystemd) {
@@ -321,6 +333,18 @@ var moduleCollectors = map[string]InventoryModule{
 			facts.SSH = &snapshot
 		},
 		carry: func(facts *Facts, previous Facts) { facts.SSH = previous.SSH },
+	},
+
+	ModuleSudoers: {
+		collect: func(ctx context.Context, facts *Facts, _ string) {
+			// The sudo policy is read by the helper: /etc/sudoers and its
+			// drop-ins are root's files. The read is a parse of a few files,
+			// and the policy changes when somebody edits it, so it goes at the
+			// slow pace.
+			policy := CollectSudoers(ctx)
+			facts.Sudoers = &policy
+		},
+		carry: func(facts *Facts, previous Facts) { facts.Sudoers = previous.Sudoers },
 	},
 
 	ModuleFirewall: {

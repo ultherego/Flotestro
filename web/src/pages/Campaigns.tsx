@@ -24,10 +24,16 @@ export function Campaigns() {
   const count = (states: string[]) => (data ? campaigns.filter((campaign) => states.includes(campaign.state)).length : undefined);
   const awaiting = count(["awaiting_approval", "planned"]);
   const inProgress = count(["planning", "canary", "running"]);
-  const paused = count(["paused"]);
+  const paused = count(["paused", "manual_gate"]);
   const completed = count(["completed"]);
-  const failed = count(["failed", "partially_applied"]);
-  const canceled = count(["canceled", "cancelled"]);
+  // A campaign that got through with hosts failed or unknown is neither a
+  // clean completion nor a failure; it has a segment of its own, because
+  // it is the one the operator has hosts to look at in.
+  const withIssues = count(["completed_with_issues"]);
+  const failed = count(["failed", "plan_failed", "expired", "partially_applied"]);
+  // A canceling campaign still has hosts at work; it is counted with the
+  // canceled ones because its fate is decided, not because it has ended.
+  const canceled = count(["canceled", "canceling", "cancelled"]);
   const listed = t("among the {n} listed", { n: campaigns.length });
   // How the listed campaigns ended, and what they did: a fleet whose
   // campaigns mostly end canceled has a planning problem, not a rollout
@@ -38,8 +44,9 @@ export function Campaigns() {
   const outcomes = tally((campaign) => campaign.state);
   const operations = tally((campaign) => campaign.action_type);
   const outcomeTone = (state: string): WidgetTone =>
-    state === "completed" ? "ok" : ["failed", "partially_applied"].includes(state) ? "error"
-      : ["paused", "awaiting_approval", "planned"].includes(state) ? "warn" : ["canceled", "cancelled"].includes(state) ? "unknown" : "info";
+    state === "completed" ? "ok" : ["failed", "plan_failed", "expired", "partially_applied"].includes(state) ? "error"
+      : ["paused", "manual_gate", "awaiting_approval", "planned", "completed_with_issues"].includes(state) ? "warn"
+        : ["canceled", "canceling", "cancelled"].includes(state) ? "unknown" : "info";
 
   return (
     <>
@@ -62,6 +69,7 @@ export function Campaigns() {
             { label: t("In progress"), value: inProgress, tone: "info" },
             { label: t("Paused"), value: paused, tone: "warn" },
             { label: t("Completed"), value: completed, tone: "ok" },
+            { label: t("With issues"), value: withIssues, tone: "warn" },
             { label: t("Failed"), value: failed, tone: "error" },
             { label: t("Canceled"), value: canceled, tone: "unknown" },
           ]} />

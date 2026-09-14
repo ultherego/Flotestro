@@ -617,10 +617,16 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, s
 		jobID, string(StateDispatched), string(StateLeased)); err != nil {
 		return err
 	}
+	// The envelope leaves before this row is written, and a quick agent
+	// acknowledges it in between: an attempt that was accepted already
+	// keeps the lease the acceptance gave it, and the job stays where the
+	// acknowledgement moved it.
 	if _, err := tx.Exec(ctx, `
 		update job_attempts
 		   set dispatched_at = now(), session_id = $2,
-		       lease_expires_at = least(lease_expires_at, now() + make_interval(secs => $3))
+		       lease_expires_at = case when accepted_at is null
+		                               then least(lease_expires_at, now() + make_interval(secs => $3))
+		                               else lease_expires_at end
 		 where id = $1`,
 		attemptID, nullableUUID(sessionID), lease.Seconds()); err != nil {
 		return err
@@ -650,7 +656,7 @@ func (s *Store) AcceptAttempt(ctx context.Context, attemptID, hostID string,
 		   and j.host_id = $2::uuid
 		   and a.finished_at is null
 		   and a.lease_expires_at is not null
-		   and j.state in ('dispatched', 'running')
+		   and j.state in ('leased', 'dispatched', 'running')
 		returning j.action_type,
 		          case when a.accepted_at = now()
 		               then extract(epoch from now() - a.dispatched_at)::float8 end`,
@@ -685,7 +691,7 @@ func (s *Store) SetLockWait(ctx context.Context, attemptID, hostID, blocker stri
 		   and j.id = a.job_id
 		   and j.host_id = $2::uuid
 		   and a.finished_at is null
-		   and j.state = 'dispatched'
+		   and j.state in ('leased', 'dispatched')
 		   and j.wait_reason <> $3`,
 		attemptID, hostID, reason)
 	if err != nil {
@@ -718,7 +724,7 @@ func (s *Store) MarkRunning(ctx context.Context, attemptID, hostID string) (bool
 		 where a.id = $1
 		   and j.host_id = $2::uuid
 		   and a.finished_at is null
-		   and j.state = 'dispatched'
+		   and j.state in ('leased', 'dispatched')
 		 for update of j`, attemptID, hostID).Scan(&jobID, &actionType, &waitReason, &lockWait)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -1022,7 +1028,7 @@ func clampOutput(stdout, stderr []byte, truncated bool, limit int) ([]byte, []by
 // again rather than retry.
 func staleReason(code string) bool {
 	switch code {
-	case "precondition_failed", "payload_hash_mismatch", "plan_hash_mismatch", "plan_stale":
+	case "precondition_failed", "precondition_changed", "payload_hash_mismatch", "plan_hash_mismatch", "plan_stale":
 		return true
 	}
 	return false

@@ -73,6 +73,12 @@ const (
 	RejectHelperFailed   = "helper_unavailable"
 	RejectCapability     = "capability_missing"
 	RejectInvalidRequest = "invalid_request"
+	// RejectPreconditionChanged marks a task whose preconditions held when
+	// it was accepted and no longer do after its wait for a resource of the
+	// host: the host rebooted, or changed under the plan, while another
+	// operation held the lock. The plan is not carried out on a host it
+	// was not computed for; the panel computes it again.
+	RejectPreconditionChanged = "precondition_changed"
 	// RejectUnsupported marks an agent that by design performs no tasks.
 	RejectUnsupported = "unsupported"
 	// RejectInternalError marks an error on the side of the agent. The task ends
@@ -114,7 +120,7 @@ type TaskExecutor struct {
 	// told about a wait for a busy lock, with the blocker. Nil means
 	// nothing to wait for: an executor assembled by hand in a test, or one
 	// without a session.
-	admit func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+	admit func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(blocker string)) (release func(), reason string)
 	// logLines passes on the journal preview. Nil means there is no session, and
 	// then the preview is not started at all: the host is not to work for
@@ -421,6 +427,20 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 				"the session ended while the task waited for the resources of the host")
 		}
 		defer release()
+
+		// The preconditions were checked before the wait, against the host
+		// as it was then. A wait behind a package transaction or a reboot
+		// can outlive that picture: the boot ID moves, a capability goes
+		// away. The plan is checked again against the facts of now, and a
+		// task whose ground moved is refused with its own code - the panel
+		// is to plan again, not to retry what it approved for another host
+		// state. A task without preconditions has nothing to recheck.
+		if err := checkPreconditions(task.GetPreconditions(), e.facts()); err != nil {
+			e.log.Info("the preconditions changed while the task waited for the resources of the host",
+				"task_id", task.GetTaskId(), "reason", err.Error())
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPreconditionChanged,
+				"the preconditions changed while the task waited for the resources of the host: "+err.Error())
+		}
 	}
 
 	// From here on the host may change, so the journal has to say so before
@@ -434,7 +454,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	}
 	// The marker is down and the claims are held: the operation starts this
 	// instant, and the panel counts the host as running from here.
-	e.reportStage(task, StageStarted, "", claims)
+	e.reportStage(task, StageStarted, "", claimNames(claims))
 
 	switch action {
 	case opspec.ActionReadJournal:

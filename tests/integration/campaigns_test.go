@@ -4126,8 +4126,11 @@ func TestActionCatalogueCarriesTemplates(t *testing.T) {
 	if ready < 40 {
 		t.Errorf("only %d operations are ready for a campaign", ready)
 	}
-	if withMaterial != 2 {
-		t.Errorf("%d operations need certificate material, expected the deployment and the trust anchor", withMaterial)
+	// The certificate deployment, the trust anchor and the repository
+	// source: each carries material (a key, a certificate) that no
+	// template can stand in for.
+	if withMaterial != 3 {
+		t.Errorf("%d operations need material, expected the deployment, the trust anchor and the repository key", withMaterial)
 	}
 }
 

@@ -359,7 +359,9 @@ func runningStep(state TargetState) StepKey {
 	switch state {
 	case TargetPlanning:
 		return StepPlan
-	case TargetRunning:
+	case TargetDispatched, TargetAwaitingLock, TargetRunning:
+		// One step, three stages of its task: handed over, waiting for a
+		// resource of the host, running.
 		return StepExecute
 	case TargetRebooting:
 		return StepReboot
@@ -384,12 +386,15 @@ func nextStep(campaign Campaign) StepKey {
 // stepStateOf maps the state a target is settled into onto the state of
 // the step that carried it. A host ruled ineligible by its own plan ran
 // the plan step to the end: the answer was "no", which is an outcome of the
-// plan rather than a failure of the read.
+// plan rather than a failure of the read; a host that found nothing to
+// change ran it to the end too. A host that ended unknown has a step that
+// did not end well - the step ledger has no unknown of its own, and the
+// reason on the step carries the code that says which kind of "not well".
 func stepStateOf(state TargetState) StepState {
 	switch state {
-	case TargetSucceeded, TargetIneligible:
+	case TargetSucceeded, TargetNoChange, TargetIneligible:
 		return StepSucceeded
-	case TargetFailed:
+	case TargetFailed, TargetUnknown:
 		return StepFailed
 	case TargetSkipped:
 		return StepSkipped

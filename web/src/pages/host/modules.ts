@@ -76,6 +76,9 @@ function requires(...names: string[]) {
 // and the grouped navigation agree on where a module stands.
 const MODULES: Module[] = [
   { segment: "overview", name: "Overview", group: "system", icon: "overview", reason: () => "" },
+  // The platform picture travels in the system fragment every agent sends,
+  // so the tab is never unavailable; an old agent shows the basic facts.
+  { segment: "system", name: "System", group: "system", icon: "server", reason: () => "", inventory: "system" },
   { segment: "packages", name: "Packages", group: "system", icon: "packages", reason: requires("packages.apt", "packages.dnf", "packages.pacman"), inventory: "packages" },
   { segment: "services", name: "Services", group: "system", icon: "services", reason: requires("systemd"), inventory: "services" },
   { segment: "processes", name: "Processes", group: "system", icon: "processes", reason: () => "" },

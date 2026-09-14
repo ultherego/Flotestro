@@ -10,6 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/power"
 	"github.com/ultherego/flotestro/internal/modules/security"
 	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
+	"github.com/ultherego/flotestro/internal/modules/sudoers"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 )
 
@@ -21,6 +22,7 @@ const (
 	moduleTime     = "time"
 	modulePower    = "power"
 	modulePackages = "packages"
+	moduleSudoers  = "sudoers"
 )
 
 // Checks is the panel's hardening profile.
@@ -120,6 +122,13 @@ var Checks = []Check{
 		Expected:  "no reboot required",
 		Rationale: "A host waiting for a reboot runs on an old kernel or old libraries despite the update being installed.",
 		Evaluate:  evaluateReboot,
+	},
+	{
+		ID: "sudo.root_nopasswd", Version: 1, Severity: SeverityHigh, Module: moduleSudoers,
+		Title:     "Nobody becomes root without a password",
+		Expected:  "no local sudo rule grants every command as root with NOPASSWD",
+		Rationale: "A passwordless root grant turns any session of that account - a leaked key, an unlocked screen - into root at once.",
+		Evaluate:  evaluateRootWithoutPassword,
 	},
 }
 
@@ -496,6 +505,57 @@ func evaluateReboot(input Input) Result {
 			Note:           "a reboot ends the plan: whatever comes after it has to be assessed anew",
 			RequiresReboot: true,
 		},
+	}
+}
+
+// evaluateRootWithoutPassword judges the local sudo policy: the helper
+// parsed the files and marked the grants, and the panel says whether any
+// of them makes somebody root without a password. The rule of the
+// distribution's default file - the sudo or wheel group with every
+// command, with a password - passes.
+func evaluateRootWithoutPassword(input Input) Result {
+	fragment, ok := input.Fragment(moduleSudoers)
+	if !ok {
+		return unknown(ReasonFactMissing, "the sudo policy was not read")
+	}
+	if fragment.UnavailableReason != "" {
+		return unknown(missingCode(fragment.UnavailableReason), fragment.UnavailableReason)
+	}
+	var policy sudoers.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &policy); err != nil {
+		return unknown(ReasonReadFailed, "the sudo policy was not read: "+err.Error())
+	}
+	if policy.UnavailableReason != "" {
+		return unknown(missingCode(policy.UnavailableReason), policy.UnavailableReason)
+	}
+	passwordless := policy.RootWithoutPassword()
+	if len(passwordless) == 0 {
+		observed := "no passwordless root grant"
+		if equivalent := len(policy.RootEquivalentRules()); equivalent > 0 {
+			observed += "; root-equivalent rules with a password: " + strconv.Itoa(equivalent)
+		}
+		if len(policy.Problems) > 0 {
+			// A line the parser skipped may be the very grant the check
+			// looks for, so the pass names what it did not read.
+			observed += "; lines not understood: " + strconv.Itoa(len(policy.Problems))
+		}
+		return Result{Passed: true, Observed: observed}
+	}
+	evidence := make([]string, 0, len(passwordless))
+	for _, rule := range passwordless {
+		evidence = append(evidence, rule.Source+":"+strconv.Itoa(rule.Line)+" "+strings.Join(rule.Users, ","))
+	}
+	observed := strconv.Itoa(len(passwordless)) + " passwordless root grants"
+	if policy.PasswordlessGlobally() {
+		observed += " (a global Defaults line turns authentication off)"
+	}
+	return Result{
+		Observed: observed,
+		Evidence: strings.Join(evidence, "; "),
+		// The panel writes no sudo rule: the files are root's and a change
+		// there is a decision about who administers the host.
+		Remediation: &Remediation{Note: "edit the named file with visudo and drop NOPASSWD from the grant, " +
+			"or move the grant to a directory rule with a password; the panel does not write sudoers files"},
 	}
 }
 

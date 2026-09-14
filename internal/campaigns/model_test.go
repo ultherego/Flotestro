@@ -218,11 +218,153 @@ func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
 			t.Errorf("%s does not hold its wave open", state)
 		}
 	}
-	if !(Target{State: TargetFailed, ErrorCode: ConnectivityLostCode}).ConnectivityLost() {
-		t.Error("a failed host with an expired lease does not count as a lost connection")
+	// A broken session ends the host unknown, and the code says which
+	// kind of unknown; a failed change is neither.
+	if !(Target{State: TargetUnknown, ErrorCode: ConnectivityLostCode}).ConnectivityLost() {
+		t.Error("an unknown host with an expired lease does not count as a lost connection")
 	}
 	if (Target{State: TargetFailed, ErrorCode: "exec_failed"}).ConnectivityLost() {
 		t.Error("a failed change counts as a lost connection")
+	}
+	if (Target{State: TargetUnknown, ErrorCode: OutcomeUnknownCode}).ConnectivityLost() {
+		t.Error("an agent restart counts as a lost connection")
+	}
+}
+
+// TestTheNewStatesKnowTheirPlace guards how the states the document names
+// sit among the predicates: the two in-flight ones hold their slot and
+// their wave without being ready to start, the two terminal ones end the
+// host, and only one of them is a success.
+func TestTheNewStatesKnowTheirPlace(t *testing.T) {
+	for _, state := range []TargetState{TargetDispatched, TargetAwaitingLock} {
+		if state.Finished() || state.Waiting() {
+			t.Errorf("%s is neither finished nor waiting in the queue", state)
+		}
+		if !state.HoldsWave() || !state.UnderWay() {
+			t.Errorf("%s holds its wave and carries a task", state)
+		}
+	}
+	for _, state := range []TargetState{TargetNoChange, TargetUnknown} {
+		if !state.Finished() || state.UnderWay() || state.HoldsWave() {
+			t.Errorf("%s ends the host's participation", state)
+		}
+	}
+	if !TargetNoChange.Succeeded() || TargetUnknown.Succeeded() {
+		t.Error("no change is a success and unknown is not")
+	}
+	if !TargetSucceeded.Succeeded() || TargetSkipped.Succeeded() {
+		t.Error("succeeded is a success and skipped is not")
+	}
+	for _, state := range []State{StateCompletedWithIssues, StatePlanFailed, StateExpired} {
+		if !state.Terminal() || state.Active() {
+			t.Errorf("%s should be a final state", state)
+		}
+	}
+	// Canceling is neither active - nothing starts - nor final: hosts are
+	// still at work, and a compensation is refused until they settle.
+	if StateCanceling.Terminal() || StateCanceling.Active() {
+		t.Error("canceling is classified wrongly")
+	}
+}
+
+// TestTheTallyCountsUnknownAsAFailure guards the document's rule that
+// unknown is not a success: the threshold reads an unknown host the way
+// it reads a failed one, a host that changed nothing the way it reads one
+// whose change landed, and the connectivity count sees only the sessions
+// that broke.
+func TestTheTallyCountsUnknownAsAFailure(t *testing.T) {
+	targets := []Target{
+		{State: TargetSucceeded},
+		{State: TargetNoChange},
+		{State: TargetFailed, ErrorCode: "exec_failed"},
+		{State: TargetUnknown, ErrorCode: ConnectivityLostCode},
+		{State: TargetUnknown, ErrorCode: OutcomeUnknownCode},
+		{State: TargetSkipped, ErrorCode: "maintenance"},
+		{State: TargetIneligible, ErrorCode: "plan_refused"},
+		{State: TargetRunning},
+	}
+	counts := tallyTargets(targets)
+	want := targetTally{Total: 8, Finished: 7, Succeeded: 2, Failed: 3, Unknown: 2, Skipped: 1, Lost: 1}
+	if counts != want {
+		t.Fatalf("tally = %+v, expected %+v", counts, want)
+	}
+	// Three of seven finished did not reach the desired state: 42 %, so a
+	// threshold of 40 % fires - and would not if the unknown ones were
+	// left out of the count.
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, counts.Total, 40, 0); !exceeded {
+		t.Error("two unknown hosts and one failure did not cross a 40 % threshold")
+	}
+}
+
+// TestTheVerdictOnASettledCampaign guards the three ways a campaign ends
+// once every host has settled: completed when every host that took part
+// got through, completed with issues when the threshold held but hosts
+// failed or ended unknown, failed when nothing got through. A skipped
+// host is a decision with a reason and no blemish on the campaign.
+func TestTheVerdictOnASettledCampaign(t *testing.T) {
+	cases := []struct {
+		name   string
+		counts targetTally
+		want   State
+	}{
+		{"every host succeeded", targetTally{Total: 3, Finished: 3, Succeeded: 3}, StateCompleted},
+		{"nothing to change anywhere", targetTally{Total: 2, Finished: 2, Succeeded: 2}, StateCompleted},
+		{"an ineligible host is no blemish", targetTally{Total: 3, Finished: 3, Succeeded: 2}, StateCompleted},
+		{"one host failed under the threshold", targetTally{Total: 4, Finished: 4, Succeeded: 3, Failed: 1}, StateCompletedWithIssues},
+		{"one host ended unknown", targetTally{Total: 4, Finished: 4, Succeeded: 3, Failed: 1, Unknown: 1}, StateCompletedWithIssues},
+		{"one host was skipped", targetTally{Total: 4, Finished: 4, Succeeded: 3, Skipped: 1}, StateCompleted},
+		{"the only host was skipped", targetTally{Total: 1, Finished: 1, Skipped: 1}, StateCompleted},
+		{"every host that ran failed", targetTally{Total: 3, Finished: 3, Failed: 3}, StateFailed},
+		{"the only host ended unknown", targetTally{Total: 1, Finished: 1, Failed: 1, Unknown: 1}, StateFailed},
+		{"failures next to skips and nothing through", targetTally{Total: 3, Finished: 3, Failed: 1, Skipped: 2}, StateFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := settleCampaignState(tc.counts); got != tc.want {
+				t.Errorf("verdict = %s, expected %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestACancelWaitsForTheHostsUnderWay guards the canceling state: a cancel
+// with hosts still carrying a task is not over, whatever stage of the task
+// they are at, and is over once none does - hosts settled any way at all.
+func TestACancelWaitsForTheHostsUnderWay(t *testing.T) {
+	for _, state := range []TargetState{TargetDispatched, TargetAwaitingLock, TargetRunning, TargetRebooting, TargetVerifying} {
+		targets := []Target{{State: TargetCanceled}, {State: state}, {State: TargetSucceeded}}
+		if cancelSettled(targets) {
+			t.Errorf("a cancel settled with a host %s", state)
+		}
+	}
+	settled := []Target{{State: TargetCanceled}, {State: TargetSucceeded}, {State: TargetFailed},
+		{State: TargetUnknown}, {State: TargetNoChange}, {State: TargetSkipped}}
+	if !cancelSettled(settled) {
+		t.Error("a cancel with every host settled did not end")
+	}
+	if !cancelSettled(nil) {
+		t.Error("a cancel with no hosts did not end")
+	}
+}
+
+// TestPlansExpireOnlyBeforeTheStart guards the expiry: a campaign whose
+// oldest plan passed the time limit expires as a whole while nothing has
+// started, keeps going once a host has - every host checks its own plan's
+// age at dispatch - and a campaign without plans has nothing to expire.
+func TestPlansExpireOnlyBeforeTheStart(t *testing.T) {
+	computed := time.Date(2026, 9, 13, 10, 0, 0, 0, time.UTC)
+	if plansExpired(computed, nil, computed.Add(PlanTTL-time.Minute)) {
+		t.Error("plans inside the limit expired")
+	}
+	if !plansExpired(computed, nil, computed.Add(PlanTTL+time.Minute)) {
+		t.Error("plans past the limit did not expire before the start")
+	}
+	started := computed.Add(time.Hour)
+	if plansExpired(computed, &started, computed.Add(PlanTTL+time.Hour)) {
+		t.Error("a campaign that started expired as a whole")
+	}
+	if plansExpired(time.Time{}, nil, computed.Add(48*time.Hour)) {
+		t.Error("a campaign without plans expired")
 	}
 }
 

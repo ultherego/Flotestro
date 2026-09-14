@@ -88,6 +88,23 @@ func (o *Orchestrator) tick(ctx context.Context) {
 
 // advance moves a campaign forward by one step.
 func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
+	// A campaign that has not started is watched for the age of its plans
+	// before its targets are read: a campaign waiting for an approval is
+	// looked at on every pass, and a thousand target rows read every five
+	// seconds to learn that nothing changed would be the cost of that.
+	if campaign.State == StateAwaitingApproval || (campaign.State == StatePlanned && campaign.StartedAt == nil) {
+		oldest, err := o.store.OldestPlan(ctx, campaign.ID)
+		if err != nil {
+			return err
+		}
+		if plansExpired(oldest, campaign.StartedAt, time.Now()) {
+			return o.expire(ctx, campaign, oldest)
+		}
+		if campaign.State == StateAwaitingApproval {
+			return nil
+		}
+	}
+
 	targets, err := o.store.Targets(ctx, campaign.ID)
 	if err != nil {
 		return err
@@ -97,6 +114,11 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	// no waves, no thresholds and no campaign concurrency limit.
 	if campaign.State == StatePlanning {
 		return o.plan(ctx, campaign, targets)
+	}
+	// A canceled campaign with hosts still at work drains: the hosts settle,
+	// nothing starts, and the campaign ends with the last of them.
+	if campaign.State == StateCanceling {
+		return o.drain(ctx, campaign, targets)
 	}
 
 	// We renew the token leases before settling anything: a host that is just
@@ -124,6 +146,9 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		}
 	}
 
+	// The tally reads unknown hosts as failures: the threshold bounds the
+	// hosts that did not reach the desired state, and an unknown one did
+	// not, as far as anyone can tell.
 	counts := tallyTargets(targets)
 	failed, finished, lost := counts.Failed, counts.Finished, counts.Lost
 
@@ -146,7 +171,7 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	}
 
 	if allFinished(targets) {
-		return o.complete(ctx, campaign, targets, failed)
+		return o.complete(ctx, campaign, targets)
 	}
 
 	// The hosts waiting for their connection are looked at on every pass,
@@ -299,14 +324,17 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			continue
 		}
 		// The task, the boot ID, the transition and the step go in one
-		// transaction: a host that is running has its change step open,
-		// and a step that is open has a host that is running.
+		// transaction: a host that is under way has its change step open,
+		// and a step that is open has a host that is under way. The host is
+		// dispatched, not running: the agent says when the operation starts,
+		// and until it does the panel has handed a task over and heard
+		// nothing back.
 		// A compensating campaign opens, with its own change step, the
 		// compensate step on the original's target for this host: the two
 		// records agree from the first moment that the reverse change runs.
 		if err := o.startStep(ctx, target, stepStart{
 			Key: StepExecute, DependsOn: dependencyOf(StepExecute, campaignPlans(campaign), false),
-			PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetRunning,
+			PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetDispatched,
 			BootID: &host.BootID, Compensates: campaign.CompensatesCampaignID,
 		}); err != nil {
 			return err
@@ -561,36 +589,6 @@ func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *h
 	return job.ID, nil
 }
 
-// targetTally is what the stop rules read off the targets: how many are
-// settled, how many of those failed, and how many failed because their
-// session broke.
-type targetTally struct {
-	Failed   int
-	Finished int
-	Lost     int
-}
-
-// tallyTargets counts the targets the way the stop rules read them. A
-// host is a failure whatever step failed it: a canary whose units did not
-// come up after the change is as much a failure as one whose change did
-// not run, and the threshold that keeps the next wave from starting reads
-// both the same way.
-func tallyTargets(targets []Target) targetTally {
-	var counts targetTally
-	for _, target := range targets {
-		if target.State.Finished() {
-			counts.Finished++
-		}
-		if target.State == TargetFailed {
-			counts.Failed++
-		}
-		if target.ConnectivityLost() {
-			counts.Lost++
-		}
-	}
-	return counts
-}
-
 func allFinished(targets []Target) bool {
 	for _, target := range targets {
 		if !target.State.Finished() {
@@ -628,4 +626,93 @@ func waveFinished(targets []Target, wave int) bool {
 		}
 	}
 	return true
+}
+
+// expire ends a campaign whose plans passed their time limit before any
+// host started.
+//
+// The hosts that were waiting are closed with the plan_stale code, the
+// same one a host gets when the campaign tries it on an old plan: the
+// difference is that here nobody tried, because a campaign that would
+// have failed every host one by one on the same ground is expired as a
+// whole. The tokens the campaign may hold as a waiting claimant go back,
+// and the report is written with the transition like every terminal one.
+func (o *Orchestrator) expire(ctx context.Context, campaign Campaign, oldest time.Time) error {
+	targets, err := o.store.Targets(ctx, campaign.ID)
+	if err != nil {
+		return err
+	}
+	age := time.Since(oldest).Round(time.Minute)
+	why := fmt.Sprintf("%v: the oldest plan was computed %s ago, the limit is %s, and no host had started",
+		ErrPlanExpired, age, PlanTTL)
+	for i := range targets {
+		if targets[i].State.Finished() {
+			continue
+		}
+		o.finishTarget(ctx, campaign, &targets[i], TargetSkipped, "plan_stale", why)
+	}
+	if err := o.store.SetState(ctx, campaign.ID, StateExpired, why); err != nil {
+		return err
+	}
+	if o.budgets != nil {
+		if err := o.budgets.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
+			o.log.Error("the capacity of an expired campaign was not released",
+				"campaign_id", campaign.ID, "err", err)
+		}
+	}
+	o.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "campaign.expire", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeFailure,
+		Detail: map[string]any{
+			"reason": why, "oldest_plan_at": oldest, "plan_ttl": PlanTTL.String(),
+			"previous_state": string(campaign.State),
+		},
+	})
+	o.log.Warn("the campaign expired before it started",
+		"campaign_id", campaign.ID, "oldest_plan_at", oldest, "previous_state", campaign.State)
+	return nil
+}
+
+// drain carries a canceled campaign to its end. The hosts under way settle
+// the way they always do - the change, then the reboot and the
+// verification the policy asks for, because a host left with its change
+// done and its reboot not ordered is a host the cancel would have
+// half-done, and a cancel does not pretend to be a rollback. Nothing new
+// starts: the waiting hosts were closed when the cancel was ordered, and
+// the thresholds have no say over a campaign that stops anyway. Once no
+// host carries a task the campaign is canceled, with its report.
+func (o *Orchestrator) drain(ctx context.Context, campaign Campaign, targets []Target) error {
+	o.renewCapacity(ctx, targets)
+	for i := range targets {
+		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
+			o.log.Error("failure while draining a campaign target",
+				"campaign_id", campaign.ID, "host_id", targets[i].HostID, "err", err)
+		}
+	}
+	if !cancelSettled(targets) {
+		return nil
+	}
+	if err := o.store.SetState(ctx, campaign.ID, StateCanceled, ""); err != nil {
+		return err
+	}
+	if o.budgets != nil {
+		if err := o.budgets.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
+			o.log.Error("the capacity of a canceled campaign was not released",
+				"campaign_id", campaign.ID, "err", err)
+		}
+	}
+	counts, err := o.store.Counts(ctx, campaign.ID)
+	if err != nil {
+		return err
+	}
+	o.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "campaign.canceled", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"canceled_by": campaign.CanceledBy, "totals": counts},
+	})
+	o.log.Info("the canceled campaign drained its last host",
+		"campaign_id", campaign.ID, "totals", fmt.Sprint(counts))
+	return nil
 }

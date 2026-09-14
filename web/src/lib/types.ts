@@ -79,6 +79,21 @@ export type Host = {
   connection_state: "online" | "offline" | "stale" | "unknown";
   last_seen_at?: string;
   boot_id?: string;
+  // What the agent reported about itself at its last Hello beyond the
+  // version: the commit it was built from, the protocols it speaks, and
+  // the configuration it runs on. Every field is absent for a host whose
+  // agent predates the report - an unknown build is not an empty one.
+  agent_build_commit?: string;
+  agent_protocol_min?: number;
+  agent_protocol_max?: number;
+  // The digest of the effective agent.yaml, absent also for a host on the
+  // environment variables of the old flow; the schema the file declares,
+  // zero for no file; and the verdict: the host runs on the environment
+  // file or on a schema older than the current one. Absent when the agent
+  // reported nothing - not knowing is not "legacy".
+  config_fingerprint?: string;
+  config_schema_version?: number;
+  config_legacy?: boolean;
   // The maintenance window: an empty field means a host outside a window,
   // not a window of zero length. Campaigns skip a host in a window, and its
   // alerts wake nobody.
@@ -303,6 +318,10 @@ export type Campaign = {
   // The payload as ordered, in the shape of a single-host operation. A
   // rollback plan starts from it: the same path, the same interface.
   payload?: unknown;
+  // planning, planned, awaiting_approval, canary, manual_gate, running,
+  // paused, canceling, and the settled ones: completed,
+  // completed_with_issues, failed, plan_failed, expired, canceled. The
+  // list of the settled ones is SETTLED_CAMPAIGN_STATES in lib/targets.
   state: string;
   canary_size: number;
   wave_size: number;
@@ -361,6 +380,9 @@ export type CampaignTarget = {
   host_id: string;
   hostname?: string;
   wave: number;
+  // One of TARGET_STATES in lib/targets. A terminal state is one of
+  // succeeded, no_change, failed, unknown, skipped, ineligible, excluded,
+  // canceled; the report totals count each of them apart.
   state: string;
   error_code?: string;
   message?: string;
@@ -375,8 +397,12 @@ export type CampaignTarget = {
 
 export type CampaignReport = {
   state: string;
+  // Hosts per target state: succeeded, no_change, failed, unknown, skipped,
+  // canceled and the rest, each its own number.
   totals: Record<string, number>;
   waves: { wave: number; is_canary: boolean; totals: Record<string, number>; completed: boolean }[];
+  // The hosts to look at: the ones that failed and the ones that ended
+  // unknown, each with its state on the row.
   failures: CampaignTarget[];
   // Hosts that came back from being offline with a different plan: they ran
   // nothing, because the consent covered the old plan.
@@ -521,6 +547,88 @@ export type HostAccess = {
   host_groups: string[];
   hbac_rules: (HBACRule & { via: string[]; reached_users?: string[] })[];
   sudo_rules: (SudoRule & { via: string[]; reached_users?: string[] })[];
+  /** Whether the directory half was read; the local half does not depend on it. */
+  directory: { configured: boolean; reachable: boolean; error?: string };
+  local_sudoers: LocalSudoersState;
+  local_sudo_rules: LocalSudoRule[];
+  /** One sentence per local grant that makes somebody root on this host. */
+  root_equivalent_warnings: string[];
+};
+
+/**
+ * The state of the local sudo policy. `read` false with a reason is a
+ * policy the panel does not know - never a host without sudo.
+ */
+export type LocalSudoersState = {
+  read: boolean;
+  reason?: string;
+  observed_at?: string;
+  revision?: string;
+  files?: { path: string; included_from?: string; lines: number; reason?: string }[];
+  problems?: { source: string; line: number; text: string; reason: string }[];
+  passwordless_globally: boolean;
+};
+
+/** One rule of /etc/sudoers or a drop-in, as the helper parsed it. */
+export type LocalSudoRule = {
+  users: string[];
+  hosts: string[];
+  run_as?: string[];
+  run_as_groups?: string[];
+  run_as_self?: boolean;
+  commands: string[];
+  tags?: string[];
+  nopasswd: boolean;
+  all_users: boolean;
+  all_hosts: boolean;
+  all_commands: boolean;
+  run_as_any_user: boolean;
+  root_equivalent: boolean;
+  critical: boolean;
+  critical_reasons?: string[];
+  /** The file and line the rule was read from. */
+  source: string;
+  line: number;
+  text: string;
+  via: string[];
+  reaches_host: boolean;
+  reached_users?: string[];
+};
+
+/**
+ * The platform picture of the system module, laid over the basic facts of
+ * the fragment. A missing number is a fact the host could not read, and
+ * `missing` says why for each of them.
+ */
+export type SystemSnapshot = {
+  hostname?: string;
+  boot_id?: string;
+  os?: { family?: string; distribution?: string; version?: string; kernel?: string; architecture?: string; pretty_name?: string; codename?: string };
+  hardware?: { cpu_cores?: number; memory_bytes?: number; root_fs_bytes?: number; root_fs_free_bytes?: number; virtualization?: string };
+  cpu?: { model?: string; vendor?: string; threads?: number; cores?: number; sockets?: number; flags?: string[]; flag_count?: number; mhz?: number };
+  memory?: { total_bytes?: number; swap_total_bytes?: number };
+  dmi?: {
+    vendor?: string; product?: string; version?: string; family?: string; board_vendor?: string; board_name?: string;
+    chassis_type?: string; serial?: string; uuid?: string; board_serial?: string; chassis_serial?: string;
+  };
+  firmware?: { vendor?: string; version?: string; date?: string; mode?: string };
+  kernel?: { release?: string; version?: string; architecture?: string; cmdline?: string };
+  distribution?: { id?: string; name?: string; version?: string; codename?: string; pretty_name?: string; like?: string[] };
+  virtualization?: { kind?: string; source?: string };
+  timezone?: string;
+  boot?: { booted_at?: string; uptime_seconds?: number };
+  missing?: Record<string, string>;
+  /** When the platform picture was read; the fragment's own timestamp is the report's. */
+  observed_at?: string;
+};
+
+/** One platform the panel has seen a host on. */
+export type SystemHistoryEntry = {
+  kernel: string;
+  distribution: string;
+  distribution_version: string;
+  first_seen_at: string;
+  last_seen_at: string;
 };
 
 export type InventoryRevision = {

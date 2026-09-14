@@ -2459,9 +2459,28 @@ type Hello struct {
 	// sees the relay address when the host connects through a site relay - then
 	// this is the only source of the host's own address. Empty means an
 	// undetermined address.
-	LocalAddress  string `protobuf:"bytes,5,opt,name=local_address,json=localAddress,proto3" json:"local_address,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	LocalAddress string `protobuf:"bytes,5,opt,name=local_address,json=localAddress,proto3" json:"local_address,omitempty"`
+	// The commit the agent was built from. The version names a release; the
+	// commit names the sources, which the version alone does not once a
+	// package was rebuilt. Empty from a build outside a checkout.
+	BuildCommit string `protobuf:"bytes,6,opt,name=build_commit,json=buildCommit,proto3" json:"build_commit,omitempty"`
+	// The protocols the agent speaks, oldest and newest. The panel judges
+	// compatibility by the overlap with its own range before it consults
+	// its table of releases. A max of zero is an agent from before the
+	// range was announced; the table decides then.
+	ProtocolMin uint32 `protobuf:"varint,7,opt,name=protocol_min,json=protocolMin,proto3" json:"protocol_min,omitempty"`
+	ProtocolMax uint32 `protobuf:"varint,8,opt,name=protocol_max,json=protocolMax,proto3" json:"protocol_max,omitempty"`
+	// The digest of the effective configuration the agent runs on: the file
+	// after the defaults filled in what it left out. Two files that mean the
+	// same have the same digest. Empty on a host that runs on the
+	// environment variables of the old flow and has no file.
+	ConfigFingerprint string `protobuf:"bytes,9,opt,name=config_fingerprint,json=configFingerprint,proto3" json:"config_fingerprint,omitempty"`
+	// The schema_version of the configuration file on disk. Zero next to a
+	// protocol range means no file: the host is still on the environment
+	// variables, which the panel shows as a legacy configuration.
+	ConfigSchemaVersion uint32 `protobuf:"varint,10,opt,name=config_schema_version,json=configSchemaVersion,proto3" json:"config_schema_version,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Hello) Reset() {
@@ -2527,6 +2546,41 @@ func (x *Hello) GetLocalAddress() string {
 		return x.LocalAddress
 	}
 	return ""
+}
+
+func (x *Hello) GetBuildCommit() string {
+	if x != nil {
+		return x.BuildCommit
+	}
+	return ""
+}
+
+func (x *Hello) GetProtocolMin() uint32 {
+	if x != nil {
+		return x.ProtocolMin
+	}
+	return 0
+}
+
+func (x *Hello) GetProtocolMax() uint32 {
+	if x != nil {
+		return x.ProtocolMax
+	}
+	return 0
+}
+
+func (x *Hello) GetConfigFingerprint() string {
+	if x != nil {
+		return x.ConfigFingerprint
+	}
+	return ""
+}
+
+func (x *Hello) GetConfigSchemaVersion() uint32 {
+	if x != nil {
+		return x.ConfigSchemaVersion
+	}
+	return 0
 }
 
 type SessionConfig struct {
@@ -13615,13 +13669,19 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"final_task\x18\x05 \x01(\v2\x1d.flotestro.agent.v1.FinalTaskH\x00R\tfinalTask\x12D\n" +
 	"\ffinal_commit\x18\x06 \x01(\v2\x1f.flotestro.agent.v1.FinalCommitH\x00R\vfinalCommitB\t\n" +
-	"\apayload\"\xdf\x01\n" +
+	"\apayload\"\xab\x03\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x17\n" +
 	"\aboot_id\x18\x02 \x01(\tR\x06bootId\x12D\n" +
 	"\fcapabilities\x18\x03 \x01(\v2 .flotestro.agent.v1.CapabilitiesR\fcapabilities\x12-\n" +
 	"\x12inventory_revision\x18\x04 \x01(\tR\x11inventoryRevision\x12#\n" +
-	"\rlocal_address\x18\x05 \x01(\tR\flocalAddress\"\xe9\x02\n" +
+	"\rlocal_address\x18\x05 \x01(\tR\flocalAddress\x12!\n" +
+	"\fbuild_commit\x18\x06 \x01(\tR\vbuildCommit\x12!\n" +
+	"\fprotocol_min\x18\a \x01(\rR\vprotocolMin\x12!\n" +
+	"\fprotocol_max\x18\b \x01(\rR\vprotocolMax\x12-\n" +
+	"\x12config_fingerprint\x18\t \x01(\tR\x11configFingerprint\x122\n" +
+	"\x15config_schema_version\x18\n" +
+	" \x01(\rR\x13configSchemaVersion\"\xe9\x02\n" +
 	"\rSessionConfig\x12+\n" +
 	"\x11heartbeat_seconds\x18\x01 \x01(\x05R\x10heartbeatSeconds\x128\n" +
 	"\x18heartbeat_jitter_seconds\x18\x02 \x01(\x05R\x16heartbeatJitterSeconds\x12*\n" +

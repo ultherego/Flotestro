@@ -35,9 +35,34 @@ const (
 	StateManualGate State = "manual_gate"
 	StateRunning    State = "running"
 	StatePaused     State = "paused"
-	StateCompleted  State = "completed"
-	StateFailed     State = "failed"
-	StateCanceled   State = "canceled"
+	// StateCanceling is a cancel ordered while hosts are still carrying
+	// their tasks. Nothing new starts; the hosts under way settle on their
+	// own - a campaign stop never interrupts work on a host - and the
+	// campaign ends canceled once the last of them has. A terminal state
+	// written while hosts still run would have the report written from a
+	// moving picture.
+	StateCanceling State = "canceling"
+	StateCompleted State = "completed"
+	// StateCompletedWithIssues is a campaign that finished under its
+	// threshold but not cleanly: hosts failed or ended unknown along the
+	// way. The document tells it from completed so a clean rollout and one
+	// that left a third of the fleet behind do not read the same on the
+	// list. A host skipped by a policy, a window or a deadline is not an
+	// issue: it was left out on purpose, with its reason, and the campaign
+	// has always closed as completed over it.
+	StateCompletedWithIssues State = "completed_with_issues"
+	StateFailed              State = "failed"
+	// StatePlanFailed is a planning phase that ended with no host to run
+	// on: every plan was refused, failed or never computed. There is
+	// nothing to approve and nothing a resume could start, so the campaign
+	// ends here rather than standing paused with a reason.
+	StatePlanFailed State = "plan_failed"
+	// StateExpired is a campaign whose plans passed their time limit before
+	// any host started - waiting for an approval or for its window. The
+	// consent, given or not, concerned a diff a day old; the campaign is
+	// ordered again rather than run on it.
+	StateExpired  State = "expired"
+	StateCanceled State = "canceled"
 )
 
 // Active says whether the campaign is under way.
@@ -48,7 +73,8 @@ func (s State) Active() bool {
 // Terminal says whether the state is final.
 func (s State) Terminal() bool {
 	switch s {
-	case StateCompleted, StateFailed, StateCanceled:
+	case StateCompleted, StateCompletedWithIssues, StateFailed, StatePlanFailed,
+		StateExpired, StateCanceled:
 		return true
 	default:
 		return false
@@ -83,13 +109,40 @@ const (
 	// token: nothing runs on it. It goes back to the queue when the host
 	// comes back and ends skipped when the campaign's deadline passes.
 	TargetQueuedOffline TargetState = "queued_offline"
-	TargetRunning       TargetState = "running"
-	TargetRebooting     TargetState = "rebooting"
-	TargetVerifying     TargetState = "verifying"
-	TargetSucceeded     TargetState = "succeeded"
-	TargetFailed        TargetState = "failed"
-	TargetSkipped       TargetState = "skipped"
-	TargetCanceled      TargetState = "canceled"
+	// TargetDispatched marks a host whose task exists and has not started
+	// on the agent's word: queued, leased, or handed over and not yet
+	// acknowledged as started. It takes its slot and its tokens - the task
+	// is in flight - but the host has changed nothing yet, and a host
+	// standing in "running" for a minute with nothing running is what the
+	// document calls a lost host.
+	TargetDispatched TargetState = "dispatched"
+	// TargetAwaitingLock marks a host whose agent holds the task and waits
+	// for a resource of the host - another task's package transaction, a
+	// unit restart under way. The blocker names what it waits on. Like a
+	// dispatched host it holds its slot: the wait is on the host, not in
+	// the queue.
+	TargetAwaitingLock TargetState = "awaiting_lock"
+	TargetRunning      TargetState = "running"
+	TargetRebooting    TargetState = "rebooting"
+	TargetVerifying    TargetState = "verifying"
+	TargetSucceeded    TargetState = "succeeded"
+	// TargetNoChange marks a host that already had the desired state: its
+	// plan found nothing to do, or the host reported that it changed
+	// nothing. A terminal success without a mutation - counted as a success
+	// by the threshold and told apart in the report, because "the file was
+	// written on forty hosts" and "the file was already there on forty
+	// hosts" are two different nights.
+	TargetNoChange TargetState = "no_change"
+	TargetFailed   TargetState = "failed"
+	// TargetUnknown marks a host whose task ended without a result: the
+	// session broke while it ran, or the agent came back from a restart
+	// with the operation half done. Unknown is not a success - the
+	// threshold counts it as a failure - and it is not a failure of the
+	// change either: what the host holds is a question to read off the
+	// host, not to answer by running the change again.
+	TargetUnknown  TargetState = "unknown"
+	TargetSkipped  TargetState = "skipped"
+	TargetCanceled TargetState = "canceled"
 )
 
 // Waiting says whether the host is ready to start but has not started yet.
@@ -97,9 +150,29 @@ const (
 // Waiting for a budget is the same place in the queue as pending: the host
 // takes no slot and asks for capacity again on every pass. A host queued
 // offline waits in the same place - for its connection rather than for a
-// token.
+// token. A host waiting for a lock is not here: its task is on the agent
+// and holds the slot.
 func (t TargetState) Waiting() bool {
 	return t == TargetPending || t == TargetAwaitingBudget || t == TargetQueuedOffline
+}
+
+// UnderWay says whether the host is carrying a task of the change: from
+// the dispatch of its task to the end of its verification. A planning host
+// carries a task too, but a plan is a read, and a cancel closes it at once
+// rather than waiting for it; the cancel waits for these.
+func (t TargetState) UnderWay() bool {
+	switch t {
+	case TargetDispatched, TargetAwaitingLock, TargetRunning, TargetRebooting, TargetVerifying:
+		return true
+	default:
+		return false
+	}
+}
+
+// Succeeded says whether the host ended with the desired state on it: the
+// change landed and was verified, or nothing needed to change.
+func (t TargetState) Succeeded() bool {
+	return t == TargetSucceeded || t == TargetNoChange
 }
 
 // HoldsWave says whether the host keeps its wave open. A host queued
@@ -113,7 +186,8 @@ func (t TargetState) HoldsWave() bool {
 // Finished says whether the host has finished taking part in the campaign.
 func (t TargetState) Finished() bool {
 	switch t {
-	case TargetSucceeded, TargetFailed, TargetSkipped, TargetCanceled, TargetIneligible, TargetExcluded:
+	case TargetSucceeded, TargetNoChange, TargetFailed, TargetUnknown, TargetSkipped,
+		TargetCanceled, TargetIneligible, TargetExcluded:
 		return true
 	default:
 		return false
@@ -593,11 +667,18 @@ type Target struct {
 
 // Report summarises the course of a campaign.
 type Report struct {
-	CampaignID string         `json:"campaign_id"`
-	State      State          `json:"state"`
-	Totals     map[string]int `json:"totals"`
-	Waves      []WaveSummary  `json:"waves"`
-	Failures   []Target       `json:"failures"`
+	CampaignID string `json:"campaign_id"`
+	State      State  `json:"state"`
+	// Totals counts the hosts per target state - succeeded, no_change,
+	// failed, unknown, skipped, canceled, and the rest - the way the
+	// document's terminal report does: a host in the desired state
+	// without a mutation and one that ended with no result are each their
+	// own number, never folded into a neighbour.
+	Totals map[string]int `json:"totals"`
+	Waves  []WaveSummary  `json:"waves"`
+	// Failures lists the hosts the operator has to look at: the ones that
+	// failed and the ones that ended unknown, each with its state.
+	Failures []Target `json:"failures"`
 	// RebootPending are the hosts that still wait for a reboot after the change.
 	RebootPending []string `json:"reboot_pending,omitempty"`
 	// PlanChanged are the hosts that came back from being offline with a
@@ -613,10 +694,114 @@ type Report struct {
 // campaign counts such hosts separately from failures of the change.
 const ConnectivityLostCode = "lease_expired"
 
+// OutcomeUnknownCode is the error code the agent answers with when it comes
+// back from a restart to find an operation it started and did not live to
+// see the end of. The helper may have finished it; the agent neither
+// repeats nor invents, and the host ends unknown.
+const OutcomeUnknownCode = "outcome_unknown"
+
 // ConnectivityLost says whether the host ended because its session broke
-// while its task ran rather than because the change failed.
+// while its task ran rather than because the change failed. Such a host
+// ends unknown; the code is what tells it from an agent restart.
 func (t Target) ConnectivityLost() bool {
-	return t.State == TargetFailed && t.ErrorCode == ConnectivityLostCode
+	return t.State == TargetUnknown && t.ErrorCode == ConnectivityLostCode
+}
+
+// targetTally is what the stop rules and the final verdict read off the
+// targets: how many are settled, how many of those ended well, how many
+// failed - the unknown ones among them, because unknown is not a success -
+// how many were left out, and how many failed because their session broke.
+type targetTally struct {
+	Total     int
+	Finished  int
+	Succeeded int
+	// Failed counts the hosts that failed and the hosts that ended
+	// unknown: the threshold is a bound on hosts that did not reach the
+	// desired state, and an unknown host did not, as far as anyone knows.
+	Failed  int
+	Unknown int
+	// Skipped counts the hosts left out by a deadline, a window or a
+	// policy - not the ones ineligible or excluded, which never took part.
+	Skipped int
+	Lost    int
+}
+
+// tallyTargets counts the targets the way the stop rules read them. A
+// host is a failure whatever step failed it: a canary whose units did not
+// come up after the change is as much a failure as one whose change did
+// not run, and the threshold that keeps the next wave from starting reads
+// both the same way. A host that ended unknown is a failure to the
+// threshold too - the document says unknown is not a success, and a
+// threshold that ignored it would let a campaign roll on while every host
+// stopped answering.
+func tallyTargets(targets []Target) targetTally {
+	counts := targetTally{Total: len(targets)}
+	for _, target := range targets {
+		if target.State.Finished() {
+			counts.Finished++
+		}
+		switch target.State {
+		case TargetSucceeded, TargetNoChange:
+			counts.Succeeded++
+		case TargetFailed:
+			counts.Failed++
+		case TargetUnknown:
+			counts.Failed++
+			counts.Unknown++
+		case TargetSkipped:
+			counts.Skipped++
+		}
+		if target.ConnectivityLost() {
+			counts.Lost++
+		}
+	}
+	return counts
+}
+
+// settleCampaignState is the verdict on a campaign whose hosts have all
+// settled: the state it ends in, read off the tally alone.
+//
+// Failed is a campaign in which nothing reached the desired state and
+// something tried: every host that ran failed or ended unknown. Completed
+// with issues is a campaign that got through - the threshold never fired -
+// but not cleanly: hosts failed or ended unknown on the way, and the
+// operator has hosts to look at. Completed is the rest, hosts skipped,
+// ineligible or excluded included: those never took part - a skip is a
+// decision with a reason, not a failure - and a campaign is not blemished
+// by a host it did not run on.
+func settleCampaignState(counts targetTally) State {
+	switch {
+	case counts.Failed > 0 && counts.Succeeded == 0:
+		return StateFailed
+	case counts.Failed > 0:
+		return StateCompletedWithIssues
+	default:
+		return StateCompleted
+	}
+}
+
+// cancelSettled says whether a canceled campaign may end: no host is
+// carrying a task any more. Until then the campaign is canceling.
+func cancelSettled(targets []Target) bool {
+	for _, target := range targets {
+		if target.State.UnderWay() {
+			return false
+		}
+	}
+	return true
+}
+
+// plansExpired says whether the campaign's plans passed their time limit
+// before any host started. A campaign that has started keeps going on the
+// plans it has - every host still checks its own plan's age at dispatch
+// and ends plan_stale on its own - because a campaign halfway through the
+// fleet is not expired, it is late. One that has not started has nothing
+// to be late for: the consent, given or not, concerns a diff a day old.
+func plansExpired(oldestPlan time.Time, started *time.Time, now time.Time) bool {
+	if started != nil || oldestPlan.IsZero() {
+		return false
+	}
+	return now.Sub(oldestPlan) > PlanTTL
 }
 
 // RebootWindowClosedCode is the error code of a host that was still

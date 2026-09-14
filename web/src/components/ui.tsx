@@ -15,16 +15,24 @@ export function ConnectionState({ state }: { state: string }) {
 /** The operation result or the job state. */
 export function JobState({ state }: { state: string }) {
   const t = useT();
-  const succeeded = ["succeeded", "completed", "active"].includes(state);
-  const failed = ["failed", "timed_out", "expired", "partially_applied"].includes(state);
+  // No change is a success without a mutation: the host already had the
+  // desired state, and green is the colour of the desired state.
+  const succeeded = ["succeeded", "completed", "active", "no_change"].includes(state);
+  const failed = ["failed", "timed_out", "expired", "partially_applied", "plan_failed"].includes(state);
   // Incapability and a skip are not a failure: the host broke nothing, it
   // simply took no part. Red would call it an error that did not happen.
   // A superseded attempt did no work of its own: the result came in on
   // the attempt before it, and this one was closed to keep the record
   // straight. Neither a failure nor a success of its own.
-  const skipped = ["ineligible", "skipped", "no_change", "superseded_by_result"].includes(state);
+  const skipped = ["ineligible", "skipped", "superseded_by_result"].includes(state);
+  // A campaign that finished with issues, a host that ended unknown, and
+  // every wait are drawn as attention rather than as an error: the
+  // operator has something to look at, not something that broke. Unknown
+  // is not grey: grey is the colour of "took no part", and an unknown host
+  // may have changed.
   const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
-    "awaiting_budget"].includes(state);
+    "awaiting_budget", "queued_offline", "awaiting_lock", "dispatched", "manual_gate",
+    "completed_with_issues", "unknown"].includes(state);
   const kind = succeeded ? "ok" : failed ? "error" : skipped ? "unknown" : waiting ? "warn" : "";
   // The legend travels with the badge: every state says what it means for
   // the host and what, if anything, the operator has to do about it.
@@ -39,6 +47,7 @@ function stateMeaning(state: string): string {
     active: "The change is in force; nothing waits.",
     leased: "Taken by a scheduler; delivery to the host is under way.",
     dispatched: "Handed to the agent; the host has not reported a start yet.",
+    awaiting_lock: "The agent holds the task and waits for a resource of the host held by another task; the blocker names it.",
     running: "The host is carrying out the operation.",
     lease_expired: "The host did not answer within the lease; the operation was delivered again.",
     superseded_by_result: "The result arrived on an earlier attempt after its lease ran out; this attempt did nothing.",
@@ -54,15 +63,19 @@ function stateMeaning(state: string): string {
     ineligible: "This host will not run the operation: it lacks the adapter or does not meet a condition. Not a failure and not counted towards the threshold.",
     excluded: "Left out by name when the campaign was ordered; the message carries who excluded it and why. Not a failure.",
     skipped: "Left out on purpose, e.g. a maintenance window. Not a failure.",
-    no_change: "The host already had the desired state; nothing was changed.",
+    no_change: "The host already had the desired state; nothing was changed. A success without a mutation.",
     succeeded: "Done and verified on the host.",
     failed: "The host reported a failure; the error code and the message say what.",
+    unknown: "The task ended without a result: the session broke or the agent restarted mid-task. Not a success and not counted as unchanged; read the host before ordering again.",
     timed_out: "No result within the allowed time; the state of the host is unknown until it reports.",
-    expired: "Not approved in time; it will not run.",
+    expired: "Not run in time: a task not approved before its expiry, or a campaign whose plans passed their time limit before any host started.",
+    canceling: "Canceled with hosts still carrying their tasks; nothing new starts, and the campaign ends canceled once they settle.",
     canceled: "Stopped before it started, or the running work was left to finish.",
     partially_applied: "Some of the change landed and some did not; the result lists both.",
     paused: "No new hosts start until resumed; work under way finishes on its own.",
-    completed: "Every host is settled.",
+    completed: "Every host is settled and every host that took part got through.",
+    completed_with_issues: "Every host is settled under the threshold, but some failed or ended unknown; the report names them.",
+    plan_failed: "Planning left no host to run on: every plan was refused, failed or never computed. Nothing was approved and nothing ran.",
   };
   return meanings[state] ?? "";
 }
@@ -91,8 +104,13 @@ function stateName(state: string): string {
     // does not meet the condition. That is not an execution failure and
     // does not count towards the failure threshold.
     ineligible: "cannot run this",
+    // The agent holds the task and waits for a resource of the host.
+    awaiting_lock: "waiting for a lock",
     succeeded: "succeeded", failed: "failed", timed_out: "timed out",
-    canceled: "canceled", cancelled: "canceled", expired: "expired",
+    // A success without a mutation, and an end without a result.
+    no_change: "no change",
+    canceled: "canceled", cancelled: "canceled", canceling: "canceling", expired: "expired",
+    completed_with_issues: "completed with issues", plan_failed: "planning failed",
     lease_expired: "lease expired", superseded_by_result: "superseded",
     rejected: "rejected", replayed: "replayed",
     active: "active", paused: "paused", completed: "completed",

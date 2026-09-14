@@ -176,3 +176,51 @@ func TestCancellableInFollowsTheCancelMode(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryCampaignReadyActionDeclaresClaims guards what the agent relies
+// on: the claims a task takes come from the contract, and the agent's own
+// fallback list serves only a mutation whose row declares nothing. An
+// operation a campaign may order across the fleet is exactly the one two
+// campaigns can put on the same host at once, so its row has to say what
+// it takes - a change a campaign orders without a claim would run next to
+// anything.
+func TestEveryCampaignReadyActionDeclaresClaims(t *testing.T) {
+	for _, action := range AllActions() {
+		if CampaignExclusionReason(action) != "" || !ExecutableMode(action) {
+			continue
+		}
+		claims := action.Contract().ResourceClaims
+		if len(claims) == 0 {
+			t.Errorf("%s is ready for a campaign and declares no claim", action)
+			continue
+		}
+		for _, claim := range claims {
+			if claim.Mode != ClaimExclusive {
+				t.Errorf("%s is ready for a campaign and takes %s %s", action, claim.Class, claim.Mode)
+			}
+		}
+	}
+}
+
+// TestTheSharedClassesHaveACapacity spells out the ration of the two
+// weighted classes of the document, and that a lock class read shared has
+// none: the reads of the package database are kept off a transaction by
+// the exclusive claim, not counted against each other.
+func TestTheSharedClassesHaveACapacity(t *testing.T) {
+	if SharedCapacity(ClaimLogsRead) < 1 || SharedCapacity(ClaimInventoryHeavy) < 1 {
+		t.Errorf("the weighted classes have the capacities logs %d and inventory %d",
+			SharedCapacity(ClaimLogsRead), SharedCapacity(ClaimInventoryHeavy))
+	}
+	if SharedCapacity(LockPackages) != 0 || SharedCapacity(LockUnits) != 0 {
+		t.Error("a lock class has a shared capacity; its readers are bounded by the task budget")
+	}
+	// The claims of a read fit its class: no read is heavier than what
+	// its class carries, or it could never run next to anybody.
+	for _, action := range AllActions() {
+		for _, claim := range action.Contract().ResourceClaims {
+			if capacity := SharedCapacity(claim.Class); capacity > 0 && claim.Weight > capacity {
+				t.Errorf("%s takes %s with the weight %d, above the capacity %d", action, claim.Class, claim.Weight, capacity)
+			}
+		}
+	}
+}

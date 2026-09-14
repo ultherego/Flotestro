@@ -1,9 +1,12 @@
 package campaigns
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/jobs"
 )
 
 // TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the
@@ -96,5 +99,145 @@ func TestTheWaitForARebootIsCountedFromTheReboot(t *testing.T) {
 	}
 	if _, known := rebootOrderedAt(&Target{}); known {
 		t.Error("a target without any time was judged")
+	}
+}
+
+// TestTheOutcomeOfATaskNamesTheHostState guards the mapping from a settled
+// task onto the host: a success is a success, a success the host says
+// changed nothing is no_change, a task that ended without a result - the
+// session broke, or the agent came back from a restart - is unknown rather
+// than failed, and the rest fail with the code the host gave.
+func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
+	cases := []struct {
+		name    string
+		verdict jobVerdict
+		state   TargetState
+		code    string
+	}{
+		{"the change landed", jobVerdict{State: jobs.StateSucceeded}, TargetSucceeded, ""},
+		{"the host changed nothing", jobVerdict{State: jobs.StateSucceeded, NoChange: true}, TargetNoChange, ""},
+		{"the session broke", jobVerdict{State: jobs.StateTimedOut, Lost: true}, TargetUnknown, ConnectivityLostCode},
+		{"the task expired undelivered", jobVerdict{State: jobs.StateExpired, Lost: true}, TargetUnknown, ConnectivityLostCode},
+		{"the agent restarted mid-task", jobVerdict{State: jobs.StateFailed, ErrorCode: OutcomeUnknownCode}, TargetUnknown, OutcomeUnknownCode},
+		{"the change failed", jobVerdict{State: jobs.StateFailed, ErrorCode: "exec_failed"}, TargetFailed, "exec_failed"},
+		{"a timeout with the host still answering", jobVerdict{State: jobs.StateTimedOut}, TargetFailed, "timed_out"},
+		{"a cancel of the task", jobVerdict{State: jobs.StateCanceled}, TargetFailed, "canceled"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state, code := targetOutcome(tc.verdict)
+			if state != tc.state || code != tc.code {
+				t.Errorf("outcome = %s/%q, expected %s/%q", state, code, tc.state, tc.code)
+			}
+		})
+	}
+}
+
+// TestTheHostFollowsItsTask guards the stages of an open task on the
+// host: dispatched until the agent reports a start, waiting for the lock
+// the agent named while it waits, running once it started. The queue
+// states before the hand-over read as dispatched too: the host has a
+// task and no word from the agent.
+func TestTheHostFollowsItsTask(t *testing.T) {
+	for _, state := range []jobs.State{jobs.StateQueued, jobs.StateLeased, jobs.StateDispatched} {
+		if got, blocker := taskStanding(state, ""); got != TargetDispatched || blocker != "" {
+			t.Errorf("a %s task puts the host in %s with blocker %q, expected dispatched", state, got, blocker)
+		}
+	}
+	got, blocker := taskStanding(jobs.StateDispatched, jobs.LockWaitReason("units held by task abc (schedule.run_now)"))
+	if got != TargetAwaitingLock || blocker != "units held by task abc (schedule.run_now)" {
+		t.Errorf("a task waiting for a lock puts the host in %s with blocker %q", got, blocker)
+	}
+	if got, blocker := taskStanding(jobs.StateRunning, ""); got != TargetRunning || blocker != "" {
+		t.Errorf("a running task puts the host in %s with blocker %q", got, blocker)
+	}
+	// A budget wait is the queue's business, not a lock of the host.
+	if got, _ := taskStanding(jobs.StateQueued, "awaiting_budget:site:lab:packages"); got != TargetDispatched {
+		t.Errorf("a task waiting for a budget puts the host in %s, expected dispatched", got)
+	}
+}
+
+// TestTheResultSaysWhetherAnythingChanged guards how the campaign reads
+// "nothing changed" off a result: a changed flag says it outright, a
+// package transaction says it by applying nothing, and a result that says
+// nothing either way is taken as a change.
+func TestTheResultSaysWhetherAnythingChanged(t *testing.T) {
+	cases := map[string]struct {
+		detail   string
+		noChange bool
+	}{
+		"a local account already there":     {`{"kind":"local_user","name":"ops","changed":false}`, true},
+		"a local account created":           {`{"kind":"local_user","name":"ops","changed":true}`, false},
+		"an upgrade with nothing to apply":  {`{"kind":"package_apply","manager":"apt","applied":[]}`, true},
+		"an upgrade with no applied list":   {`{"kind":"package_apply","manager":"apt"}`, true},
+		"an upgrade that applied a package": {`{"kind":"package_apply","applied":[{"name":"curl"}]}`, false},
+		"a unit restart":                    {`{"kind":"unit_detail","units":[]}`, false},
+		"a file written":                    {`{"kind":"file","sha256":"abc"}`, false},
+		"no result at all":                  {``, false},
+		"an unreadable result":              {`{`, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := resultNoChange(json.RawMessage(tc.detail)); got != tc.noChange {
+				t.Errorf("resultNoChange = %v, expected %v", got, tc.noChange)
+			}
+		})
+	}
+}
+
+// TestThePlanSaysWhetherThereIsAnythingToDo guards how the campaign reads
+// "nothing to do" off a plan: a plan that names no_change or the removal
+// of an absent file, or a package plan with no changes and nothing
+// blocked. A plan of another shape is a change until proven otherwise.
+func TestThePlanSaysWhetherThereIsAnythingToDo(t *testing.T) {
+	cases := map[string]struct {
+		plan     string
+		noChange bool
+	}{
+		"a file already in the desired state": {`{"kind":"file_plan","plan":{"action":"no_change","exists":true},"plan_hash":"h"}`, true},
+		"a file to create":                    {`{"kind":"file_plan","plan":{"action":"create"},"plan_hash":"h"}`, false},
+		"a file to update":                    {`{"kind":"file_plan","plan":{"action":"update","changes":["content"]}}`, false},
+		"a removal of an absent file":         {`{"kind":"file_plan","plan":{"action":"remove_absent"}}`, true},
+		"a rule already present":              {`{"kind":"firewall_plan","plan":{"action":"no_change"}}`, true},
+		"an upgrade with nothing to upgrade":  {`{"kind":"package_plan","mode":"upgrade","changes":[],"blocked":[]}`, true},
+		"an upgrade with no lists at all":     {`{"kind":"package_plan","mode":"upgrade"}`, true},
+		"an upgrade with a change":            {`{"kind":"package_plan","changes":[{"name":"curl"}]}`, false},
+		"an upgrade with a blocked package":   {`{"kind":"package_plan","changes":[],"blocked":[{"name":"curl"}]}`, false},
+		"a compose plan":                      {`{"kind":"compose","payload":{"digest":"abc"}}`, false},
+		"a name from the order":               {`{"plan":{"hostname":"web-1","source":"order"}}`, false},
+		"no plan":                             {``, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := planNoChange(json.RawMessage(tc.plan)); got != tc.noChange {
+				t.Errorf("planNoChange = %v, expected %v", got, tc.noChange)
+			}
+		})
+	}
+}
+
+// TestTheRebootFollowsThePolicyAndTheResult guards the reboot decision now
+// that it reads the result it is handed: never and always answer on their
+// own, if_required asks the package transaction, and anything else does
+// not reboot.
+func TestTheRebootFollowsThePolicyAndTheResult(t *testing.T) {
+	needs := json.RawMessage(`{"kind":"package_apply","reboot_required":true}`)
+	if rebootNeeded(Campaign{RebootPolicy: RebootNever}, needs) {
+		t.Error("the policy never ordered a reboot")
+	}
+	if !rebootNeeded(Campaign{RebootPolicy: RebootAlways}, nil) {
+		t.Error("the policy always did not order a reboot")
+	}
+	if !rebootNeeded(Campaign{RebootPolicy: RebootIfRequired}, needs) {
+		t.Error("a transaction that requires a reboot did not get one")
+	}
+	if rebootNeeded(Campaign{RebootPolicy: RebootIfRequired}, json.RawMessage(`{"kind":"package_apply","reboot_required":false}`)) {
+		t.Error("a transaction that requires no reboot got one")
+	}
+	if rebootNeeded(Campaign{RebootPolicy: RebootIfRequired}, json.RawMessage(`{"kind":"file"}`)) {
+		t.Error("a file write got a reboot")
+	}
+	if rebootNeeded(Campaign{RebootPolicy: RebootIfRequired}, nil) {
+		t.Error("a task without a result got a reboot")
 	}
 }

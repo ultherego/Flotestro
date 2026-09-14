@@ -223,6 +223,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/hosts/{id}/files/history", s.handleFileHistory)
 	s.route(mux, "GET /api/v1/files/versions/{sha256}", s.handleFileVersion)
 	s.route(mux, "GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
+	// The kernels and releases the panel has seen the host on; the current
+	// platform is the system module of the inventory.
+	s.route(mux, "GET /api/v1/hosts/{id}/system/history", s.handleHostSystemHistory)
 	// The manifest history of a project. Reverting a change is deploying an
 	// earlier version, so there is no separate operation.
 	s.route(mux, "GET /api/v1/hosts/{id}/compose/{project}/versions", s.handleComposeVersions)
@@ -788,30 +791,44 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The protocol table lives in the binary, not in the database, so the
-	// versions are grouped in the database and judged here. Only versions
-	// that parse are fetched: an agent that reports no version, or a word
-	// in its place, is unknown rather than unsupported.
+	// versions are grouped in the database and judged here. An agent that
+	// announced the protocols it speaks is judged by that range, whatever
+	// its version reads; one that announced nothing by its version and the
+	// table, and only when the version parses: an agent that reports no
+	// version, or a word in its place, and no range is unknown rather than
+	// unsupported.
 	unsupported := 0
 	versions, err := s.pool.Query(ctx, `
-		select h.agent_version, count(*)
+		select h.agent_version, h.agent_protocol_min, h.agent_protocol_max, count(*)
 		from hosts h
 		where h.lifecycle_state <> 'retired'
-		  and h.agent_version ~ '^v?\d+(\.\d+)*'
+		  and (h.agent_version ~ '^v?\d+(\.\d+)*' or h.agent_protocol_max is not null)
 		  and `+visible+`
-		group by 1`, args...)
+		group by 1, 2, 3`, args...)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
 	for versions.Next() {
-		var version string
+		var version *string
+		var protocolMin, protocolMax *int
 		var count int
-		if err := versions.Scan(&version, &count); err != nil {
+		if err := versions.Scan(&version, &protocolMin, &protocolMax, &count); err != nil {
 			versions.Close()
 			s.fail(w, err)
 			return
 		}
-		if buildinfo.CheckProtocol(version) != nil {
+		announced := func(value *int) int {
+			if value == nil {
+				return 0
+			}
+			return *value
+		}
+		reported := ""
+		if version != nil {
+			reported = *version
+		}
+		if buildinfo.CheckProtocolRange(reported, announced(protocolMin), announced(protocolMax)) != nil {
 			unsupported += count
 		}
 	}

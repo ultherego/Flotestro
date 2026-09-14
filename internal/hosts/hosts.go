@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/ultherego/flotestro/internal/agentconfig"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/selector"
@@ -226,6 +227,22 @@ type Host struct {
 	ConnectionState    string     `json:"connection_state"`
 	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
 	BootID             string     `json:"boot_id,omitempty"`
+	// What the agent reported about itself at its last Hello beyond the
+	// version: the commit it was built from, the protocols it speaks, and
+	// the configuration it runs on. Every field is absent for a host whose
+	// agent predates the report - an unknown build is not an empty one.
+	AgentBuildCommit string `json:"agent_build_commit,omitempty"`
+	AgentProtocolMin *int   `json:"agent_protocol_min,omitempty"`
+	AgentProtocolMax *int   `json:"agent_protocol_max,omitempty"`
+	// ConfigFingerprint digests the effective agent.yaml; absent also for
+	// a host on the environment variables of the old flow, which has no
+	// file. ConfigSchemaVersion is what the file declares, zero for no
+	// file, and ConfigLegacy is the verdict: the host runs on the
+	// environment file or on a schema older than the current one. Absent
+	// when the agent reported nothing: not knowing is not "legacy".
+	ConfigFingerprint   string `json:"config_fingerprint,omitempty"`
+	ConfigSchemaVersion *int   `json:"config_schema_version,omitempty"`
+	ConfigLegacy        *bool  `json:"config_legacy,omitempty"`
 	// Tags are what operators recorded about the host: 'key' or
 	// 'key=value'. The list is always present - a host without tags has an
 	// empty one - so a selector can tell "no tags" from "not asked".
@@ -1187,6 +1204,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
+		       coalesce(h.agent_build_commit, ''), h.agent_protocol_min, h.agent_protocol_max,
+		       coalesce(h.config_fingerprint, ''), h.config_schema_version,
 		       h.reboot_required, h.failed_units, h.pending_updates, h.pending_security_updates,
 		       coalesce(h.current_inventory_revision, ''), h.package_database_broken, h.enrolled_at,
 		       coalesce(h.management_address, ''), coalesce(h.management_address_source, ''),
@@ -1234,6 +1253,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
+			&h.AgentBuildCommit, &h.AgentProtocolMin, &h.AgentProtocolMax,
+			&h.ConfigFingerprint, &h.ConfigSchemaVersion,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
 			&h.CurrentInventoryRevision, &h.PackageDatabaseBroken, &h.EnrolledAt,
 			&h.ManagementAddress, &h.ManagementAddressSource, &h.ManagementAddressObservedAt,
@@ -1247,6 +1268,15 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		if h.Identity.Enrolled {
 			h.Identity.OfflineVerdict = judgeFromFragment(h.Identity.SSSDOnline,
 				identityPayload, identityObservedAt)
+		}
+		// The verdict on the configuration is judged here, against the
+		// schema this panel ships with: a host that reported a schema is
+		// on the legacy configuration when it runs on no file (zero) or on
+		// a file older than the current schema. A host that reported none
+		// gets no verdict.
+		if h.ConfigSchemaVersion != nil {
+			legacy := *h.ConfigSchemaVersion < agentconfig.SchemaVersion
+			h.ConfigLegacy = &legacy
 		}
 		// An empty tag list is a fact about the host and is sent as one,
 		// not as a missing field.
@@ -1270,6 +1300,49 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		result = append(result, h)
 	}
 	return result, rows.Err()
+}
+
+// AgentReport is what an agent says about itself in its Hello beyond the
+// version and the boot: the sources it was built from, the protocols it
+// speaks and the configuration it runs on. An agent that announces no
+// protocol range predates the report and sends none.
+type AgentReport struct {
+	BuildCommit         string
+	ProtocolMin         int
+	ProtocolMax         int
+	ConfigFingerprint   string
+	ConfigSchemaVersion int
+}
+
+// RecordAgentReport writes what the agent reported about itself at its
+// Hello. A nil report clears the columns: the agent that connected says
+// nothing about its build, and what the previous one said is not a fact
+// about this one - a host downgraded to an agent from before the report
+// is a host of an unknown build, not of the last known one.
+func (s *Store) RecordAgentReport(ctx context.Context, hostID string, report *AgentReport) error {
+	const query = `
+		update hosts
+		   set agent_build_commit    = $2,
+		       agent_protocol_min    = $3,
+		       agent_protocol_max    = $4,
+		       config_fingerprint    = $5,
+		       config_schema_version = $6,
+		       updated_at            = now()
+		 where id = $1`
+	if report == nil {
+		_, err := s.pool.Exec(ctx, query, hostID, nil, nil, nil, nil, nil)
+		return err
+	}
+	var commit, fingerprint *string
+	if report.BuildCommit != "" {
+		commit = &report.BuildCommit
+	}
+	if report.ConfigFingerprint != "" {
+		fingerprint = &report.ConfigFingerprint
+	}
+	_, err := s.pool.Exec(ctx, query, hostID, commit, report.ProtocolMin, report.ProtocolMax,
+		fingerprint, report.ConfigSchemaVersion)
+	return err
 }
 
 // The sources of the management address. The order is not accidental: an
@@ -1669,4 +1742,94 @@ func (s *Store) ApplyEnrollmentFacts(ctx context.Context, tx pgx.Tx, hostID, own
 		return ErrNotFound
 	}
 	return nil
+}
+
+// SystemHistoryLimit is how many (kernel, distribution) pairs the panel
+// keeps per host. A host changes its kernel a few times a year; twenty
+// pairs reach back further than anybody asks, and a bounded row count
+// keeps the fleet's history from growing with every reboot.
+const SystemHistoryLimit = 20
+
+// SystemHistoryEntry is one platform the panel has seen a host on: a
+// kernel and a distribution release, with the span it was seen over.
+type SystemHistoryEntry struct {
+	Kernel              string    `json:"kernel"`
+	Distribution        string    `json:"distribution"`
+	DistributionVersion string    `json:"distribution_version"`
+	FirstSeenAt         time.Time `json:"first_seen_at"`
+	LastSeenAt          time.Time `json:"last_seen_at"`
+}
+
+// RecordSystemHistory notes that the host was seen on this kernel and
+// release at the given moment. A pair seen before moves its last_seen;
+// a new one gets a row, and the oldest rows beyond the limit go.
+//
+// It returns whether the pair was new: the gateway logs a host that came
+// up on something it had not seen before, and stays quiet otherwise.
+func (s *Store) RecordSystemHistory(ctx context.Context, hostID string, entry SystemHistoryEntry) (bool, error) {
+	if entry.Kernel == "" && entry.Distribution == "" {
+		// A report that names neither says nothing about the platform.
+		return false, nil
+	}
+	seen := entry.LastSeenAt
+	if seen.IsZero() {
+		seen = time.Now().UTC()
+	}
+	const upsert = `
+		insert into host_system_history
+			(host_id, kernel, distribution, distribution_version, first_seen_at, last_seen_at)
+		values ($1, $2, $3, $4, $5, $5)
+		on conflict (host_id, kernel, distribution, distribution_version) do update
+		   set last_seen_at  = greatest(host_system_history.last_seen_at, excluded.last_seen_at),
+		       first_seen_at = least(host_system_history.first_seen_at, excluded.first_seen_at)
+		returning (xmax = 0)`
+	var created bool
+	if err := s.pool.QueryRow(ctx, upsert, hostID, entry.Kernel, entry.Distribution,
+		entry.DistributionVersion, seen).Scan(&created); err != nil {
+		return false, fmt.Errorf("recording the platform history: %w", err)
+	}
+	if !created {
+		return false, nil
+	}
+	// The cap holds at every insert rather than until a sweep: the rows
+	// beyond the newest twenty go now.
+	const prune = `
+		delete from host_system_history
+		 where host_id = $1
+		   and (kernel, distribution, distribution_version) in (
+		       select kernel, distribution, distribution_version
+		         from host_system_history
+		        where host_id = $1
+		        order by last_seen_at desc, first_seen_at desc
+		       offset $2)`
+	if _, err := s.pool.Exec(ctx, prune, hostID, SystemHistoryLimit); err != nil {
+		return true, fmt.Errorf("pruning the platform history: %w", err)
+	}
+	return true, nil
+}
+
+// SystemHistory lists the platforms the host was seen on, the most
+// recently seen first.
+func (s *Store) SystemHistory(ctx context.Context, hostID string) ([]SystemHistoryEntry, error) {
+	const query = `
+		select kernel, distribution, distribution_version, first_seen_at, last_seen_at
+		  from host_system_history
+		 where host_id = $1
+		 order by last_seen_at desc, first_seen_at desc`
+	rows, err := s.pool.Query(ctx, query, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	result := []SystemHistoryEntry{}
+	for rows.Next() {
+		var entry SystemHistoryEntry
+		if err := rows.Scan(&entry.Kernel, &entry.Distribution, &entry.DistributionVersion,
+			&entry.FirstSeenAt, &entry.LastSeenAt); err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
 }

@@ -591,7 +591,7 @@ func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
 	executor.progress = reports.record
 
 	var admitted []string
-	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(string)) (func(), string) {
 		// The acknowledgement precedes the wait for the resources: a task
 		// queued behind a busy lock is on the host, not lost.
@@ -662,8 +662,8 @@ func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
 	executor.progress = reports.record
 
 	resources := newLocks()
-	releaseHolder, _ := resources.acquire(context.Background(), "holder", "schedule.run_now", []string{opspec.LockUnits})
-	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+	releaseHolder, _ := resources.acquire(context.Background(), "holder", "schedule.run_now", exclusiveOn(opspec.LockUnits))
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(string)) (func(), string) {
 		return acquireResources(ctx, resources, task, claims, waiting)
 	}
@@ -716,7 +716,7 @@ func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
 	fake, client := startFakeHelper(t, accepted)
 	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
 	busy := true
-	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(string)) (func(), string) {
 		if busy {
 			return nil, "the resource units is busy with the operation unit.stop (task other)"
@@ -746,5 +746,101 @@ func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
 	if second.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED || second.GetReplayed() {
 		t.Errorf("the second delivery: status=%s replayed=%v code=%q",
 			second.GetStatus(), second.GetReplayed(), second.GetErrorCode())
+	}
+}
+
+// TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost:
+// the preconditions are checked again once the task holds its resources.
+// A task accepted on one boot that waited behind a lock into the next
+// boot is refused with its own code, the helper is never asked, and
+// nothing is remembered under the key - the panel plans again, and the
+// new plan is a new delivery.
+func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake, client := startFakeHelper(t, accepted)
+
+	// The facts move while the task waits: the inventory cycle reads a new
+	// boot ID once the host is back.
+	var factsMu sync.Mutex
+	bootID := "boot-before"
+	facts := func() Facts {
+		factsMu.Lock()
+		defer factsMu.Unlock()
+		f := systemdFacts()
+		f.BootID = bootID
+		return f
+	}
+	executor := NewTaskExecutor(client, journal, facts, quietLogger())
+	var reports progressLog
+	executor.progress = reports.record
+
+	resources := newLocks()
+	releaseHolder, _ := resources.acquire(context.Background(), "holder", "unit.stop", exclusiveOn(opspec.LockUnits))
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
+		waiting func(string)) (func(), string) {
+		return acquireResources(ctx, resources, task, claims, waiting)
+	}
+
+	task := restartEnvelope("task-1", "key-1")
+	task.Preconditions = &agentv1.Preconditions{ExpectedBootId: "boot-before"}
+	done := make(chan *agentv1.TaskResult, 1)
+	go func() { done <- executor.Execute(context.Background(), task) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(reports.withStage(StageAwaitingLock)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the task did not wait for the lock; stages: %v", reports.stagesOf("task-1"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The host reboots under the waiting task.
+	factsMu.Lock()
+	bootID = "boot-after"
+	factsMu.Unlock()
+	releaseHolder()
+
+	var result *agentv1.TaskResult
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the task did not end after the lock was released")
+	}
+	if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED || result.GetErrorCode() != RejectPreconditionChanged {
+		t.Fatalf("the refusal: status=%s code=%q message=%q", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
+	}
+	if !strings.Contains(result.GetMessage(), "restarted") {
+		t.Errorf("the refusal does not say what changed: %q", result.GetMessage())
+	}
+	if fake.calls.Load() != 0 {
+		t.Errorf("the helper was called %d times for a task whose ground moved", fake.calls.Load())
+	}
+	if stages := reports.stagesOf("task-1"); len(stages) != 2 || stages[0] != StageAccepted || stages[1] != StageAwaitingLock {
+		t.Errorf("the stages were %v, expected accepted and awaiting_lock and no start", stages)
+	}
+	if files := inFlightFiles(t, dir); len(files) != 0 {
+		t.Errorf("a task refused before the host was touched left a marker: %v", files)
+	}
+	// The refusal is the answer to this plan, like a precondition refused
+	// before the wait: a redelivery of the same plan meets the same host
+	// and replays it rather than judging again. A new plan is a new key.
+	if stored := journal.Lookup("key-1"); stored == nil || stored.GetErrorCode() != RejectPreconditionChanged {
+		t.Errorf("the refusal was not stored as the result of the key: %+v", stored)
+	}
+	if _, held := resources.held[opspec.LockUnits]; held {
+		t.Error("the refused task kept its claim on the units class")
+	}
+
+	// The same task on the boot it was planned for runs: the recheck refuses
+	// only what changed.
+	factsMu.Lock()
+	bootID = "boot-before"
+	factsMu.Unlock()
+	again := executor.Execute(context.Background(), restartEnvelope("task-2", "key-2"))
+	if again.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatalf("a task on the planned boot: status=%s code=%q", again.GetStatus(), again.GetErrorCode())
 	}
 }

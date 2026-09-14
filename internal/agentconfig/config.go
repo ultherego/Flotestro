@@ -124,14 +124,21 @@ func Defaults() Config {
 	}
 }
 
-// Load reads and checks the configuration from a file.
+// Load reads and checks the configuration from a file. The file read
+// becomes the one Current reports, so the session can tell the panel what
+// the host runs on.
 func Load(path string) (Config, error) {
 	file, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return Config{}, fmt.Errorf("%w: %v", ErrOpen, err)
 	}
 	defer file.Close()
-	return Read(file)
+	cfg, err := Read(file)
+	if err != nil {
+		return Config{}, err
+	}
+	remember(path, cfg)
+	return cfg, nil
 }
 
 // Read reads the configuration from a stream.

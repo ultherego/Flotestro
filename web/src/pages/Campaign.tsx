@@ -12,7 +12,8 @@ import { type HostPlan, JobPlan, PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import {
-  type CampaignStep, type CompensationLinks, loadedTargets, TARGET_STATES, useTargets, useTargetSteps,
+  type CampaignStep, type CompensationLinks, loadedTargets, SETTLED_CAMPAIGN_STATES, TARGET_STATES,
+  useTargets, useTargetSteps,
 } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
@@ -151,10 +152,19 @@ export function Campaign() {
   // campaign action here interrupts work on a host or rolls it back.
   const totals = report.data?.totals ?? {};
   const offlineQueued = totals.queued_offline ?? 0;
+  // A host whose task is handed over and not started, or waits for a lock
+  // on the host, is waiting like the offline one: it has changed nothing
+  // yet, and a cancel would leave its task to finish.
+  const waitingToStart = (totals.dispatched ?? 0) + (totals.awaiting_lock ?? 0);
   const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0) + offlineQueued;
-  const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0);
+  const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0) + waitingToStart;
 
+  // No change is a success: the host has the desired state. Unknown is
+  // not - and it is not a failure of the change either, so it has a
+  // segment of its own rather than a place in the red one.
   const succeeded = totals.succeeded ?? 0;
+  const noChange = totals.no_change ?? 0;
+  const unknown = totals.unknown ?? 0;
   const failed = (totals.failed ?? 0) + (totals.timed_out ?? 0) + (totals.partially_applied ?? 0);
 
   // What the hosts under way do when the campaign stops, from the cancel
@@ -232,7 +242,7 @@ export function Campaign() {
             {data.state === "paused" && (
               <button onClick={() => control.mutate("resume")}>{t("Resume")}</button>
             )}
-            {!["completed", "failed", "canceled"].includes(data.state) && (
+            {!SETTLED_CAMPAIGN_STATES.includes(data.state) && data.state !== "canceling" && (
               <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
             )}
           </>
@@ -268,7 +278,7 @@ export function Campaign() {
         <Card
           title={t("Advance to the waves?")}
           description={t("The canary is settled. {succeeded} hosts succeeded and {failed} failed; the remaining {notStarted} hosts start in waves of {wave} once you advance. The decision is recorded with your identity and the reason.", {
-            succeeded, failed, notStarted, wave: data.wave_size,
+            succeeded: succeeded + noChange, failed: failed + unknown, notStarted, wave: data.wave_size,
           })}
           footer={
             <Actions>
@@ -331,13 +341,21 @@ export function Campaign() {
 
       {/* The fate of the hosts as one coloured bar: the campaign's state
           read from across the room, each segment leading to its hosts. */}
-      <Card title={t("Targets")} description={t("{n} hosts in this campaign", { n: total })}>
+      <Card
+        title={t("Targets")}
+        description={data.state === "canceling"
+          ? t("{n} hosts in this campaign. The campaign is canceled; {underWay} hosts still carry their tasks and it ends once they settle.", { n: total, underWay })
+          : t("{n} hosts in this campaign", { n: total })}
+      >
         <StatusBar segments={[
           { label: t("Not started"), value: report.data ? notStarted - offlineQueued : undefined, tone: "neutral" },
           { label: t("Waiting for connection"), value: report.data ? offlineQueued : undefined, tone: "warn" },
-          { label: t("In progress"), value: report.data ? underWay : undefined, tone: "info" },
+          { label: t("Waiting to start"), value: report.data ? waitingToStart : undefined, tone: "warn" },
+          { label: t("In progress"), value: report.data ? underWay - waitingToStart : undefined, tone: "info" },
           { label: t("Succeeded"), value: report.data ? succeeded : undefined, tone: "ok" },
+          { label: t("No change"), value: report.data ? noChange : undefined, tone: "ok" },
           { label: t("Failed"), value: report.data ? failed : undefined, tone: "error" },
+          { label: t("Unknown"), value: report.data ? unknown : undefined, tone: "warn" },
           { label: t("Skipped"), value: report.data ? (totals.skipped ?? 0) + (totals.canceled ?? 0) : undefined, tone: "unknown" },
         ]} />
       </Card>
@@ -844,7 +862,7 @@ export function compensationOffer(input: {
   reverseReady?: boolean;
   changedHosts?: number;
 }): CompensationOffer {
-  if (!["completed", "failed", "canceled"].includes(input.state)) return { kind: "not_settled" };
+  if (!SETTLED_CAMPAIGN_STATES.includes(input.state)) return { kind: "not_settled" };
   if (!input.reverseAction || !PLANNABLE_ROLLBACK.includes(input.rollback ?? "")) return { kind: "no_reverse" };
   const changed = input.changedHosts ?? 0;
   if (changed <= 0) return { kind: "nothing_changed", reverse: input.reverseAction };

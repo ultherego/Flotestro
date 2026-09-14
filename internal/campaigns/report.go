@@ -35,7 +35,12 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 		if !target.State.Finished() {
 			waveOpen[target.Wave] = true
 		}
-		if target.State == TargetFailed {
+		// The failures are the hosts the operator has to look at. A host
+		// that ended unknown is on the list for that reason - it needs a
+		// read of the host before anything is ordered again - and its own
+		// state on the row tells it from a change that failed. The totals
+		// count the two apart, as the document's report does.
+		if target.State == TargetFailed || target.State == TargetUnknown {
 			report.Failures = append(report.Failures, target)
 		}
 		// A host verifying its units without a reboot behind it is not

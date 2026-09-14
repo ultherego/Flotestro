@@ -32,6 +32,8 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/security"
 	sshmodule "github.com/ultherego/flotestro/internal/modules/ssh"
 	"github.com/ultherego/flotestro/internal/modules/storage"
+	"github.com/ultherego/flotestro/internal/modules/sudoers"
+	"github.com/ultherego/flotestro/internal/modules/system"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 	"github.com/ultherego/flotestro/internal/packages"
 )
@@ -153,8 +155,17 @@ type Facts struct {
 	// Schedules are the recurring jobs of the host. A missing value means a host
 	// without cron or a read that failed - the unavailable_reason field inside
 	// the snapshot tells them apart.
-	Schedules   *schedules.Snapshot `json:"schedules,omitempty"`
-	CollectedAt time.Time           `json:"collected_at"`
+	Schedules *schedules.Snapshot `json:"schedules,omitempty"`
+	// System is the platform picture: the processor, the memory, the DMI
+	// identity, the firmware, the kernel, the distribution and the boot. It
+	// changes when somebody changes the machine, so it is read rarely, and
+	// the panel keeps the history of the kernels and releases it saw.
+	System *system.Snapshot `json:"system,omitempty"`
+	// Sudoers is the local sudo policy as the helper read it. A missing
+	// value is a policy that was not read, never a host without sudo - the
+	// unavailable_reason inside the snapshot tells them apart.
+	Sudoers     *sudoers.Snapshot `json:"sudoers,omitempty"`
+	CollectedAt time.Time         `json:"collected_at"`
 }
 
 // Revision computes a stable revision from the content of the report. An

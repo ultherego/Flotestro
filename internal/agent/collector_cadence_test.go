@@ -196,3 +196,47 @@ func TestRemoteCadenceOverridesOnlyWhatItNames(t *testing.T) {
 		t.Fatalf("an hour that is not an hour was taken: %d", cadence.FullHourUTC)
 	}
 }
+
+// TestCadenceReadsTheSlowModulesEverySixHours: the platform picture and
+// the sudo policy go with the opening report, then every six hours, and
+// never split from each other.
+func TestCadenceReadsTheSlowModulesEverySixHours(t *testing.T) {
+	tick := &clock{at: time.Date(2026, 9, 14, 8, 0, 0, 0, time.UTC)}
+	cadence := newCadence(15*time.Minute, "host-g")
+	// The window is fixed just before the run ends, so the daily report
+	// does not fall into a cycle by coincidence.
+	cadence.FullHourUTC = 7
+	started := tick.at
+	cadence.started(started)
+
+	var slowAt []time.Time
+	for cycle := 0; cycle < 90; cycle++ {
+		at := tick.advance(15 * time.Minute)
+		modules, full := cadence.due(at)
+		if full {
+			t.Fatalf("a full report at %v, outside the hour 7", at)
+		}
+		if slices.Contains(modules, ModuleSystem) != slices.Contains(modules, ModuleSudoers) {
+			t.Fatalf("the slow modules were split at %v: %v", at, modules)
+		}
+		if slices.Contains(modules, ModuleSystem) {
+			slowAt = append(slowAt, at)
+		}
+	}
+	if len(slowAt) != 3 {
+		t.Fatalf("22 hours gave %d slow reads at %v, expected 3", len(slowAt), slowAt)
+	}
+	// The read lands two cycles before the six hours are up, so the panel
+	// never holds a picture older than six hours.
+	if slowAt[0].Sub(started) != 6*time.Hour-30*time.Minute {
+		t.Errorf("the first slow read went at %v, expected two cycles short of six hours after the opening report", slowAt[0])
+	}
+	for i := 1; i < len(slowAt); i++ {
+		if gap := slowAt[i].Sub(slowAt[i-1]); gap != 6*time.Hour {
+			t.Errorf("slow reads %v apart, expected six hours", gap)
+		}
+	}
+	if ModuleCadence(ModuleSystem) != CadenceSlow || ModuleCadence(ModuleSudoers) != CadenceSlow {
+		t.Error("the platform picture and the sudo policy are not slow modules")
+	}
+}

@@ -75,6 +75,36 @@ func checkProtocol(table []protocolStep, supported int, version string) error {
 	return nil
 }
 
+// CheckProtocolRange says whether this binary can talk to an agent that
+// announced the protocols it speaks, from min to max.
+//
+// The announcement is preferred over the table: it is what the agent
+// knows about itself, and it holds for a release the table has not heard
+// of yet. The sides can talk when the ranges overlap - the agent's oldest
+// is not newer than what the panel speaks, and its newest is not older
+// than what the panel still accepts. An agent that announced nothing (a
+// max of zero) is judged by its version and the table, as before the
+// range existed.
+func CheckProtocolRange(version string, min, max int) error {
+	return checkProtocolRange(protocolByVersion, AgentProtocolMin, AgentProtocol, version, min, max)
+}
+
+func checkProtocolRange(table []protocolStep, supportedMin, supportedMax int,
+	version string, min, max int) error {
+	if max == 0 {
+		return checkProtocol(table, supportedMax, version)
+	}
+	if min < 1 || min > max {
+		return fmt.Errorf("%w: the agent %s announces the protocols %d to %d, which is not a range",
+			ErrProtocolIncompatible, version, min, max)
+	}
+	if min > supportedMax || max < supportedMin {
+		return fmt.Errorf("%w: the agent %s speaks protocols %d to %d, this panel speaks %d to %d",
+			ErrProtocolIncompatible, version, min, max, supportedMin, supportedMax)
+	}
+	return nil
+}
+
 // parseVersion reads the numeric part of a release version: the dotted
 // numbers before any suffix. "0.41.0-1" and "0.41.0~beta2" are both 0.41.0
 // for the protocol: the suffix is the package build, not the contract.
@@ -151,10 +181,29 @@ const ackSince = "0.47.0"
 // acceptance of a task. A version that cannot be read is taken as an old
 // one: the longer lease is the safe mistake.
 func AcknowledgesTasks(version string) bool {
+	return atLeast(version, ackSince)
+}
+
+// helloBuildSince is the first release whose agent introduces itself with
+// its build commit, its protocol range and the fingerprint of its
+// configuration. A Hello without them from an older agent is not a Hello
+// with an empty build: the panel records nothing rather than a blank.
+const helloBuildSince = "0.47.0"
+
+// ReportsBuild says whether an agent of the given version puts its build
+// and configuration into the Hello. A version that cannot be read is taken
+// as an old one: not knowing is the honest answer for such a host.
+func ReportsBuild(version string) bool {
+	return atLeast(version, helloBuildSince)
+}
+
+// atLeast says whether a version is the given release or a later one. A
+// version that cannot be read is older than every release.
+func atLeast(version, since string) bool {
 	target, err := parseVersion(version)
 	if err != nil {
 		return false
 	}
-	since, _ := parseVersion(ackSince)
-	return compareVersions(target, since) >= 0
+	floor, _ := parseVersion(since)
+	return compareVersions(target, floor) >= 0
 }

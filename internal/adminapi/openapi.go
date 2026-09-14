@@ -73,6 +73,20 @@ func (s *Server) openAPI() map[string]any {
 	register("Payload", opspec.Payload{})
 	register("Budget", budgets.State{})
 	register("BudgetHolder", budgets.Holder{})
+	register("SystemHistoryEntry", hosts.SystemHistoryEntry{})
+	describe(schemas, "SystemHistoryEntry", "kernel",
+		"The kernel release the host reported, as /proc/sys/kernel/osrelease names it.")
+	describe(schemas, "SystemHistoryEntry", "first_seen_at",
+		"When the panel first saw the host on this kernel and release; last_seen_at moves with every report that names the pair. "+
+			"The panel keeps the twenty most recently seen pairs per host.")
+	register("HostAccess", hostAccessView{})
+	describe(schemas, "HostAccess", "known",
+		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
+	describe(schemas, "HostAccess", "local_sudo_rules",
+		"The rules of /etc/sudoers and its drop-ins as the helper parsed them, each with its file and line, whether it reaches this host, "+
+			"and whether it amounts to root. Empty when the policy was not read - local_sudoers.reason says why.")
+	describe(schemas, "HostAccess", "root_equivalent_warnings",
+		"One sentence per local grant that makes somebody root, in the order of the rules; empty when the policy was not read.")
 	// The reflection inlines the holder into the budget; the contract
 	// names it once, so the sentences below land on the shape a client sees.
 	schemas["Budget"].(map[string]any)["properties"].(map[string]any)["holders"] =
@@ -85,8 +99,26 @@ func (s *Server) openAPI() map[string]any {
 			"Read from the compensating campaigns; the record of this one never changes when a rollback is ordered.")
 	describe(schemas, "Campaign", "changed_hosts",
 		"How many hosts the campaign changed: the target succeeded, or failed only after its change landed "+
-			"(in the reboot or the verification). These are the hosts a compensation runs on. "+
-			"Zero until the campaign is completed, failed or canceled - a compensation is refused before that.")
+			"(in the reboot or the verification). A host that reported no change is not counted. "+
+			"These are the hosts a compensation runs on. "+
+			"Zero until the campaign has settled - a compensation is refused before that.")
+	// The states are the contract a client filters and colours by; the
+	// reflection sees a string. The list here is the list the database
+	// checks, in the order a campaign moves through them.
+	describe(schemas, "Campaign", "state",
+		"planning (every host computes its plan), planned, awaiting_approval, canary, manual_gate, running, paused, "+
+			"canceling (a cancel with hosts still carrying their tasks; canceled once they settle), "+
+			"and the terminal states: completed, completed_with_issues (finished under the threshold with hosts "+
+			"failed or unknown), failed (nothing got through), plan_failed (planning left no host to run on), "+
+			"expired (the plans passed their time limit before any host started), canceled.")
+	describe(schemas, "CampaignTarget", "state",
+		"pending, planning, awaiting_budget, queued_offline, ineligible, excluded, "+
+			"dispatched (the task is handed over and the agent has not reported a start), "+
+			"awaiting_lock (the agent holds the task and waits for a resource of the host; blocker names it), "+
+			"running, rebooting, verifying, and the terminal states: succeeded, no_change (the host already had the "+
+			"desired state; a success without a mutation), failed, unknown (the task ended without a result - the "+
+			"session broke or the agent restarted mid-task; not a success, counted as a failure by the threshold, "+
+			"read the host before ordering again), skipped, canceled.")
 	// The budget row grew additively: a client of the first shape reads
 	// the same five fields, and the new ones say who holds the tokens and
 	// who waits for them, which the numbers alone never did.
@@ -405,6 +437,8 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/budgets":                       items("Budget"),
 	"GET /api/v1/fleet/summary":                 ref("FleetSummary"),
 	"GET /api/v1/hosts/{id}/audit":              collection("AuditEvent"),
+	"GET /api/v1/hosts/{id}/system/history":     collection("SystemHistoryEntry"),
+	"GET /api/v1/hosts/{id}/access":             ref("HostAccess"),
 }
 
 // items is a whole list answered at once, without a count: the budgets

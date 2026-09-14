@@ -99,3 +99,78 @@ func TestOnlyANewAgentAcknowledgesTasks(t *testing.T) {
 		}
 	}
 }
+
+// TestTheAnnouncedRangeDecidesBeforeTheTable: an agent that says what it
+// speaks is judged by that - a release the table has never heard of talks
+// when its range overlaps the panel's, and a release the table would let
+// in is refused when its announced range does not. An agent that
+// announces nothing is judged by the table as before.
+func TestTheAnnouncedRangeDecidesBeforeTheTable(t *testing.T) {
+	// The panel of the test speaks protocols 1 to 2.
+	check := func(version string, min, max int) error {
+		return checkProtocolRange(testTable, 1, 2, version, min, max)
+	}
+	compatible := []struct {
+		version  string
+		min, max int
+	}{
+		{"0.41.0", 1, 1},
+		{"0.50.0", 1, 2},
+		{"9.9.9", 2, 3},
+		{"devel", 1, 1},
+		{"", 2, 2},
+	}
+	for _, c := range compatible {
+		if err := check(c.version, c.min, c.max); err != nil {
+			t.Errorf("%q announcing %d..%d was refused: %v", c.version, c.min, c.max, err)
+		}
+	}
+	incompatible := []struct {
+		version  string
+		min, max int
+	}{
+		{"9.9.9", 3, 4},
+		{"0.41.0", 3, 3},
+		{"0.41.0", 2, 1},
+		{"0.41.0", 0, 1},
+	}
+	for _, c := range incompatible {
+		if err := check(c.version, c.min, c.max); !errors.Is(err, ErrProtocolIncompatible) {
+			t.Errorf("%q announcing %d..%d was not refused as incompatible: %v", c.version, c.min, c.max, err)
+		}
+	}
+
+	// Nothing announced: the table decides, with the same answers as
+	// CheckProtocol, an unreadable version included.
+	if err := check("0.41.0", 0, 0); err != nil {
+		t.Errorf("a release the table knows was refused without an announcement: %v", err)
+	}
+	if err := check("0.50.0", 0, 0); errors.Is(err, ErrProtocolIncompatible) {
+		t.Errorf("a release on protocol 2 was refused by a panel speaking up to 2: %v", err)
+	}
+	if err := checkProtocolRange(testTable, 1, 1, "0.50.0", 0, 0); !errors.Is(err, ErrProtocolIncompatible) {
+		t.Errorf("a release on protocol 2 was not refused by a panel speaking up to 1: %v", err)
+	}
+	if err := check("devel", 0, 0); err == nil || errors.Is(err, ErrProtocolIncompatible) {
+		t.Errorf("an unreadable version without an announcement is unknown, not incompatible: %v", err)
+	}
+}
+
+// TestTheRealRangeIsConsistent: the floor is not above the ceiling, and
+// this binary accepts its own announcement.
+func TestTheRealRangeIsConsistent(t *testing.T) {
+	if AgentProtocolMin < 1 || AgentProtocolMin > AgentProtocol {
+		t.Fatalf("the protocol range %d..%d is not a range", AgentProtocolMin, AgentProtocol)
+	}
+	if err := CheckProtocolRange(Version, AgentProtocolMin, AgentProtocol); err != nil {
+		t.Fatalf("this binary's own range is refused: %v", err)
+	}
+}
+
+func TestOnlyANewAgentReportsItsBuild(t *testing.T) {
+	for version, want := range map[string]bool{"0.46.9": false, "0.47.0": true, "0.47.0-1": true, "1.0.0": true, "": false, "test": false} {
+		if got := ReportsBuild(version); got != want {
+			t.Errorf("ReportsBuild(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

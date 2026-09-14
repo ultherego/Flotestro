@@ -129,8 +129,10 @@ func CheckCompensation(original Campaign, action opspec.ActionType, changed []Ta
 // records as succeeded. A host whose change failed, or whose session broke
 // mid-task, is left out: what it holds is unknown, and unknown is not
 // "unchanged" - it is a question for the operator on that host, not for a
-// campaign. A target from before the step ledger existed has no execute
-// row; its state alone decides.
+// campaign. A host that reported no change is left out too: its change
+// step ran to the end and changed nothing, so there is nothing to bring
+// back. A target from before the step ledger existed has no execute row;
+// its state alone decides.
 func (s *Store) ChangedTargets(ctx context.Context, campaignID string) ([]Target, error) {
 	const query = `
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
@@ -139,10 +141,7 @@ func (s *Store) ChangedTargets(ctx context.Context, campaignID string) ([]Target
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at
 		  from campaign_targets t
 		  left join hosts h on h.id = t.host_id
-		 where t.campaign_id = $1
-		   and (t.state = 'succeeded'
-		        or exists (select 1 from campaign_steps s
-		                    where s.target_id = t.id and s.step_key = 'execute' and s.state = 'succeeded'))
+		 where t.campaign_id = $1 and ` + changedTargetCondition + `
 		 order by t.wave, t.position`
 	rows, err := s.pool.Query(ctx, query, campaignID)
 	if err != nil {
@@ -196,6 +195,10 @@ func compensationOutcome(state TargetState, code, message string) (StepState, st
 	switch state {
 	case TargetSucceeded:
 		return StepSucceeded, reason
+	case TargetNoChange:
+		// The reverse found nothing to do: the host already holds the state
+		// the compensation was to bring back, and the original is compensated.
+		return StepSucceeded, orReason(reason, "the host already held the state the compensation brings back")
 	case TargetSkipped, TargetIneligible, TargetExcluded:
 		return StepSkipped, orReason(reason, "the compensating host was "+string(state))
 	case TargetCanceled:

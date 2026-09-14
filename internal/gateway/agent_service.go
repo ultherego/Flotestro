@@ -23,6 +23,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	backupstore "github.com/ultherego/flotestro/internal/backup"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	certstore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
@@ -275,9 +276,39 @@ func (s *AgentService) Connect(ctx context.Context,
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("the first message has to be Hello"))
 	}
 
+	// The protocol is judged by what the agent says it speaks, and by the
+	// table of releases for an agent that says nothing. Only a definite
+	// incompatibility closes the door: a version the panel cannot read is
+	// an unknown, and an unknown agent is let in rather than cut off over
+	// a spelling. A refused host keeps the reason on its record, so the
+	// operator sees an agent to upgrade rather than a host that went quiet.
+	if err := buildinfo.CheckProtocolRange(hello.GetAgentVersion(),
+		int(hello.GetProtocolMin()), int(hello.GetProtocolMax())); errors.Is(err, buildinfo.ErrProtocolIncompatible) {
+		s.refused(ctx, hostID, opspec.RefusalProtocolIncompatible, err.Error())
+		return connect.NewError(connect.CodeFailedPrecondition, err)
+	}
+
 	caps := capabilitiesFromProto(hello.GetCapabilities())
 	if err := s.hosts.ApplyHello(ctx, hostID, hello.GetAgentVersion(), hello.GetBootId(), caps); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
+	}
+	// What the agent says about its build and its configuration. An agent
+	// that announces no protocol range predates the report, and the record
+	// is cleared rather than left with what an earlier agent said.
+	var report *hosts.AgentReport
+	if hello.GetProtocolMax() > 0 {
+		report = &hosts.AgentReport{
+			BuildCommit:         hello.GetBuildCommit(),
+			ProtocolMin:         int(hello.GetProtocolMin()),
+			ProtocolMax:         int(hello.GetProtocolMax()),
+			ConfigFingerprint:   hello.GetConfigFingerprint(),
+			ConfigSchemaVersion: int(hello.GetConfigSchemaVersion()),
+		}
+	}
+	if err := s.hosts.RecordAgentReport(ctx, hostID, report); err != nil {
+		// The session is worth more than the record: a host whose build
+		// was not written down is still a host to manage.
+		s.log.Error("the agent's report of its build was not recorded", "host_id", hostID, "err", err)
 	}
 	// The return of the agent settles its replacement rather than the exit code
 	// of the package manager: the process that carried the job out was
@@ -480,6 +511,12 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 				"host_id", hostID, "revision", report.GetRevision(), "full", report.GetFull())
 		}
 		s.followHostname(ctx, hostID, report)
+		if stored || report.GetFull() {
+			// The platform history is written from the system module: a
+			// revision seen before names a pair the history already has,
+			// so only a new revision or a full report is worth the write.
+			s.followPlatform(ctx, hostID, report)
+		}
 		return nil
 
 	case *agentv1.AgentMessage_MetricsSample:
@@ -2766,6 +2803,66 @@ func (s *AgentService) followHostname(ctx context.Context, hostID string, report
 		Outcome: audit.OutcomeSuccess,
 		Detail:  map[string]any{"previous": previous, "current": hostname, "revision": report.GetRevision()},
 	})
+}
+
+// followPlatform keeps the history of the kernels and releases a host was
+// seen on.
+//
+// The pair comes from the basic facts of the system module, which every
+// agent sends: the kernel release and the distribution with its version.
+// A pair the panel has not seen on this host gets a row and a line in the
+// log; one it has seen only moves its last-seen mark.
+func (s *AgentService) followPlatform(ctx context.Context, hostID string, report *agentv1.InventoryReport) {
+	entry, ok := reportedPlatform(report)
+	if !ok {
+		return
+	}
+	created, err := s.hosts.RecordSystemHistory(ctx, hostID, entry)
+	if err != nil {
+		s.log.Error("the platform history was not written after the inventory", "host_id", hostID, "err", err)
+		return
+	}
+	if created {
+		s.log.Info("the host reports a platform not seen before",
+			"host_id", hostID, "kernel", entry.Kernel,
+			"distribution", entry.Distribution, "version", entry.DistributionVersion)
+	}
+}
+
+// reportedPlatform reads the kernel and the release from the system module
+// of a report. A report without the module, or one whose module was not
+// read, says nothing about the platform and writes nothing.
+func reportedPlatform(report *agentv1.InventoryReport) (hosts.SystemHistoryEntry, bool) {
+	var facts struct {
+		OS struct {
+			Kernel       string `json:"kernel"`
+			Distribution string `json:"distribution"`
+			Version      string `json:"version"`
+		} `json:"os"`
+	}
+	for _, fragment := range report.GetFragments() {
+		if fragment.GetModule() != "system" || fragment.GetUnavailableReason() != "" {
+			continue
+		}
+		if err := json.Unmarshal(fragment.GetPayload(), &facts); err != nil {
+			return hosts.SystemHistoryEntry{}, false
+		}
+		if facts.OS.Kernel == "" && facts.OS.Distribution == "" {
+			return hosts.SystemHistoryEntry{}, false
+		}
+		seen := time.Now().UTC()
+		if observed := fragment.GetObservedAt(); observed != nil {
+			seen = observed.AsTime().UTC()
+		}
+		return hosts.SystemHistoryEntry{
+			Kernel:              facts.OS.Kernel,
+			Distribution:        facts.OS.Distribution,
+			DistributionVersion: facts.OS.Version,
+			FirstSeenAt:         seen,
+			LastSeenAt:          seen,
+		}, true
+	}
+	return hosts.SystemHistoryEntry{}, false
 }
 
 // reportedHostname reads the name from the system module of a report. An

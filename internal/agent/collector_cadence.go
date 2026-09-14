@@ -25,17 +25,28 @@ const (
 	// CadenceNormal marks a module read in every fourth cycle: the state
 	// changes on its own, but slowly, and the read starts tools.
 	CadenceNormal CadenceClass = "normal"
+	// CadenceSlow marks a module read every six hours and at the start of a
+	// session, which is where a reboot lands: the platform facts and the
+	// sudo policy change when somebody changes the machine, and the
+	// document sets their pace at six hours and a boot.
+	CadenceSlow CadenceClass = "slow"
 	// CadenceStatic marks a module read once a day, at the full report, or on
 	// demand: the state changes only when somebody changes it, and then the
 	// change usually comes from the panel and orders its own refresh.
 	CadenceStatic CadenceClass = "static"
 )
 
+// slowInterval is the pace of the slow class.
+const slowInterval = 6 * time.Hour
+
 // moduleCadence assigns every module of ModuleOrder to a class. The basic
 // facts - the system, the hardware, the identity of the machine - are always
 // collected with the cycle; they are cheap and decide which modules make
 // sense, so they have no class here.
 var moduleCadence = map[string]CadenceClass{
+	ModuleSystem:  CadenceSlow,
+	ModuleSudoers: CadenceSlow,
+
 	ModuleServices:   CadenceFast,
 	ModuleContainers: CadenceFast,
 	ModulePower:      CadenceFast,
@@ -108,6 +119,9 @@ type Cadence struct {
 	random   func(n int64) int64
 	ticks    int
 	lastFull time.Time
+	// lastSlow is when the slow modules last went: with the full report
+	// that opens the session, with the daily one, or on their own cycle.
+	lastSlow time.Time
 }
 
 // newCadence builds the cycle of a host. A non-positive interval means the
@@ -143,6 +157,7 @@ func (c *Cadence) applyRemote(intervalSeconds, normalEvery int32, fullHourUTC *i
 // report the whole inventory twice within minutes.
 func (c *Cadence) started(at time.Time) {
 	c.lastFull = at
+	c.lastSlow = at
 }
 
 // next returns how long to wait for the next cycle: the interval spread by
@@ -159,11 +174,13 @@ func (c *Cadence) next() time.Duration {
 // set means the whole inventory; otherwise the list names the modules due.
 //
 // The static modules are never on the list: they are read with the full
-// report once a day, and on demand when the panel asks for them.
+// report once a day, and on demand when the panel asks for them. The slow
+// ones join the list once six hours have passed since they last went.
 func (c *Cadence) due(at time.Time) (modules []string, full bool) {
 	c.ticks++
 	if c.fullDue(at) {
 		c.lastFull = at
+		c.lastSlow = at
 		return nil, true
 	}
 	classes := []CadenceClass{CadenceFast}
@@ -173,6 +190,25 @@ func (c *Cadence) due(at time.Time) (modules []string, full bool) {
 	}
 	if c.ticks%every == 0 {
 		classes = append(classes, CadenceNormal)
+	}
+	// The slow read goes two cycles before the six hours are up rather
+	// than the first cycle after: the panel judges a fact older than six
+	// hours as stale, and a read landing a jittered cycle late would leave
+	// the sudo check unknown for a quarter of an hour four times a day.
+	// The mark advances by the pace itself, so the reads keep six hours
+	// between them rather than six hours less two cycles.
+	switch next := c.lastSlow.Add(slowInterval); {
+	case c.lastSlow.IsZero():
+		c.lastSlow = at
+		classes = append(classes, CadenceSlow)
+	case !at.Add(2 * c.Interval).Before(next):
+		c.lastSlow = next
+		if next.Before(at) {
+			// A cycle longer than the pace reads the slow modules every
+			// time; the mark follows the clock rather than falling behind.
+			c.lastSlow = at
+		}
+		classes = append(classes, CadenceSlow)
 	}
 	return ModulesOfCadence(classes...), false
 }

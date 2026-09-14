@@ -20,7 +20,10 @@ import (
 // reboot or the verification after the reboot.
 func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, target *Target) error {
 	switch target.State {
-	case TargetRunning:
+	case TargetDispatched, TargetAwaitingLock, TargetRunning:
+		// Three states of one task: handed over, waiting for a resource of
+		// the host, running on the agent's word. The task's own state says
+		// which, and its end settles the host the same way from any of them.
 		return o.afterMainJob(ctx, campaign, target)
 	case TargetRebooting:
 		return o.afterReboot(ctx, campaign, target)
@@ -49,38 +52,51 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	if err != nil {
 		return err
 	}
-	// The host stays running for as long as its job is open - dispatched,
-	// waiting on a lock, or running on the agent's word - and shows what
-	// it waits on meanwhile.
-	if err := o.followBlocker(ctx, target, job); err != nil {
-		return err
-	}
+	// The host follows its task for as long as the task is open: handed
+	// over, waiting on a lock with the blocker named, or running on the
+	// agent's word.
 	if !jobs.State(job.State).Terminal() {
-		return nil
+		return o.followJob(ctx, target, job)
 	}
+	// What the task ended with, read into one verdict: a broken session
+	// is told apart from a failed change, and the host's own word that it
+	// changed nothing from a change that landed.
+	verdict := jobVerdict{State: job.State, ErrorCode: job.ResultErrorCode}
 	if job.State != jobs.StateSucceeded {
-		code, message := orDefault(job.ResultErrorCode, string(job.State)), job.ResultMessage
-		// A broken session is told apart from a failed change: the outcome
-		// on the host is unknown, and the campaign counts such hosts against
-		// its own threshold.
 		lost, detail, err := o.connectivityLost(ctx, job, target)
 		if err != nil {
 			return err
 		}
+		verdict.Lost = lost
+		state, code := targetOutcome(verdict)
+		message := job.ResultMessage
 		if lost {
-			code, message = ConnectivityLostCode, detail
+			message = detail
 		}
-		o.finishTarget(ctx, campaign, target, TargetFailed, code, message)
+		o.finishTarget(ctx, campaign, target, state, code, message)
+		return nil
+	}
+	detail, err := o.lastAttemptDetail(ctx, *target.JobID)
+	if err != nil {
+		return err
+	}
+	verdict.NoChange = resultNoChange(detail)
+	if state, _ := targetOutcome(verdict); state == TargetNoChange {
+		// Nothing changed on the host, so there is nothing to reboot for
+		// and nothing to verify: the reboot and the verification are
+		// answers to a change, and the strip says why neither ran.
+		why := "the host reported that nothing changed"
+		o.finishTargetSteps(ctx, campaign, target, TargetNoChange, "", why,
+			stepOutcome{Key: StepExecute, State: StepSucceeded, Reason: why},
+			stepOutcome{Key: StepReboot, State: StepSkipped, Reason: why},
+			stepOutcome{Key: StepVerify, State: StepSkipped, Reason: why})
 		return nil
 	}
 
 	// From here on the change itself is done; whatever follows is the
 	// reboot's outcome, and the step records say so.
 	changed := stepOutcome{Key: StepExecute, State: StepSucceeded}
-	needsReboot, err := o.rebootNeeded(ctx, campaign, *target.JobID)
-	if err != nil {
-		return err
-	}
+	needsReboot := rebootNeeded(campaign, detail)
 	if !needsReboot {
 		// A reboot that did not happen is a decision, and the strip is to
 		// say whose: the policy's or the host's.
@@ -149,24 +165,114 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	return nil
 }
 
-// followBlocker copies onto the target what the host's job waits on: the
-// lock the agent named, while the job waits for it, and nothing once the
-// wait is over - the operation started, or the job settled. The write
-// happens only when the text changes: the orchestrator passes every few
-// seconds, and a host waiting a minute must not be rewritten every pass to
-// say the same thing.
-func (o *Orchestrator) followBlocker(ctx context.Context, target *Target, job *jobs.Job) error {
-	blocker, _ := jobs.LockBlocker(job.WaitReason)
-	if blocker == target.Blocker {
+// followJob copies onto the target where its open task stands: dispatched
+// until the agent says the operation started, waiting for a lock with the
+// blocker the agent named while it waits, running once it started. The
+// write happens only when something changes: the orchestrator passes every
+// few seconds, and a host waiting a minute must not be rewritten every
+// pass to say the same thing.
+func (o *Orchestrator) followJob(ctx context.Context, target *Target, job *jobs.Job) error {
+	state, blocker := taskStanding(job.State, job.WaitReason)
+	if state == target.State && blocker == target.Blocker {
 		return nil
 	}
-	if _, err := o.store.Pool().Exec(ctx,
-		`update campaign_targets set blocker = $2 where id = $1 and blocker <> $2`,
-		target.ID, blocker); err != nil {
-		return fmt.Errorf("recording the blocker of the target: %w", err)
+	if err := o.store.FollowTask(ctx, target.ID, state, blocker); err != nil {
+		return fmt.Errorf("recording where the task of the target stands: %w", err)
 	}
+	target.State = state
 	target.Blocker = blocker
 	return nil
+}
+
+// taskStanding maps an open task onto the state of the host carrying it,
+// together with the lock it waits on. The agent's word decides: a task it
+// has not reported started is dispatched wherever it is in the queue, a
+// task it reported waiting is waiting for that lock, and only a task it
+// reported started is running.
+func taskStanding(state jobs.State, waitReason string) (TargetState, string) {
+	if blocker, waiting := jobs.LockBlocker(waitReason); waiting {
+		return TargetAwaitingLock, blocker
+	}
+	if state == jobs.StateRunning {
+		return TargetRunning, ""
+	}
+	return TargetDispatched, ""
+}
+
+// jobVerdict is what the campaign reads off a task that ended: its state
+// and error code, whether the session broke while it ran, and whether the
+// host said it changed nothing.
+type jobVerdict struct {
+	State     jobs.State
+	ErrorCode string
+	Lost      bool
+	NoChange  bool
+}
+
+// targetOutcome maps the end of a task onto the state of the host and the
+// code it carries.
+//
+// A task that succeeded is a success - a change that landed, or nothing to
+// change when the host says so. A task that ended without a result is
+// unknown, not failed: the session broke while it ran, or the agent came
+// back from a restart with the operation half done. The document keeps
+// unknown apart from failure because the next step differs - read the
+// host, do not run the change again - and from success because nobody
+// saw the desired state on the host. Everything else is a failure of the
+// change with the code the host gave, or the task's state when it gave
+// none.
+func targetOutcome(verdict jobVerdict) (TargetState, string) {
+	switch {
+	case verdict.State == jobs.StateSucceeded && verdict.NoChange:
+		return TargetNoChange, ""
+	case verdict.State == jobs.StateSucceeded:
+		return TargetSucceeded, ""
+	case verdict.Lost:
+		return TargetUnknown, ConnectivityLostCode
+	case verdict.ErrorCode == OutcomeUnknownCode:
+		return TargetUnknown, OutcomeUnknownCode
+	default:
+		return TargetFailed, orDefault(verdict.ErrorCode, string(verdict.State))
+	}
+}
+
+// resultNoChange reads off the result of a change whether the host said it
+// changed nothing. The families say it differently: a result with a
+// changed flag says so outright, a package transaction by applying no
+// package. A result that says nothing either way changed something as far
+// as the campaign knows - a unit restart has no "already restarted".
+func resultNoChange(detail json.RawMessage) bool {
+	if len(detail) == 0 {
+		return false
+	}
+	var parsed struct {
+		Kind    string          `json:"kind"`
+		Changed *bool           `json:"changed"`
+		Applied json.RawMessage `json:"applied"`
+	}
+	if err := json.Unmarshal(detail, &parsed); err != nil {
+		return false
+	}
+	if parsed.Changed != nil {
+		return !*parsed.Changed
+	}
+	if parsed.Kind == "package_apply" {
+		return jsonListEmpty(parsed.Applied)
+	}
+	return false
+}
+
+// lastAttemptDetail returns the typed result of the task's latest attempt;
+// empty when the task has none.
+func (o *Orchestrator) lastAttemptDetail(ctx context.Context, jobID string) (json.RawMessage, error) {
+	attempts, err := o.jobs.Attempts(ctx, jobID)
+	if err != nil {
+		return nil, err
+	}
+	if len(attempts) == 0 {
+		return nil, nil
+	}
+	return attempts[len(attempts)-1].Detail, nil
 }
 
 // afterRemediation settles a host of a fleet remediation from the state of
@@ -211,33 +317,24 @@ func (o *Orchestrator) afterRemediation(ctx context.Context, campaign Campaign, 
 
 // rebootNeeded answers whether the campaign's policy and the task's result
 // require a reboot of the host.
-func (o *Orchestrator) rebootNeeded(ctx context.Context, campaign Campaign, jobID string) (bool, error) {
+func rebootNeeded(campaign Campaign, detail json.RawMessage) bool {
 	switch RebootPolicy(campaign.RebootPolicy) {
 	case RebootNever:
-		return false, nil
+		return false
 	case RebootAlways:
-		return true, nil
+		return true
 	}
-
-	attempts, err := o.jobs.Attempts(ctx, jobID)
-	if err != nil {
-		return false, err
-	}
-	if len(attempts) == 0 {
-		return false, nil
-	}
-	detail := attempts[len(attempts)-1].Detail
 	if len(detail) == 0 {
-		return false, nil
+		return false
 	}
 	var parsed struct {
 		Kind           string `json:"kind"`
 		RebootRequired bool   `json:"reboot_required"`
 	}
 	if err := json.Unmarshal(detail, &parsed); err != nil {
-		return false, nil
+		return false
 	}
-	return parsed.Kind == "package_apply" && parsed.RebootRequired, nil
+	return parsed.Kind == "package_apply" && parsed.RebootRequired
 }
 
 // afterReboot waits for the host to come back with a new boot ID and orders
@@ -394,11 +491,14 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 		// session lost during the check is the one exception: it is not a
 		// verdict on the units, and the campaign counts it with the other
 		// lost sessions.
-		code := "health_check_failed"
+		state, code := TargetFailed, "health_check_failed"
 		if job.ResultErrorCode == ConnectivityLostCode {
-			code = ConnectivityLostCode
+			// The change landed and nobody saw the units after it: the
+			// host is unknown, not failed, and the compensation count
+			// still reads its change step as landed.
+			state, code = TargetUnknown, ConnectivityLostCode
 		}
-		o.finishTarget(ctx, campaign, target, TargetFailed, code,
+		o.finishTarget(ctx, campaign, target, state, code,
 			stepReason(job.ResultErrorCode, job.ResultMessage))
 		return nil
 	}
@@ -442,7 +542,7 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 	o.releaseCapacity(ctx, target)
 
 	outcome := audit.OutcomeSuccess
-	if state == TargetFailed {
+	if state == TargetFailed || state == TargetUnknown {
 		outcome = audit.OutcomeFailure
 	}
 	o.audit.Record(ctx, audit.Event{
@@ -518,14 +618,11 @@ func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaig
 	return nil
 }
 
-// complete closes a campaign and records the report in the audit trail.
-func (o *Orchestrator) complete(ctx context.Context, campaign Campaign,
-	targets []Target, failed int) error {
-	state := StateCompleted
-	if failed > 0 && failed == len(targets) {
-		// A campaign in which every host failed is not completed.
-		state = StateFailed
-	}
+// complete closes a campaign whose hosts have all settled and records the
+// report in the audit trail. The state is the verdict on the tally:
+// completed, completed with issues, or failed when nothing got through.
+func (o *Orchestrator) complete(ctx context.Context, campaign Campaign, targets []Target) error {
+	state := settleCampaignState(tallyTargets(targets))
 	if err := o.store.SetState(ctx, campaign.ID, state, ""); err != nil {
 		return err
 	}

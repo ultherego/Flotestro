@@ -179,6 +179,11 @@ func main() {
 	agent.SetFileProbe(executor.ProbeFiles)
 	agent.SetSecurityProbe(executor.ProbeSecurity)
 	agent.SetCertificateProbe(executor.ProbeCertificates)
+	// The DMI serial numbers and the sudo policy are root's: the platform
+	// picture asks the helper for the first, the sudoers module for the
+	// second.
+	agent.SetSystemProbe(executor.ProbeSystem)
+	agent.SetSudoersProbe(executor.ProbeSudoers)
 
 	// The certificate of the agent is short-lived. Without renewal the whole
 	// host would drop out of the fleet on the day it expires, because the

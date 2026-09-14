@@ -3,9 +3,11 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
@@ -33,11 +35,11 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 	}
 	action := opspec.PlanningAction(change)
 	if action == "" {
-		// The campaign should never have come into being; stopping is the
+		// The campaign should never have come into being; ending it is the
 		// only honest answer, because there is nothing to compute the plan
-		// with.
-		return o.pauseOnThreshold(ctx, campaign,
-			"the operation cannot be planned on the hosts", 0, 0)
+		// with, and nothing a resume could start.
+		return o.failPlanning(ctx, campaign, targets,
+			"the operation cannot be planned on the hosts")
 	}
 
 	var payload opspec.Payload
@@ -107,8 +109,8 @@ func (o *Orchestrator) planFromOrder(ctx context.Context, campaign Campaign, tar
 	if err != nil {
 		// The order was validated when the campaign came into being, so this
 		// is a payload that changed underneath it; there is nothing to split.
-		return o.pauseOnThreshold(ctx, campaign,
-			"the order carries no usable mapping: "+err.Error(), 0, 0)
+		return o.failPlanning(ctx, campaign, targets,
+			"the order carries no usable mapping: "+err.Error())
 	}
 	var shared opspec.Payload
 	if len(campaign.Payload) > 0 {
@@ -267,12 +269,86 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 		o.finishTarget(ctx, campaign, target, TargetIneligible, "plan_refused", reason)
 		return true, nil
 	}
+	if planNoChange(plan) {
+		// A plan that found nothing to do is the host's report that it
+		// already has the desired state. Nothing is approved for it and
+		// nothing runs on it: a change ordered on such a host would write
+		// the same file again for the sake of a step record. The plan is
+		// kept all the same, so the screen of plans shows what the host
+		// found, and the host ends here as a success without a mutation.
+		// The plan is written first and on its own: a pass repeated after
+		// a crash between the two finds the host still planning with its
+		// task ended, and writes the same plan again.
+		if err := o.store.SavePlan(ctx, campaign.ID, target.HostID, hash, plan); err != nil {
+			return false, err
+		}
+		o.settleNoChange(ctx, campaign, target, hash)
+		return true, nil
+	}
 	// The host goes back to the queue: the plan is computed, the change will
 	// start once the consent is given.
 	if err := o.acceptPlan(ctx, campaign, target, hash, plan, ""); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// settleNoChange ends a host whose plan found nothing to do as no_change:
+// the plan step succeeded with that answer, and the change step is
+// recorded skipped so the strip says why the host never ran rather than
+// showing a change it never reached.
+func (o *Orchestrator) settleNoChange(ctx context.Context, campaign Campaign, target *Target, hash string) {
+	why := "the host already has the desired state; the plan found nothing to change"
+	o.finishTargetSteps(ctx, campaign, target, TargetNoChange, "", why,
+		stepOutcome{Key: StepPlan, State: StepSucceeded, Reason: "plan " + shortHash(hash) + ": nothing to change"},
+		stepOutcome{Key: StepExecute, State: StepSkipped, Reason: why})
+}
+
+// planNoChange reads off a plan whether it found nothing to do.
+//
+// Every planner says it in its own way: a file, a rule, a module or a
+// clock plan names its action, and no_change - or remove_absent, the
+// removal of a file that is not there - is nothing to do; a package plan
+// lists its changes, and an empty list with nothing blocked is nothing to
+// do. A plan of a shape the campaign does not know is taken as a change:
+// a host started for nothing is a wasted step, a host settled as done
+// while a change waited is a lie in the report.
+func planNoChange(plan json.RawMessage) bool {
+	if len(plan) == 0 {
+		return false
+	}
+	var parsed struct {
+		Kind string `json:"kind"`
+		Plan struct {
+			Action string `json:"action"`
+		} `json:"plan"`
+		Changes json.RawMessage `json:"changes"`
+		Blocked json.RawMessage `json:"blocked"`
+	}
+	if err := json.Unmarshal(plan, &parsed); err != nil {
+		return false
+	}
+	switch parsed.Plan.Action {
+	case "no_change", "remove_absent":
+		return true
+	}
+	if parsed.Kind == "package_plan" {
+		return jsonListEmpty(parsed.Changes) && jsonListEmpty(parsed.Blocked)
+	}
+	return false
+}
+
+// jsonListEmpty says whether a JSON value is an absent, null or empty list.
+// Anything that is not a list is not empty: unknown is not zero.
+func jsonListEmpty(raw json.RawMessage) bool {
+	if len(raw) == 0 || string(raw) == "null" {
+		return true
+	}
+	var list []json.RawMessage
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return false
+	}
+	return len(list) == 0
 }
 
 // acceptPlan records a host's plan, closes its plan step and returns the
@@ -386,14 +462,27 @@ func ContentFingerprint(detail json.RawMessage) string {
 // campaign to the operator's decision.
 func (o *Orchestrator) finishPlanning(ctx context.Context, campaign Campaign,
 	targets []Target) error {
+	// Every host settled while planning - already in the desired state,
+	// refused by its plan, failed to plan - leaves nothing to approve and
+	// nothing to run. The campaign ends here: completed when hosts were
+	// found in the desired state, plan_failed when no host got that far.
+	if allFinished(targets) {
+		if tallyTargets(targets).Succeeded == 0 {
+			return o.failPlanning(ctx, campaign, targets,
+				"no host computed a plan of the change")
+		}
+		return o.complete(ctx, campaign, targets)
+	}
 	plans, err := o.store.Plans(ctx, campaign.ID)
 	if err != nil {
 		return err
 	}
 	if len(plans) == 0 {
-		// No host computed a plan: there is nothing to approve.
-		return o.pauseOnThreshold(ctx, campaign,
-			"no host computed a plan of the change", len(targets), len(targets))
+		// Hosts still in the queue without a plan on record: a plan set
+		// nobody can approve. The guard is for a row somebody changed by
+		// hand; the engine queues no host without its plan.
+		return o.failPlanning(ctx, campaign, targets,
+			"no host computed a plan of the change")
 	}
 
 	set := PlanSetFingerprint(plans)
@@ -778,4 +867,53 @@ func orDefault(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// failPlanning ends a campaign whose planning phase left no host to run
+// on. Until now such a campaign stood paused with the reason, and a
+// resume would have started nothing: there was no plan to start. The
+// hosts still open are closed - their plan never came - and the campaign
+// ends plan_failed, with its report.
+func (o *Orchestrator) failPlanning(ctx context.Context, campaign Campaign,
+	targets []Target, reason string) error {
+	counts := tallyTargets(targets)
+	why := fmt.Sprintf("%s: %d hosts cannot run the change, %d failed to plan, %d were skipped, %d never planned",
+		reason, ineligibleCount(targets), counts.Failed, counts.Skipped, counts.Total-counts.Finished)
+	for i := range targets {
+		if targets[i].State.Finished() {
+			continue
+		}
+		o.finishTarget(ctx, campaign, &targets[i], TargetSkipped, "plan_failed", reason)
+	}
+	if err := o.store.SetState(ctx, campaign.ID, StatePlanFailed, why); err != nil {
+		return err
+	}
+	if o.budgets != nil {
+		if err := o.budgets.ReleaseClaimant(ctx, "campaign:"+campaign.ID); err != nil {
+			o.log.Error("the capacity of a campaign that failed to plan was not released",
+				"campaign_id", campaign.ID, "err", err)
+		}
+	}
+	o.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "campaign.plan_failed", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeFailure,
+		Detail: map[string]any{"reason": why, "hosts": len(targets)},
+	})
+	o.log.Warn("the campaign ended in planning with no host to run on",
+		"campaign_id", campaign.ID, "reason", why)
+	return nil
+}
+
+// ineligibleCount counts the hosts that answered the plan with a refusal
+// or never qualified; they are the usual reason a planning phase leaves
+// nothing to run.
+func ineligibleCount(targets []Target) int {
+	count := 0
+	for _, target := range targets {
+		if target.State == TargetIneligible || target.State == TargetExcluded {
+			count++
+		}
+	}
+	return count
 }

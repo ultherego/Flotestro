@@ -29,8 +29,16 @@ var (
 )
 
 // AgentProtocol changes with every incompatible change of the contract
-// between the agent and the centre.
+// between the agent and the centre. It is the newest protocol this binary
+// speaks.
 const AgentProtocol = 1
+
+// AgentProtocolMin is the oldest protocol this binary still speaks. The two
+// make the range an agent announces in its Hello and the range the panel
+// accepts: the sides can talk when the ranges overlap. The floor moves up
+// only when a release drops the support for an old protocol, which is a
+// decision to write here, not a consequence of raising AgentProtocol.
+const AgentProtocolMin = 1
 
 // Describe assembles one line for the "version" command.
 func Describe(name string) string {
@@ -59,6 +67,17 @@ func ShortCommit() string {
 		return commit[:12]
 	}
 	return commit
+}
+
+// FullCommit returns the whole commit digest, for the record the panel keeps
+// of a host: the short form is for a line on a screen, the full one is what
+// a build is looked up by. Empty when nobody wrote it in and the build
+// metadata has none - a binary built outside a checkout.
+func FullCommit() string {
+	if Commit != "" {
+		return Commit
+	}
+	return commitFromMetadata()
 }
 
 func commitFromMetadata() string {

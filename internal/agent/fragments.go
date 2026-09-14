@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/modules/system"
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
@@ -31,6 +32,7 @@ const (
 	ModuleFiles      = "files"
 	ModuleContainers = "containers"
 	ModuleSchedules  = "schedules"
+	ModuleSudoers    = "sudoers"
 )
 
 // Fragment is the state of one module of the host together with its own
@@ -69,12 +71,16 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		reason  string
 		content any
 	}{
-		{ModuleSystem, "agent/os-release+procfs", "", struct {
+		// The basic facts travel in every report; the platform picture is
+		// laid over them when it was read, flattened into the same object,
+		// so the panel reads one shape for the machine.
+		{ModuleSystem, "agent/os-release+procfs+dmi", "", struct {
 			OS       OSInfo   `json:"os"`
 			Hardware Hardware `json:"hardware"`
 			Hostname string   `json:"hostname"`
 			BootID   string   `json:"boot_id"`
-		}{f.OS, f.Hardware, f.Hostname, f.BootID}},
+			*system.Snapshot
+		}{f.OS, f.Hardware, f.Hostname, f.BootID, f.System}},
 
 		// The package tab asks about two things at once: what is installed and
 		// where it came from. The sources therefore travel in the same fragment
@@ -125,6 +131,8 @@ func (f Facts) Fragments() ([]Fragment, error) {
 		{ModuleCerts, "agent/certificates+certmonger", certificatesReason(f), hostCertificates(f)},
 
 		{ModuleFiles, "agent/managed-files", filesReason(f), managedFiles(f)},
+
+		{ModuleSudoers, "helper/sudoers", sudoersReason(f), sudoersState(f)},
 	}
 
 	fragments := make([]Fragment, 0, len(descriptions))
@@ -359,6 +367,22 @@ func hostCertificates(f Facts) any {
 		return struct{}{}
 	}
 	return f.Certificates
+}
+
+// sudoersReason returns the reason why the sudo policy was not read.
+func sudoersReason(f Facts) string {
+	if f.Sudoers == nil {
+		return "this host did not report its sudo policy"
+	}
+	return f.Sudoers.UnavailableReason
+}
+
+// sudoersState returns the sudo policy or an empty picture.
+func sudoersState(f Facts) any {
+	if f.Sudoers == nil {
+		return struct{}{}
+	}
+	return f.Sudoers
 }
 
 // backupReason returns the reason why there is no state of the backup tools.

@@ -224,6 +224,29 @@ func exclusive(class string) ResourceClaim {
 	return ResourceClaim{Class: class, Mode: ClaimExclusive, Weight: 1}
 }
 
+// sharedCapacities is how much weight the shared classes of the document
+// carry at once on one host. A shared claim coexists with other shared
+// claims of its class until their weights add up to the capacity; the
+// next one waits, the way an exclusive claim waits. The classes are the
+// two the document bounds - bytes per second and file descriptors for
+// the logs, CPU and subprocesses for the scans - and the numbers are the
+// document's "shared + weight" made concrete: four readers of the logs,
+// two walks of the host. A shared class without a row here is bounded
+// only by the task budget of the host; that is the case of a read that
+// takes a lock class shared, where the point is to stay out of the way of
+// a mutation, not to ration the reads.
+var sharedCapacities = map[string]int{
+	ClaimLogsRead:       4,
+	ClaimInventoryHeavy: 2,
+}
+
+// SharedCapacity returns the weight a shared class carries at once on a
+// host, or zero for a class without a bound. Zero means no bound, not no
+// room: the agent lets such shared claims coexist without counting.
+func SharedCapacity(class string) int {
+	return sharedCapacities[class]
+}
+
 // contracts is the table of declarations for mutating operations.
 //
 // The cancel modes follow the cancellation contract of chapter 15 of the
@@ -316,7 +339,12 @@ var contracts = map[ActionType]contract{
 	// reload, with a checkpoint between; the previous sources come back as
 	// a new plan. A timezone is one call, set back by setting it again.
 	ActionTimeConfigApply: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck},
-	ActionTimezoneSet:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	// The timezone has no lock class of its own in the registry, but it
+	// rewrites the clock configuration the time sources change goes
+	// through, and that change holds the units class for its daemon
+	// reload; the timezone joins it rather than opening a class nobody
+	// else takes.
+	ActionTimezoneSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(LockUnits)}},
 
 	// The kernel. A sysctl value and a module take the network as well: they
 	// change the stack an address change relies on. A blacklist entry is

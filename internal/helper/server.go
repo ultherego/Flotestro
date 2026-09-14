@@ -308,6 +308,8 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 		return s.readLocalAccounts(ctx, request, action.LocalAccounts)
 	case *helperv1.HelperRequest_LocalUserAction:
 		return s.applyLocalUserAction(ctx, request, action.LocalUserAction)
+	case *helperv1.HelperRequest_System:
+		return s.readSystem(ctx, request, action.System)
 	default:
 		return reject(ErrorUnknownAction, "no supported action")
 	}

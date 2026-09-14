@@ -1332,8 +1332,10 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 	// A campaign stopped with one write does not close the hosts one by one,
 	// so it has nowhere to return the tokens. They are returned here: the
 	// capacity held by a campaign that does nothing any more stops the next
-	// one.
-	if operation == "cancel" && s.budgets != nil {
+	// one. A campaign that is still draining keeps them: its hosts under
+	// way hold real capacity until they settle, and the drain returns the
+	// tokens then.
+	if operation == "cancel" && s.budgets != nil && updated.State == campaigns.StateCanceled {
 		if err := s.budgets.ReleaseClaimant(r.Context(), "campaign:"+campaign.ID); err != nil {
 			s.log.Error("the capacity of the cancelled campaign was not released",
 				"campaign_id", campaign.ID, "err", err)

@@ -129,6 +129,32 @@ export function Overview() {
             <Fact label={t("Enrolled")}><Time value={host.enrolled_at} /></Fact>
             <Fact label={t("Machine ID")}><span className="hm-mono">{host.machine_id}</span></Fact>
             <Fact label={t("Boot ID")}><span className="hm-mono">{host.boot_id || "—"}</span></Fact>
+            {/* The release and, next to it, the commit the binary was built
+                from: the version names a release, the commit names the
+                sources, which matters once a package was rebuilt. An agent
+                from before the report shows the version alone. */}
+            <Fact label={t("Agent version")}>
+              {host.agent_version || <span className="badge unknown">{t("unknown")}</span>}
+              {host.agent_build_commit && (
+                <>
+                  {" "}
+                  <span className="hm-mono" title={`${t("Commit")}: ${host.agent_build_commit}`}>
+                    {host.agent_build_commit.slice(0, 12)}
+                  </span>
+                </>
+              )}
+            </Fact>
+            {/* Whether the agent runs on the configuration file of the
+                current schema or still on the environment file of the old
+                flow, which is what "agentctl config migrate" moves it off.
+                A host whose agent reported nothing is unknown, not legacy. */}
+            <Fact label={t("Daemon config")}>
+              {host.config_legacy === undefined
+                ? <span className="badge unknown">{t("unknown")}</span>
+                : host.config_legacy
+                  ? <span className="badge warn">{t("Schema migration")}</span>
+                  : <span className="badge ok">{t("up to date")}</span>}
+            </Fact>
           </Facts>
           <RenameHost host={host} reported={module.data?.payload?.hostname} />
         </Section>

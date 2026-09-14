@@ -372,8 +372,13 @@ func verifyLeave(ctx context.Context, domain string) []*helperv1.EnrollCheck {
 	checks = append(checks, check("ipa_config", os.IsNotExist(configErr), true,
 		describeAbsence("/etc/ipa/default.conf", configErr)))
 
+	// The keytab is advisory: ipa-client-install --uninstall unenrolls the
+	// host and removes its configuration, but leaves /etc/krb5.keytab where
+	// the file holds keys of its own (the lab's Debian client does). A
+	// keytab left behind after an unenrollment holds keys the directory no
+	// longer honours; the operator is told, the host is out of the domain.
 	_, keytabErr := os.Stat("/etc/krb5.keytab")
-	checks = append(checks, check("keytab", os.IsNotExist(keytabErr), true,
+	checks = append(checks, check("keytab", os.IsNotExist(keytabErr), false,
 		describeAbsence("/etc/krb5.keytab", keytabErr)))
 
 	// SSSD must no longer know the domain. Advisory: an SSSD that keeps a

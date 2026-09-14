@@ -80,10 +80,25 @@ export type CompensationLinks = {
  */
 export const REBOOT_TIMEOUT = { min: 60, max: 7200, default: 900 };
 
-/** The states a target can be in, for the filter. */
+/**
+ * The states a target can be in, for the filter, in the order a host moves
+ * through them. The task of a host shows in three of them: dispatched
+ * until the agent reports a start, awaiting_lock while it waits for a
+ * resource of the host, running once it started.
+ */
 export const TARGET_STATES = [
-  "pending", "awaiting_budget", "queued_offline", "planning", "running", "rebooting", "verifying",
-  "succeeded", "failed", "skipped", "ineligible", "excluded", "canceled",
+  "pending", "awaiting_budget", "queued_offline", "planning", "dispatched", "awaiting_lock",
+  "running", "rebooting", "verifying",
+  "succeeded", "no_change", "failed", "unknown", "skipped", "ineligible", "excluded", "canceled",
+];
+
+/**
+ * The states a campaign has settled in: nothing changes on any host any
+ * more, the report is on record, and a compensation can be ordered. A
+ * canceling campaign is not among them - its hosts are still at work.
+ */
+export const SETTLED_CAMPAIGN_STATES = [
+  "completed", "completed_with_issues", "failed", "plan_failed", "expired", "canceled",
 ];
 
 /** One executable step of a target: plan, execute, reboot, verify or compensate. */
