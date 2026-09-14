@@ -45,6 +45,10 @@ export function Logs() {
   const queryClient = useQueryClient();
   const [source, setSource] = useState<"journal" | "file">("journal");
   const [preview, setPreview] = useState<string | null>(null);
+  // The job behind the live preview: stopping the preview cancels it, so
+  // the host does not keep the journal open for the rest of the timeout
+  // after the operator has stopped watching.
+  const [previewJob, setPreviewJob] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   // The unit detail on the Services tab hands over the unit and the cursor
   // of its last journal line, so the read here starts where that ended.
@@ -83,9 +87,25 @@ export function Logs() {
       setErrorMessage("");
       setLines(null);
       setPaused(false);
+      setPreviewJob(job.id);
       setPreview(`/api/v1/jobs/${job.id}/events`);
     },
     onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const stop = useMutation({
+    mutationFn: async () => {
+      // Closing the stream is not enough: the follow is a task on the host,
+      // and only a cancellation of the job interrupts it there.
+      if (previewJob) {
+        await api.post(`/api/v1/jobs/${previewJob}/cancel`, { reason: "preview stopped from the panel" });
+      }
+    },
+    onSettled: () => {
+      setPreview(null);
+      setPreviewJob(null);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
   });
 
   const read = useMutation({
@@ -292,7 +312,9 @@ export function Logs() {
                 <button className="secondary" onClick={() => setPaused((state) => !state)}>
                   {paused ? t("Resume") : t("Pause")}
                 </button>
-                <button className="secondary" onClick={() => setPreview(null)}>{t("Stop")}</button>
+                <button className="secondary" onClick={() => stop.mutate()} disabled={stop.isPending}>
+                  {t("Stop")}
+                </button>
               </>
             )}
             {/* The same read on a handful of hosts at once: the form on
