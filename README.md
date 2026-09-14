@@ -1,7 +1,7 @@
 <div align="center">
 
-![Flotestro](docs/logo.webp#gh-dark-mode-only)
-![Flotestro](docs/logo-light.webp#gh-light-mode-only)
+![Flotestro](docs/logo.webp#gh-light-mode-only)
+![Flotestro](docs/logo-dark.webp#gh-dark-mode-only)
 
 </div>
 
