@@ -69,6 +69,24 @@ type execution struct {
 	latest    string
 }
 
+// origin returns the attempt that is doing the work behind a task id: the
+// id itself when it is the running one, the running one when the id is a
+// redelivery of it, and "" when nothing is under way for it. A cancel that
+// names the redelivered attempt has to reach the execution that runs.
+func (r *runningKeys) origin(taskID string) string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, x := range r.keys {
+		if x.taskID == taskID || x.latest == taskID {
+			return x.taskID
+		}
+	}
+	return ""
+}
+
 func newRunningKeys() *runningKeys {
 	return &runningKeys{keys: map[string]*execution{}, followUps: map[string]string{}}
 }

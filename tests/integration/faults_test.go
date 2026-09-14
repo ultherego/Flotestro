@@ -373,7 +373,7 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 // still open, its lease in the past, the job still handed over. A live link
 // cannot produce that picture - the result arrives within a second of the
 // mutation, and a redelivery that reaches the agent while it is still
-// working is refused as resource_busy rather than replayed - so the rows
+// working is acknowledged as in progress rather than replayed - so the rows
 // are set to it directly, and from there the product is on its own.
 //
 // The promise: ReclaimExpiredLeases marks the attempt lease_expired and

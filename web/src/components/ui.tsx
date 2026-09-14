@@ -19,7 +19,10 @@ export function JobState({ state }: { state: string }) {
   const failed = ["failed", "timed_out", "expired", "partially_applied"].includes(state);
   // Incapability and a skip are not a failure: the host broke nothing, it
   // simply took no part. Red would call it an error that did not happen.
-  const skipped = ["ineligible", "skipped", "no_change"].includes(state);
+  // A superseded attempt did no work of its own: the result came in on
+  // the attempt before it, and this one was closed to keep the record
+  // straight. Neither a failure nor a success of its own.
+  const skipped = ["ineligible", "skipped", "no_change", "superseded_by_result"].includes(state);
   const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
     "awaiting_budget"].includes(state);
   const kind = succeeded ? "ok" : failed ? "error" : skipped ? "unknown" : waiting ? "warn" : "";
@@ -37,6 +40,8 @@ function stateMeaning(state: string): string {
     leased: "Taken by a scheduler; delivery to the host is under way.",
     dispatched: "Handed to the agent; the host has not reported a start yet.",
     running: "The host is carrying out the operation.",
+    lease_expired: "The host did not answer within the lease; the operation was delivered again.",
+    superseded_by_result: "The result arrived on an earlier attempt after its lease ran out; this attempt did nothing.",
     awaiting_approval: "Nothing happens until somebody approves; the approval confirms the plan hash.",
     planning: "Every host computes its own plan; nothing is applied yet.",
     planned: "The plans are in; the campaign waits for the consent.",
@@ -88,6 +93,7 @@ function stateName(state: string): string {
     ineligible: "cannot run this",
     succeeded: "succeeded", failed: "failed", timed_out: "timed out",
     canceled: "canceled", cancelled: "canceled", expired: "expired",
+    lease_expired: "lease expired", superseded_by_result: "superseded",
     rejected: "rejected", replayed: "replayed",
     active: "active", paused: "paused", completed: "completed",
     partially_applied: "partially applied",

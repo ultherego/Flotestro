@@ -570,7 +570,14 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				// where it was declared safe, and beyond that it is recorded.
 				interrupted := false
 				if opts.Executor != nil && opts.Executor.cancels != nil {
-					interrupted = opts.Executor.cancels.Cancel(payload.CancelTask.GetTaskId())
+					// The panel may name the attempt it holds now, which can be
+					// a redelivery; the interruption goes to the execution
+					// behind it.
+					target := payload.CancelTask.GetTaskId()
+					if origin := opts.Executor.running.origin(target); origin != "" {
+						target = origin
+					}
+					interrupted = opts.Executor.cancels.Cancel(target)
 				}
 				opts.Log.Info("a cancellation of the task was requested",
 					"task_id", payload.CancelTask.GetTaskId(),
