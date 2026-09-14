@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
@@ -8,6 +9,7 @@ import {
   countWhere, useHost,
 } from "./shared";
 import { useJournalPreview } from "../../lib/stream";
+import { readsPrefill } from "../Reads";
 import { useT } from "../../i18n";
 
 type JournalResult = { lines?: string[]; truncated?: boolean };
@@ -19,7 +21,15 @@ type FileResult = {
   allowlist?: string;
 };
 
-type Attempt = { status?: string; error_code?: string; message?: string; detail?: Record<string, unknown> };
+type Attempt = {
+  status?: string;
+  error_code?: string;
+  message?: string;
+  detail?: Record<string, unknown>;
+  // A journal read prints its lines on stdout; a file read carries them in
+  // the detail.
+  stdout?: string;
+};
 
 /**
  * The host's logs.
@@ -36,7 +46,11 @@ export function Logs() {
   const [source, setSource] = useState<"journal" | "file">("journal");
   const [preview, setPreview] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
-  const [unit, setUnit] = useState("");
+  // The unit detail on the Services tab hands over the unit and the cursor
+  // of its last journal line, so the read here starts where that ended.
+  const [params] = useSearchParams();
+  const [unit, setUnit] = useState(params.get("unit") ?? "");
+  const [cursor, setCursor] = useState(params.get("cursor") ?? "");
   const [priority, setPriority] = useState("");
   const [since, setSince] = useState("");
   const [path, setPath] = useState("/var/log/syslog");
@@ -86,6 +100,7 @@ export function Logs() {
                   lines: lineCount,
                   max_priority: priority ? Number(priority) : undefined,
                   since: since || undefined,
+                  after_cursor: cursor || undefined,
                 },
               },
             }
@@ -114,7 +129,8 @@ export function Logs() {
         setErrorMessage(attempt.message || attempt.error_code || t("The host refused the read."));
         return;
       }
-      setLines(detail?.lines ?? []);
+      // The journal comes back as text, the file as a list of lines.
+      setLines(detail?.lines ?? splitLines(attempt.stdout));
       const parts: string[] = [];
       if (detail?.truncated) parts.push(t("output truncated"));
       if (detail?.size_bytes) parts.push(t("file {n} KiB", { n: Math.round(detail.size_bytes / 1024) }));
@@ -214,6 +230,16 @@ export function Logs() {
               <Field label={t("Since")}>
                 <input placeholder={t("since, e.g. -1h")} value={since} onChange={(e) => setSince(e.target.value)} />
               </Field>
+              {/* A cursor is the position the unit detail ended at; the
+                  read continues from there until the operator clears it. */}
+              {cursor && (
+                <Field label={t("After cursor")} wide help={t("Continues right after the last line shown in the unit detail.")}>
+                  <div className="operations">
+                    <span className="hm-mono" title={cursor}>{cursor.slice(0, 40)}…</span>
+                    <button className="secondary" onClick={() => setCursor("")}>{t("Clear")}</button>
+                  </div>
+                </Field>
+              )}
               <Field label={t("lines")} narrow>
                 <input
                   type="number"
@@ -269,6 +295,29 @@ export function Logs() {
                 <button className="secondary" onClick={() => setPreview(null)}>{t("Stop")}</button>
               </>
             )}
+            {/* The same read on a handful of hosts at once: the form on
+                the reads page opens with this query filled in, and the
+                lines of every host come back merged into one timeline. */}
+            {!preview && (
+              <Link
+                className="button"
+                to={readsPrefill(
+                  source === "journal" ? "journal.read" : "logfile.read",
+                  source === "journal"
+                    ? {
+                        journal: {
+                          unit: unit || undefined,
+                          lines: lineCount,
+                          max_priority: priority ? Number(priority) : undefined,
+                          since: since || undefined,
+                        },
+                      }
+                    : { logfile: { path, lines: lineCount } },
+                )}
+              >
+                {t("Read the same on more hosts")}
+              </Link>
+            )}
           </FormActions>
         </Form>
       </Section>
@@ -312,4 +361,10 @@ export function Logs() {
       </Widgets>
     </ModulePage>
   );
+}
+
+/** The lines of a text result; nothing read is an empty list, not a line. */
+function splitLines(text?: string): string[] {
+  if (!text) return [];
+  return text.replace(/\n$/, "").split("\n");
 }
