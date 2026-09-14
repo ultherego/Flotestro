@@ -113,6 +113,24 @@ func (s *Store) ForHost(ctx context.Context, hostID string, limit int) ([]Plan, 
 	return s.query(ctx, "where host_id = $1 order by created_at desc limit $2", hostID, limit)
 }
 
+// ForCampaignHost returns the plan a campaign started on a host - the
+// most recent one, should the campaign ever have started two.
+//
+// The plan carries no campaign column: the creator is the record of who
+// ordered it, and a campaign is recorded there like any other creator.
+func (s *Store) ForCampaignHost(ctx context.Context, campaignID, hostID string) (*Plan, error) {
+	plans, err := s.query(ctx,
+		"where host_id = $1 and created_by = $2 order by created_at desc limit 1",
+		hostID, CampaignCreator(campaignID))
+	if err != nil {
+		return nil, err
+	}
+	if len(plans) == 0 {
+		return nil, ErrNotFound
+	}
+	return &plans[0], nil
+}
+
 // Running returns the plans the runner has to carry further.
 func (s *Store) Running(ctx context.Context) ([]Plan, error) {
 	return s.query(ctx, "where state = $1 order by created_at", StateRunning)

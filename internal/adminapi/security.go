@@ -11,6 +11,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/compliance"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
@@ -438,6 +439,450 @@ func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// fleetRemediationRequest describes a fleet remediation: the checks to fix
+// and the hosts to fix them on. Both are chosen; neither is implied.
+type fleetRemediationRequest struct {
+	CheckIDs []string           `json:"check_ids"`
+	Selector campaigns.Selector `json:"selector"`
+	// The rest concerns the order only, not the preview.
+	Name   string `json:"name,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// The rollout. The defaults follow the module's policy: a canary of
+	// one, waves of five, two hosts at once.
+	CanarySize              *int  `json:"canary_size,omitempty"`
+	WaveSize                *int  `json:"wave_size,omitempty"`
+	MaxConcurrent           *int  `json:"max_concurrent,omitempty"`
+	FailureThresholdPercent *int  `json:"failure_threshold_percent,omitempty"`
+	ManualGate              *bool `json:"manual_gate,omitempty"`
+	// OfflinePolicy may only tighten what the operation declares.
+	OfflinePolicy   string `json:"offline_policy,omitempty"`
+	DeadlineMinutes *int   `json:"deadline_minutes,omitempty"`
+	IdempotencyKey  string `json:"idempotency_key,omitempty"`
+}
+
+// The ceilings of a remediation rollout. Wider waves than this are several
+// waves: every step is a change of the module that owns it, and a wave of
+// a hundred sshd rewrites is not a trial on a small group.
+const (
+	maxRemediationWave = 20
+	// ReasonNoPlan means a host the chosen checks give no step on: they
+	// passed, do not apply, are unknown or have no remediating operation.
+	ReasonNoPlan = "no_plan"
+)
+
+// remediationCandidate is a host with its computed plan.
+type remediationCandidate struct {
+	host        hosts.Host
+	arrangement remediation.Arrangement
+}
+
+// excludedHost is a host of the snapshot that will not move, as the
+// preview shows it.
+type excludedHost struct {
+	HostID   string `json:"host_id"`
+	Hostname string `json:"hostname"`
+	Reason   string `json:"reason"`
+	Message  string `json:"message"`
+}
+
+// fleetRemediation is the computed shape of a fleet remediation: the
+// snapshot, every ready host's plan and the plans grouped.
+//
+// One function computes it for the preview and for the order. A drift
+// between them would be the worst kind of bug: the operator would approve a
+// different set of plans than the one they read.
+type fleetRemediation struct {
+	CheckIDs    []string
+	Selector    campaigns.Selector
+	Candidates  []hosts.Host
+	Ready       []remediationCandidate
+	Closed      []closedHost
+	Notes       []hostGroup
+	Groups      []remediation.Group
+	GeneratedAt time.Time
+}
+
+func (f fleetRemediation) excluded() []excludedHost {
+	list := make([]excludedHost, 0, len(f.Closed))
+	for _, entry := range f.Closed {
+		list = append(list, excludedHost{
+			HostID: entry.Host.ID, Hostname: entry.Host.Hostname,
+			Reason: entry.Reason, Message: entry.Message,
+		})
+	}
+	return list
+}
+
+func (f fleetRemediation) exclusions() []hostGroup {
+	return qualification{Closed: f.Closed}.Exclusions()
+}
+
+// targets assembles the campaign snapshot: the hosts with a plan, and the
+// closed ones with their reasons.
+func (f fleetRemediation) targets() []campaigns.TargetHost {
+	targets := make([]campaigns.TargetHost, 0, len(f.Ready)+len(f.Closed))
+	for _, candidate := range f.Ready {
+		targets = append(targets, campaigns.TargetHost{ID: candidate.host.ID, BootID: candidate.host.BootID})
+	}
+	for _, entry := range f.Closed {
+		targets = append(targets, campaigns.TargetHost{
+			ID: entry.Host.ID, BootID: entry.Host.BootID,
+			State: entry.State, Reason: entry.Reason, Message: entry.Message,
+		})
+	}
+	return targets
+}
+
+// plans returns the per-host plans as the campaign records them.
+func (f fleetRemediation) plans() ([]campaigns.HostPlanSpec, error) {
+	plans := make([]campaigns.HostPlanSpec, 0, len(f.Ready))
+	for _, candidate := range f.Ready {
+		content, err := json.Marshal(candidate.arrangement.Plan)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, campaigns.HostPlanSpec{
+			HostID: candidate.host.ID, PlanHash: candidate.arrangement.Hash, Plan: content,
+		})
+	}
+	return plans, nil
+}
+
+// planFleetRemediation computes the fleet remediation for a request. The
+// answer has already been written when the second result is false.
+//
+// The operator picks checks and hosts: an empty check list or an empty
+// selector is a refusal, not "everything". Every host that the selector
+// matched stays in the snapshot - ready with its plan, or closed with a
+// reason the approver reads - and the ready plans are grouped by their
+// steps, because a hundred hosts with the same change are one change.
+func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
+	request fleetRemediationRequest, principal authz.Principal) (*fleetRemediation, bool) {
+	checkIDs, ok := checkChoice(w, request.CheckIDs)
+	if !ok {
+		return nil, false
+	}
+	if request.Selector.Empty() {
+		problem(w, http.StatusBadRequest, "selector_required",
+			"name the hosts to fix: a site, an environment, an expression or a host list; there is no fix-all")
+		return nil, false
+	}
+	chosen, ok := s.checkSelector(w, request.Selector)
+	if !ok {
+		return nil, false
+	}
+	candidates, ok := s.materialize(w, r, chosen)
+	if !ok {
+		return nil, false
+	}
+	if len(candidates) == 0 {
+		problem(w, http.StatusBadRequest, "no_targets", "the selector matched no hosts")
+		return nil, false
+	}
+
+	now := time.Now().UTC()
+	result := &fleetRemediation{CheckIDs: checkIDs, Selector: chosen, Candidates: candidates, GeneratedAt: now}
+
+	// A host outside the reading scope is in the snapshot as closed: the
+	// preview must not describe findings the principal may not read, and
+	// the order refuses such a host outright below.
+	visible := make([]hosts.Host, 0, len(candidates))
+	for _, host := range candidates {
+		if !principal.Can(authz.PermSecurityRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
+			result.Closed = append(result.Closed, closedHost{
+				Host: host, State: campaigns.TargetIneligible, Reason: ReasonOutOfScope,
+				Message: "the host is outside the scope of your security permissions",
+			})
+			continue
+		}
+		visible = append(visible, host)
+	}
+	kept, excluded := excludeHosts(visible, chosen, principal.Subject)
+	assessment := assessCandidates(kept, opspec.ActionSecurityRemediate, s.activeConflicts(r.Context()), now)
+	result.Closed = append(result.Closed, excluded...)
+	result.Closed = append(result.Closed, assessment.Closed...)
+	result.Notes = assessment.Notes
+
+	fragments, err := s.inventory.HostFragments(r.Context(), hostIDs(assessment.Ready))
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+
+	byHost := map[remediation.Host]remediation.Arrangement{}
+	for _, host := range assessment.Ready {
+		report := compliance.Evaluate(host.ID, hostInput(host, fragments[host.ID]), now)
+		arrangement, err := remediation.ArrangeForChecks(report, checkIDs)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_plan", host.Hostname+": "+err.Error())
+			return nil, false
+		}
+		if arrangement.Empty() {
+			result.Closed = append(result.Closed, closedHost{
+				Host: host, State: campaigns.TargetIneligible, Reason: ReasonNoPlan,
+				Message: describeSkipped(checkIDs, arrangement.Skipped),
+			})
+			continue
+		}
+		if reason := stepRefusal(host, arrangement.Plan.Plan.Steps); reason != "" {
+			if strings.HasPrefix(reason, "capability ") {
+				result.Closed = append(result.Closed, closedHost{
+					Host: host, State: campaigns.TargetIneligible,
+					Reason: ReasonCapabilityMissing, Message: reason,
+				})
+				continue
+			}
+			problem(w, http.StatusBadRequest, "not_a_remediation", reason)
+			return nil, false
+		}
+		result.Ready = append(result.Ready, remediationCandidate{host: host, arrangement: arrangement})
+		byHost[remediation.Host{HostID: host.ID, Hostname: host.Hostname}] = arrangement
+	}
+	result.Groups = remediation.GroupPlans(byHost)
+	return result, true
+}
+
+// checkChoice validates the chosen checks: named, known and not repeated.
+func checkChoice(w http.ResponseWriter, ids []string) ([]string, bool) {
+	if len(ids) == 0 {
+		problem(w, http.StatusBadRequest, "no_checks", "list the checks to fix; there is no fix-all")
+		return nil, false
+	}
+	known := map[string]bool{}
+	for _, check := range compliance.Checks {
+		known[check.ID] = true
+	}
+	seen := map[string]bool{}
+	chosen := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if !known[id] {
+			problem(w, http.StatusBadRequest, "unknown_check", "the check "+id+" does not exist")
+			return nil, false
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		chosen = append(chosen, id)
+	}
+	sort.Strings(chosen)
+	return chosen, true
+}
+
+// describeSkipped says, check by check, why a host got no step.
+func describeSkipped(checkIDs []string, skipped map[string]string) string {
+	parts := make([]string, 0, len(checkIDs))
+	for _, id := range checkIDs {
+		if reason, ok := skipped[id]; ok {
+			parts = append(parts, id+": "+reason)
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// stepRefusal names the step a host cannot run: an irreversible operation
+// that needs its target typed, or an adapter the host lacks. An empty
+// result means every step may go.
+func stepRefusal(host hosts.Host, steps []remediation.Step) string {
+	for _, step := range steps {
+		action := opspec.ActionType(step.ActionType)
+		if action.RequiresTargetConfirmation() {
+			return "finding " + step.CheckID + " maps to an irreversible operation; run it host by host"
+		}
+		if capability := action.RequiredCapability(); !hostHasCapability(&host, capability) {
+			return "capability " + capability + " is missing for finding " + step.CheckID
+		}
+	}
+	return ""
+}
+
+// handleFleetRemediationPreview answers what a fleet remediation would do:
+// the per-host plans grouped by their steps, and the hosts that get none.
+//
+// A preview is a read of the findings: it needs the reading permission
+// and changes nothing. The order goes through the composite permission
+// check, which the preview does not, so the preview may show more than
+// the order will accept.
+func (s *Server) handleFleetRemediationPreview(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRead, "fleet")
+	if !ok {
+		return
+	}
+	var request fleetRemediationRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	plan, ok := s.planFleetRemediation(w, r, request, principal)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"check_ids": plan.CheckIDs, "hosts": len(plan.Candidates), "eligible": len(plan.Ready),
+		"groups": plan.Groups, "excluded": plan.excluded(), "notes": plan.Notes,
+		"generated_at": plan.GeneratedAt,
+	})
+}
+
+// handleFleetRemediation orders a fleet remediation as a campaign.
+//
+// The plans are the same the preview showed, computed again now: the
+// campaign records every host's steps, and the approval fingerprint covers
+// the whole set, so the consent concerns those steps on those hosts. The
+// composite permission is checked before anything is created - the
+// remediation permission and the permission of every step's operation, in
+// the scope of every host - and refused as a whole: half a fleet
+// remediation is a fleet in a state nobody planned.
+func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRemediate, "fleet")
+	if !ok {
+		return
+	}
+	var request fleetRemediationRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	action := opspec.ActionSecurityRemediate
+	offlinePolicy, err := opspec.ResolveOfflinePolicy(action, opspec.OfflinePolicy(request.OfflinePolicy))
+	if errors.Is(err, opspec.ErrOfflinePolicyLoosened) {
+		problem(w, http.StatusBadRequest, "offline_policy_loosened", err.Error())
+		return
+	}
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_offline_policy", err.Error())
+		return
+	}
+
+	plan, ok := s.planFleetRemediation(w, r, request, principal)
+	if !ok {
+		return
+	}
+	if len(plan.Ready) == 0 {
+		problem(w, http.StatusBadRequest, "no_eligible_targets",
+			"no matched host gets a plan from these checks: "+describeExclusions(plan.exclusions()))
+		return
+	}
+
+	// The composite permission, host by host, step by step. The first
+	// missing one ends the order and is named; nothing has been created.
+	for _, host := range plan.Candidates {
+		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+		if _, ok := s.authorize(w, r, authz.PermCampaignCreate, scope, "host", host.ID); !ok {
+			return
+		}
+		if _, ok := s.authorize(w, r, authz.PermSecurityRemediate, scope, "host", host.ID); !ok {
+			return
+		}
+	}
+	for _, candidate := range plan.Ready {
+		scope := authz.Scope{Site: candidate.host.Site, Environment: candidate.host.Environment}
+		for _, step := range candidate.arrangement.Plan.Actions() {
+			permission := authz.Permission(opspec.ActionType(step).Permission())
+			if _, ok := s.authorize(w, r, permission, scope, "host", candidate.host.ID); !ok {
+				return
+			}
+		}
+	}
+
+	// A fleet remediation is the highest-risk order of the module: one
+	// consent changes many hosts through operations that may each cut off
+	// access. It requires fresh authentication like any critical campaign.
+	stepUpEvidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+		"security.remediation.apply", "campaign", "")
+	if !ok {
+		return
+	}
+
+	payload := opspec.Payload{Security: &opspec.SecurityPayload{CheckIDs: plan.CheckIDs}}
+	if err := opspec.ValidateRemediationOrder(payload); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_payload", err.Error())
+		return
+	}
+	encodedPayload, err := json.Marshal(payload)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	name := strings.TrimSpace(request.Name)
+	if name == "" {
+		name = "Security remediation: " + strings.Join(plan.CheckIDs, ", ")
+	}
+	spec := campaigns.Spec{
+		Name:       name,
+		ActionType: string(action),
+		Payload:    encodedPayload,
+		Selector:   plan.Selector,
+		CanarySize: valueOrDefault(request.CanarySize, 1),
+		// The waves and the concurrency follow the module's policy and are
+		// bounded whatever the request says: every step is a change of the
+		// module that owns it.
+		WaveSize:                min(valueOr(request.WaveSize, 5), maxRemediationWave),
+		MaxConcurrent:           min(valueOr(request.MaxConcurrent, 2), maxCampaignConcurrency),
+		FailureThresholdPercent: valueOrDefault(request.FailureThresholdPercent, 20),
+		RebootPolicy:            campaigns.RebootNever,
+		JobTimeoutSeconds:       action.DefaultTimeout(),
+		RequiresApproval:        true,
+		OfflinePolicy:           offlinePolicy,
+		DeadlineMinutes:         valueOr(request.DeadlineMinutes, int(campaigns.DefaultDeadline/time.Minute)),
+		ManualGate:              request.ManualGate != nil && *request.ManualGate,
+		CreatedBy:               principal.Subject,
+		RequestID:               requestIDOf(r),
+		IdempotencyKey:          idempotencyKeyOf(r, request.IdempotencyKey),
+	}
+	plans, err := plan.plans()
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	tx, err := s.campaigns.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+
+	campaign, err := s.campaigns.CreatePlanned(r.Context(), tx, spec, plan.targets(), plans)
+	if errors.Is(err, campaigns.ErrRepeated) {
+		_ = tx.Rollback(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{"campaign": campaign, "groups": plan.Groups, "excluded": plan.excluded()})
+		return
+	}
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_campaign", err.Error())
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "campaign.create", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"name": campaign.Name, "action_type": campaign.ActionType,
+			"campaign_mode": string(action.CampaignMode()),
+			"check_ids":     plan.CheckIDs, "targets": len(plan.Candidates),
+			"eligible": len(plan.Ready), "excluded": plan.exclusions(), "notes": plan.Notes,
+			"plan_groups": len(plan.Groups), "plan_set_hash": campaign.PlanSetHash,
+			"selector": plan.Selector.Expression.Describe(), "exclude_reason": plan.Selector.ExcludeReason,
+			"canary_size": campaign.CanarySize, "wave_size": campaign.WaveSize,
+			"max_concurrent": campaign.MaxConcurrent, "manual_gate": campaign.ManualGate,
+			"offline_policy": string(campaign.OfflinePolicy), "deadline_at": campaign.DeadlineAt,
+			"approval_fingerprint": campaign.ApprovalFingerprint, "reason": request.Reason,
+		}, stepUpEvidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"campaign": campaign, "groups": plan.Groups, "excluded": plan.excluded(),
+	})
 }
 
 func stepNames(steps []remediation.Step) []string {

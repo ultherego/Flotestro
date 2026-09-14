@@ -1,9 +1,10 @@
 import { Fragment, useState } from "react";
-import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useNavigate } from "react-router-dom";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
+import type { RemediationOrder, RemediationPreview, Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
+import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -37,6 +38,49 @@ function severityTone(severity: string): WidgetTone {
 /** The order the severities are listed in, the gravest first. */
 const SEVERITIES = ["high", "medium", "low", "info"];
 
+function usePermissions(): Set<string> {
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  return new Set(whoami.data?.permissions ?? []);
+}
+
+/** How the hosts of a fleet remediation are chosen. */
+type ScopeMode = "findings" | "filters";
+
+/** The order as the screen holds it before the preview and the campaign. */
+type RemediationOrderDraft = {
+  scope: ScopeMode;
+  site: string;
+  environment: string;
+  reason: string;
+  canary: number;
+  wave: number;
+  concurrent: number;
+  manualGate: boolean;
+};
+
+/**
+ * The selector the order sends: the hosts listed under the chosen checks,
+ * or the site and environment filters. The server resolves it; the screen
+ * never decides which host is in.
+ */
+type RemediationSelector = { site?: string; environment?: string; host_ids?: string[] };
+
+function selectorOf(draft: RemediationOrderDraft, checks: Check[], selected: Set<string>): RemediationSelector {
+  if (draft.scope === "filters") {
+    return { site: draft.site.trim() || undefined, environment: draft.environment.trim() || undefined };
+  }
+  const ids = new Set<string>();
+  for (const check of checks) {
+    if (!selected.has(check.check_id)) continue;
+    for (const host of check.hosts ?? []) ids.add(host.host_id);
+  }
+  return { host_ids: [...ids].sort() };
+}
+
 /**
  * The fleet's compliance with the hardening profile.
  *
@@ -48,6 +92,12 @@ const SEVERITIES = ["high", "medium", "low", "info"];
 export function FleetSecurity() {
   const t = useT();
   const [expanded, setExpanded] = useState("");
+  // The checks ticked for a fleet remediation. Only a check with a
+  // remediating operation behind it can be ticked: there is nothing to
+  // plan for the rest.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const permissions = usePermissions();
+  const remediates = permissions.has("security.remediate");
   const { data, error } = useQuery({
     queryKey: ["security", "fleet"],
     queryFn: () => api.get<View>("/api/v1/security"),
@@ -55,6 +105,14 @@ export function FleetSecurity() {
 
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Empty>{t("Computing findings…")}</Empty>;
+
+  const toggle = (checkId: string) =>
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(checkId)) next.delete(checkId);
+      else next.add(checkId);
+      return next;
+    });
 
   // The fleet-wide sums: a finding on a hundred hosts counts a hundred
   // times here, because that is how many jobs the fix takes.
@@ -90,7 +148,7 @@ export function FleetSecurity() {
     <>
       <PageHeader
         title={t("Security")}
-        description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — but the fix still goes host by host, as a job of the module that owns it.")}
+        description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — and the fix is one campaign: every host gets its own plan of module jobs, one approval covers the whole set.")}
       />
 
       <div className="widgets">
@@ -120,6 +178,7 @@ export function FleetSecurity() {
           <table>
             <thead>
               <tr>
+                {remediates && <th>{t("Fix")}</th>}
                 <th>{t("Check")}</th><th className="num">{t("Need action")}</th><th className="num">{t("Passed")}</th><th className="num">{t("Unknown")}</th><th className="num">{t("N/A")}</th><th>{t("Expected")}</th><th className="num">{t("Fixable")}</th>
               </tr>
             </thead>
@@ -127,6 +186,17 @@ export function FleetSecurity() {
               {data.checks.map((check) => (
                 <Fragment key={check.check_id}>
                   <tr>
+                    {remediates && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={t("Fix {check} on the fleet", { check: check.check_id })}
+                          checked={selected.has(check.check_id)}
+                          disabled={!check.fixable}
+                          onChange={() => toggle(check.check_id)}
+                        />
+                      </td>
+                    )}
                     <td>
                       <button
                         className="expander"
@@ -164,7 +234,7 @@ export function FleetSecurity() {
                   {expanded === check.check_id &&
                     (check.hosts ?? []).map((host) => (
                       <tr key={`${check.check_id}-${host.host_id}`} className="detail-row">
-                        <td colSpan={2}>
+                        <td colSpan={remediates ? 3 : 2}>
                           <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
                         </td>
                         <td colSpan={4} className="mono">{host.observed}</td>
@@ -198,7 +268,190 @@ export function FleetSecurity() {
             </div>
           )}
         </Card>
+
+        {remediates && selected.size > 0 && (
+          <FleetRemediation checks={data.checks} selected={selected} />
+        )}
       </div>
     </>
+  );
+}
+
+/**
+ * The fleet remediation flow: the scope, the preview and the order.
+ *
+ * The operator picks checks and hosts; there is no fix-all. The preview
+ * shows every host's plan grouped by its steps - a hundred hosts with the
+ * same change are one change - and the hosts that get none, with the
+ * reason. The order creates a campaign that waits for one approval over
+ * the whole set of plans, and the campaign page takes it from there.
+ */
+function FleetRemediation({ checks, selected }: { checks: Check[]; selected: Set<string> }) {
+  const t = useT();
+  const navigate = useNavigate();
+  const [draft, setDraft] = useState<RemediationOrderDraft>({
+    scope: "findings", site: "", environment: "", reason: "",
+    canary: 1, wave: 5, concurrent: 2, manualGate: false,
+  });
+  const change = (delta: Partial<RemediationOrderDraft>) =>
+    setDraft((previous) => ({ ...previous, ...delta }));
+
+  const checkIds = [...selected].sort();
+  const selector = selectorOf(draft, checks, selected);
+  // The preview is bound to what it was computed for: a check ticked or
+  // a filter changed after it shows the old answer no more.
+  const previewKey = JSON.stringify({ checkIds, selector });
+  const [shown, setShown] = useState<{ key: string; preview: RemediationPreview } | null>(null);
+  const preview = shown && shown.key === previewKey ? shown.preview : null;
+
+  const compute = useMutation({
+    mutationFn: () =>
+      api.post<RemediationPreview>("/api/v1/security/remediation/preview", { check_ids: checkIds, selector }),
+    onSuccess: (result) => setShown({ key: previewKey, preview: result }),
+  });
+  const create = useMutation({
+    mutationFn: () =>
+      api.post<RemediationOrder>("/api/v1/security/remediation", {
+        check_ids: checkIds,
+        selector,
+        reason: draft.reason.trim(),
+        canary_size: draft.canary,
+        wave_size: draft.wave,
+        max_concurrent: draft.concurrent,
+        manual_gate: draft.manualGate,
+      }),
+    onSuccess: (result) => navigate(`/campaigns/${result.campaign.id}`),
+  });
+
+  const listedHosts = draft.scope === "findings" ? (selector.host_ids ?? []).length : 0;
+  const scopeMissing = draft.scope === "filters"
+    ? !draft.site.trim() && !draft.environment.trim()
+    : listedHosts === 0;
+  const errorOf = (failure: unknown) => (failure instanceof Error ? failure.message : failure ? String(failure) : "");
+
+  return (
+    <Card
+      className="span-12"
+      title={t("Remediate on the fleet")}
+      description={t("{n} checks chosen. Every host gets its own plan of module jobs; hosts with the same steps are one group, and one approval covers the whole set. Nothing changes until the campaign is approved.", { n: checkIds.length })}
+    >
+      <FieldGrid>
+        <Field label={t("Scope")} hint={draft.scope === "findings"
+          ? t("The hosts listed under the chosen checks: up to {n} per check.", { n: 50 })
+          : t("Every host of the site or environment; the ones without a finding are left out with a reason.")}>
+          <select value={draft.scope} onChange={(e) => change({ scope: e.target.value as ScopeMode })}>
+            <option value="findings">{t("hosts with findings ({n})", { n: listedHosts })}</option>
+            <option value="filters">{t("site or environment")}</option>
+          </select>
+        </Field>
+        {draft.scope === "filters" && (
+          <>
+            <Field label={t("Site")}>
+              <input placeholder={t("site")} value={draft.site} onChange={(e) => change({ site: e.target.value })} />
+            </Field>
+            <Field label={t("Environment")}>
+              <input placeholder={t("environment")} value={draft.environment} onChange={(e) => change({ environment: e.target.value })} />
+            </Field>
+          </>
+        )}
+      </FieldGrid>
+      <Actions>
+        <button className="secondary" onClick={() => compute.mutate()} disabled={compute.isPending || scopeMissing}>
+          {compute.isPending ? t("Computing plans…") : t("Preview the plans")}
+        </button>
+        {scopeMissing && <span className="source">{t("Name the hosts first: there is no fix-all.")}</span>}
+        {compute.error !== null && <p className="page-error">{errorOf(compute.error)}</p>}
+      </Actions>
+
+      {preview && (
+        <>
+          <p>
+            {t("{eligible} of {hosts} hosts get a plan, in {groups} groups.", {
+              eligible: preview.eligible, hosts: preview.hosts, groups: preview.groups.length,
+            })}
+            {" "}<span className="source">{t("computed")} <Time value={preview.generated_at} /></span>
+          </p>
+          {preview.groups.length > 0 && (
+            <Columns>
+              {preview.groups.map((group) => (
+                <Card
+                  key={group.plan_hash}
+                  title={`${t("{n} hosts", { n: group.count })} · ${t("{n} steps", { n: group.steps.length })}`}
+                  description={<span className="mono">{group.plan_hash.slice(0, 16)}</span>}
+                >
+                  <ol>
+                    {group.steps.map((step) => (
+                      <li key={step.position}>
+                        <code>{step.action_type}</code> <span className="source">{step.check_id}</span>
+                        {step.requires_reboot && <> <span className="badge warn">{t("reboot")}</span></>}
+                      </li>
+                    ))}
+                  </ol>
+                  <div className="source">
+                    {group.hosts.map((host) => (
+                      <Fragment key={host.host_id}>
+                        <Link to={`/hosts/${host.host_id}/security`}>{host.hostname || host.host_id.slice(0, 8)}</Link>{" "}
+                      </Fragment>
+                    ))}
+                  </div>
+                </Card>
+              ))}
+            </Columns>
+          )}
+          {preview.excluded.length > 0 && (
+            <>
+              <h4 className="widget-subhead">{t("Hosts without a plan")}</h4>
+              <table>
+                <thead><tr><th>{t("Host")}</th><th>{t("Reason")}</th><th>{t("Message")}</th></tr></thead>
+                <tbody>
+                  {preview.excluded.map((host) => (
+                    <tr key={host.host_id}>
+                      <td><Link to={`/hosts/${host.host_id}/security`}>{host.hostname || host.host_id.slice(0, 8)}</Link></td>
+                      <td><code>{host.reason}</code></td>
+                      <td title={host.message}>{host.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          {preview.eligible > 0 && (
+            <>
+              <h4 className="widget-subhead">{t("Rollout")}</h4>
+              <FieldGrid>
+                <Field label={t("Reason (kept in the audit trail)")} hint={t("Required, at least 8 characters: one order changes many hosts through operations that may each cut off access.")} wide>
+                  <input value={draft.reason} onChange={(e) => change({ reason: e.target.value })} />
+                </Field>
+                <Field label={t("Canary")} hint={t("Wave zero: the hosts that go first.")}>
+                  <input type="number" min={0} value={draft.canary} onChange={(e) => change({ canary: +e.target.value })} />
+                </Field>
+                <Field label={t("Wave size")} hint={t("Between 1 and 20 hosts per wave.")}>
+                  <input type="number" min={1} max={20} value={draft.wave} onChange={(e) => change({ wave: +e.target.value })} />
+                </Field>
+                <Field label={t("At once")} hint={t("How many hosts run their plan at the same time.")}>
+                  <input type="number" min={1} value={draft.concurrent} onChange={(e) => change({ concurrent: +e.target.value })} />
+                </Field>
+                <label className="toggle">
+                  <input
+                    type="checkbox"
+                    checked={draft.manualGate}
+                    disabled={draft.canary <= 0}
+                    onChange={(e) => change({ manualGate: e.target.checked })}
+                  />{" "}
+                  {t("stop after the canary until somebody advances the campaign")}
+                </label>
+              </FieldGrid>
+              <Actions>
+                <button onClick={() => create.mutate()} disabled={create.isPending || draft.reason.trim().length < 8}>
+                  {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: preview.eligible })}
+                </button>
+                <span className="source">{t("The campaign waits for approval; nothing runs before it.")}</span>
+                {create.error !== null && <p className="page-error">{errorOf(create.error)}</p>}
+              </Actions>
+            </>
+          )}
+        </>
+      )}
+    </Card>
   );
 }

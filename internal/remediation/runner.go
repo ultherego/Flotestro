@@ -149,6 +149,11 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// A plan a campaign started was approved with the campaign: the consent
+	// covered every step of every host, so the steps do not queue for a
+	// second consent one by one. The task is bound to the campaign, so its
+	// screens count it as their own.
+	campaign := plan.Campaign()
 	task, err := r.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:  plan.HostID,
 		Action:  action,
@@ -156,8 +161,9 @@ func (r *Runner) start(ctx context.Context, plan Plan, step *Step) error {
 		// The key binds the task to one specific step of one specific plan:
 		// another pass of the runner does not create a second task.
 		IdempotencyKey:   "remediation:" + plan.ID + ":" + step.CheckID,
-		RequiresApproval: action.Mutating(),
+		RequiresApproval: action.Mutating() && campaign == "",
 		CreatedBy:        plan.CreatedBy,
+		CampaignID:       campaign,
 		Preconditions: jobs.Preconditions{
 			OSFamily:             host.OSFamily,
 			RequiredCapabilities: []string{action.RequiredCapability()},

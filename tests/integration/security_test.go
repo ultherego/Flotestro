@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -419,4 +420,283 @@ func securityReport(t *testing.T, h *harness, hostID string) reportView {
 	var report reportView
 	h.do(http.MethodGet, "/api/v1/hosts/"+hostID+"/security", nil, &report, http.StatusOK)
 	return report
+}
+
+type fleetCheckView struct {
+	CheckID string `json:"check_id"`
+	Failed  int    `json:"failed"`
+	Fixable int    `json:"fixable"`
+	Hosts   []struct {
+		HostID   string `json:"host_id"`
+		Hostname string `json:"hostname"`
+		Action   string `json:"action"`
+	} `json:"hosts"`
+}
+
+type remediationGroupView struct {
+	PlanHash string         `json:"plan_hash"`
+	Count    int            `json:"count"`
+	Changes  []string       `json:"changes"`
+	Steps    []planStepView `json:"steps"`
+	Hosts    []struct {
+		HostID   string `json:"host_id"`
+		Hostname string `json:"hostname"`
+	} `json:"hosts"`
+}
+
+type remediationPreviewView struct {
+	CheckIDs []string               `json:"check_ids"`
+	Hosts    int                    `json:"hosts"`
+	Eligible int                    `json:"eligible"`
+	Groups   []remediationGroupView `json:"groups"`
+	Excluded []struct {
+		HostID  string `json:"host_id"`
+		Reason  string `json:"reason"`
+		Message string `json:"message"`
+	} `json:"excluded"`
+}
+
+type remediationOrderView struct {
+	Campaign campaignView           `json:"campaign"`
+	Groups   []remediationGroupView `json:"groups"`
+}
+
+// fixableCheck picks a check the lab has fixable findings for, together
+// with the hosts that carry them. It prefers the password check, because
+// its remediation is one declarative sshd write on every host.
+func fixableCheck(t *testing.T, h *harness) (fleetCheckView, []string) {
+	t.Helper()
+	var fleet struct {
+		Checks []fleetCheckView `json:"checks"`
+	}
+	h.get("/api/v1/security", &fleet)
+	var chosen fleetCheckView
+	for _, check := range fleet.Checks {
+		if check.Fixable == 0 {
+			continue
+		}
+		if chosen.CheckID == "" || check.CheckID == "ssh.password-auth" {
+			chosen = check
+		}
+	}
+	if chosen.CheckID == "" {
+		t.Skip("no check has a fixable finding in this lab")
+	}
+	var hostIDs []string
+	for _, host := range chosen.Hosts {
+		if host.Action != "" {
+			hostIDs = append(hostIDs, host.HostID)
+		}
+	}
+	if len(hostIDs) == 0 {
+		t.Skipf("the check %s has fixable findings but lists no host with an operation", chosen.CheckID)
+	}
+	return chosen, hostIDs
+}
+
+// TestFleetRemediationGroupsPlansAndBindsTheApproval checks the fleet
+// form of remediation: chosen checks on chosen hosts, every host with its
+// own plan, hosts with the same steps in one group, and one campaign whose
+// approval fingerprint covers the whole set of plans. The campaign is not
+// approved - the lab stays as it is - and is cancelled at the end.
+func TestFleetRemediationGroupsPlansAndBindsTheApproval(t *testing.T) {
+	h := newHarness(t)
+	check, hostIDs := fixableCheck(t, h)
+	selector := map[string]any{"host_ids": hostIDs}
+
+	// There is no fix-all: neither an empty check list nor an empty host
+	// selection is "everything", and a check that does not exist is a
+	// refusal rather than a silent no-op on the fleet.
+	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
+		map[string]any{"check_ids": []string{}, "selector": selector}, nil, http.StatusBadRequest)
+	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
+		map[string]any{"check_ids": []string{check.CheckID}, "selector": map[string]any{}}, nil, http.StatusBadRequest)
+	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
+		map[string]any{"check_ids": []string{"no.such.check"}, "selector": selector}, nil, http.StatusBadRequest)
+
+	var preview remediationPreviewView
+	h.do(http.MethodPost, "/api/v1/security/remediation/preview",
+		map[string]any{"check_ids": []string{check.CheckID}, "selector": selector}, &preview, http.StatusOK)
+	if preview.Hosts != len(hostIDs) {
+		t.Errorf("the preview describes %d hosts, %d were named", preview.Hosts, len(hostIDs))
+	}
+	if preview.Eligible == 0 || len(preview.Groups) == 0 {
+		t.Fatalf("no host got a plan: %+v", preview)
+	}
+	// Every host with the finding gets the same step, so the plans form one
+	// group; the group's hosts add up to the eligible count.
+	covered := 0
+	for _, group := range preview.Groups {
+		if len(group.Steps) != 1 || group.Steps[0].CheckID != check.CheckID {
+			t.Errorf("group %s has the steps %+v", group.PlanHash[:8], group.Steps)
+		}
+		if group.Count != len(group.Hosts) {
+			t.Errorf("group %s counts %d hosts and lists %d", group.PlanHash[:8], group.Count, len(group.Hosts))
+		}
+		covered += group.Count
+	}
+	if covered != preview.Eligible {
+		t.Errorf("the groups cover %d hosts, %d are eligible", covered, preview.Eligible)
+	}
+	if len(preview.Groups) != 1 {
+		t.Errorf("one declarative step on every host split into %d groups", len(preview.Groups))
+	}
+	for _, excluded := range preview.Excluded {
+		if excluded.Reason == "" || excluded.Message == "" {
+			t.Errorf("host %s was left out without a reason", excluded.HostID)
+		}
+	}
+
+	// The composite permission: an operator may write the sshd
+	// configuration and create campaigns, but does not hold the remediation
+	// permission - so the order is refused as a whole, naming the missing
+	// one, and nothing comes into being. The preview, a read, still answers.
+	host := h.hostByFamily("debian")
+	operator := h.withToken(h.createPrincipal(uniqueSubject("remediation-operator"), []map[string]string{
+		{"role": "operator", "site": host.Site, "environment": host.Environment},
+	}))
+	operator.do(http.MethodPost, "/api/v1/security/remediation/preview",
+		map[string]any{"check_ids": []string{check.CheckID}, "selector": selector}, nil, http.StatusOK)
+	var refusal struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	operator.do(http.MethodPost, "/api/v1/security/remediation",
+		map[string]any{"check_ids": []string{check.CheckID}, "selector": selector, "reason": securityReason},
+		&refusal, http.StatusForbidden)
+	if refusal.Code != "permission_denied" || !strings.Contains(refusal.Detail, "security.remediate") {
+		t.Errorf("the operator's refusal = %+v; expected the missing remediation permission named", refusal)
+	}
+
+	// The order: a campaign that waits for one approval over the plans.
+	var order remediationOrderView
+	h.do(http.MethodPost, "/api/v1/security/remediation",
+		map[string]any{
+			"check_ids": []string{check.CheckID}, "selector": selector, "reason": securityReason,
+			"canary_size": 1, "wave_size": 5, "max_concurrent": 2,
+		}, &order, http.StatusCreated)
+	campaign := order.Campaign
+	t.Cleanup(func() {
+		// The campaign is never approved here; cancelling leaves the lab as
+		// it was and the queue empty for the next run.
+		h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/cancel",
+			map[string]any{"reason": "end of the test"}, nil, 0)
+	})
+	if campaign.State != "awaiting_approval" {
+		t.Fatalf("the campaign is %s, not awaiting approval", campaign.State)
+	}
+	if campaign.ApprovalFingerprint == "" || campaign.PlanSetHash == "" {
+		t.Fatalf("the campaign has no fingerprint over its plans: %+v", campaign)
+	}
+	if campaign.CanarySize != 1 || campaign.WaveSize != 5 || !campaign.RequiresApproval {
+		t.Errorf("the rollout was not recorded as ordered: %+v", campaign)
+	}
+	if campaign.OfflinePolicy != "wait_until_deadline" {
+		t.Errorf("offline policy = %q, expected the operation's wait_until_deadline", campaign.OfflinePolicy)
+	}
+
+	// The plan set is the one the preview showed: the same groups with the
+	// same digests, one plan per eligible host, every plan a remediation
+	// plan. The snapshot keeps the hosts without a plan too, closed with
+	// their reason.
+	var plans struct {
+		Items []struct {
+			PlanHash string   `json:"plan_hash"`
+			Count    int      `json:"count"`
+			Hosts    []string `json:"hosts"`
+			Plan     struct {
+				Kind string `json:"kind"`
+				Plan struct {
+					Changes []string       `json:"changes"`
+					Steps   []planStepView `json:"steps"`
+				} `json:"plan"`
+			} `json:"plan"`
+		} `json:"items"`
+		Hosts       int    `json:"hosts"`
+		PlanSetHash string `json:"plan_set_hash"`
+	}
+	h.get("/api/v1/campaigns/"+campaign.ID+"/plans", &plans)
+	if plans.Hosts != preview.Eligible || plans.PlanSetHash != campaign.PlanSetHash {
+		t.Errorf("the campaign holds %d plans under %s; the preview had %d eligible hosts",
+			plans.Hosts, plans.PlanSetHash, preview.Eligible)
+	}
+	if len(plans.Items) != len(order.Groups) || len(order.Groups) != len(preview.Groups) {
+		t.Errorf("the plan groups: %d recorded, %d in the answer, %d in the preview",
+			len(plans.Items), len(order.Groups), len(preview.Groups))
+	}
+	for _, item := range plans.Items {
+		if item.Plan.Kind != "security_remediation" || len(item.Plan.Plan.Steps) != 1 {
+			t.Errorf("the recorded plan %s is %+v", item.PlanHash[:8], item.Plan)
+		}
+		found := false
+		for _, group := range preview.Groups {
+			if group.PlanHash == item.PlanHash && group.Count == item.Count {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("the recorded group %s (%d hosts) was not in the preview", item.PlanHash[:8], item.Count)
+		}
+	}
+	targets := h.campaignTargets(campaign.ID)
+	if len(targets) != preview.Hosts {
+		t.Errorf("the snapshot has %d targets, the preview named %d hosts", len(targets), preview.Hosts)
+	}
+	for _, target := range targets {
+		if target.State != "pending" && target.State != "ineligible" && target.State != "skipped" {
+			t.Errorf("target %s is %s before any approval", target.Hostname, target.State)
+		}
+	}
+
+	// The consent covers the plans: the same hosts with a different check
+	// set are a different set of plans, and the approval fingerprint moves
+	// with it. Where a second fixable check shares a host the plan set
+	// digest moves too; otherwise only the order differs.
+	second := []string{check.CheckID}
+	var fleet struct {
+		Checks []fleetCheckView `json:"checks"`
+	}
+	h.get("/api/v1/security", &fleet)
+	named := map[string]bool{}
+	for _, id := range hostIDs {
+		named[id] = true
+	}
+	shared := false
+	for _, other := range fleet.Checks {
+		if other.CheckID == check.CheckID || other.Fixable == 0 {
+			continue
+		}
+		for _, candidate := range other.Hosts {
+			if named[candidate.HostID] && candidate.Action != "" {
+				shared = true
+			}
+		}
+		if shared {
+			second = append(second, other.CheckID)
+			break
+		}
+	}
+	if len(second) == 1 {
+		second = append(second, "kernel.rp-filter")
+		if check.CheckID == "kernel.rp-filter" {
+			second[1] = "kernel.syncookies"
+		}
+	}
+	var recomputed remediationOrderView
+	h.do(http.MethodPost, "/api/v1/security/remediation",
+		map[string]any{"check_ids": second, "selector": selector, "reason": securityReason},
+		&recomputed, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/campaigns/"+recomputed.Campaign.ID+"/cancel",
+			map[string]any{"reason": "end of the test"}, nil, 0)
+	})
+	if recomputed.Campaign.ApprovalFingerprint == campaign.ApprovalFingerprint {
+		t.Error("a different check set kept the approval fingerprint")
+	}
+	if shared && recomputed.Campaign.PlanSetHash == campaign.PlanSetHash {
+		t.Errorf("a second check with findings on the same hosts kept the plan set digest %s", campaign.PlanSetHash)
+	}
+	if recomputed.Campaign.State != "awaiting_approval" {
+		t.Errorf("the recomputed campaign is %s", recomputed.Campaign.State)
+	}
 }
