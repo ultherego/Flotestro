@@ -217,7 +217,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// operation ordered by hand requires fresh authentication, so ordered on
 	// the whole fleet it requires it all the more.
 	var stepUpEvidence map[string]any
-	if action.RequiresFreshAuth() {
+	if opspec.PayloadRequiresFreshAuth(action, payload) {
 		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
 			"campaign.create", "campaign", "")
 		if !ok {
@@ -969,7 +969,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var stepUpEvidence map[string]any
-	if opspec.ActionType(campaign.ActionType).RequiresFreshAuth() {
+	if campaignRequiresFreshAuth(campaign) {
 		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
 			"campaign.approve", "campaign", campaign.ID)
 		if !ok {
@@ -1217,4 +1217,20 @@ func campaignScopes(principal authz.Principal) []campaigns.Scope {
 		result = append(result, campaigns.Scope{Site: scope.Site, Environment: scope.Environment})
 	}
 	return result
+}
+
+// campaignRequiresFreshAuth says whether approving the campaign needs the
+// operator to confirm their identity first: the registry's answer for the
+// operation, raised where the content of the order calls for it. A payload
+// that does not decode is treated as the operation's base level - the
+// campaign was validated when it was created.
+func campaignRequiresFreshAuth(campaign *campaigns.Campaign) bool {
+	action := opspec.ActionType(campaign.ActionType)
+	var payload opspec.Payload
+	if len(campaign.Payload) > 0 {
+		if err := json.Unmarshal(campaign.Payload, &payload); err != nil {
+			return action.RequiresFreshAuth()
+		}
+	}
+	return opspec.PayloadRequiresFreshAuth(action, payload)
 }

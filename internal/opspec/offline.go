@@ -108,6 +108,11 @@ var offlinePolicies = map[ActionType]OfflinePolicy{
 	ActionSSHHostKeyRotate:       OfflineRequireOnline,
 	ActionSystemReboot:           OfflineRequireOnline,
 	ActionSystemShutdown:         OfflineRequireOnline,
+	// A rename lands on a host whose neighbours were checked at ordering
+	// time; hours later the name may be taken.
+	ActionSystemHostnameSet: OfflineRequireOnline,
+	// Deleting an account frees a name the operator saw at that moment.
+	ActionLocalUserDelete: OfflineRequireOnline,
 	// Destructive storage: a disk that was empty when the operator looked
 	// may hold somebody's data by the time the host comes back.
 	ActionDiskWipe:         OfflineRequireOnline,
@@ -159,6 +164,9 @@ var offlinePolicies = map[ActionType]OfflinePolicy{
 	ActionDockerStop:       OfflineWait,
 	ActionDockerRestart:    OfflineWait,
 	ActionDockerPull:       OfflineWait,
+	// A group list and an expiry date are declarations about a name.
+	ActionLocalUserGroupsSet: OfflineWait,
+	ActionLocalUserExpirySet: OfflineWait,
 }
 
 // OfflinePolicy returns the policy an operation declares for a host that is

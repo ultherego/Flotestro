@@ -465,3 +465,94 @@ func jobEventsResult(t *testing.T, h *harness, jobID string) eventsResult {
 	}
 	return response.Items[len(response.Items)-1].Detail
 }
+
+// logsResult mirrors the typed result of a container log read.
+type logsResult struct {
+	Kind              string   `json:"kind"`
+	ContainerID       string   `json:"container_id"`
+	ContainerName     string   `json:"container_name"`
+	Lines             []string `json:"lines"`
+	Truncated         bool     `json:"truncated"`
+	TruncatedReason   string   `json:"truncated_reason"`
+	UnavailableReason string   `json:"unavailable_reason"`
+}
+
+// TestContainerLogsAreBounded checks the log read of one container: the
+// tail asked for comes back as lines, a short tail is not cut, and the
+// result says so rather than leaving the operator to guess. The read is
+// aimed at a running container, so there is something to read.
+func TestContainerLogsAreBounded(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	state := hostEngineState(t, h, host.ID)
+
+	var running *containerView
+	for i := range state.Containers {
+		if state.Containers[i].State == "running" {
+			running = &state.Containers[i]
+			break
+		}
+	}
+	if running == nil {
+		t.Skip("the host has no running container to read the log of")
+	}
+
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "docker.container.logs", "reason": containersReason,
+		"payload": map[string]any{"docker_logs": map[string]any{
+			"container_id": running.ID, "lines": 20, "timestamps": true,
+		}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("the log read ended in state %s: %s", job.State, lastMessage(attempts))
+	}
+
+	var response struct {
+		Items []struct {
+			Detail logsResult `json:"detail"`
+		} `json:"items"`
+	}
+	h.do(http.MethodGet, "/api/v1/jobs/"+job.ID+"/attempts", nil, &response, http.StatusOK)
+	if len(response.Items) == 0 {
+		t.Fatal("job without attempts")
+	}
+	result := response.Items[len(response.Items)-1].Detail
+	if result.Kind != "docker_logs" {
+		t.Fatalf("result kind = %q, expected docker_logs", result.Kind)
+	}
+	if result.UnavailableReason != "" {
+		t.Fatalf("the engine did not answer: %s", result.UnavailableReason)
+	}
+	// The result names the container it read: a name that moved to another
+	// container would show the wrong log, and the operator is to see which.
+	if result.ContainerName == "" && result.ContainerID == "" {
+		t.Error("the result does not say which container was read")
+	}
+	if result.Lines == nil {
+		t.Fatal("the result carries no line list; an empty log is an empty list, not an absence")
+	}
+	if len(result.Lines) > 20 {
+		t.Errorf("asked for 20 lines, got %d", len(result.Lines))
+	}
+	// Twenty lines of a container log fit well within the byte limit: a
+	// read this small marked as truncated would mean the limit is wrong.
+	if result.Truncated {
+		t.Errorf("a read of 20 lines was truncated: %s", result.TruncatedReason)
+	}
+
+	// The bounds of the read are refused before the order reaches the host.
+	for name, order := range map[string]map[string]any{
+		"too many lines": {"container_id": running.ID, "lines": 5001},
+		"a path":         {"container_id": "../images/json"},
+		"a bad since":    {"container_id": running.ID, "since": "yesterday"},
+		"empty":          {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+				map[string]any{
+					"action": "docker.container.logs", "reason": containersReason,
+					"payload": map[string]any{"docker_logs": order},
+				}, nil, http.StatusBadRequest)
+		})
+	}
+}

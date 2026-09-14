@@ -148,6 +148,9 @@ func main() {
 
 	executor := agent.NewTaskExecutor(
 		agent.NewHelperClient(*helperSocket), journal, func() agent.Facts { return agent.Facts{} }, log)
+	// The rename preflight compares what the certificate names with the
+	// hostname: an identity bound to the identifier survives a rename.
+	executor.SetHostIdentity(identity.HostID)
 	// The observation mode is a decision of the owner of the host rather than
 	// a missing capability: the agent reports facts but carries out no
 	// change.

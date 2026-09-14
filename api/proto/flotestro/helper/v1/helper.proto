@@ -62,6 +62,12 @@ message HelperRequest {
     CertificateRequest certificate = 45;
     RepositoryRequest repository = 46;
     BackupRequest backup = 47;
+    // A bounded read of one container's log. Separate from the engine
+    // read: it has its own line and byte limits, and a target of its own.
+    DockerLogsRequest docker_logs = 49;
+    // Renaming the host: hostnamectl plus the entries of /etc/hosts that
+    // name the old hostname.
+    HostnameRequest hostname = 50;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -83,6 +89,13 @@ message LocalUserActionRequest {
     OPERATION_LOCK = 2;
     OPERATION_UNLOCK = 3;
     OPERATION_SET_SSH_KEYS = 4;
+    // The complete list of supplementary groups; an empty list takes every
+    // supplementary group away.
+    OPERATION_SET_GROUPS = 5;
+    // The expiry date of the account; an empty date clears it.
+    OPERATION_SET_EXPIRY = 6;
+    // Deleting the account, optionally with its home directory.
+    OPERATION_DELETE = 7;
   }
   Operation operation = 1;
   string name = 2;
@@ -94,6 +107,10 @@ message LocalUserActionRequest {
   repeated string ssh_keys = 6;
   // CreateHome creates the home directory when creating the account.
   bool create_home = 7;
+  // ExpiresAt is the expiry date as YYYY-MM-DD; empty clears the expiry.
+  string expires_at = 8;
+  // RemoveHome deletes the home directory together with the account.
+  bool remove_home = 9;
 }
 
 // DomainEnrollRequest joins the host to the domain. Requires root, because
@@ -230,6 +247,9 @@ message HelperResponse {
   RepositoryResult repository_result = 34;
   BackupResult backup_result = 35;
   DockerEventsResult docker_events_result = 36;
+  DockerLogsResult docker_logs_result = 37;
+  HostnameResult hostname_result = 38;
+  SmartResult smart_result = 39;
 }
 
 // DockerReadRequest describes what to read from the engine. The scope is
@@ -503,6 +523,9 @@ message StorageRequest {
     // The plan of a check or an extension of a filesystem or a volume,
     // without touching the host. The kind is named by the plan field.
     OPERATION_DEVICE_PLAN = 10;
+    // The SMART health and attributes of the named device. A read that
+    // takes no guard.
+    OPERATION_SMART_READ = 11;
   }
   Operation operation = 1;
   string source = 2;
@@ -1014,6 +1037,69 @@ message DockerEventsResult {
   string unavailable_reason = 4;
 }
 
+// DockerLogsRequest reads the tail of one container's log.
+message DockerLogsRequest {
+  // The container identifier or name. Checked here again: the value lands
+  // in the path of an Engine API request.
+  string container_id = 1;
+  uint32 lines = 2;
+  string since = 3;
+  bool timestamps = 4;
+}
+
+message DockerLogsResult {
+  string container_id = 1;
+  string container_name = 2;
+  repeated string lines = 3;
+  bool truncated = 4;
+  string truncated_reason = 5;
+  string unavailable_reason = 6;
+}
+
+// HostnameRequest renames the host with hostnamectl and rewrites the
+// entries of /etc/hosts that name the old hostname.
+message HostnameRequest {
+  string hostname = 1;
+  string pretty = 2;
+}
+
+message HostnameResult {
+  string previous = 1;
+  string current = 2;
+  bool changed = 3;
+  bool hosts_file_updated = 4;
+}
+
+// SmartResult carries what smartctl reports about one device. A device
+// the tool cannot read reports unsupported with the tool's own message.
+message SmartResult {
+  string device = 1;
+  string model = 2;
+  string serial = 3;
+  string health = 4;
+  string health_reason = 5;
+  optional int32 temperature_c = 6;
+  optional uint64 power_on_hours = 7;
+  optional uint64 reallocated_sectors = 8;
+  optional uint64 pending_sectors = 9;
+  optional uint32 wear_percent = 10;
+  repeated SmartAttribute attributes = 11;
+  bool unsupported = 12;
+  string unsupported_reason = 13;
+  string output = 14;
+}
+
+message SmartAttribute {
+  uint32 id = 1;
+  string name = 2;
+  uint32 value = 3;
+  uint32 worst = 4;
+  uint32 threshold = 5;
+  uint64 raw = 6;
+  string raw_string = 7;
+  bool failing = 8;
+}
+
 message DockerReadResult {
   // The engine state in JSON form. The structure belongs to the containers
   // module and is not repeated in the helper contract - the helper does not
@@ -1051,6 +1137,9 @@ message LocalAccountDetail {
   optional bool locked = 2;
   repeated LocalSSHKey ssh_keys = 3;
   optional bool password_set = 4;
+  // ExpiresAt is the expiry date as YYYY-MM-DD from the shadow record;
+  // empty means no expiry.
+  string expires_at = 5;
 }
 
 message LocalSSHKey {

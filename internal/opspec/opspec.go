@@ -23,6 +23,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/docker"
 	filesmodule "github.com/ultherego/flotestro/internal/modules/files"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
+	"github.com/ultherego/flotestro/internal/modules/hostname"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
 	monitoringmodul "github.com/ultherego/flotestro/internal/modules/monitoring"
 	"github.com/ultherego/flotestro/internal/modules/network"
@@ -84,6 +85,10 @@ const (
 	ActionFilesystemResize ActionType = "filesystem.resize"
 	ActionFilesystemCreate ActionType = "filesystem.create"
 	ActionDiskWipe         ActionType = "disk.wipe"
+	// ActionStorageSmartRead reads the SMART health and attributes of one
+	// device. A virtual disk reports unsupported with the tool's own
+	// message; no number is invented.
+	ActionStorageSmartRead ActionType = "storage.smart.read"
 
 	ActionSSHConfigPlan    ActionType = "ssh.config.plan"
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
@@ -199,7 +204,13 @@ const (
 	// separate operation with its own permission rather than a mode of
 	// reboot.
 	ActionSystemShutdown ActionType = "system.shutdown"
-	ActionUnitStatus     ActionType = "unit.status"
+	// Renaming a host changes its identity towards everything that knows it
+	// by name: DNS, Kerberos, the certificates of its services, the entries
+	// of other hosts. The panel knows it by identifier, so the agent's own
+	// certificate survives; everything else is checked before the change and
+	// reported, never guessed.
+	ActionSystemHostnameSet ActionType = "system.hostname.set"
+	ActionUnitStatus        ActionType = "unit.status"
 	// Enabling and masking change what the host will do after a reboot, not
 	// its state now. A unit that is enabled and a unit that is running are
 	// two different things, so there are two operations.
@@ -213,6 +224,16 @@ const (
 	ActionLocalUserLock   ActionType = "localuser.lock"
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
 	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
+	// The groups of an account decide what it may do on the host: a
+	// membership in sudo or docker is root by another name, so the set
+	// operation ranks critical when such a group is in the list.
+	ActionLocalUserGroupsSet ActionType = "localuser.groups.set"
+	// An expiry date is a change of access with a date attached; clearing it
+	// restores access.
+	ActionLocalUserExpirySet ActionType = "localuser.expiry.set"
+	// Deleting an account is destructive: the home directory, when removed,
+	// does not come back, and neither does the UID's ownership of files.
+	ActionLocalUserDelete ActionType = "localuser.delete"
 
 	// ActionInventoryRefresh orders the inventory to be read again.
 	//
@@ -239,6 +260,10 @@ const (
 	// operation, because it answers a different question from a state read:
 	// not "how are things", but "what happened here".
 	ActionDockerEvents ActionType = "docker.events"
+	// ActionDockerLogs reads the tail of one container's log. A read bounded
+	// by a line count and by the same byte limit as a log file: a container
+	// that writes in a loop must not hand the panel its whole history.
+	ActionDockerLogs ActionType = "docker.container.logs"
 
 	// The plan of a Compose project computes the difference between the
 	// host's state and the manifest.
@@ -295,6 +320,10 @@ const (
 	// rewrites the whole bundle: two anchor changes at once give a bundle
 	// neither of the plans saw.
 	LockCertificates = "certificates"
+	// The whole host: a rename collides with every other mutation the same
+	// way a reboot does, because what the change lands on has a different
+	// name afterwards.
+	LockHost = "host"
 )
 
 // CampaignMode says whether and how an operation may run on many hosts at
@@ -445,7 +474,66 @@ func (a ActionType) RequiresTargetConfirmation() bool {
 	if a == ActionSystemShutdown {
 		return true
 	}
+	// A rename destroys no data, but every system that knows the host by
+	// name loses it at once: the operator types the name they are taking
+	// away.
+	if a == ActionSystemHostnameSet {
+		return true
+	}
 	return a.Risk() == RiskDestructive
+}
+
+// ConfirmationTarget says what the operator has to type to confirm an
+// operation on the given host: the hostname, or for an operation aimed at
+// an account - the account name. The name typed is the thing that goes
+// away, so a dialog opened on the wrong row cannot be confirmed by habit.
+func ConfirmationTarget(action ActionType, payload Payload, host string) string {
+	if action == ActionLocalUserDelete && payload.LocalUser != nil {
+		return payload.LocalUser.Name
+	}
+	return host
+}
+
+// PrivilegedGroups lists the groups whose membership is root by another
+// name: sudo and wheel give root directly, docker gives it through the
+// engine socket, adm reads every log, root and admin are what they say.
+var PrivilegedGroups = []string{"sudo", "wheel", "docker", "adm", "root", "admin"}
+
+// PrivilegedGroupsIn returns the privileged groups the list names.
+func PrivilegedGroupsIn(groups []string) []string {
+	var found []string
+	for _, group := range groups {
+		for _, privileged := range PrivilegedGroups {
+			if group == privileged {
+				found = append(found, group)
+			}
+		}
+	}
+	return found
+}
+
+// PayloadRisk returns the risk of one order: the registry's level for the
+// operation, raised where the content of the order calls for it. A groups
+// change that puts an account into sudo is a critical change of access even
+// though the same operation without such a group is not.
+func PayloadRisk(action ActionType, payload Payload) RiskLevel {
+	risk := action.Risk()
+	if action == ActionLocalUserGroupsSet && payload.LocalUser != nil &&
+		len(PrivilegedGroupsIn(payload.LocalUser.Groups)) > 0 {
+		return RiskCritical
+	}
+	return risk
+}
+
+// PayloadRequiresFreshAuth says whether one order needs the operator to
+// confirm their identity right before placing it: the registry's answer,
+// or the raised one where the content of the order calls for it.
+func PayloadRequiresFreshAuth(action ActionType, payload Payload) bool {
+	switch PayloadRisk(action, payload) {
+	case RiskCritical, RiskDestructive:
+		return true
+	}
+	return false
 }
 
 // defaultOutputLimit applies to operations that do not state their own.
@@ -590,6 +678,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	// A filesystem check takes long and requires that nobody is using it.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
 		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage},
+	// The SMART read changes nothing and takes no lock: the tool asks the
+	// device for its own log. It has its own permission rather than the
+	// topology read's, because every operation has one.
+	ActionStorageSmartRead: {mutating: false, capability: "storage", permission: "storage.smart.read",
+		timeoutSeconds: 120, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 256 << 10},
 
 	// Extending a volume and a filesystem is reversible only in theory:
 	// shrinking requires getting the data below a boundary nobody planned
@@ -828,6 +921,13 @@ var actionSpecs = map[ActionType]actionSpec{
 	// other operation starts at the moment the host is going down.
 	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits},
+	// A rename changes the host's identity towards everything that knows it
+	// by name. The panel keeps its own by identifier, so the management
+	// channel survives - but Kerberos, service certificates and the other
+	// hosts' entries do not follow by themselves. Critical, and the whole
+	// host is the lock: nothing else is to land on a host mid-rename.
+	ActionSystemHostnameSet: {mutating: true, capability: "systemd", permission: "system.hostname.write",
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockHost},
 	// Reading unit state is non-mutating and serves campaign health checks.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
@@ -861,6 +961,19 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
 	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+	// The registry lists the base risk of a groups change. The risk of one
+	// order depends on its content: a membership in a privileged group is
+	// root by another name, and PayloadRisk raises such an order to
+	// critical.
+	ActionLocalUserGroupsSet: {mutating: true, capability: "", permission: "localuser.groups.write",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+	ActionLocalUserExpirySet: {mutating: true, capability: "", permission: "localuser.expiry.write",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+	// Deleting an account is irreversible: a removed home directory does not
+	// come back, and neither does the UID's ownership of what it left
+	// behind. The operator types the account name before it starts.
+	ActionLocalUserDelete: {mutating: true, capability: "", permission: "localuser.delete",
+		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockAccounts},
 
 	// Reading containers changes nothing, but it can be heavy: the full list
 	// of images on a build host is megabytes, so it has its own resource
@@ -900,6 +1013,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	// it. The time limit covers the longest allowed window with a margin.
 	ActionDockerEvents: {mutating: false, capability: "docker", permission: "docker.events",
 		timeoutSeconds: 180, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
+	// A log read changes nothing and takes no container lock: reading what
+	// a container wrote must not wait for its restart. The byte limit is
+	// the one a log file read has.
+	ActionDockerLogs: {mutating: false, capability: "docker", permission: "docker.container.logs",
+		timeoutSeconds: 60, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
 	// The plan changes nothing, but it runs compose on the host and fetches
 	// image metadata, so it has its own permission.
@@ -1430,6 +1548,7 @@ type Payload struct {
 	DockerImage     *DockerImagePayload     `json:"docker_image,omitempty"`
 	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
 	DockerEvents    *DockerEventsPayload    `json:"docker_events,omitempty"`
+	DockerLogs      *DockerLogsPayload      `json:"docker_logs,omitempty"`
 	Compose         *ComposePayload         `json:"compose,omitempty"`
 	UnitToggle      *UnitToggle             `json:"unit_toggle,omitempty"`
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
@@ -1453,6 +1572,7 @@ type Payload struct {
 	Backup          *BackupPayload          `json:"backup,omitempty"`
 	Monitoring      *MonitoringPayload      `json:"monitoring,omitempty"`
 	Inventory       *InventoryPayload       `json:"inventory,omitempty"`
+	Hostname        *HostnamePayload        `json:"hostname,omitempty"`
 }
 
 // maxRefreshModules bounds the length of the scope. An order with a list
@@ -2131,6 +2251,38 @@ type LocalUserPayload struct {
 	// missing data.
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	CreateHome bool     `json:"create_home,omitempty"`
+	// ExpiresAt is the expiry date as YYYY-MM-DD. Empty in an expiry
+	// operation clears the expiry - a deliberate change, not missing data.
+	ExpiresAt string `json:"expires_at,omitempty"`
+	// RemoveHome concerns deletion only: the home directory goes with the
+	// account only when the operator says so.
+	RemoveHome bool `json:"remove_home,omitempty"`
+}
+
+// HostnamePayload describes a rename of the host.
+type HostnamePayload struct {
+	// Hostname is the static name: an RFC 1123 label or a fully qualified
+	// name.
+	Hostname string `json:"hostname"`
+	// Pretty is the human-readable name hostnamectl shows. Optional.
+	Pretty string `json:"pretty,omitempty"`
+}
+
+// DockerLogsPayload describes a bounded read of one container's log.
+//
+// The target may be an identifier or a name. Unlike a container mutation,
+// a read aimed at a name that moved to another container shows the wrong
+// log and changes nothing - and the name is what the operator has in front
+// of them.
+type DockerLogsPayload struct {
+	ContainerID string `json:"container_id"`
+	// Lines is the tail to read; zero means the module default of 200.
+	Lines uint32 `json:"lines,omitempty"`
+	// Since narrows the read: an RFC 3339 timestamp or a duration such as
+	// 15m. Empty means the whole tail.
+	Since string `json:"since,omitempty"`
+	// Timestamps prefixes every line with the engine's timestamp.
+	Timestamps bool `json:"timestamps,omitempty"`
 }
 
 // Validate checks that the operation type and the payload agree.
@@ -2206,12 +2358,33 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
-	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet:
+	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet,
+		ActionLocalUserGroupsSet, ActionLocalUserExpirySet, ActionLocalUserDelete:
 		if payload.LocalUser == nil {
 			return fmt.Errorf("the operation %s requires a local_user payload", action)
 		}
 		if !localUserNamePattern.MatchString(payload.LocalUser.Name) {
 			return fmt.Errorf("invalid account name %q", payload.LocalUser.Name)
+		}
+		// The accounts below the user range and the account the agent runs
+		// under are refused already here: the host refuses them too, but a
+		// queued deletion of root would look like a change about to happen.
+		if action == ActionLocalUserDelete && protectedAccount(payload.LocalUser.Name) {
+			return fmt.Errorf("the account %s is not deleted through the panel", payload.LocalUser.Name)
+		}
+		if payload.LocalUser.RemoveHome && action != ActionLocalUserDelete {
+			return fmt.Errorf("the operation %s does not remove a home directory", action)
+		}
+		if payload.LocalUser.ExpiresAt != "" {
+			if action != ActionLocalUserExpirySet {
+				return fmt.Errorf("the operation %s does not set an expiry date", action)
+			}
+			if err := validateExpiryDate(payload.LocalUser.ExpiresAt); err != nil {
+				return err
+			}
+		}
+		if len(payload.LocalUser.Groups) > 64 {
+			return fmt.Errorf("too many groups: %d", len(payload.LocalUser.Groups))
 		}
 		if len(payload.LocalUser.SSHKeys) > 64 {
 			return fmt.Errorf("too many SSH keys: %d", len(payload.LocalUser.SSHKeys))
@@ -2290,6 +2463,19 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the operation %s does not remove volumes", action)
 		}
 		return nil
+
+	case ActionDockerLogs:
+		if payload.DockerLogs == nil {
+			return fmt.Errorf("the operation %s requires a docker_logs payload", action)
+		}
+		if err := docker.ValidateContainerReference(payload.DockerLogs.ContainerID); err != nil {
+			return err
+		}
+		if payload.DockerLogs.Lines > docker.MaxLogLines {
+			return fmt.Errorf("the number of lines has to be in the range 1-%d", docker.MaxLogLines)
+		}
+		_, err := docker.ParseLogsSince(payload.DockerLogs.Since, time.Now())
+		return err
 
 	case ActionDockerPull:
 		if payload.DockerImage == nil {
@@ -2618,6 +2804,15 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return security.ValidateMode(payload.Security.Mode)
 
+	case ActionSystemHostnameSet:
+		if payload.Hostname == nil {
+			return fmt.Errorf("the operation %s requires a hostname payload", action)
+		}
+		if err := hostname.Validate(payload.Hostname.Hostname); err != nil {
+			return err
+		}
+		return hostname.ValidatePretty(payload.Hostname.Pretty)
+
 	case ActionSystemShutdown:
 		if payload.Power == nil {
 			return fmt.Errorf("the operation %s requires a power payload", action)
@@ -2727,6 +2922,12 @@ func Validate(action ActionType, payload Payload) error {
 
 	case ActionStoragePlan:
 		return nil
+
+	case ActionStorageSmartRead:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		return storage.ValidateSmartDevice(payload.Storage.Device)
 
 	case ActionMountEnsure:
 		if payload.Storage == nil {
@@ -3030,6 +3231,31 @@ func Validate(action ActionType, payload Payload) error {
 // because an envelope can reach the agent by a way other than through the
 // panel.
 var localUserNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}\$?$`)
+
+// protectedAccounts are never deleted through the panel: the superuser, the
+// accounts the agent and the helper run under, and the account that owns
+// nothing and sits above the user range. The other system accounts are
+// refused by the host, which sees their identifiers: that decision has one
+// boundary, the helper's, and the panel does not keep a second list of
+// what a system account is.
+var protectedAccounts = map[string]bool{
+	"root": true, "flotestro": true, "flotestro-agent": true, "flotestro-relay": true,
+	"nobody": true,
+}
+
+func protectedAccount(name string) bool {
+	return protectedAccounts[name]
+}
+
+// validateExpiryDate accepts a calendar date the way chage takes it. A date
+// in the past is allowed: it is one way of cutting access off with a record
+// of when.
+func validateExpiryDate(value string) error {
+	if _, err := time.Parse("2006-01-02", value); err != nil {
+		return fmt.Errorf("invalid expiry date %q; expected YYYY-MM-DD", value)
+	}
+	return nil
+}
 
 // validatePublicKeyShape rejects material that is not a public key. The panel
 // does not accept a private key even by an operator's mistake.

@@ -42,6 +42,8 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 				Groups:     payload.Groups,
 				SshKeys:    payload.SSHKeys,
 				CreateHome: payload.CreateHome,
+				ExpiresAt:  payload.ExpiresAt,
+				RemoveHome: payload.RemoveHome,
 			},
 		},
 	}, timeout)
@@ -104,7 +106,7 @@ func sameAccountState(before, after *LocalAccount) bool {
 	if before == nil || after == nil {
 		return before == after
 	}
-	if before.Shell != after.Shell || before.Gecos != after.Gecos {
+	if before.Shell != after.Shell || before.Gecos != after.Gecos || before.ExpiresAt != after.ExpiresAt {
 		return false
 	}
 	if !sameStrings(before.Groups, after.Groups) {
@@ -152,6 +154,10 @@ var helperUserOperations = map[opspec.ActionType]helperv1.LocalUserActionRequest
 	opspec.ActionLocalUserLock:   helperv1.LocalUserActionRequest_OPERATION_LOCK,
 	opspec.ActionLocalUserUnlock: helperv1.LocalUserActionRequest_OPERATION_UNLOCK,
 	opspec.ActionLocalSSHKeysSet: helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS,
+	// The groups, the expiry date and the deletion of an account.
+	opspec.ActionLocalUserGroupsSet: helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS,
+	opspec.ActionLocalUserExpirySet: helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY,
+	opspec.ActionLocalUserDelete:    helperv1.LocalUserActionRequest_OPERATION_DELETE,
 }
 
 var localUserMessages = map[opspec.ActionType]string{
@@ -159,4 +165,8 @@ var localUserMessages = map[opspec.ActionType]string{
 	opspec.ActionLocalUserLock:   "the local account was locked",
 	opspec.ActionLocalUserUnlock: "the local account was unlocked",
 	opspec.ActionLocalSSHKeysSet: "the SSH keys were set",
+	// The groups, the expiry date and the deletion of an account.
+	opspec.ActionLocalUserGroupsSet: "the groups of the local account were set",
+	opspec.ActionLocalUserExpirySet: "the expiry of the local account was set",
+	opspec.ActionLocalUserDelete:    "the local account was deleted",
 }

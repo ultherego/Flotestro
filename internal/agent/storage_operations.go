@@ -165,3 +165,93 @@ func storageSummary(snapshot storage.Snapshot) string {
 	return "devices: " + strconv.Itoa(len(snapshot.Devices)) +
 		", mounted filesystems: " + strconv.Itoa(mounted)
 }
+
+// readSmart asks the helper about the SMART state of one device.
+//
+// The tool needs root to talk to the device, so the read goes through the
+// helper. A device the tool cannot read comes back as unsupported with the
+// tool's own words; the read itself succeeded, and that answer is its
+// content.
+func (e *TaskExecutor) readSmart(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.StoragePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"the disk space payload is missing")
+	}
+	timeout := timeoutOf(task, opspec.ActionStorageSmartRead)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
+	defer cancel()
+	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_Storage{
+			Storage: &helperv1.StorageRequest{
+				Operation: helperv1.StorageRequest_OPERATION_SMART_READ,
+				Device:    payload.Device,
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	if !response.GetAccepted() {
+		refused := rejected(agentv1.TaskResult_STATUS_REJECTED, response.GetErrorCode(), response.GetMessage())
+		refused.TaskId = task.GetTaskId()
+		return refused
+	}
+	result := response.GetSmartResult()
+	if result == nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed,
+			"the helper did not send back the SMART report")
+	}
+	return &agentv1.TaskResult{
+		TaskId:      task.GetTaskId(),
+		Status:      agentv1.TaskResult_STATUS_SUCCEEDED,
+		Message:     smartSummary(result),
+		SmartResult: smartResultToAgent(result),
+	}
+}
+
+// smartSummary describes the report in one sentence.
+func smartSummary(result *helperv1.SmartResult) string {
+	if result.GetUnsupported() {
+		return result.GetDevice() + ": SMART unsupported (" + result.GetUnsupportedReason() + ")"
+	}
+	summary := result.GetDevice() + ": health " + result.GetHealth()
+	if reason := result.GetHealthReason(); reason != "" {
+		summary += " (" + reason + ")"
+	}
+	return summary
+}
+
+func smartResultToAgent(result *helperv1.SmartResult) *agentv1.SmartResult {
+	converted := &agentv1.SmartResult{
+		Device:             result.GetDevice(),
+		Model:              result.GetModel(),
+		Serial:             result.GetSerial(),
+		Health:             result.GetHealth(),
+		HealthReason:       result.GetHealthReason(),
+		TemperatureC:       result.TemperatureC,
+		PowerOnHours:       result.PowerOnHours,
+		ReallocatedSectors: result.ReallocatedSectors,
+		PendingSectors:     result.PendingSectors,
+		WearPercent:        result.WearPercent,
+		Unsupported:        result.GetUnsupported(),
+		UnsupportedReason:  result.GetUnsupportedReason(),
+		Output:             result.GetOutput(),
+	}
+	for _, attribute := range result.GetAttributes() {
+		converted.Attributes = append(converted.Attributes, &agentv1.SmartAttribute{
+			Id:        attribute.GetId(),
+			Name:      attribute.GetName(),
+			Value:     attribute.GetValue(),
+			Worst:     attribute.GetWorst(),
+			Threshold: attribute.GetThreshold(),
+			Raw:       attribute.GetRaw(),
+			RawString: attribute.GetRawString(),
+			Failing:   attribute.GetFailing(),
+		})
+	}
+	return converted
+}

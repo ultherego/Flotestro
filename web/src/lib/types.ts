@@ -445,6 +445,8 @@ export type LocalAccount = {
   locked: boolean | null;
   password_set: boolean | null;
   ssh_keys: { fingerprint: string; type?: string; comment?: string; source?: string }[];
+  /** The expiry date as YYYY-MM-DD; absent means no expiry or an unread record. */
+  expires_at?: string;
   unavailable_reason?: string;
   observed_at: string;
 };
@@ -456,6 +458,16 @@ export type Principal = {
   kind: string;
   /** May be absent: an identity without its own bindings has roles from the group mappings. */
   bindings?: { role: string; scope: { site: string; environment: string } }[];
+  /** The live API tokens; the value of a token is never among them. */
+  tokens?: ApiToken[];
+};
+
+export type ApiToken = {
+  id: string;
+  description?: string;
+  expires_at?: string;
+  last_used_at?: string;
+  created_at: string;
 };
 
 export type GroupMapping = {

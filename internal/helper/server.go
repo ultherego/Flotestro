@@ -38,6 +38,14 @@ type Server struct {
 	IdleTimeout time.Duration
 	active      sync.WaitGroup
 	traffic     chan struct{}
+
+	// The account and hostname handlers reach the system through these
+	// seams, so they can be checked without an account on the machine
+	// running the tests. Nil means the real NSS lookup, the real shadow
+	// tools and the real /etc/hosts.
+	lookupAccount func(name string) (accountRecord, error)
+	accountTool   accountTool
+	hostsFile     string
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -268,6 +276,12 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 
 	case *helperv1.HelperRequest_DockerEvents:
 		return s.readDockerEvents(ctx, request, action.DockerEvents)
+
+	case *helperv1.HelperRequest_DockerLogs:
+		return s.readDockerLogs(ctx, request, action.DockerLogs)
+
+	case *helperv1.HelperRequest_Hostname:
+		return s.applyHostname(ctx, request, action.Hostname)
 
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)

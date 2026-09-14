@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,8 +55,80 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 		return s.planMount(actionCtx, action)
 	case helperv1.StorageRequest_OPERATION_DEVICE_PLAN:
 		return s.planDevice(actionCtx, action)
+	case helperv1.StorageRequest_OPERATION_SMART_READ:
+		return s.readSmart(actionCtx, action)
 	}
 	return reject(ErrorUnknownAction, "unknown disk space operation")
+}
+
+// readSmart asks the SMART tool about one device.
+//
+// The tool needs root to talk to the device, so the read goes through the
+// helper; it takes no guard, because it changes nothing. A missing tool is
+// an unsupported read with a reason, not an invented healthy disk.
+func (s *Server) readSmart(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	device := action.GetDevice()
+	if err := storage.ValidateSmartDevice(device); err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	if !exists(storage.SmartctlPath) {
+		return reject(ErrorUnsupported, "this host has no smartctl ("+storage.SmartctlPath+")")
+	}
+	report := storage.ReadSmart(ctx, smartRunner, device)
+	return &helperv1.HelperResponse{Accepted: true, SmartResult: smartResultToProto(report)}
+}
+
+// smartRunner runs the SMART tool and hands back its output together with
+// the exit code: the code carries the verdict bit by bit, so a non-zero
+// code with a full JSON is a device with findings rather than a failed
+// read.
+func smartRunner(ctx context.Context, path string, args ...string) (string, int, error) {
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = toolEnvironment()
+	output, err := cmd.Output()
+	code := 0
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			code = exitErr.ExitCode()
+			// The tool printed its answer and ended with a status: that is
+			// the answer, not a failure of the read.
+			return string(output), code, nil
+		}
+		return string(output), -1, err
+	}
+	return string(output), code, nil
+}
+
+func smartResultToProto(report storage.SmartReport) *helperv1.SmartResult {
+	result := &helperv1.SmartResult{
+		Device:             report.Device,
+		Model:              report.Model,
+		Serial:             report.Serial,
+		Health:             report.Health,
+		HealthReason:       report.HealthReason,
+		TemperatureC:       report.TemperatureC,
+		PowerOnHours:       report.PowerOnHours,
+		ReallocatedSectors: report.ReallocatedSectors,
+		PendingSectors:     report.PendingSectors,
+		WearPercent:        report.WearPercent,
+		Unsupported:        report.Unsupported,
+		UnsupportedReason:  report.UnsupportedReason,
+		Output:             report.Output,
+	}
+	for _, attribute := range report.Attributes {
+		result.Attributes = append(result.Attributes, &helperv1.SmartAttribute{
+			Id:        attribute.ID,
+			Name:      attribute.Name,
+			Value:     attribute.Value,
+			Worst:     attribute.Worst,
+			Threshold: attribute.Threshold,
+			Raw:       attribute.Raw,
+			RawString: attribute.RawString,
+			Failing:   attribute.Failing,
+		})
+	}
+	return result
 }
 
 // storageGuard names the guard of a disk space operation. The reads and the
@@ -64,7 +137,8 @@ func storageGuard(operation helperv1.StorageRequest_Operation) string {
 	switch operation {
 	case helperv1.StorageRequest_OPERATION_READ_LVM,
 		helperv1.StorageRequest_OPERATION_MOUNT_PLAN,
-		helperv1.StorageRequest_OPERATION_DEVICE_PLAN:
+		helperv1.StorageRequest_OPERATION_DEVICE_PLAN,
+		helperv1.StorageRequest_OPERATION_SMART_READ:
 		return ""
 	}
 	return GuardStorage

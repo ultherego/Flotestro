@@ -12,7 +12,7 @@ import { useT } from "../../i18n";
  * mistaken target, the other stays in the audit log.
  */
 export function TargetConfirmation({
-  host, description, label, onConfirm, onCancel, busy, danger,
+  host, description, label, onConfirm, onCancel, busy, danger, target,
 }: {
   host: Host;
   description: string;
@@ -20,6 +20,12 @@ export function TargetConfirmation({
   // danger marks the operations that destroy or overwrite data: a restore
   // has its own red workflow, so it is never mistaken for a routine change.
   danger?: boolean;
+  /**
+   * What the operator types: the hostname unless the operation is aimed at
+   * something narrower than the host - an account, say - in which case the
+   * name of that thing is the one that goes away and the one typed.
+   */
+  target?: string;
   onConfirm: (reason: string, confirmation: string) => void;
   onCancel: () => void;
   busy: boolean;
@@ -27,7 +33,8 @@ export function TargetConfirmation({
   const t = useT();
   const [reason, setReason] = useState("");
   const [confirmation, setConfirmation] = useState("");
-  const ready = reason.trim().length >= 8 && confirmation === host.hostname;
+  const expected = target ?? host.hostname;
+  const ready = reason.trim().length >= 8 && confirmation === expected;
 
   return (
     <div className={danger ? "form danger" : "form"} data-testid="target-confirmation">
@@ -44,7 +51,7 @@ export function TargetConfirmation({
         <input value={reason} onChange={(e) => setReason(e.target.value)} />
       </label>
       <label>
-        {t("Type the hostname to confirm:")} <code>{host.hostname}</code>
+        {target === undefined ? t("Type the hostname to confirm:") : t("Type the name to confirm:")} <code>{expected}</code>
         <input value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
       </label>
       <div className="operations">

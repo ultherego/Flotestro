@@ -54,6 +54,10 @@ type LocalAccount struct {
 	// password".
 	PasswordSet *bool        `json:"password_set,omitempty"`
 	SSHKeys     []SSHKeyInfo `json:"ssh_keys,omitempty"`
+	// ExpiresAt is the expiry date as YYYY-MM-DD from the shadow record.
+	// Empty means no expiry, or a record the helper did not read - the
+	// difference is in UnavailableReason.
+	ExpiresAt string `json:"expires_at,omitempty"`
 
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
@@ -172,6 +176,7 @@ func mergePrivilegedAccounts(accounts []LocalAccount, result *helperv1.LocalAcco
 		}
 		accounts[index].Locked = detail.Locked
 		accounts[index].PasswordSet = detail.PasswordSet
+		accounts[index].ExpiresAt = detail.GetExpiresAt()
 		for _, key := range detail.GetSshKeys() {
 			accounts[index].SSHKeys = append(accounts[index].SSHKeys, SSHKeyInfo{
 				Fingerprint: key.GetFingerprint(),
@@ -209,6 +214,7 @@ func localAccountsToProto(accounts []LocalAccount) []*agentv1.LocalAccount {
 			Locked:            account.Locked,
 			PasswordSet:       account.PasswordSet,
 			SshKeys:           keys,
+			ExpiresAt:         account.ExpiresAt,
 			UnavailableReason: account.UnavailableReason,
 		})
 	}

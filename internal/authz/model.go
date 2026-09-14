@@ -142,6 +142,9 @@ const (
 	PermStorageMountWrite  Permission = "storage.mount.write"
 	PermStorageMountRemove Permission = "storage.mount.remove"
 	PermStorageFsck        Permission = "storage.fsck"
+	// The SMART read is diagnostics like the topology read: the device's
+	// own health log, changing nothing.
+	PermStorageSmartRead Permission = "storage.smart.read"
 	// Extending and formatting are two different decisions: the first adds
 	// space, the second deletes everything that was on it.
 	PermStorageLVMWrite        Permission = "storage.lvm.write"
@@ -204,6 +207,9 @@ const (
 	// after a reboot the host comes back by itself, after a shutdown somebody
 	// has to go to it.
 	PermSystemShutdown Permission = "system.shutdown"
+	// Renaming a host changes its identity towards everything that knows it
+	// by name; it belongs to the administrator alone.
+	PermSystemHostnameWrite Permission = "system.hostname.write"
 	// Time. Reading and testing the sources are part of diagnosis - a drifted
 	// clock looks from the outside like broken Kerberos or broken mTLS.
 	// Changing the sources can step the clock, so it has its own
@@ -242,6 +248,10 @@ const (
 	// from reading state: state says how things are, and the journal - what
 	// happened here, including what the state no longer remembers.
 	PermDockerEvents Permission = "docker.events"
+	// PermDockerLogs allows reading what a container wrote. Separate from
+	// reading the engine state: a log carries what the application said,
+	// which is more than what the engine knows about it.
+	PermDockerLogs Permission = "docker.container.logs"
 	// Container operations have separate permissions: starting a service and
 	// removing it are two different decisions, including as to who may take
 	// them.
@@ -292,6 +302,13 @@ const (
 	PermLocalUserLock    Permission = "localuser.lock"
 	PermLocalUserUnlock  Permission = "localuser.unlock"
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
+	// The groups and the expiry of an account are changes of access with a
+	// scope of their own: a group can be root by another name, an expiry is
+	// a lock with a date. Deleting an account is destructive and belongs to
+	// the administrator alone.
+	PermLocalUserGroupsWrite Permission = "localuser.groups.write"
+	PermLocalUserExpiryWrite Permission = "localuser.expiry.write"
+	PermLocalUserDelete      Permission = "localuser.delete"
 
 	// The metrics describe the fleet: the number of hosts, the states of
 	// tasks and the validity of the CA. That is reconnaissance material, so
@@ -354,7 +371,7 @@ var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
 		PermIdentityRead, PermLocalUserRead, PermDockerRead, PermDockerEvents, PermProcessRead,
-		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
+		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermStorageSmartRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
 		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
 	},
@@ -395,8 +412,9 @@ var rolePermissions = map[Role][]Permission{
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// The operator runs containers but does not delete them: removing and
-		// pruning are irreversible and belong to the administrator.
-		PermDockerRead, PermDockerEvents,
+		// pruning are irreversible and belong to the administrator. The log of
+		// a container is diagnostics, like the journal.
+		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
 		// The operator plans project deployments but does not carry them out.
 		PermComposePlan,
@@ -414,11 +432,13 @@ var rolePermissions = map[Role][]Permission{
 		PermHostTagWrite, PermHostGroupWrite,
 		// The operator sees local accounts but does not create them: granting
 		// access to a host is an administrative decision rather than part of
-		// handling an outage.
-		PermLocalUserRead,
+		// handling an outage. The groups and the expiry of an existing
+		// account are theirs to change - a privileged group still asks for
+		// fresh authentication - and deletion stays with the administrator.
+		PermLocalUserRead, PermLocalUserGroupsWrite, PermLocalUserExpiryWrite,
 		// The operator reads the network configuration but does not change
 		// it: a bad change cuts the host off and cannot be fixed remotely.
-		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
+		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermStorageSmartRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
 		// A drifted clock looks like a directory or certificate outage, so
 		// testing the time sources belongs to the first diagnosis.
 		PermTimeRead, PermTimePlan, PermSecurityRead, PermSecurityScan, PermFilePlan,
@@ -456,7 +476,7 @@ var rolePermissions = map[Role][]Permission{
 		PermJobCreate, PermJobApprove, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
 		// The administrator also has the irreversible container operations.
-		PermDockerRead, PermDockerEvents,
+		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
 		PermComposePlan, PermComposeDeploy,
@@ -470,7 +490,7 @@ var rolePermissions = map[Role][]Permission{
 		PermDNSRead, PermDNSPlan, PermDNSHostWrite,
 		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
 		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
-		PermStorageRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
+		PermStorageRead, PermStorageSmartRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
 		PermStorageLVMWrite, PermStorageFilesystemWrite,
 		PermStorageDestructive, PermStorageWipe,
 		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
@@ -482,7 +502,7 @@ var rolePermissions = map[Role][]Permission{
 		PermFileRead, PermFilePlan, PermFileWrite, PermFileRemove, PermFileRollback,
 		PermPackagesPlan, PermPackagesRead, PermPackagesUpgrade, PermPackagesRepair,
 		PermAgentUpgrade,
-		PermSystemReboot, PermSystemShutdown, PermHostMaintenanceWrite,
+		PermSystemReboot, PermSystemShutdown, PermSystemHostnameWrite, PermHostMaintenanceWrite,
 		PermHostTagWrite, PermHostGroupWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermBudgetRead, PermBudgetWrite,
@@ -493,7 +513,8 @@ var rolePermissions = map[Role][]Permission{
 		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
 		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
-		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermMetricsRead,
+		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermLocalUserGroupsWrite,
+		PermLocalUserExpiryWrite, PermLocalUserDelete, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,
 		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan, PermCertificateWatch,

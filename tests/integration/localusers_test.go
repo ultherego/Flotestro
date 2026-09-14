@@ -24,6 +24,7 @@ type accountView struct {
 		Fingerprint string `json:"fingerprint"`
 		Type        string `json:"type"`
 	} `json:"ssh_keys"`
+	ExpiresAt  string `json:"expires_at"`
 	ObservedAt string `json:"observed_at"`
 }
 
@@ -216,4 +217,153 @@ func TestPrivateKeyIsRejected(t *testing.T) {
 			t.Errorf("key %.30q: code = %q, expected invalid_payload", key, problem.Code)
 		}
 	}
+}
+
+const accountsReason = "integration test of the local accounts module"
+
+// TestAccountGroupsExpiryAndDeletion checks the operations that change what
+// an existing account may do and when it stops: the group list, the expiry
+// date and the deletion. Every change is read back from the host right
+// after the operation, and a deleted account is gone from the panel without
+// waiting for the next full report.
+func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	name := fmt.Sprintf("test%d", time.Now().UnixNano()%100000)
+
+	t.Cleanup(func() {
+		// The deletion at the end of the test takes the account away; the
+		// lock is for the case the test stopped before it got there.
+		if account(h, host.ID, name) != nil {
+			accountOperation(h, host.ID, "localuser.lock", map[string]any{"name": name})
+		}
+	})
+
+	created, _ := accountOperation(h, host.ID, "localuser.create", map[string]any{
+		"name": name, "gecos": "Groups and expiry test", "shell": "/bin/bash", "create_home": true,
+	})
+	if created.State != "succeeded" {
+		t.Fatalf("creating the account ended in state %s", created.State)
+	}
+
+	// The group list is complete: what is on it is granted, the rest is
+	// taken away. "users" exists on every Debian host.
+	groups, attempts := accountOperation(h, host.ID, "localuser.groups.set", map[string]any{
+		"name": name, "groups": []string{"users"},
+	})
+	if groups.State != "succeeded" {
+		t.Fatalf("setting the groups ended in state %s: %s", groups.State, lastMessage(attempts))
+	}
+	if state := account(h, host.ID, name); state == nil || !containsString(state.Groups, "users") {
+		t.Errorf("the account is not in the users group after the operation: %+v", state)
+	}
+
+	// An expiry date is access with a date attached; the panel shows the
+	// date the host holds, not the one it sent.
+	expiry, attempts := accountOperation(h, host.ID, "localuser.expiry.set", map[string]any{
+		"name": name, "expires_at": "2031-06-30",
+	})
+	if expiry.State != "succeeded" {
+		t.Fatalf("setting the expiry ended in state %s: %s", expiry.State, lastMessage(attempts))
+	}
+	if state := account(h, host.ID, name); state == nil || state.ExpiresAt != "2031-06-30" {
+		t.Errorf("expires_at = %q after setting it, expected 2031-06-30", expiresOf(state))
+	}
+
+	// Clearing the expiry is a deliberate change sent as an empty date.
+	cleared, attempts := accountOperation(h, host.ID, "localuser.expiry.set", map[string]any{
+		"name": name, "expires_at": "",
+	})
+	if cleared.State != "succeeded" {
+		t.Fatalf("clearing the expiry ended in state %s: %s", cleared.State, lastMessage(attempts))
+	}
+	if state := account(h, host.ID, name); state == nil || state.ExpiresAt != "" {
+		t.Errorf("expires_at = %q after clearing it, expected none", expiresOf(state))
+	}
+
+	// A malformed date does not reach the host.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
+		"action":  "localuser.expiry.set",
+		"payload": map[string]any{"local_user": map[string]any{"name": name, "expires_at": "tomorrow"}},
+	}, nil, http.StatusBadRequest)
+
+	// Deletion is destructive: the operator types the account name, gives a
+	// reason and two people approve. Without the typed name the order does
+	// not exist.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
+		"action": "localuser.delete", "reason": accountsReason,
+		"payload": map[string]any{"local_user": map[string]any{"name": name, "remove_home": true}},
+	}, nil, http.StatusBadRequest)
+	// The hostname is not the target of this operation; the account is.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
+		"action": "localuser.delete", "reason": accountsReason,
+		"target_confirmation": host.Hostname,
+		"payload":             map[string]any{"local_user": map[string]any{"name": name, "remove_home": true}},
+	}, nil, http.StatusBadRequest)
+
+	deletion := deleteAccount(t, h, host, name, true)
+	if deletion.State != "succeeded" {
+		t.Fatalf("the deletion ended in state %s: %s", deletion.State, lastMessage(h.attempts(deletion.ID)))
+	}
+	if state := account(h, host.ID, name); state != nil {
+		t.Errorf("the deleted account is still shown: %+v", state)
+	}
+}
+
+// TestSystemAccountDeletionIsRefused checks that the host, which sees the
+// identifiers, refuses to delete a service account - and says so with the
+// code the panel shows.
+func TestSystemAccountDeletionIsRefused(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	job := deleteAccount(t, h, host, "daemon", false)
+	if job.State == "succeeded" {
+		t.Fatal("deleting the system account daemon succeeded")
+	}
+	if job.ResultErrorCode != "system_account" {
+		t.Errorf("error code = %q, expected system_account (%s)", job.ResultErrorCode, lastMessage(h.attempts(job.ID)))
+	}
+	if state := account(h, host.ID, "daemon"); state != nil && state.Source != "system" {
+		t.Errorf("daemon is shown as %s after the refusal", state.Source)
+	}
+}
+
+// deleteAccount orders a deletion with the typed account name and collects
+// the two approvals a destructive operation needs.
+func deleteAccount(t *testing.T, h *harness, host hostView, name string, removeHome bool) jobView {
+	t.Helper()
+	job := h.createOperation(host.ID, map[string]any{
+		"action": "localuser.delete", "reason": accountsReason,
+		"target_confirmation": name,
+		"payload":             map[string]any{"local_user": map[string]any{"name": name, "remove_home": removeHome}},
+	})
+	if job.RequiredApprovals < 2 {
+		t.Errorf("deleting an account requires %d approvals, expected two", job.RequiredApprovals)
+	}
+	job = h.approve(job.ID, job.PayloadHash)
+	if job.CollectedApprovals < job.RequiredApprovals {
+		second := h.withToken(h.createPrincipal(uniqueSubject("approver-accounts"),
+			[]map[string]string{
+				{"role": "approver", "site": host.Site, "environment": host.Environment},
+			}))
+		second.approve(job.ID, job.PayloadHash)
+	}
+	return h.awaitTerminal(job.ID, 2*time.Minute)
+}
+
+func containsString(list []string, wanted string) bool {
+	for _, item := range list {
+		if item == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func expiresOf(state *accountView) string {
+	if state == nil {
+		return "<no account>"
+	}
+	return state.ExpiresAt
 }

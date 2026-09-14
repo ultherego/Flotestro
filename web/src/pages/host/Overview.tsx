@@ -1,19 +1,22 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
 import { api, loadedItems } from "../../lib/api";
 import { bytes } from "../../lib/format";
-import type { Host, HostTimelineItem, HostTimelineKind, HostTimelinePage } from "../../lib/types";
+import type { Host, HostTimelineItem, HostTimelineKind, HostTimelinePage, Job } from "../../lib/types";
 import {
-  Fact, Facts, Foot, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, usageTone,
-  useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
 } from "./shared";
+import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
 type SystemState = {
   os?: Record<string, string>;
+  hostname?: string;
   hardware?: {
     cpu_cores?: number;
     memory_bytes?: number;
@@ -70,6 +73,7 @@ export function Overview() {
 
         <Section title={t("System")} span={7} flush>
           <Facts>
+            <Fact label={t("Hostname")}><span className="hm-mono">{host.hostname}</span></Fact>
             <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
             <Fact label={t("Architecture")}>{host.architecture || "—"}</Fact>
             <Fact label={t("Management address")}>
@@ -87,6 +91,7 @@ export function Overview() {
             <Fact label={t("Machine ID")}><span className="hm-mono">{host.machine_id}</span></Fact>
             <Fact label={t("Boot ID")}><span className="hm-mono">{host.boot_id || "—"}</span></Fact>
           </Facts>
+          <RenameHost host={host} reported={module.data?.payload?.hostname} />
         </Section>
 
         <Section title={t("Hardware")} span={5} flush>
@@ -131,6 +136,111 @@ export function Overview() {
         </Section>
       </Widgets>
     </ModulePage>
+  );
+}
+
+/** An RFC 1123 name as the host accepts it: lower-case labels joined by dots. */
+const HOSTNAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/;
+
+/**
+ * Renaming the host.
+ *
+ * A rename changes the identity of the host towards everything that knows
+ * it by name: DNS, Kerberos, the certificates of its services, the entries
+ * of other hosts. The panel knows the host by identifier, so the management
+ * channel survives - the rest is checked on the host before the change and
+ * reported, never guessed. Critical: the operator types the name they are
+ * taking away, and the order asks for fresh authentication.
+ */
+function RenameHost({ host, reported }: { host: Host; reported?: string }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [hostname, setHostname] = useState("");
+  const [pretty, setPretty] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      setMessage(
+        job.requires_approval
+          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
+      );
+      setConfirming(false);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const name = hostname.trim();
+  const valid = HOSTNAME_PATTERN.test(name) && name.length <= 64 && name !== "localhost" && !name.endsWith(".localhost");
+  const unchanged = name === host.hostname;
+
+  return (
+    <div className="hm-section-body">
+      {/* The name the host reports for itself, when the panel's differs:
+          the host was renamed by hand, or a rename is on its way. */}
+      {reported && reported !== host.hostname && (
+        <FormNote>{t("The host reports the name {name}; the panel will follow at the next inventory.", { name: reported })}</FormNote>
+      )}
+      {!open ? (
+        <FormActions>
+          <button className="secondary" onClick={() => setOpen(true)} disabled={host.connection_state !== "online"}>
+            {t("Rename host")}
+          </button>
+        </FormActions>
+      ) : (
+        <Form>
+          <Fields>
+            <Field
+              label={t("New hostname")}
+              help={t("An RFC 1123 name, lower-case: a label or a fully qualified name.")}
+            >
+              <input value={hostname} placeholder="web02.example.internal" onChange={(e) => setHostname(e.target.value)} />
+            </Field>
+            <Field label={t("Pretty name")} help={t("Optional; what hostnamectl shows to people.")}>
+              <input value={pretty} placeholder="Web 02" onChange={(e) => setPretty(e.target.value)} />
+            </Field>
+          </Fields>
+          {name !== "" && !valid && (
+            <Message text={t("This is not a valid hostname: lower-case letters, digits and hyphens, labels joined by dots.")} error />
+          )}
+          {unchanged && <Message text={t("The host already has this name.")} />}
+          <FormNote>
+            {t("The host checks first whether the name resolves in DNS to another machine and whether the agent's certificate is bound to the name. /etc/hosts follows the rename; DNS, Kerberos and service certificates do not.")}
+          </FormNote>
+          <FormActions>
+            <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!valid || unchanged || confirming}>
+              {t("Rename host…")}
+            </button>
+            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+          </FormActions>
+          <Message text={message} />
+        </Form>
+      )}
+
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          label={t("Rename host")}
+          description={t("{host} will be renamed to {name}. Every system that knows it by the old name loses it at once; the panel keeps it by identifier.", { host: host.hostname, name })}
+          busy={request.isPending}
+          onConfirm={(reason, confirmation) =>
+            request.mutate({
+              action: "system.hostname.set",
+              reason,
+              target_confirmation: confirmation,
+              payload: { hostname: { hostname: name, pretty: pretty.trim() } },
+            })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
   );
 }
 

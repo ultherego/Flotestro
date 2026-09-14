@@ -6,8 +6,8 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Check, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -58,6 +58,40 @@ type Snapshot = {
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
+/** One row of the ATA attribute table, as smartctl reports it. */
+type SmartAttribute = {
+  id: number;
+  name: string;
+  value: number;
+  worst: number;
+  threshold: number;
+  raw: number;
+  raw_string?: string;
+  failing?: boolean;
+};
+
+/**
+ * The SMART report of one device. Every number is optional: a device that
+ * does not report its temperature has none here, not a zero.
+ */
+type SmartResult = {
+  kind?: string;
+  device?: string;
+  model?: string;
+  serial?: string;
+  health?: string;
+  health_reason?: string;
+  temperature_c?: number;
+  power_on_hours?: number;
+  reallocated_sectors?: number;
+  pending_sectors?: number;
+  wear_percent?: number;
+  attributes?: SmartAttribute[];
+  unsupported?: boolean;
+  unsupported_reason?: string;
+  output?: string;
+};
+
 /**
  * The host's storage.
  *
@@ -72,6 +106,7 @@ export function Storage() {
   const queryClient = useQueryClient();
   const module = useModule<Snapshot>(host.id, "storage");
   const [intent, setIntent] = useState<Intent | null>(null);
+  const [smartOf, setSmartOf] = useState<Device | null>(null);
   const [message, setMessage] = useState("");
   const [wizard, setWizard] = useState(false);
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
@@ -278,6 +313,19 @@ export function Storage() {
                   {!device.uuid && !device.serial && "—"}
                 </td>
                 <td>
+                  {/* The health log belongs to a whole disk, not to a
+                      partition; reading it changes nothing, so a mounted
+                      disk is asked as well. */}
+                  {!device.parent && (
+                    <div className="operations">
+                      <button
+                        className="secondary"
+                        onClick={() => setSmartOf(smartOf?.path === device.path ? null : device)}
+                      >
+                        SMART
+                      </button>
+                    </div>
+                  )}
                   {/* Operations on a device make sense only when nothing sits
                       on it - and the host checks that once more anyway. */}
                   {(device.mountpoints ?? []).length === 0 && (
@@ -351,6 +399,8 @@ export function Storage() {
           </tbody>
         </Table>
       </Section>
+
+      {smartOf && <SmartReport key={smartOf.path} device={smartOf} onClose={() => setSmartOf(null)} />}
 
       {/* The two LVM tables are narrow; side by side they fill the row. */}
       <Section title={t("Volume groups")} count={snapshot?.groups?.length} span={snapshot?.volumes?.length ? 6 : 12} flush>
@@ -452,6 +502,121 @@ export function Storage() {
       )}
     </ModulePage>
   );
+}
+
+/**
+ * The SMART state of one disk.
+ *
+ * The read goes through a job like every other read: the tool needs root
+ * to talk to the device. A virtual disk, a USB bridge without passthrough
+ * or a device the tool does not know comes back as unsupported with the
+ * tool's own words - the panel shows that reason and invents no healthy
+ * disk. Every counter is shown only when the device reported it.
+ */
+function SmartReport({ device, onClose }: { device: Device; onClose: () => void }) {
+  const t = useT();
+  const host = useHost();
+  const read = useReadOperation<SmartResult>(host);
+  const report = read.attempt?.detail;
+  const refused = read.attempt && read.attempt.status !== "succeeded";
+  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const attributes = report?.attributes ?? [];
+
+  return (
+    <Section
+      title={t("SMART of {device}", { device: device.path })}
+      description={device.model || device.serial ? `${device.model ?? ""} ${device.serial ?? ""}`.trim() : undefined}
+      span={12}
+      tools={
+        <>
+          <button onClick={() => read.order({ action: "storage.smart.read", payload: { storage: { device: device.path } } })} disabled={read.busy || host.connection_state !== "online"}>
+            {read.busy ? t("Reading…") : read.ordered ? t("Read again") : t("Read SMART")}
+          </button>
+          <button className="secondary" onClick={onClose}>{t("Close")}</button>
+        </>
+      }
+      flush
+    >
+      <Message text={read.message} error />
+      {refused && (
+        <Message text={read.attempt?.message || read.attempt?.error_code || t("The host refused the read.")} error />
+      )}
+
+      {!read.ordered ? (
+        <Empty>{t("The health log is read on request; the tool asks the device for it.")}</Empty>
+      ) : !report ? null : report.unsupported ? (
+        <Empty>{t("SMART is not available for this device: {reason}", { reason: report.unsupported_reason || "" })}</Empty>
+      ) : (
+        <>
+          <Facts>
+            <Fact label={t("Health")}><SmartHealth report={report} /></Fact>
+            <Fact label={t("Model")}>{report.model || "—"}</Fact>
+            <Fact label={t("Serial")}><span className="hm-mono">{report.serial || "—"}</span></Fact>
+            <Fact label={t("Temperature")}>{report.temperature_c !== undefined ? `${report.temperature_c} °C` : unknown}</Fact>
+            <Fact label={t("Power-on hours")}>{report.power_on_hours !== undefined ? report.power_on_hours.toLocaleString() : unknown}</Fact>
+            {/* A reallocated or a pending sector is the number that matters
+                most: a disk that has started moving data is a disk to
+                replace. Unknown stays unknown, never zero. */}
+            <Fact label={t("Reallocated sectors")}>
+              {report.reallocated_sectors === undefined ? unknown : <SectorCount count={report.reallocated_sectors} />}
+            </Fact>
+            <Fact label={t("Pending sectors")}>
+              {report.pending_sectors === undefined ? unknown : <SectorCount count={report.pending_sectors} />}
+            </Fact>
+            <Fact label={t("Wear")}>{report.wear_percent !== undefined ? `${report.wear_percent}%` : unknown}</Fact>
+          </Facts>
+          {attributes.length > 0 && (
+            <Table>
+              <thead>
+                <tr>
+                  <th className="hm-num">ID</th><th>{t("Attribute")}</th><th className="hm-num">{t("Value")}</th>
+                  <th className="hm-num">{t("Worst")}</th><th className="hm-num">{t("Threshold")}</th><th className="hm-num">{t("Raw")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attributes.map((attribute) => (
+                  <tr key={attribute.id}>
+                    <td className="hm-num">{attribute.id}</td>
+                    <td className="hm-mono">
+                      {attribute.name}
+                      {attribute.failing && <span className="badge error"> {t("failing")}</span>}
+                    </td>
+                    <td className="hm-num">{attribute.value}</td>
+                    <td className="hm-num">{attribute.worst}</td>
+                    <td className="hm-num">{attribute.threshold}</td>
+                    <td className="hm-num hm-mono">{attribute.raw_string || attribute.raw}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          )}
+          {report.output && (
+            <div className="hm-section-body">
+              <pre className="hm-log">{report.output}</pre>
+            </div>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+/** The verdict of the tool: passed, failed, or unknown with the reason. */
+function SmartHealth({ report }: { report: SmartResult }) {
+  const t = useT();
+  switch (report.health) {
+    case "passed":
+      return <span className="badge ok">{t("passed")}</span>;
+    case "failed":
+      return <span className="badge error">{t("failed")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
+    default:
+      return <span className="badge unknown">{t("unknown")}{report.health_reason ? ` · ${report.health_reason}` : ""}</span>;
+  }
+}
+
+/** A sector count: zero is the good answer here, and anything else is a warning. */
+function SectorCount({ count }: { count: number }) {
+  return count === 0 ? <span className="badge ok">0</span> : <span className="badge error">{count}</span>;
 }
 
 /**

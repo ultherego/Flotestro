@@ -352,6 +352,11 @@ var contracts = map[ActionType]contract{
 	// shutdown is not brought back through the panel.
 	ActionSystemReboot:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimHost)}},
 	ActionSystemShutdown: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, extra: []ResourceClaim{exclusive(ClaimHost)}},
+	// A rename is one hostnamectl call and is undone by renaming back; the
+	// host lock is the registry's lock class, so the claim comes with it.
+	// The verification is the host's own: the next inventory reports the
+	// new name.
+	ActionSystemHostnameSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 
 	// Identity. Enrollment is a saga with checkpoints; leaving the domain
 	// is a separate decision, not an automatic reverse.
@@ -364,6 +369,13 @@ var contracts = map[ActionType]contract{
 	ActionLocalUserLock:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserUnlock: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalSSHKeysSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	// The previous group list and the previous expiry date are read back
+	// from the account before the change, so each has a compensating
+	// change. A deleted account has none: the UID's ownership of what it
+	// left behind does not come back with a new account of the same name.
+	ActionLocalUserGroupsSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	ActionLocalUserExpirySet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	ActionLocalUserDelete:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom},
 
 	// Containers. Start and stop undo each other; a restart has no
 	// reverse; a removal and a prune free what is gone. A pull can be

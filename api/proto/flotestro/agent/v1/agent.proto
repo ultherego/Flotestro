@@ -437,6 +437,10 @@ message LocalAccount {
   // account without a password with a key is reachable only by key; the
   // panel must tell these cases apart.
   optional bool password_set = 12;
+  // ExpiresAt is the account expiry date as YYYY-MM-DD, from the shadow
+  // record. Empty means no expiry or an unread record - the difference is
+  // in unavailable_reason.
+  string expires_at = 13;
 }
 
 message SSHKey {
@@ -534,6 +538,8 @@ message TaskEnvelope {
     AgentUpgrade agent_upgrade = 54;
     RefreshInventory refresh_inventory = 55;
     ReadDockerEvents read_docker_events = 56;
+    DockerLogs docker_logs = 57;
+    HostnameSet hostname_set = 58;
   }
 }
 
@@ -679,6 +685,13 @@ message LocalUserAction {
     OPERATION_LOCK = 2;
     OPERATION_UNLOCK = 3;
     OPERATION_SET_SSH_KEYS = 4;
+    // The complete list of supplementary groups. Declarative like the keys:
+    // an empty list takes every supplementary group away.
+    OPERATION_SET_GROUPS = 5;
+    // The account expiry date. An empty date clears the expiry.
+    OPERATION_SET_EXPIRY = 6;
+    // Deleting the account, optionally with its home directory.
+    OPERATION_DELETE = 7;
   }
   Operation operation = 1;
   string name = 2;
@@ -689,6 +702,11 @@ message LocalUserAction {
   // empty list revokes access, it does not mean "do not change".
   repeated string ssh_keys = 6;
   bool create_home = 7;
+  // ExpiresAt is the expiry date as YYYY-MM-DD. Empty on an expiry operation
+  // means "no expiry".
+  string expires_at = 8;
+  // RemoveHome deletes the home directory together with the account.
+  bool remove_home = 9;
 }
 
 message LocalUserResult {
@@ -837,6 +855,9 @@ message TaskResult {
   MonitoringResult monitoring_result = 46;
   InstalledPackagesResult installed_packages_result = 47;
   InventoryRefreshResult inventory_refresh_result = 48;
+  SmartResult smart_result = 50;
+  DockerLogsResult docker_logs_result = 51;
+  HostnameResult hostname_result = 52;
 }
 
 // InventoryRefreshResult carries the proof of the refresh.
@@ -1205,6 +1226,9 @@ message StorageAction {
     OPERATION_MOUNT_PLAN = 9;
     // The plan of a check or an extension of a filesystem or a volume.
     OPERATION_DEVICE_PLAN = 10;
+    // The SMART health and attributes of one device. A read; it changes
+    // nothing and takes no lock.
+    OPERATION_SMART_READ = 11;
   }
   Operation operation = 1;
   string source = 2;
@@ -1749,6 +1773,99 @@ message DockerEventsResult {
   bool truncated = 2;
   string truncated_reason = 3;
   string unavailable_reason = 4;
+}
+
+// DockerLogs orders a bounded read of one container's log.
+//
+// The read is closed by a line count and by the same byte limit as a log
+// file read: a container that writes in a loop would otherwise hand the
+// panel its whole history. The target may be an identifier or a name -
+// this is a read, and the name is what the operator has in front of them.
+message DockerLogs {
+  string container_id = 1;
+  // Lines is the tail to read. Zero means the module default.
+  uint32 lines = 2;
+  // Since narrows the read: an RFC 3339 timestamp or a duration such as
+  // "15m". Empty means the whole tail.
+  string since = 3;
+  // Timestamps prefixes every line with the engine's timestamp.
+  bool timestamps = 4;
+}
+
+// DockerLogsResult carries the lines read. Stderr lines are merged with a
+// marker rather than in a second list, so the order of what the container
+// wrote is kept.
+message DockerLogsResult {
+  string container_id = 1;
+  string container_name = 2;
+  repeated string lines = 3;
+  // Truncated means a read cut short by the byte limit. A cut list without
+  // this marker would look complete.
+  bool truncated = 4;
+  string truncated_reason = 5;
+  string unavailable_reason = 6;
+}
+
+// HostnameSet renames the host.
+//
+// The agent runs a preflight before it asks the helper: whether the new
+// name resolves in DNS to something else than this host, and whether the
+// certificate of the agent is bound to the name. The result carries those
+// checks whether the rename happened or not.
+message HostnameSet {
+  // Hostname is the static name: an RFC 1123 label or a fully qualified
+  // name.
+  string hostname = 1;
+  // Pretty is the human-readable name shown by hostnamectl. Optional.
+  string pretty = 2;
+}
+
+// HostnameResult carries the outcome of a rename together with the
+// preflight checks.
+message HostnameResult {
+  string previous = 1;
+  string current = 2;
+  bool changed = 3;
+  repeated PreflightCheck checks = 4;
+  // HostsFileUpdated says whether /etc/hosts named the old hostname and was
+  // rewritten; the previous content is kept as /etc/hosts.flotestro-before.
+  bool hosts_file_updated = 5;
+}
+
+// SmartResult carries the health and the attributes of one device as
+// smartctl reports them. A device the tool cannot read reports unsupported
+// with the tool's own message; no number is ever invented.
+message SmartResult {
+  string device = 1;
+  string model = 2;
+  string serial = 3;
+  // Health is "passed", "failed" or "unknown". Unknown carries a reason.
+  string health = 4;
+  string health_reason = 5;
+  optional int32 temperature_c = 6;
+  optional uint64 power_on_hours = 7;
+  optional uint64 reallocated_sectors = 8;
+  optional uint64 pending_sectors = 9;
+  // WearPercent is the NVMe percentage used; SSD wear indicators of ATA
+  // devices are left in the attribute table under their own names.
+  optional uint32 wear_percent = 10;
+  repeated SmartAttribute attributes = 11;
+  bool unsupported = 12;
+  string unsupported_reason = 13;
+  // Output is the beginning of what the tool printed when its JSON could
+  // not be read, for the operator to see why.
+  string output = 14;
+}
+
+message SmartAttribute {
+  uint32 id = 1;
+  string name = 2;
+  uint32 value = 3;
+  uint32 worst = 4;
+  uint32 threshold = 5;
+  uint64 raw = 6;
+  string raw_string = 7;
+  bool failing = 8;
 }
 
 message UnitStatusResult {

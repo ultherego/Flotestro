@@ -9,6 +9,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // dockerProbe reads the state of the container engine through the helper. The
@@ -209,5 +210,62 @@ func dockerResultToProto(result *helperv1.DockerActionResult) *agentv1.DockerAct
 		Removed:        result.GetRemoved(),
 		ReclaimedBytes: result.ReclaimedBytes,
 		ImageDigest:    result.GetImageDigest(),
+	}
+}
+
+// readDockerLogs reads the tail of one container's log through the helper.
+//
+// The read is bounded twice: by the line count of the order and by the byte
+// limit of the task. An unavailable engine is not an error of the operation:
+// the read succeeded, and its content is the information that the engine
+// does not answer.
+func (e *TaskExecutor) readDockerLogs(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.DockerLogsPayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"the container log payload is missing")
+	}
+	timeout := timeoutOf(task, opspec.ActionDockerLogs)
+	readCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	response, err := e.helper.Call(readCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		MaxOutputBytes: task.GetLimits().GetMaxOutputBytes(),
+		Action: &helperv1.HelperRequest_DockerLogs{
+			DockerLogs: &helperv1.DockerLogsRequest{
+				ContainerId: payload.ContainerID,
+				Lines:       payload.Lines,
+				Since:       payload.Since,
+				Timestamps:  payload.Timestamps,
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	if !response.GetAccepted() {
+		refused := rejected(agentv1.TaskResult_STATUS_FAILED, response.GetErrorCode(), response.GetMessage())
+		refused.TaskId = task.GetTaskId()
+		return refused
+	}
+	result := response.GetDockerLogsResult()
+	if result == nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed,
+			"the helper did not send back the container log")
+	}
+	return &agentv1.TaskResult{
+		TaskId: task.GetTaskId(),
+		Status: agentv1.TaskResult_STATUS_SUCCEEDED,
+		DockerLogsResult: &agentv1.DockerLogsResult{
+			ContainerId:       result.GetContainerId(),
+			ContainerName:     result.GetContainerName(),
+			Lines:             result.GetLines(),
+			Truncated:         result.GetTruncated(),
+			TruncatedReason:   result.GetTruncatedReason(),
+			UnavailableReason: result.GetUnavailableReason(),
+		},
 	}
 }

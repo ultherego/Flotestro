@@ -109,6 +109,73 @@ func (s *Server) readDockerEvents(ctx context.Context, request *helperv1.HelperR
 	}
 }
 
+// readDockerLogs reads the tail of one container's log.
+//
+// The read is bounded twice: by the line count of the order and by the byte
+// limit the module shares with a log file read. The target may be a name -
+// this is a read, and a name that moved to another container shows the
+// wrong log and changes nothing - but it is checked again here, because it
+// lands in the path of an Engine API request.
+func (s *Server) readDockerLogs(ctx context.Context, request *helperv1.HelperRequest,
+	action *helperv1.DockerLogsRequest) *helperv1.HelperResponse {
+	if err := docker.ValidateContainerReference(action.GetContainerId()); err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	since, err := docker.ParseLogsSince(action.GetSince(), time.Now())
+	if err != nil {
+		return reject(ErrorMalformed, err.Error())
+	}
+	client, err := docker.New()
+	if err != nil {
+		return &helperv1.HelperResponse{
+			Accepted: true,
+			DockerLogsResult: &helperv1.DockerLogsResult{
+				ContainerId:       action.GetContainerId(),
+				UnavailableReason: err.Error(),
+			},
+		}
+	}
+
+	readCtx, cancel := deadline(ctx, request, time.Minute, 5*time.Minute)
+	defer cancel()
+
+	limit := int64(request.GetMaxOutputBytes())
+	if limit <= 0 || limit > docker.MaxLogBytes {
+		limit = docker.MaxLogBytes
+	}
+	logs, err := client.Logs(readCtx, action.GetContainerId(), docker.LogsOptions{
+		Tail:       action.GetLines(),
+		Since:      since,
+		Timestamps: action.GetTimestamps(),
+		MaxBytes:   limit,
+	})
+	if err != nil {
+		if errors.Is(err, docker.ErrNotFound) {
+			return reject(ErrorDockerObjectMissing, err.Error())
+		}
+		if errors.Is(err, docker.ErrUnavailable) {
+			return &helperv1.HelperResponse{
+				Accepted: true,
+				DockerLogsResult: &helperv1.DockerLogsResult{
+					ContainerId:       action.GetContainerId(),
+					UnavailableReason: err.Error(),
+				},
+			}
+		}
+		return reject(ErrorExecFailed, err.Error())
+	}
+	return &helperv1.HelperResponse{
+		Accepted: true,
+		DockerLogsResult: &helperv1.DockerLogsResult{
+			ContainerId:     logs.ContainerID,
+			ContainerName:   logs.ContainerName,
+			Lines:           logs.Lines,
+			Truncated:       logs.Truncated,
+			TruncatedReason: logs.TruncatedReason,
+		},
+	}
+}
+
 // applyDocker performs an operation on the container engine.
 //
 // The container identifier is checked again even though the panel already

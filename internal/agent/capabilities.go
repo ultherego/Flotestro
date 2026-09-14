@@ -1,10 +1,14 @@
 package agent
 
 import (
+	"os"
+
 	"github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
+	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/security"
+	"github.com/ultherego/flotestro/internal/modules/storage"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
 )
 
@@ -239,6 +243,11 @@ func DetectCapabilities() Capabilities {
 	lvm := exists("/usr/sbin/vgs") && exists("/usr/sbin/lvs")
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
+	// ufw holds the rules only when enabled; its configuration file says so
+	// without starting a process. The helper asks "ufw status" for the
+	// running answer.
+	ufw := exists(firewall.UFWPath)
+	ufwActive := ufw && ufwEnabled()
 	timedatectl := exists(hosttime.TimedatectlPath)
 	selinux := isDir(security.SELinuxDir) && exists(security.SetenforcePath)
 	audit := exists(security.AuditctlPath) && exists(security.AugenrulesPath)
@@ -422,24 +431,26 @@ func DetectCapabilities() Capabilities {
 			Version:   adapterVersion,
 			Available: lsblk,
 			Features: map[string]bool{
-				"lvm":  lvm,
-				"fsck": fsck,
-				"raid": exists("/proc/mdstat"),
+				"lvm":   lvm,
+				"fsck":  fsck,
+				"raid":  exists("/proc/mdstat"),
+				"smart": isExecutable(storage.SmartctlPath),
 			},
 			Reason: reason(lsblk, "this host has no lsblk binary"),
 		},
 		{
 			Name:      CapFirewall,
 			Version:   adapterVersion,
-			Available: nft || firewalld,
-			ReadOnly:  !nft && !firewalld,
+			Available: nft || firewalld || ufwActive,
+			ReadOnly:  !nft && !firewalld && !ufwActive,
 			Features: map[string]bool{
 				"nftables":  nft,
 				"firewalld": firewalld,
-				"write":     nft,
+				"ufw":       ufwActive,
+				"write":     nft || ufwActive,
 				"zones":     firewalld,
 			},
-			Reason: reason(nft || firewalld, "this host has neither nftables nor firewalld"),
+			Reason: firewallAdapterReason(nft, firewalld, ufw, ufwActive),
 		},
 		{
 			Name:      CapDNS,
@@ -529,6 +540,28 @@ func networkAdapterReason(read bool, adapter string) string {
 		return "this host has no iproute2 (ip) binary"
 	}
 	return network.ReadOnlyReason(adapter)
+}
+
+// firewallAdapterReason explains what the firewall module is missing. An
+// installed but inactive ufw holds nothing, so on a host without nft the
+// panel only reads - and says why.
+func firewallAdapterReason(nft, firewalld, ufw, ufwActive bool) string {
+	if nft || firewalld || ufwActive {
+		return ""
+	}
+	if ufw {
+		return "ufw is installed but inactive, and this host has no nftables; the panel only reads here"
+	}
+	return "this host has neither nftables, firewalld nor an active ufw"
+}
+
+// ufwEnabled reads the ENABLED flag of ufw's configuration file.
+func ufwEnabled() bool {
+	content, err := os.ReadFile(firewall.UFWConfigFile)
+	if err != nil {
+		return false
+	}
+	return firewall.UFWEnabled(string(content))
 }
 
 // resolverReason explains what the DNS module is missing.

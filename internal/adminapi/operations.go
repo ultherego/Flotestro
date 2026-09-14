@@ -122,8 +122,11 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	// A highest-risk operation requires fresh authentication: one that can
 	// cut off access to the host or wipe data must not go from an hour-old
 	// session.
+	// The risk of one order can be higher than the registry's level for the
+	// operation: a group list that puts an account into sudo is a critical
+	// change of access, and it asks for the same fresh authentication.
 	var stepUpProof map[string]any
-	if action.RequiresFreshAuth() {
+	if opspec.PayloadRequiresFreshAuth(action, payload) {
 		proof, ok := s.requireStepUp(w, r, principal, request.Reason,
 			string(action), "host", hostID)
 		if !ok {
@@ -134,8 +137,10 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 
 	// A destructive operation requires typing in the target name. A click is
 	// not a sufficient decision for a change that cannot be undone - and the
-	// host list tends to be long and alike.
-	if action.RequiresTargetConfirmation() && request.TargetConfirmation != host.Hostname {
+	// host list tends to be long and alike. An operation aimed at an account
+	// takes the account name: it is the thing that goes away.
+	if action.RequiresTargetConfirmation() &&
+		request.TargetConfirmation != opspec.ConfirmationTarget(action, payload, host.Hostname) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
 			Action: "job.create", TargetType: "host", TargetID: hostID,
@@ -145,7 +150,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			},
 		})
 		problem(w, http.StatusBadRequest, "target_confirmation_required",
-			"this operation is irreversible; repeat the hostname in target_confirmation")
+			"this operation is irreversible; repeat the name of its target in target_confirmation")
 		return
 	}
 

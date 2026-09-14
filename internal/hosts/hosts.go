@@ -416,6 +416,27 @@ func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reaso
 	return int(tag.RowsAffected()), nil
 }
 
+// RevokeSupersededCertificates revokes the certificates of a host older
+// than the one it has just presented. A host has one identity at a time:
+// once the new certificate has opened a session, the earlier ones - the
+// one replaced by a recovery, or the one renewed from - are keys that
+// nobody legitimate holds any more. The row of the presented certificate
+// is the reference, so an unknown fingerprint revokes nothing.
+func (s *Store) RevokeSupersededCertificates(ctx context.Context, hostID string,
+	fingerprint []byte, reason string) (int, error) {
+	const query = `
+		update agent_certificates set revoked_at = now(), revocation_reason = $3
+		where host_id = $1::uuid and revoked_at is null and not_after > now()
+		  and fingerprint_sha256 <> $2
+		  and created_at < (select created_at from agent_certificates
+		                    where fingerprint_sha256 = $2 and host_id = $1::uuid)`
+	tag, err := s.pool.Exec(ctx, query, hostID, fingerprint, reason)
+	if err != nil {
+		return 0, fmt.Errorf("revoking the superseded certificates: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
 // HasLiveCertificate says whether the host holds a certificate that is
 // neither revoked nor expired. A host without one cannot come back on its
 // own: its return starts with identity recovery.
@@ -1000,6 +1021,34 @@ func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, sourc
 		   and coalesce(management_address_source, '') <> 'manual'`
 	_, err := s.pool.Exec(ctx, query, hostID, address, source)
 	return err
+}
+
+// Rename records the name the host reports for itself. The hosts table
+// keeps the name from enrollment until the host says otherwise: the name
+// a host answers to is a fact of the host, not of the panel. The previous
+// name comes back so the change can be recorded; a report of the same name
+// changes nothing and returns changed false.
+func (s *Store) Rename(ctx context.Context, hostID, hostname string) (previous string, changed bool, err error) {
+	if hostname == "" {
+		return "", false, nil
+	}
+	const query = `
+		update hosts as h
+		   set hostname   = $2,
+		       updated_at = now()
+		  from hosts as prior
+		 where h.id = $1
+		   and prior.id = h.id
+		   and h.hostname <> $2
+		returning prior.hostname`
+	err = s.pool.QueryRow(ctx, query, hostID, hostname).Scan(&previous)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("renaming the host: %w", err)
+	}
+	return previous, true, nil
 }
 
 // AdoptCertificateIssuer fills in the issuer of certificates from before CA

@@ -57,19 +57,23 @@ type Fragment struct {
 
 // LocalAccount is an observation of an account on a host.
 type LocalAccount struct {
-	Name              string          `json:"name"`
-	UID               int64           `json:"uid"`
-	GID               int64           `json:"gid"`
-	Home              string          `json:"home,omitempty"`
-	Shell             string          `json:"shell,omitempty"`
-	Gecos             string          `json:"gecos,omitempty"`
-	Source            string          `json:"source"`
-	Groups            []string        `json:"groups"`
-	Locked            *bool           `json:"locked"`
-	PasswordSet       *bool           `json:"password_set"`
-	SSHKeys           json.RawMessage `json:"ssh_keys"`
-	UnavailableReason string          `json:"unavailable_reason,omitempty"`
-	ObservedAt        time.Time       `json:"observed_at"`
+	Name        string          `json:"name"`
+	UID         int64           `json:"uid"`
+	GID         int64           `json:"gid"`
+	Home        string          `json:"home,omitempty"`
+	Shell       string          `json:"shell,omitempty"`
+	Gecos       string          `json:"gecos,omitempty"`
+	Source      string          `json:"source"`
+	Groups      []string        `json:"groups"`
+	Locked      *bool           `json:"locked"`
+	PasswordSet *bool           `json:"password_set"`
+	SSHKeys     json.RawMessage `json:"ssh_keys"`
+	// ExpiresAt is the expiry date as YYYY-MM-DD from the shadow record.
+	// Empty means no expiry, or a record the agent did not read - the
+	// difference is in UnavailableReason.
+	ExpiresAt         string    `json:"expires_at,omitempty"`
+	UnavailableReason string    `json:"unavailable_reason,omitempty"`
+	ObservedAt        time.Time `json:"observed_at"`
 }
 
 // Revision describes a stored revision.
@@ -83,6 +87,23 @@ type Revision struct {
 	ObservedAt    time.Time       `json:"observed_at"`
 }
 
+// The bounds an agent cannot move. A report of an ordinary host is a few
+// hundred kilobytes and a lab Debian with every module on reports 2.4 MB;
+// anything beyond MaxPayloadBytes is not an inventory, whatever the
+// certificate says. The gateway refuses a message above 8 MiB before it
+// is even decoded, so the cap here is the one that names the reason. The history of a host is kept for the diff
+// of the last few reports, not as an archive, so the older revisions go
+// when a new one arrives: without the cap a host reporting a new revision
+// every cycle fills the database on its own.
+const (
+	MaxPayloadBytes     = 6 << 20
+	MaxRevisionsPerHost = 20
+)
+
+// ErrOversized means a report larger than MaxPayloadBytes. The caller
+// refuses it without writing anything.
+var ErrOversized = errors.New("the inventory report exceeds the size limit")
+
 type Store struct {
 	pool *pgxpool.Pool
 }
@@ -95,6 +116,10 @@ func NewStore(pool *pgxpool.Pool) *Store {
 // repeated report about the same revision does not create a new row but still
 // refreshes the observation mark of the host.
 func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored bool, err error) {
+	if len(report.RawJSON) > MaxPayloadBytes {
+		return false, fmt.Errorf("%w: %d bytes, the limit is %d", ErrOversized,
+			len(report.RawJSON), MaxPayloadBytes)
+	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -117,6 +142,15 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 		return false, fmt.Errorf("writing the inventory revision: %w", err)
 	default:
 		stored = true
+	}
+
+	// The older revisions go in the same transaction as the new one
+	// arrives: the cap holds at every commit rather than until the next
+	// sweep.
+	if stored {
+		if err := pruneRevisions(ctx, tx, hostID); err != nil {
+			return false, err
+		}
 	}
 
 	const updateHost = `
@@ -156,6 +190,24 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	return stored, nil
 }
 
+// pruneRevisions deletes the revisions of a host beyond the newest
+// MaxRevisionsPerHost. The current revision is always among the newest, so
+// the reference from the host row stays valid.
+func pruneRevisions(ctx context.Context, tx pgx.Tx, hostID string) error {
+	const query = `
+		delete from inventory_revisions
+		where host_id = $1
+		  and id not in (
+			select id from inventory_revisions
+			where host_id = $1
+			order by observed_at desc, created_at desc
+			limit $2)`
+	if _, err := tx.Exec(ctx, query, hostID, MaxRevisionsPerHost); err != nil {
+		return fmt.Errorf("pruning the inventory revisions: %w", err)
+	}
+	return nil
+}
+
 // replaceLocalAccounts swaps the observation of the accounts of a host. The
 // accounts removed on the host disappear from the panel, because the list in
 // the report is full rather than incremental.
@@ -190,8 +242,8 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 	const upsert = `
 		insert into host_local_accounts
 			(host_id, name, uid, gid, home, shell, gecos, source, groups,
-			 locked, password_set, ssh_keys, unavailable_reason, observed_at)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, nullif($13, ''), now())
+			 locked, password_set, ssh_keys, unavailable_reason, expires_at, observed_at)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, nullif($13, ''), nullif($14, ''), now())
 		on conflict (host_id, name) do update set
 			uid = excluded.uid, gid = excluded.gid, home = excluded.home,
 			shell = excluded.shell, gecos = excluded.gecos, source = excluded.source,
@@ -199,6 +251,7 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 			password_set = excluded.password_set,
 			ssh_keys = excluded.ssh_keys,
 			unavailable_reason = excluded.unavailable_reason,
+			expires_at = excluded.expires_at,
 			observed_at = now()`
 	keys := account.SSHKeys
 	if len(keys) == 0 {
@@ -210,7 +263,17 @@ func queueLocalAccount(batch *pgx.Batch, hostID string, account LocalAccount) {
 	}
 	batch.Queue(upsert, hostID, account.Name, account.UID, account.GID,
 		account.Home, account.Shell, account.Gecos, account.Source, groups,
-		account.Locked, account.PasswordSet, keys, account.UnavailableReason)
+		account.Locked, account.PasswordSet, keys, account.UnavailableReason, account.ExpiresAt)
+}
+
+// DeleteLocalAccount removes the observation of an account the host no
+// longer has. It closes the loop after a deletion the same way an upsert
+// closes it after a change: the full report that would drop the row comes
+// only later, and until then the panel would show an account that is gone.
+func (s *Store) DeleteLocalAccount(ctx context.Context, hostID, name string) error {
+	const query = `delete from host_local_accounts where host_id = $1 and name = $2`
+	_, err := s.pool.Exec(ctx, query, hostID, name)
+	return err
 }
 
 // UpsertLocalAccount writes the observation of a single account. It serves to
@@ -231,7 +294,7 @@ func (s *Store) LocalAccounts(ctx context.Context, hostID string) ([]LocalAccoun
 	const query = `
 		select name, uid, gid, coalesce(home, ''), coalesce(shell, ''),
 		       coalesce(gecos, ''), source, groups, locked, password_set, ssh_keys,
-		       coalesce(unavailable_reason, ''), observed_at
+		       coalesce(unavailable_reason, ''), coalesce(expires_at, ''), observed_at
 		from host_local_accounts
 		where host_id = $1
 		order by source, name`
@@ -247,7 +310,7 @@ func (s *Store) LocalAccounts(ctx context.Context, hostID string) ([]LocalAccoun
 		if err := rows.Scan(&account.Name, &account.UID, &account.GID, &account.Home,
 			&account.Shell, &account.Gecos, &account.Source, &account.Groups,
 			&account.Locked, &account.PasswordSet, &account.SSHKeys,
-			&account.UnavailableReason,
+			&account.UnavailableReason, &account.ExpiresAt,
 			&account.ObservedAt); err != nil {
 			return nil, err
 		}

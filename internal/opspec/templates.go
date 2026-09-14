@@ -50,6 +50,10 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 	case ActionLocalSSHKeysSet:
 		return Payload{LocalUser: &LocalUserPayload{Name: "example",
 			SSHKeys: []string{"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyMaterialReplaceMe000000 example@host"}}}, true
+	case ActionLocalUserGroupsSet:
+		return Payload{LocalUser: &LocalUserPayload{Name: "example", Groups: []string{"adm"}}}, true
+	case ActionLocalUserExpirySet:
+		return Payload{LocalUser: &LocalUserPayload{Name: "example", ExpiresAt: "2030-01-01"}}, true
 
 	case ActionPackageHoldSet:
 		return pkgs(true), true

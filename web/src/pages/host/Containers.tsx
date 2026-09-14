@@ -6,8 +6,8 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
-  Section, Summary as SummaryBar, Table, Widgets, useHost, useModule,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
+  ModulePage, Section, Summary as SummaryBar, Table, Widgets, useHost, useModule, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -98,6 +98,21 @@ type Event = {
   attributes?: Record<string, string>;
 };
 
+/** The tail of one container's log, as the job result carries it. */
+type LogsResult = {
+  kind?: string;
+  container_id?: string;
+  container_name?: string;
+  lines?: string[];
+  truncated?: boolean;
+  truncated_reason?: string;
+  unavailable_reason?: string;
+};
+
+/** The bounds of a container log read; the host refuses anything beyond them. */
+const LOG_LINES_MIN = 50;
+const LOG_LINES_MAX = 5000;
+
 type EventsResult = {
   kind?: string;
   events?: {
@@ -130,6 +145,7 @@ export function Containers() {
   const queryClient = useQueryClient();
   const [view, setView] = useState<View>("containers");
   const [pending, setPending] = useState<Pending | null>(null);
+  const [logsOf, setLogsOf] = useState<Container | null>(null);
   const [message, setMessage] = useState("");
   const summary = useModule<Summary>(host.id, "containers");
   const full = useModule<FullState>(host.id, "containers.full");
@@ -308,14 +324,18 @@ export function Containers() {
         </div>
 
         {view === "containers" && (
-          <ContainerTable
-            containers={lists?.containers}
-            read={read}
-            operation={containerOperation}
-            remove={(container) =>
-              setPending({ kind: "remove-container", id: container.id, name: container.name })
-            }
-          />
+          <>
+            <ContainerTable
+              containers={lists?.containers}
+              read={read}
+              operation={containerOperation}
+              logs={(container) => setLogsOf(logsOf?.id === container.id ? null : container)}
+              remove={(container) =>
+                setPending({ kind: "remove-container", id: container.id, name: container.name })
+              }
+            />
+            {logsOf && <ContainerLogs key={logsOf.id} container={logsOf} onClose={() => setLogsOf(null)} />}
+          </>
         )}
         {view === "images" && (
           <ImageTable
@@ -544,6 +564,109 @@ function Events() {
   );
 }
 
+/**
+ * The tail of one container's log.
+ *
+ * A read bounded by a line count and by the same byte limit as a log file:
+ * a container that writes in a loop must not hand the panel its whole
+ * history. The lines come back in the job result and stay there - the log
+ * is what the application said at one moment, not the state of the host.
+ * Stderr lines are marked in place, so the order of what the container
+ * wrote is kept.
+ */
+function ContainerLogs({ container, onClose }: { container: Container; onClose: () => void }) {
+  const t = useT();
+  const host = useHost();
+  const [lines, setLines] = useState(200);
+  const [since, setSince] = useState("");
+  const [timestamps, setTimestamps] = useState(false);
+  const read = useReadOperation<LogsResult>(host);
+
+  const result = read.attempt?.detail;
+  const output = result?.lines ?? [];
+  const refused = read.attempt && read.attempt.status !== "succeeded";
+  const bounded = Math.min(LOG_LINES_MAX, Math.max(LOG_LINES_MIN, Math.trunc(lines) || LOG_LINES_MIN));
+
+  return (
+    <Section
+      title={t("Log of {name}", { name: container.name })}
+      count={read.attempt ? output.length : undefined}
+      tools={<button className="secondary" onClick={onClose}>{t("Close")}</button>}
+      flush
+    >
+      <div className="hm-section-body">
+        <Form>
+          <Fields>
+            <Field label={t("Lines from the end")} help={t("Between {min} and {max}; the read is also cut at 1 MiB.", { min: LOG_LINES_MIN, max: LOG_LINES_MAX })} narrow>
+              <input
+                type="number"
+                min={LOG_LINES_MIN}
+                max={LOG_LINES_MAX}
+                value={lines}
+                onChange={(e) => setLines(Number(e.target.value))}
+              />
+            </Field>
+            <Field label={t("Since")} help={t("A duration such as 15m, 2h or 1d, or an RFC 3339 timestamp. Empty reads the whole tail.")}>
+              <input value={since} placeholder="15m" onChange={(e) => setSince(e.target.value)} />
+            </Field>
+            <div className="hm-field">
+              <span className="hm-field-label">{t("Timestamps")}</span>
+              <Check checked={timestamps} onChange={setTimestamps}>{t("Prefix every line with the engine's timestamp")}</Check>
+            </div>
+          </Fields>
+          <FormActions>
+            <button
+              onClick={() =>
+                read.order({
+                  action: "docker.container.logs",
+                  payload: {
+                    docker_logs: {
+                      container_id: container.id,
+                      lines: bounded,
+                      since: since.trim(),
+                      timestamps,
+                    },
+                  },
+                })
+              }
+              disabled={read.busy || host.connection_state !== "online"}
+            >
+              {read.busy ? t("Reading…") : t("Read log")}
+            </button>
+          </FormActions>
+          <Message text={read.message} error />
+        </Form>
+      </div>
+
+      {refused && (
+        <Message text={read.attempt?.message || read.attempt?.error_code || t("The host refused the read.")} error />
+      )}
+      {result?.unavailable_reason && (
+        <Empty>{t("The container engine did not answer: {reason}", { reason: result.unavailable_reason })}</Empty>
+      )}
+
+      {!read.ordered ? (
+        <Empty>{t("The log is read on request. Pick the bounds and read it.")}</Empty>
+      ) : read.attempt && !refused && !result?.unavailable_reason ? (
+        output.length === 0 ? (
+          <Empty>{t("The container wrote nothing in that range.")}</Empty>
+        ) : (
+          <div className="hm-section-body">
+            <pre className="hm-log">{output.join("\n")}</pre>
+          </div>
+        )
+      ) : null}
+
+      {/* A cut-off log without this sentence would look complete. */}
+      {result?.truncated && (
+        <Foot>
+          <span>{t("Truncated: {reason}. Narrow the window or the line count.", { reason: result.truncated_reason || "" })}</span>
+        </Foot>
+      )}
+    </Section>
+  );
+}
+
 type Translate = (text: string, params?: Record<string, string | number>) => string;
 
 function removalLabel(t: Translate, target: Pending): string {
@@ -590,11 +713,13 @@ function ContainerTable({
   containers,
   read,
   operation,
+  logs,
   remove,
 }: {
   containers?: Container[];
   read: boolean;
   operation: (action: string, container: Container) => void;
+  logs: (container: Container) => void;
   remove: (container: Container) => void;
 }) {
   const t = useT();
@@ -654,6 +779,9 @@ function ContainerTable({
                 ) : (
                   <button onClick={() => operation("docker.container.start", container)}>{t("Start")}</button>
                 )}
+                {/* The log of a stopped container is still there: reading
+                    it is often the reason the container is looked at. */}
+                <button className="secondary" onClick={() => logs(container)}>{t("Logs")}</button>
                 {/* Removal is irreversible, so it does not go straight from
                     the click - it opens the target confirmation. */}
                 <button className="hm-danger" onClick={() => remove(container)}>{t("Remove")}</button>

@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -410,6 +411,12 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		if len(raw) == 0 {
 			raw = []byte("{}")
 		}
+		// The size is checked before the JSON: validating two megabytes
+		// only to refuse them is work the host should not be able to order.
+		if len(raw) > inventory.MaxPayloadBytes {
+			s.refuseInventory(ctx, hostID, report.GetRevision(), len(raw))
+			return nil
+		}
 		if !json.Valid(raw) {
 			return fmt.Errorf("the inventory is not valid JSON")
 		}
@@ -433,6 +440,10 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			LocalAccounts: localAccountsFromReport(report),
 			Fragments:     fragmentsFromReport(report),
 		})
+		if errors.Is(err, inventory.ErrOversized) {
+			s.refuseInventory(ctx, hostID, report.GetRevision(), len(raw))
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -440,6 +451,7 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			s.log.Info("a new inventory revision",
 				"host_id", hostID, "revision", report.GetRevision(), "full", report.GetFull())
 		}
+		s.followHostname(ctx, hostID, report)
 		return nil
 
 	case *agentv1.AgentMessage_MetricsSample:
@@ -884,6 +896,17 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 				"host_id", hostID, "account", user.LocalUser.GetName(), "err", err)
 		}
 	}
+	// A deleted account has no state to read back: the row goes, so the
+	// panel does not show an account the host no longer has until the next
+	// full report.
+	if user, ok := result.GetDetail().(*agentv1.TaskResult_LocalUser); ok &&
+		state == jobs.StateSucceeded && action == string(opspec.ActionLocalUserDelete) &&
+		user.LocalUser.GetAccount() == nil && user.LocalUser.GetName() != "" {
+		if err := s.inventory.DeleteLocalAccount(ctx, hostID, user.LocalUser.GetName()); err != nil {
+			s.log.Error("the deleted account was not removed from the inventory",
+				"host_id", hostID, "account", user.LocalUser.GetName(), "err", err)
+		}
+	}
 
 	// The state of the package database is updated by every result that knows
 	// it: a transaction, a plan and a repair.
@@ -973,6 +996,57 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"truncated_reason":   dockerEvents.GetTruncatedReason(),
 			"unavailable_reason": dockerEvents.GetUnavailableReason(),
 		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// The tail of a container log is the answer to a question from one
+	// moment, like the event log: it stays in the result of the job. An
+	// unavailable engine carries no lines, and the result is to come into
+	// being anyway - it is what tells the operator why they see nothing.
+	if logs := result.GetDockerLogsResult(); logs != nil &&
+		(logs.GetContainerId() != "" || logs.GetUnavailableReason() != "") {
+		lines := logs.GetLines()
+		if lines == nil {
+			lines = []string{}
+		}
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "docker_logs",
+			"container_id":       logs.GetContainerId(),
+			"container_name":     logs.GetContainerName(),
+			"lines":              lines,
+			"truncated":          logs.GetTruncated(),
+			"truncated_reason":   logs.GetTruncatedReason(),
+			"unavailable_reason": logs.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// A rename carries the preflight checks whether it happened or not: the
+	// operator is to see what was checked, including a refused one.
+	if rename := result.GetHostnameResult(); rename != nil &&
+		(rename.GetCurrent() != "" || len(rename.GetChecks()) > 0) {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "hostname",
+			"previous":           rename.GetPrevious(),
+			"current":            rename.GetCurrent(),
+			"changed":            rename.GetChanged(),
+			"hosts_file_updated": rename.GetHostsFileUpdated(),
+			"checks":             preflightChecksJSON(rename.GetChecks()),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
+	// A SMART report is a reading from one moment, and a device the tool
+	// cannot read reports unsupported with the tool's own words: the panel
+	// shows that reason, never an invented healthy disk.
+	if smart := result.GetSmartResult(); smart != nil && smart.GetDevice() != "" {
+		encoded, err := json.Marshal(smartResultJSON(smart))
 		if err == nil {
 			return encoded
 		}
@@ -1669,6 +1743,31 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
 
+	// The certificate that opened this session is the identity of the host
+	// from now on. The older ones still valid - the one a recovery replaced,
+	// the one a renewal came from - are revoked here rather than at the
+	// issue: until the new key has proven it works, cutting the old one off
+	// could leave a host with no way back. A relay attests the host with a
+	// certificate of its own, so only a direct session settles this.
+	if relayID == "" {
+		revoked, err := s.hosts.RevokeSupersededCertificates(ctx, session.HostID, fingerprint, "replaced")
+		if err != nil {
+			s.log.Error("the superseded certificates were not revoked",
+				"host_id", session.HostID, "err", err)
+		} else if revoked > 0 {
+			s.log.Info("the older certificates of the host were revoked",
+				"host_id", session.HostID, "revoked", revoked)
+			s.audit.Record(ctx, audit.Event{
+				ActorType: audit.ActorAgent, ActorID: session.HostID,
+				Action: "host.certificate.replaced", TargetType: "host", TargetID: session.HostID,
+				Outcome: audit.OutcomeSuccess,
+				Detail: map[string]any{
+					"revoked": revoked, "reason": "replaced", "session_id": session.ID,
+				},
+			})
+		}
+	}
+
 	// The older sessions of this host are closed in the database at once: a row
 	// left open on a gateway that no longer serves the host inflates every
 	// measurement that counts connections and has the scheduler send jobs into
@@ -1783,6 +1882,24 @@ func (s *AgentService) closeSession(ctx context.Context, session *Session, hostI
 		"host_id", hostID, "session_id", session.ID, "sessions", s.registry.Count())
 }
 
+// refuseInventory records a report the panel would not take. The session
+// goes on: the host is not at fault for the size of what it saw, and the
+// refusal is what the operator needs to see on the trail.
+func (s *AgentService) refuseInventory(ctx context.Context, hostID, revision string, size int) {
+	s.log.Warn("an inventory report was refused for its size",
+		"host_id", hostID, "revision", revision, "size_bytes", size,
+		"limit_bytes", inventory.MaxPayloadBytes)
+	s.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorAgent, ActorID: hostID,
+		Action: "inventory.oversized", TargetType: "host", TargetID: hostID,
+		Outcome: audit.OutcomeDenied,
+		Detail: map[string]any{
+			"reason": "payload_too_large", "revision": revision,
+			"size_bytes": size, "limit_bytes": inventory.MaxPayloadBytes,
+		},
+	})
+}
+
 func (s *AgentService) denied(ctx context.Context, hostID, reason string) {
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: hostID,
@@ -1863,6 +1980,7 @@ func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalA
 			Locked:            account.Locked,
 			PasswordSet:       account.PasswordSet,
 			SSHKeys:           keys,
+			ExpiresAt:         account.GetExpiresAt(),
 			UnavailableReason: account.GetUnavailableReason(),
 		})
 	}
@@ -2112,6 +2230,104 @@ func packageDatabaseState(result *agentv1.TaskResult) (broken bool, known bool) 
 		return len(detail.PackageRepair.GetStillBlocked()) > 0, true
 	}
 	return false, false
+}
+
+// followHostname keeps the name of the host in step with what the host
+// reports for itself.
+//
+// The panel knows the host by identifier; the name is a fact of the host,
+// read from the system module of the inventory, and it changes when the
+// host is renamed - through the panel or by hand. The change is recorded as
+// its own audit event, so a host that shows up under a new name has a trail
+// leading back to the old one.
+func (s *AgentService) followHostname(ctx context.Context, hostID string, report *agentv1.InventoryReport) {
+	hostname := reportedHostname(report)
+	if hostname == "" {
+		return
+	}
+	previous, changed, err := s.hosts.Rename(ctx, hostID, hostname)
+	if err != nil {
+		s.log.Error("the hostname was not written after the inventory", "host_id", hostID, "err", err)
+		return
+	}
+	if !changed {
+		return
+	}
+	s.log.Info("the host reports a new name", "host_id", hostID, "previous", previous, "current", hostname)
+	s.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorAgent, ActorID: hostID,
+		Action: "host.renamed", TargetType: "host", TargetID: hostID,
+		Outcome: audit.OutcomeSuccess,
+		Detail:  map[string]any{"previous": previous, "current": hostname, "revision": report.GetRevision()},
+	})
+}
+
+// reportedHostname reads the name from the system module of a report. An
+// agent from before the split carries it at the top of the raw report; a
+// report without either says nothing about the name and changes nothing.
+func reportedHostname(report *agentv1.InventoryReport) string {
+	var facts struct {
+		Hostname string `json:"hostname"`
+	}
+	for _, fragment := range report.GetFragments() {
+		if fragment.GetModule() != "system" || fragment.GetUnavailableReason() != "" {
+			continue
+		}
+		if err := json.Unmarshal(fragment.GetPayload(), &facts); err == nil {
+			return strings.TrimSpace(facts.Hostname)
+		}
+	}
+	if err := json.Unmarshal(report.GetRawJson(), &facts); err == nil {
+		return strings.TrimSpace(facts.Hostname)
+	}
+	return ""
+}
+
+// smartResultJSON turns a SMART report into the form the interface reads.
+// Every counter is optional: a device that does not report its temperature
+// has none in the result, rather than a zero.
+func smartResultJSON(smart *agentv1.SmartResult) map[string]any {
+	attributes := make([]map[string]any, 0, len(smart.GetAttributes()))
+	for _, attribute := range smart.GetAttributes() {
+		attributes = append(attributes, map[string]any{
+			"id":         attribute.GetId(),
+			"name":       attribute.GetName(),
+			"value":      attribute.GetValue(),
+			"worst":      attribute.GetWorst(),
+			"threshold":  attribute.GetThreshold(),
+			"raw":        attribute.GetRaw(),
+			"raw_string": attribute.GetRawString(),
+			"failing":    attribute.GetFailing(),
+		})
+	}
+	encoded := map[string]any{
+		"kind":               "smart",
+		"device":             smart.GetDevice(),
+		"model":              smart.GetModel(),
+		"serial":             smart.GetSerial(),
+		"health":             smart.GetHealth(),
+		"health_reason":      smart.GetHealthReason(),
+		"attributes":         attributes,
+		"unsupported":        smart.GetUnsupported(),
+		"unsupported_reason": smart.GetUnsupportedReason(),
+		"output":             smart.GetOutput(),
+	}
+	if smart.TemperatureC != nil {
+		encoded["temperature_c"] = smart.GetTemperatureC()
+	}
+	if smart.PowerOnHours != nil {
+		encoded["power_on_hours"] = smart.GetPowerOnHours()
+	}
+	if smart.ReallocatedSectors != nil {
+		encoded["reallocated_sectors"] = smart.GetReallocatedSectors()
+	}
+	if smart.PendingSectors != nil {
+		encoded["pending_sectors"] = smart.GetPendingSectors()
+	}
+	if smart.WearPercent != nil {
+		encoded["wear_percent"] = smart.GetWearPercent()
+	}
+	return encoded
 }
 
 // fragmentsFromReport reads the modules of a report. An agent from before the

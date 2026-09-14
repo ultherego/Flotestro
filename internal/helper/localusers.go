@@ -3,13 +3,13 @@ package helper
 import (
 	"bufio"
 	"context"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
-	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
@@ -24,8 +24,8 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 	result := &helperv1.LocalAccountsResult{}
 	var problems []string
 
-	// The key files are read with ssh-keygen, one account after another; the
-	// limit of the order binds the whole read.
+	// The key files are read one account after another; the limit of the
+	// order binds the whole read.
 	ctx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
@@ -43,8 +43,14 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 			locked, password := state.locked, state.passwordSet
 			detail.Locked = &locked
 			detail.PasswordSet = &password
+			detail.ExpiresAt = state.expiresAt
 		}
-		keys, keyErr := readAuthorizedKeys(ctx, name)
+		if ctx.Err() != nil {
+			problems = append(problems, "the read ran out of time")
+			result.Accounts = append(result.Accounts, detail)
+			break
+		}
+		keys, keyErr := readAuthorizedKeys(name)
 		if keyErr != nil {
 			problems = append(problems, name+": "+keyErr.Error())
 		}
@@ -68,6 +74,9 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 type shadowState struct {
 	locked      bool
 	passwordSet bool
+	// expiresAt is the account expiry date as YYYY-MM-DD; empty means no
+	// expiry.
+	expiresAt string
 }
 
 // readShadowStates reads the password state of the accounts. The password
@@ -102,51 +111,94 @@ func parseShadow(path string) (map[string]shadowState, error) {
 		state := shadowState{locked: strings.HasPrefix(hash, "!")}
 		remaining := strings.TrimLeft(hash, "!")
 		state.passwordSet = remaining != "" && remaining != "*"
+		// The eighth field is the expiry as days since the epoch. Empty
+		// means no expiry; the panel shows a date, not a day count.
+		if len(fields) >= 8 {
+			state.expiresAt = expiryDate(fields[7])
+		}
 		states[fields[0]] = state
 	}
 	return states, scanner.Err()
 }
 
+// expiryDate turns the shadow day count into a calendar date. A value that
+// is not a day count - empty, negative, garbage - means no expiry.
+func expiryDate(field string) string {
+	days, err := strconv.ParseInt(strings.TrimSpace(field), 10, 64)
+	if err != nil || days < 0 {
+		return ""
+	}
+	return time.Unix(0, 0).UTC().AddDate(0, 0, int(days)).Format("2006-01-02")
+}
+
 // readAuthorizedKeys returns the fingerprints of the public keys of an
 // account. The key content itself is not returned: the fingerprint is enough
 // to identify it.
-func readAuthorizedKeys(ctx context.Context, name string) ([]*helperv1.LocalSSHKey, error) {
+//
+// The file is read without following a link anywhere on the way and parsed
+// here rather than handed to ssh-keygen by path: the helper runs as root,
+// and a link planted as ~/.ssh would otherwise make it read somebody else's
+// file.
+func readAuthorizedKeys(name string) ([]*helperv1.LocalSSHKey, error) {
 	home, err := homeDirectory(name)
 	if err != nil {
 		return nil, err
 	}
-	path := filepath.Join(home, ".ssh", "authorized_keys")
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			// A missing file is a normal state, not an error.
-			return nil, nil
-		}
+	content, err := readAuthorizedKeysFile(home)
+	if err != nil {
 		// A file the helper cannot see is something other than an account
 		// without keys. Silently returning an empty list would tell the panel
 		// that the account has no access, while the state simply could not be
 		// determined.
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, err
 	}
-
-	stdout, _, err := runIdentityTool(ctx, 15*time.Second, "ssh-keygen", "-l", "-f", path)
-	if err != nil {
-		return nil, fmt.Errorf("reading the keys: %v", err)
+	if content == nil {
+		// A missing file is a normal state, not an error.
+		return nil, nil
 	}
+	return parseAuthorizedKeys(content), nil
+}
 
+// parseAuthorizedKeys turns the lines of a key file into fingerprints.
+// Lines that are not a key - comments, options without material, damaged
+// entries - are skipped: they grant no access, so they are not reported as
+// one.
+func parseAuthorizedKeys(content []byte) []*helperv1.LocalSSHKey {
 	var keys []*helperv1.LocalSSHKey
-	for _, line := range strings.Split(stdout, "\n") {
-		// Format: <bits> <fingerprint> <comment> (<type>)
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 3 {
-			continue
+	rest := content
+	for len(rest) > 0 {
+		key, comment, _, remaining, err := ssh.ParseAuthorizedKey(rest)
+		if err != nil {
+			break
 		}
-		keyType := strings.Trim(fields[len(fields)-1], "()")
-		comment := strings.Join(fields[2:len(fields)-1], " ")
+		rest = remaining
 		keys = append(keys, &helperv1.LocalSSHKey{
-			Fingerprint: fields[1], Type: keyType, Comment: comment,
+			Fingerprint: ssh.FingerprintSHA256(key),
+			Type:        keyTypeName(key.Type()),
+			Comment:     comment,
 		})
 	}
-	return keys, nil
+	return keys
+}
+
+// keyTypeName names the key type the way ssh-keygen -l does, which is the
+// way the panel has shown it since the read went through the tool.
+func keyTypeName(algorithm string) string {
+	switch algorithm {
+	case ssh.KeyAlgoED25519:
+		return "ED25519"
+	case ssh.KeyAlgoRSA:
+		return "RSA"
+	case ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521:
+		return "ECDSA"
+	case ssh.KeyAlgoSKED25519:
+		return "ED25519-SK"
+	case ssh.KeyAlgoSKECDSA256:
+		return "ECDSA-SK"
+	case ssh.KeyAlgoDSA:
+		return "DSA"
+	}
+	return algorithm
 }
 
 func homeDirectory(name string) (string, error) {

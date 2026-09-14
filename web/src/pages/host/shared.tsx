@@ -340,3 +340,61 @@ export function RequestOperation({
     </Section>
   );
 }
+
+/** One attempt of a job as a result view reads it: the status, the refusal and the typed detail. */
+export type ReadAttempt<T> = { status?: string; error_code?: string; message?: string; detail?: T };
+
+/**
+ * A read ordered through a job.
+ *
+ * The order goes out, the screen polls the attempts until the host answers,
+ * and the last attempt is the result. The hook keeps the job identifier and
+ * the error of the order; the page decides what the detail looks like. A
+ * refusal is a result too: the attempt carries the reason, and the page is
+ * to show it rather than an empty list.
+ */
+export function useReadOperation<T>(host: Host) {
+  const queryClient = useQueryClient();
+  const [job, setJob] = useState("");
+  const [message, setMessage] = useState("");
+
+  const order = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (created) => {
+      setMessage("");
+      setJob(created.id);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const attempts = useQuery({
+    queryKey: ["job-attempts", job],
+    queryFn: () => api.get<{ items: ReadAttempt<T>[] }>(`/api/v1/jobs/${job}/attempts`),
+    enabled: job !== "",
+    refetchInterval: (query) => {
+      const items = (query.state.data as { items?: { status?: string }[] } | undefined)?.items;
+      return items?.[items.length - 1]?.status ? false : 2000;
+    },
+  });
+
+  const items = attempts.data?.items ?? [];
+  const last = items.length > 0 ? items[items.length - 1] : undefined;
+  return {
+    /** Places the order; the body is the operation request as the API takes it. */
+    order: order.mutate,
+    /** Whether any order was placed since the last reset. */
+    ordered: job !== "",
+    /** Whether an answer is still on its way. */
+    busy: order.isPending || (job !== "" && !last?.status),
+    /** The error of placing the order, empty when it went through. */
+    message,
+    /** The last attempt once the host answered; undefined until then. */
+    attempt: last?.status ? last : undefined,
+    reset: () => {
+      setJob("");
+      setMessage("");
+    },
+  };
+}

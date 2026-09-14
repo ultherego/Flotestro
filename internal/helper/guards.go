@@ -44,6 +44,9 @@ const (
 	// The MAC mode and the audit rules change the policy every next change
 	// has to reckon with.
 	GuardSecurity = "security"
+	// The whole host: a rename lands on everything, so nothing else lands
+	// on the host at the same time. The name is the agent's host claim.
+	GuardHost = "host"
 )
 
 // guards serialize the mutations on the resources of the host.

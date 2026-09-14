@@ -353,7 +353,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
-		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
+		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet,
+		opspec.ActionLocalUserGroupsSet, opspec.ActionLocalUserExpirySet,
+		opspec.ActionLocalUserDelete:
 		envelope.Action = &agentv1.TaskEnvelope_LocalUserAction{
 			LocalUserAction: &agentv1.LocalUserAction{
 				Operation:  localUserOperations[action],
@@ -363,6 +365,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				Groups:     payload.LocalUser.Groups,
 				SshKeys:    payload.LocalUser.SSHKeys,
 				CreateHome: payload.LocalUser.CreateHome,
+				ExpiresAt:  payload.LocalUser.ExpiresAt,
+				RemoveHome: payload.LocalUser.RemoveHome,
 			},
 		}
 
@@ -396,6 +400,26 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			events.MaxEvents = uint32(payload.DockerEvents.MaxEvents)
 		}
 		envelope.Action = &agentv1.TaskEnvelope_ReadDockerEvents{ReadDockerEvents: events}
+
+	case opspec.ActionDockerLogs:
+		// Every field travels, the zero ones too: the plan hash is computed
+		// from the whole payload on both sides.
+		envelope.Action = &agentv1.TaskEnvelope_DockerLogs{
+			DockerLogs: &agentv1.DockerLogs{
+				ContainerId: payload.DockerLogs.ContainerID,
+				Lines:       payload.DockerLogs.Lines,
+				Since:       payload.DockerLogs.Since,
+				Timestamps:  payload.DockerLogs.Timestamps,
+			},
+		}
+
+	case opspec.ActionSystemHostnameSet:
+		envelope.Action = &agentv1.TaskEnvelope_HostnameSet{
+			HostnameSet: &agentv1.HostnameSet{
+				Hostname: payload.Hostname.Hostname,
+				Pretty:   payload.Hostname.Pretty,
+			},
+		}
 
 	case opspec.ActionInventoryRefresh:
 		// The scope is optional: no payload means the whole inventory.
@@ -714,9 +738,12 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
-		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe:
+		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe,
+		opspec.ActionStorageSmartRead:
 		operation := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
 		switch action {
+		case opspec.ActionStorageSmartRead:
+			operation = agentv1.StorageAction_OPERATION_SMART_READ
 		case opspec.ActionStoragePlan:
 			// A plan without a target is a read of the topology (the host
 			// tab); a plan with a target computes the difference for one
@@ -1006,6 +1033,10 @@ var localUserOperations = map[opspec.ActionType]agentv1.LocalUserAction_Operatio
 	opspec.ActionLocalUserLock:   agentv1.LocalUserAction_OPERATION_LOCK,
 	opspec.ActionLocalUserUnlock: agentv1.LocalUserAction_OPERATION_UNLOCK,
 	opspec.ActionLocalSSHKeysSet: agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS,
+	// The groups, the expiry date and the deletion of an account.
+	opspec.ActionLocalUserGroupsSet: agentv1.LocalUserAction_OPERATION_SET_GROUPS,
+	opspec.ActionLocalUserExpirySet: agentv1.LocalUserAction_OPERATION_SET_EXPIRY,
+	opspec.ActionLocalUserDelete:    agentv1.LocalUserAction_OPERATION_DELETE,
 }
 
 func approvalsOf(job jobs.Job) []string {

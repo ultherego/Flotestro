@@ -84,6 +84,9 @@ type TaskExecutor struct {
 	// that came out of it. Nil means there is no session - and without one there
 	// is nowhere to send a new picture, so there is nothing to refresh either.
 	inventoryRefresh func(ctx context.Context, modules []string) Refresh
+	// hostID is what the agent's certificate names. Empty means the executor
+	// was not told, and the rename preflight says so rather than guessing.
+	hostID string
 }
 
 // SecretFetch reaches for the value of the secret named in the task.
@@ -202,6 +205,12 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.readDocker(ctx, task)
 	case opspec.ActionDockerEvents:
 		return e.readDockerEvents(ctx, task)
+	case opspec.ActionDockerLogs:
+		return e.readDockerLogs(ctx, task, payload.DockerLogs)
+	case opspec.ActionSystemHostnameSet:
+		return e.setHostname(ctx, task, payload.Hostname)
+	case opspec.ActionStorageSmartRead:
+		return e.readSmart(ctx, task, payload.Storage)
 	case opspec.ActionInventoryRefresh:
 		return e.refreshInventory(ctx, task)
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
@@ -270,7 +279,9 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionProcessSignal:
 		return e.signalProcess(ctx, task, payload.ProcessSignal)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
-		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet:
+		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet,
+		opspec.ActionLocalUserGroupsSet, opspec.ActionLocalUserExpirySet,
+		opspec.ActionLocalUserDelete:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
 	case opspec.ActionDomainPreflight:
 		return e.enrollDomain(ctx, task, payload.DomainEnroll, true)
@@ -579,6 +590,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				Groups:     request.GetGroups(),
 				SSHKeys:    request.GetSshKeys(),
 				CreateHome: request.GetCreateHome(),
+				ExpiresAt:  request.GetExpiresAt(),
+				RemoveHome: request.GetRemoveHome(),
 			},
 		}, nil
 
@@ -593,6 +606,26 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				FollowSeconds: int(events.GetFollowSeconds()),
 				Types:         events.GetTypes(),
 				MaxEvents:     int(events.GetMaxEvents()),
+			},
+		}, nil
+
+	case *agentv1.TaskEnvelope_DockerLogs:
+		logs := action.DockerLogs
+		return opspec.ActionDockerLogs, opspec.Payload{
+			DockerLogs: &opspec.DockerLogsPayload{
+				ContainerID: logs.GetContainerId(),
+				Lines:       logs.GetLines(),
+				Since:       logs.GetSince(),
+				Timestamps:  logs.GetTimestamps(),
+			},
+		}, nil
+
+	case *agentv1.TaskEnvelope_HostnameSet:
+		rename := action.HostnameSet
+		return opspec.ActionSystemHostnameSet, opspec.Payload{
+			Hostname: &opspec.HostnamePayload{
+				Hostname: rename.GetHostname(),
+				Pretty:   rename.GetPretty(),
 			},
 		}, nil
 
@@ -898,6 +931,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionFilesystemCreate
 		case agentv1.StorageAction_OPERATION_DISK_WIPE:
 			kind = opspec.ActionDiskWipe
+		case agentv1.StorageAction_OPERATION_SMART_READ:
+			kind = opspec.ActionStorageSmartRead
 		}
 		return kind, opspec.Payload{Storage: &opspec.StoragePayload{
 			Source:            przestrzen.GetSource(),
@@ -1132,6 +1167,9 @@ var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
 	agentv1.LocalUserAction_OPERATION_LOCK:         opspec.ActionLocalUserLock,
 	agentv1.LocalUserAction_OPERATION_UNLOCK:       opspec.ActionLocalUserUnlock,
 	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS: opspec.ActionLocalSSHKeysSet,
+	agentv1.LocalUserAction_OPERATION_SET_GROUPS:   opspec.ActionLocalUserGroupsSet,
+	agentv1.LocalUserAction_OPERATION_SET_EXPIRY:   opspec.ActionLocalUserExpirySet,
+	agentv1.LocalUserAction_OPERATION_DELETE:       opspec.ActionLocalUserDelete,
 }
 
 // joinNames assembles the names into a readable list for the message shown to

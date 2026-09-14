@@ -33,6 +33,10 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionLocalUserLock:   CampaignSamePayload,
 	ActionLocalUserUnlock: CampaignSamePayload,
 	ActionLocalSSHKeysSet: CampaignSamePayload,
+	// A group list and an expiry date are declarations about a name; a
+	// deletion has one target the operator types by hand.
+	ActionLocalUserGroupsSet: CampaignSamePayload,
+	ActionLocalUserExpirySet: CampaignSamePayload,
 
 	// A package version hold is a declaration about a name, not about a diff.
 	ActionPackageHoldSet: CampaignSamePayload,

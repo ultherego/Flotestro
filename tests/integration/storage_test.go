@@ -302,3 +302,103 @@ func TestDestructiveOperationRequiresAnIdentity(t *testing.T) {
 				"device": "/dev/sdb", "expected_size_bytes": 2147483648}}},
 		nil, http.StatusBadRequest)
 }
+
+// smartView mirrors the typed result of a SMART read. The counters are
+// pointers: a device that did not report one has none, not a zero.
+type smartView struct {
+	Kind               string  `json:"kind"`
+	Device             string  `json:"device"`
+	Health             string  `json:"health"`
+	HealthReason       string  `json:"health_reason"`
+	TemperatureC       *int32  `json:"temperature_c"`
+	PowerOnHours       *uint64 `json:"power_on_hours"`
+	ReallocatedSectors *uint64 `json:"reallocated_sectors"`
+	PendingSectors     *uint64 `json:"pending_sectors"`
+	Attributes         []struct {
+		ID   uint32 `json:"id"`
+		Name string `json:"name"`
+	} `json:"attributes"`
+	Unsupported       bool   `json:"unsupported"`
+	UnsupportedReason string `json:"unsupported_reason"`
+}
+
+// TestSmartReportsHonestly checks the SMART read of the first disk: the
+// host either reports values it read from the device, or says the device
+// is unsupported and why. A virtual disk in the lab is the usual case of
+// the latter; what it must never do is report a healthy disk at zero
+// degrees with zero hours because the tool had nothing to say.
+func TestSmartReportsHonestly(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	if !hostHasFeature(host, "storage", "smart") {
+		t.Skip("the host has no smartctl; the SMART read is not offered there")
+	}
+
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "storage.smart.read", "reason": storageReason,
+		"payload": map[string]any{"storage": map[string]any{"device": "/dev/sda"}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("the SMART read ended in state %s: %s", job.State, lastMessage(attempts))
+	}
+
+	var response struct {
+		Items []struct {
+			Detail smartView `json:"detail"`
+		} `json:"items"`
+	}
+	h.do(http.MethodGet, "/api/v1/jobs/"+job.ID+"/attempts", nil, &response, http.StatusOK)
+	if len(response.Items) == 0 {
+		t.Fatal("job without attempts")
+	}
+	report := response.Items[len(response.Items)-1].Detail
+	if report.Kind != "smart" || report.Device != "/dev/sda" {
+		t.Fatalf("result = %+v, expected a SMART report of /dev/sda", report)
+	}
+
+	if report.Unsupported {
+		// Honest ignorance: a reason, and no number next to it.
+		if report.UnsupportedReason == "" {
+			t.Error("the device is unsupported without a reason")
+		}
+		if report.TemperatureC != nil || report.PowerOnHours != nil ||
+			report.ReallocatedSectors != nil || report.PendingSectors != nil {
+			t.Errorf("an unsupported device reports counters: %+v", report)
+		}
+		return
+	}
+
+	switch report.Health {
+	case "passed", "failed":
+	case "unknown":
+		if report.HealthReason == "" {
+			t.Error("the health is unknown without a reason")
+		}
+	default:
+		t.Errorf("health = %q, expected passed, failed or unknown", report.Health)
+	}
+	// A device the tool vouched for has read something: hours, a
+	// temperature or attributes. All of them absent would mean the tool
+	// said nothing and the verdict was invented.
+	if report.PowerOnHours == nil && report.TemperatureC == nil && len(report.Attributes) == 0 {
+		t.Errorf("a supported device reports no value at all: %+v", report)
+	}
+
+	// A device outside /dev does not reach the host.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
+		"action": "storage.smart.read", "reason": storageReason,
+		"payload": map[string]any{"storage": map[string]any{"device": "/etc/passwd"}},
+	}, nil, http.StatusBadRequest)
+}
+
+// hostHasFeature says whether the adapter registry of a host lists a
+// feature of a capability as present.
+func hostHasFeature(host hostView, capability, feature string) bool {
+	for _, adapter := range host.Capabilities {
+		if adapter.Name == capability {
+			return adapter.Available && adapter.Features[feature]
+		}
+	}
+	return false
+}
