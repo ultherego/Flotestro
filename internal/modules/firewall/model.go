@@ -107,6 +107,10 @@ type Snapshot struct {
 	Chains []Chain `json:"chains,omitempty"`
 	Rules  []Rule  `json:"rules,omitempty"`
 	Zones  []Zone  `json:"zones,omitempty"`
+	// UFW is the header of "ufw status" on a host where ufw holds the
+	// rules: the default policy is what a packet meets when no rule
+	// matches, and no rule list says that.
+	UFW *UFWStatus `json:"ufw,omitempty"`
 	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`
 	ReadOnlyReason string    `json:"read_only_reason,omitempty"`

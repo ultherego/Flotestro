@@ -40,6 +40,16 @@ type Plan struct {
 	// meant to see before approving.
 	Refusal string `json:"refusal,omitempty"`
 
+	// Adapter names the mechanism the change goes through on this host:
+	// networkmanager, nmstate or netplan. The same difference written for
+	// another mechanism is another change, so it is part of the fingerprint.
+	Adapter string `json:"adapter,omitempty"`
+	// Document is the text the adapter will apply: the nmstate document of
+	// the touched interface or the panel's netplan file after the merge.
+	// NetworkManager takes arguments, not a document, so it stays empty
+	// there. The operator sees exactly what will land on the host.
+	Document string `json:"document,omitempty"`
+
 	PlanHash string `json:"plan_hash"`
 }
 
@@ -85,8 +95,11 @@ func ComputeRoutes(iface string, current Profile, routes []string) Plan {
 func ComputeProfile(iface string, current Profile, method string, addresses []string,
 	gateway string, dns []string) Plan {
 	plan := newPlan(iface, current, PlanProfile)
+	// The type travels with the profile: the mechanisms that apply a
+	// document name the interface by it, also in the document that goes the
+	// other way on rollback.
 	desired := Profile{
-		Connection: current.Connection, Interface: current.Interface,
+		Connection: current.Connection, Interface: current.Interface, Type: current.Type,
 		Method: method, Addresses: append([]string(nil), addresses...),
 		Gateway: gateway, DNS: append([]string(nil), dns...),
 		DNSSearch: current.DNSSearch, IgnoreAutoDNS: current.IgnoreAutoDNS,
@@ -126,6 +139,15 @@ func RefusedPlan(iface, operation, reason string) Plan {
 // different answer than a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
+}
+
+// Attach records the adapter and the document the change will go through
+// and recomputes the fingerprint: the same difference applied by another
+// mechanism, or with another document, is another change.
+func (p *Plan) Attach(adapter, document string) {
+	p.Adapter = adapter
+	p.Document = document
 	p.PlanHash = planFingerprint(*p)
 }
 

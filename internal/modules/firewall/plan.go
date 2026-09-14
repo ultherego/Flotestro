@@ -43,6 +43,10 @@ type Plan struct {
 	// the panel. A plan with a refusal is an answer - the operator is meant
 	// to see it before approving.
 	Refusal string `json:"refusal,omitempty"`
+	// Commands lists, for a mechanism driven by its command line (ufw),
+	// the commands the change runs - as the operator would type them. The
+	// nftables table is rebuilt from the registry and lists nothing here.
+	Commands []string `json:"commands,omitempty"`
 
 	PlanHash string `json:"plan_hash"`
 }
@@ -104,6 +108,13 @@ func ComputeRemoval(registry Registry, id, rulesetHash, adapter string) Plan {
 // than a plan without one.
 func (p *Plan) Refuse(reason string) {
 	p.Refusal = reason
+	p.PlanHash = planFingerprint(*p)
+}
+
+// Describe records the commands the change runs and recomputes the
+// fingerprint: a plan with other commands is another change.
+func (p *Plan) Describe(commands []string) {
+	p.Commands = commands
 	p.PlanHash = planFingerprint(*p)
 }
 

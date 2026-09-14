@@ -5,6 +5,7 @@ package integration
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -266,5 +267,163 @@ func TestNetworkChangeIsConfirmedByConnectivity(t *testing.T) {
 				t.Errorf("MTU of interface %s = %d", iface, entry.MTU)
 			}
 		}
+	}
+}
+
+// networkPlanView is the plan a host computed for a network change, as the
+// job result carries it.
+type networkPlanView struct {
+	Interface string   `json:"interface"`
+	Action    string   `json:"action"`
+	Changes   []string `json:"changes"`
+	Refusal   string   `json:"refusal"`
+	Adapter   string   `json:"adapter"`
+	Document  string   `json:"document"`
+	PlanHash  string   `json:"plan_hash"`
+	Current   *struct {
+		MTU string `json:"mtu"`
+	} `json:"current"`
+}
+
+// hostWithWriteAdapter returns the first connected host whose network is
+// written through the given mechanism, together with its network state.
+func hostWithWriteAdapter(t *testing.T, h *harness, adapter string) (hostView, networkSnapshot) {
+	t.Helper()
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		state := hostNetworkSnapshot(t, h, host.ID)
+		if state.WriteAdapter == adapter {
+			return host, state
+		}
+	}
+	t.Skipf("no connected host writes its network through %s", adapter)
+	return hostView{}, networkSnapshot{}
+}
+
+// networkPlan orders a plan of an MTU change and reads what the host
+// computed. A plan touches nothing on the host.
+func networkPlan(t *testing.T, h *harness, hostID, iface, mtu string) networkPlanView {
+	t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "network.plan", "reason": "integration test of the netplan adapter",
+		"payload": map[string]any{"network": map[string]any{"interface": iface, "mtu": mtu}},
+	}, 2*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("planning on %s: state = %s, %s", iface, job.State, lastMessage(attempts))
+	}
+	var response struct {
+		Items []struct {
+			Detail struct {
+				Kind string          `json:"kind"`
+				Plan json.RawMessage `json:"plan"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+job.ID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind != "network_plan" {
+			continue
+		}
+		var plan networkPlanView
+		if err := json.Unmarshal(response.Items[i].Detail.Plan, &plan); err != nil {
+			t.Fatalf("network plan: %v", err)
+		}
+		return plan
+	}
+	t.Fatalf("the job %s carries no network plan", job.ID)
+	return networkPlanView{}
+}
+
+// TestNetplanHostPlansInItsOwnFile finds the host that writes its network
+// through netplan - the Ubuntu host of the lab - and checks that a plan is
+// computed there the way the doctrine wants it: against the merged
+// configuration, naming the adapter, and showing the panel's own file
+// rather than the distribution's. An interface other than the management
+// one gets a real MTU change planned; the management interface only a plan
+// with its current value, which must honestly say "no change". Nothing is
+// applied: the management interface of a lab host is not to be touched.
+func TestNetplanHostPlansInItsOwnFile(t *testing.T) {
+	h := newHarness(t)
+	host, state := hostWithWriteAdapter(t, h, "netplan")
+	if state.ManagementInterface == "" {
+		t.Fatal("the host did not point at the management interface")
+	}
+
+	// A real change is planned on an interface the change cannot cut the
+	// panel off through. netplan may not describe every interface the
+	// kernel has; such an interface is a refusal, not a plan, and the test
+	// then falls back to the management interface.
+	planned := false
+	for _, iface := range state.Interfaces {
+		if iface.Management || iface.Kind != "ethernet" || iface.OperState != "up" {
+			continue
+		}
+		plan := networkPlan(t, h, host.ID, iface.Name, "1400")
+		if plan.Refusal != "" {
+			t.Logf("interface %s: %s", iface.Name, plan.Refusal)
+			continue
+		}
+		if plan.Adapter != "netplan" {
+			t.Errorf("the plan names the adapter %q", plan.Adapter)
+		}
+		if plan.Action != "update" || len(plan.Changes) != 1 || !strings.Contains(plan.Changes[0], "MTU") {
+			t.Errorf("plan on %s: %q %v", iface.Name, plan.Action, plan.Changes)
+		}
+		// The document is the panel's file after the merge: the touched
+		// interface with the MTU, and nothing of the distribution's
+		// definition copied in.
+		if !strings.Contains(plan.Document, iface.Name) || !strings.Contains(plan.Document, "mtu: 1400") {
+			t.Errorf("the plan document does not carry the change: %q", plan.Document)
+		}
+		if strings.Contains(plan.Document, state.ManagementInterface) {
+			t.Errorf("the plan document touches the management interface: %q", plan.Document)
+		}
+		assertNoChangePlan(t, h, host.ID, iface.Name, plan)
+		planned = true
+		break
+	}
+	if planned {
+		return
+	}
+
+	// Without another interface the management one is planned with the
+	// value the kernel reports, then with the value the plan itself calls
+	// current: the second is a no-op plan and has to say so.
+	kernelMTU := "1500"
+	for _, iface := range state.Interfaces {
+		if iface.Management && iface.MTU > 0 {
+			kernelMTU = strconv.Itoa(iface.MTU)
+		}
+	}
+	plan := networkPlan(t, h, host.ID, state.ManagementInterface, kernelMTU)
+	if plan.Refusal != "" {
+		t.Fatalf("the management interface refused a plan: %s", plan.Refusal)
+	}
+	if plan.Adapter != "netplan" {
+		t.Fatalf("plan = %+v", plan)
+	}
+	assertNoChangePlan(t, h, host.ID, state.ManagementInterface, plan)
+}
+
+// assertNoChangePlan plans the interface once more with the MTU the given
+// plan calls current. That plan is a no-op and has to say so, with a
+// fingerprint of its own: a host already in the desired state is an answer
+// the campaign shows, not a change it applies.
+func assertNoChangePlan(t *testing.T, h *harness, hostID, iface string, plan networkPlanView) {
+	t.Helper()
+	if plan.Current == nil || plan.Current.MTU == "" {
+		t.Fatalf("the plan on %s does not say what the host has now: %+v", iface, plan)
+	}
+	same := networkPlan(t, h, hostID, iface, plan.Current.MTU)
+	if same.Refusal != "" {
+		t.Fatalf("the no-op plan on %s was refused: %s", iface, same.Refusal)
+	}
+	if same.Action != "no_change" || len(same.Changes) != 0 {
+		t.Errorf("a plan with the current MTU %q says %q %v", plan.Current.MTU, same.Action, same.Changes)
+	}
+	if same.PlanHash == "" || (same.PlanHash == plan.PlanHash && plan.Action != "no_change") {
+		t.Errorf("fingerprints: change %q, no change %q", plan.PlanHash, same.PlanHash)
 	}
 }

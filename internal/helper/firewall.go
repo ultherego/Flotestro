@@ -87,7 +87,7 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 	if action.GetZone() != "" {
 		return s.planZone(state, action)
 	}
-	registry, err := firewall.LoadRegistry(firewall.RegistryDir)
+	registry, err := loadRuleRegistry(state.Adapter)
 	if err != nil {
 		return reject(ErrorExecFailed, "reading the rule registry: "+err.Error())
 	}
@@ -98,8 +98,10 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 	removal := action.GetChain() == "" && action.GetAction() == ""
 
 	var plan firewall.Plan
+	var after firewall.Registry
 	if removal {
 		plan = firewall.ComputeRemoval(registry, action.GetRuleId(), state.Hash, state.Adapter)
+		after, _ = registry.Remove(action.GetRuleId())
 	} else {
 		rule := firewall.RuleSpec{
 			ID: action.GetRuleId(), Chain: action.GetChain(), Action: action.GetAction(),
@@ -116,6 +118,18 @@ func (s *Server) planRule(ctx context.Context, action *helperv1.FirewallRequest)
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
 				plan.Refuse(err.Error())
 			}
+		}
+		after = registry.Set(rule)
+	}
+	if state.Adapter == firewall.AdapterUFW && plan.Refusal == "" {
+		// ufw is driven by its command line, so the plan is the list of
+		// commands - and what ufw cannot express falls out here, not on the
+		// host.
+		steps, err := firewall.UFWTransition(registry, after)
+		if err != nil {
+			plan.Refuse(err.Error())
+		} else {
+			plan.Describe(firewall.CommandLines(steps))
 		}
 	}
 
@@ -195,13 +209,17 @@ func describeFirewallPlan(plan firewall.Plan) string {
 	}
 }
 
-// changeRules creates or removes a panel rule and rebuilds the table.
+// changeRules creates or removes a panel rule and rebuilds the table - or,
+// on a host where ufw holds the rules, runs the ufw commands that carry the
+// registry from the state before to the state after.
 func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
-	if !exists(firewall.NftPath) {
-		return reject(ErrorUnsupported, "this host has no nftables")
-	}
-
 	state := s.readFirewall(ctx)
+	if state.UnavailableReason != "" {
+		return reject(ErrorUnsupported, state.UnavailableReason)
+	}
+	if !state.Writable {
+		return reject(ErrorUnsupported, state.ReadOnlyReason)
+	}
 	// A change ordered against a different rule set is not the same change the
 	// operator looked at in the plan.
 	if expected := action.GetExpectedHash(); expected != "" && expected != state.Hash {
@@ -209,7 +227,7 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 			"the rule set changed since the plan (%s instead of %s)", state.Hash, expected))
 	}
 
-	registry, err := firewall.LoadRegistry(firewall.RegistryDir)
+	registry, err := loadRuleRegistry(state.Adapter)
 	if err != nil {
 		return reject(ErrorExecFailed, "reading the rule registry: "+err.Error())
 	}
@@ -245,13 +263,32 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 	}
 	registry.UpdatedAt = time.Now().UTC()
 
-	plan, response := s.armFirewallRollback(ctx, previous, action.GetRollbackSeconds())
+	// The ufw commands are assembled before anything is armed: a rule ufw
+	// cannot express is a flaw of the order, not a failure of the execution.
+	var ufwSteps [][]string
+	if state.Adapter == firewall.AdapterUFW {
+		if ufwSteps, err = firewall.UFWTransition(previous, registry); err != nil {
+			return reject(ErrorMalformed, err.Error())
+		}
+	}
+
+	plan, response := s.armFirewallRollback(ctx, state.Adapter, previous, action.GetRollbackSeconds())
 	if response != nil {
 		return response
 	}
-	if err := s.rebuildTable(ctx, registry); err != nil {
-		// The rollback stays armed: it will bring the table to the state from
-		// before the change also when the rebuild stopped halfway.
+	if state.Adapter == firewall.AdapterUFW {
+		// ufw is changed rule by rule, so the registry is written before the
+		// first step: a change that stops halfway is then rolled back from
+		// the registry it was heading to - deleting what landed and adding
+		// back what was removed - rather than from one that says nothing
+		// changed.
+		if err := saveRuleRegistry(state.Adapter, registry); err != nil {
+			return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
+		}
+	}
+	if err := s.applyRegistry(ctx, state.Adapter, registry, ufwSteps); err != nil {
+		// The rollback stays armed: it will bring the rules to the state from
+		// before the change also when the change stopped halfway.
 		response := reject(ErrorExecFailed, err.Error())
 		response.FirewallResult = &helperv1.FirewallResult{
 			Message:          err.Error(),
@@ -260,13 +297,17 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 		}
 		return response
 	}
-	if err := firewall.SaveRegistry(firewall.RegistryDir, registry); err != nil {
+	if err := saveRuleRegistry(state.Adapter, registry); err != nil {
 		return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
 	}
 
+	applied := "the rules were rebuilt"
+	if state.Adapter == firewall.AdapterUFW {
+		applied = "the ufw rules were changed"
+	}
 	return firewallResponse(s.readFirewall(ctx),
-		fmt.Sprintf("the rules were rebuilt; rollback at %s unless the agent confirms connectivity",
-			plan.Deadline.Format(time.RFC3339)), &plan)
+		fmt.Sprintf("%s; rollback at %s unless the agent confirms connectivity",
+			applied, plan.Deadline.Format(time.RFC3339)), &plan)
 }
 
 // changeZone opens or closes a port or a service in a firewalld zone.
@@ -315,6 +356,66 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 	return firewallResponse(s.readFirewall(ctx), "the zone was changed", nil)
 }
 
+// applyRegistry brings the host to the given registry: nftables by
+// rebuilding the panel table, ufw by the commands of the transition.
+func (s *Server) applyRegistry(ctx context.Context, adapter string, registry firewall.Registry,
+	ufwSteps [][]string) error {
+	if adapter != firewall.AdapterUFW {
+		return s.rebuildTable(ctx, registry)
+	}
+	for _, step := range ufwSteps {
+		output, err := runTool(ctx, step)
+		if err != nil && firewall.UFWDeletionOfAbsentRule(step, output) {
+			// A rule already gone is the state the step wanted. It happens on
+			// a rollback of a change that stopped halfway, and on a host where
+			// somebody removed the panel's rule by hand.
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w: %s", strings.Join(step, " "), err, output)
+		}
+	}
+	return nil
+}
+
+// restoreRegistry returns to the registry of a rollback plan. For ufw the
+// transition is computed from the registry the host has now to the one from
+// before the change: the same function as the change, the other way round.
+func (s *Server) restoreRegistry(ctx context.Context, plan firewallPlan) error {
+	var steps [][]string
+	if plan.Adapter == firewall.AdapterUFW {
+		current, err := loadRuleRegistry(plan.Adapter)
+		if err != nil {
+			return fmt.Errorf("reading the rule registry: %w", err)
+		}
+		if steps, err = firewall.UFWTransition(current, plan.Registry); err != nil {
+			return err
+		}
+	}
+	if err := s.applyRegistry(ctx, plan.Adapter, plan.Registry, steps); err != nil {
+		return err
+	}
+	return saveRuleRegistry(plan.Adapter, plan.Registry)
+}
+
+// loadRuleRegistry reads the registry of the mechanism that holds the rules.
+// Each mechanism has one of its own: the same rule is written differently
+// by each, and a host switching between them must not rebuild one's rules
+// through the other.
+func loadRuleRegistry(adapter string) (firewall.Registry, error) {
+	if adapter == firewall.AdapterUFW {
+		return firewall.LoadNamedRegistry(firewall.RegistryDir, firewall.UFWRegistryFile)
+	}
+	return firewall.LoadRegistry(firewall.RegistryDir)
+}
+
+func saveRuleRegistry(adapter string, registry firewall.Registry) error {
+	if adapter == firewall.AdapterUFW {
+		return firewall.SaveNamedRegistry(firewall.RegistryDir, firewall.UFWRegistryFile, registry)
+	}
+	return firewall.SaveRegistry(firewall.RegistryDir, registry)
+}
+
 // rebuildTable recreates the panel table from the registry.
 func (s *Server) rebuildTable(ctx context.Context, registry firewall.Registry) error {
 	if len(registry.Rules) == 0 {
@@ -337,10 +438,11 @@ func (s *Server) rebuildTable(ctx context.Context, registry firewall.Registry) e
 
 // armFirewallRollback writes the registry from before the change and starts the
 // timer.
-func (s *Server) armFirewallRollback(ctx context.Context, previous firewall.Registry,
+func (s *Server) armFirewallRollback(ctx context.Context, adapter string, previous firewall.Registry,
 	seconds uint32) (firewallPlan, *helperv1.HelperResponse) {
 	plan := firewallPlan{
 		ID:        rollbackIdentifier(),
+		Adapter:   adapter,
 		Registry:  previous,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -379,10 +481,7 @@ func (s *Server) restoreFirewall(ctx context.Context, id string) *helperv1.Helpe
 	if err != nil {
 		return reject(ErrorUnsupported, "there is no rollback plan "+id)
 	}
-	if err := s.rebuildTable(ctx, plan.Registry); err != nil {
-		return reject(ErrorExecFailed, err.Error())
-	}
-	if err := firewall.SaveRegistry(firewall.RegistryDir, plan.Registry); err != nil {
+	if err := s.restoreRegistry(ctx, plan); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
 	_ = s.disarmTimer(ctx, firewallRollbackUnit+id)
@@ -394,21 +493,39 @@ func (s *Server) restoreFirewall(ctx context.Context, id string) *helperv1.Helpe
 func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	snapshot := firewall.Snapshot{ObservedAt: time.Now().UTC()}
 
-	if !exists(firewall.NftPath) {
+	nft := exists(firewall.NftPath)
+	ufw := exists(firewall.UFWPath)
+	if !nft && !ufw {
 		snapshot.UnavailableReason = "this host has no nftables (nft) binary"
 		return snapshot
 	}
-	// nft writes the warnings about tables belonging to other programs to the
-	// error stream, not to the output. Without them the panel would take the
-	// docker tables for ordinary host tables - and would allow touching them.
-	output, warnings, err := outputWithWarnings(ctx, firewall.NftPath, "-a", "list", "ruleset")
-	if err != nil {
-		snapshot.UnavailableReason = "nft list ruleset: " + err.Error()
-		return snapshot
+	var ruleset string
+	if nft {
+		// nft writes the warnings about tables belonging to other programs to
+		// the error stream, not to the output. Without them the panel would
+		// take the docker tables for ordinary host tables - and would allow
+		// touching them.
+		output, warnings, err := outputWithWarnings(ctx, firewall.NftPath, "-a", "list", "ruleset")
+		if err != nil {
+			snapshot.UnavailableReason = "nft list ruleset: " + err.Error()
+			return snapshot
+		}
+		ruleset = warnings + output
+		snapshot = firewall.ParseRuleset(ruleset)
+		snapshot.ObservedAt = time.Now().UTC()
+		snapshot.Writable = true
 	}
-	snapshot = firewall.ParseRuleset(warnings + output)
-	snapshot.ObservedAt = time.Now().UTC()
-	snapshot.Writable = true
+
+	// ufw loads its rules into the tables underneath through iptables-nft,
+	// which nft reports as foreign: the rules the operator knows are the ufw
+	// ones, read in the form ufw takes them back in. An installed but
+	// inactive ufw holds nothing, and the panel's own nftables table works as
+	// on any other host.
+	if ufw {
+		if response := s.readUFW(ctx, &snapshot, ruleset); response != "" {
+			snapshot.ReadOnlyReason = response
+		}
+	}
 
 	// Firewalld keeps its own tables and rewrites them on a reload, so on such
 	// a host we speak of zones and not of panel rules.
@@ -422,6 +539,48 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 	return snapshot
 }
 
+// readUFW adds the ufw state to the snapshot. It returns the reason the
+// panel cannot write here, or an empty string.
+func (s *Server) readUFW(ctx context.Context, snapshot *firewall.Snapshot, ruleset string) string {
+	arguments := firewall.UFWStatusArguments()
+	output, err := toolOutput(ctx, arguments[0], arguments[1:]...)
+	if err != nil {
+		if !snapshot.Writable {
+			return "ufw status: " + err.Error()
+		}
+		return ""
+	}
+	status := firewall.ParseUFWStatus(output)
+	if !status.Active {
+		// An inactive ufw is an answer the operator is to see next to the
+		// adapter: where the rules go instead, or why nowhere.
+		status.Reason = firewall.UFWInactiveWithNftables
+		if !snapshot.Writable {
+			status.Reason = firewall.UFWInactiveReadOnly
+		}
+		snapshot.UFW = &status
+		if !snapshot.Writable {
+			return status.Reason
+		}
+		return ""
+	}
+	snapshot.UFW = &status
+	arguments = firewall.UFWAddedArguments()
+	added, err := toolOutput(ctx, arguments[0], arguments[1:]...)
+	if err != nil {
+		snapshot.Writable = false
+		return "ufw show added: " + err.Error()
+	}
+	snapshot.Rules = append(snapshot.Rules, firewall.ParseUFWAdded(added)...)
+	snapshot.Adapter = firewall.AdapterUFW
+	// The fingerprint covers the ufw rules together with the tables: a rule
+	// added with ufw since the plan is a changed rule set even when the
+	// operator's nft listing looks the same at a glance.
+	snapshot.Hash = firewall.Fingerprint(ruleset + "\n" + added)
+	snapshot.Writable = true
+	return ""
+}
+
 // firewallRollbackUnit is the prefix of the transient unit that carries out a
 // firewall rollback.
 const firewallRollbackUnit = "flotestro-firewall-"
@@ -429,7 +588,10 @@ const firewallRollbackUnit = "flotestro-firewall-"
 // firewallPlan is the rule registry from before a change together with the
 // deadline of the return.
 type firewallPlan struct {
-	ID        string            `json:"id"`
+	ID string `json:"id"`
+	// Adapter names the mechanism the registry belongs to. Empty means
+	// nftables: plans written before the field existed are its plans.
+	Adapter   string            `json:"adapter,omitempty"`
 	Registry  firewall.Registry `json:"registry"`
 	CreatedAt time.Time         `json:"created_at"`
 	Deadline  time.Time         `json:"deadline"`
@@ -497,11 +659,11 @@ func RollbackFirewall(ctx context.Context, id string) error {
 	if err != nil {
 		return fmt.Errorf("the rollback plan %s: %w", id, err)
 	}
+	// The unit that calls this has no clock of its own.
+	ctx, cancel := context.WithTimeout(ctx, rollbackToolLimit)
+	defer cancel()
 	server := &Server{}
-	if err := server.rebuildTable(ctx, plan.Registry); err != nil {
-		return err
-	}
-	if err := firewall.SaveRegistry(firewall.RegistryDir, plan.Registry); err != nil {
+	if err := server.restoreRegistry(ctx, plan); err != nil {
 		return err
 	}
 	return removeFirewallPlan(id)

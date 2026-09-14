@@ -40,6 +40,10 @@ type Snapshot = {
   tables?: { family: string; name: string; source: string; owner?: string }[];
   rules?: Rule[];
   zones?: Zone[];
+  /** The header of "ufw status" where ufw is installed: the default policy
+      is what a packet meets when no rule matches, and no rule list says
+      that. An inactive ufw carries the reason the panel writes elsewhere. */
+  ufw?: { active: boolean; defaults?: string; logging?: string; reason?: string };
   writable?: boolean;
   read_only_reason?: string;
   observed_at?: string;
@@ -47,6 +51,18 @@ type Snapshot = {
 };
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
+
+/** The adapters as the host names them, in the spelling the operator knows. */
+const ADAPTER_LABELS: Record<string, string> = {
+  nftables: "nftables",
+  firewalld: "firewalld",
+  ufw: "UFW",
+};
+
+/** The label of an adapter; an unknown name is shown as the host sent it. */
+function adapterLabel(adapter: string): string {
+  return ADAPTER_LABELS[adapter] ?? adapter;
+}
 
 /**
  * The host's firewall.
@@ -152,10 +168,18 @@ export function Firewall() {
         <Facts>
           <Fact label={t("Adapter")}>
             {snapshot?.adapter
-              ? <span className={snapshot.writable ? "badge ok" : "badge unknown"}>{snapshot.adapter}</span>
+              ? <span className={snapshot.writable ? "badge ok" : "badge unknown"}>{adapterLabel(snapshot.adapter)}</span>
               : <span className="badge unknown">{t("unknown")}</span>}
             {snapshot?.read_only_reason && <span className="source"> · {snapshot.read_only_reason}</span>}
           </Fact>
+          {snapshot?.ufw && (
+            <Fact label={t("Default policy (ufw)")}>
+              {snapshot.ufw.active
+                ? <span className="hm-mono">{snapshot.ufw.defaults || "—"}</span>
+                : <span className="badge unknown">{t("ufw inactive")}</span>}
+              {!snapshot.ufw.active && snapshot.ufw.reason && <span className="source"> · {snapshot.ufw.reason}</span>}
+            </Fact>
+          )}
           {/* The fingerprint ties the plan to the rule set: a change
               requested against a different set is not the same change the
               operator looked at. */}

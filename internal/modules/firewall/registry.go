@@ -29,10 +29,17 @@ type Registry struct {
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
-// LoadRegistry reads the rule registry. A missing file means a host on
-// which the panel has not created anything yet - and that is not an error.
+// LoadRegistry reads the nftables rule registry. A missing file means a
+// host on which the panel has not created anything yet - and that is not
+// an error.
 func LoadRegistry(dir string) (Registry, error) {
-	data, err := os.ReadFile(filepath.Join(dir, RegistryFile))
+	return LoadNamedRegistry(dir, RegistryFile)
+}
+
+// LoadNamedRegistry reads the registry kept in the given file: each
+// mechanism has one of its own.
+func LoadNamedRegistry(dir, file string) (Registry, error) {
+	data, err := os.ReadFile(filepath.Join(dir, file))
 	if os.IsNotExist(err) {
 		return Registry{}, nil
 	}
@@ -46,8 +53,13 @@ func LoadRegistry(dir string) (Registry, error) {
 	return registry, nil
 }
 
-// SaveRegistry writes the rule registry.
+// SaveRegistry writes the nftables rule registry.
 func SaveRegistry(dir string, registry Registry) error {
+	return SaveNamedRegistry(dir, RegistryFile, registry)
+}
+
+// SaveNamedRegistry writes the registry kept in the given file.
+func SaveNamedRegistry(dir, file string, registry Registry) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
@@ -55,7 +67,7 @@ func SaveRegistry(dir string, registry Registry) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, RegistryFile)
+	path := filepath.Join(dir, file)
 	// Atomic write: a registry read half-way would not rebuild the table,
 	// and that is exactly when it is needed.
 	temporary := path + ".new"

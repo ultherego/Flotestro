@@ -3,6 +3,7 @@ package network
 import (
 	"fmt"
 	"net"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -28,12 +29,20 @@ type Connection struct {
 // panel manages. Empty fields mean "NetworkManager has nothing here", not
 // "clear".
 type Profile struct {
-	Connection string   `json:"connection"`
-	Interface  string   `json:"interface,omitempty"`
-	Method     string   `json:"method,omitempty"`
-	Addresses  []string `json:"addresses,omitempty"`
-	Gateway    string   `json:"gateway,omitempty"`
-	DNS        []string `json:"dns,omitempty"`
+	// Connection names the profile: the NetworkManager connection, or the
+	// interface itself where the mechanism has no profile names (nmstate,
+	// netplan).
+	Connection string `json:"connection"`
+	Interface  string `json:"interface,omitempty"`
+	// Type is the interface type as the mechanism names it: the nmstate
+	// interface type (ethernet, bond) or the netplan section (ethernets,
+	// bonds). NetworkManager identifies a profile by name and leaves it
+	// empty.
+	Type      string   `json:"type,omitempty"`
+	Method    string   `json:"method,omitempty"`
+	Addresses []string `json:"addresses,omitempty"`
+	Gateway   string   `json:"gateway,omitempty"`
+	DNS       []string `json:"dns,omitempty"`
 	// DNSSearch and IgnoreAutoDNS belong to the resolver just like the
 	// servers: a rollback that restores only the servers leaves the host
 	// with somebody else's search domains and with the DHCP servers
@@ -256,6 +265,21 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 		modification = append(modification, "802-3-ethernet.mtu", profile.MTU)
 	}
 	return [][]string{modification, {NmcliPath, "connection", "up", profile.Connection}}, nil
+}
+
+// interfaceName is what the kernel accepts as an interface name: up to 15
+// characters, none of them a slash, a space or a control character. The
+// name goes into documents the mechanisms read and into file names next to
+// the plans, so the check is the same everywhere.
+var interfaceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,14}$`)
+
+// ValidateInterfaceName checks an interface name before it is looked up or
+// written anywhere.
+func ValidateInterfaceName(name string) error {
+	if !interfaceName.MatchString(name) {
+		return fmt.Errorf("invalid interface name %q", name)
+	}
+	return nil
 }
 
 // ValidateMTU checks an MTU value.

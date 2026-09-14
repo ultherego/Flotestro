@@ -35,6 +35,66 @@ type RollbackPlan struct {
 	// Deadline is the moment after which the rollback is to run.
 	Deadline time.Time `json:"deadline"`
 	Reason   string    `json:"reason,omitempty"`
+
+	// Adapter names the mechanism the change went through. Empty means
+	// NetworkManager: plans written before the field existed are its plans.
+	Adapter string `json:"adapter,omitempty"`
+	// Kind names the change (mtu, routes, profile, dns) for the mechanisms
+	// that undo a document rather than rewrite a profile.
+	Kind string `json:"kind,omitempty"`
+	// PreviousExists says, for netplan, whether the panel's file existed
+	// before the change: a rollback of a first change removes the file
+	// instead of restoring an empty one.
+	PreviousExists bool `json:"previous_exists,omitempty"`
+}
+
+// The files kept next to a plan for the mechanisms that apply documents:
+// the state from before the change and the state applied. Both are state
+// documents the mechanism reads, not commands the helper runs.
+const (
+	previousStateSuffix = ".previous.yaml"
+	desiredStateSuffix  = ".desired.yaml"
+)
+
+// PreviousStatePath returns the file holding the state from before the
+// change of the given plan.
+func PreviousStatePath(dir, id string) (string, error) {
+	return statePath(dir, id, previousStateSuffix)
+}
+
+// DesiredStatePath returns the file holding the document applied by the
+// given plan.
+func DesiredStatePath(dir, id string) (string, error) {
+	return statePath(dir, id, desiredStateSuffix)
+}
+
+func statePath(dir, id, suffix string) (string, error) {
+	if !ValidPlanID(id) {
+		return "", fmt.Errorf("invalid plan identifier %q", id)
+	}
+	return filepath.Join(dir, id+suffix), nil
+}
+
+// SaveState writes a state document next to the plan. The path comes from
+// the plan identifier, so the document cannot land outside the directory.
+func SaveState(path, content string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	temporary := path + ".new"
+	if err := os.WriteFile(temporary, []byte(content), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, path)
+}
+
+// LoadState reads a state document kept next to a plan.
+func LoadState(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // PlanPath returns the plan file with the given identifier.
@@ -112,11 +172,15 @@ func SetAsideFailedPlan(dir, id string) error {
 	return os.Rename(path, path+".failed")
 }
 
-// RemovePlan deletes a rollback plan.
+// RemovePlan deletes a rollback plan together with the state documents
+// kept next to it.
 func RemovePlan(dir, id string) error {
 	path, err := PlanPath(dir, id)
 	if err != nil {
 		return err
+	}
+	for _, suffix := range []string{previousStateSuffix, desiredStateSuffix} {
+		_ = os.Remove(filepath.Join(dir, id+suffix))
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
@@ -124,13 +188,18 @@ func RemovePlan(dir, id string) error {
 	return nil
 }
 
-// RollbackSteps assembles the commands restoring the state before the
-// change.
+// RollbackSteps assembles the NetworkManager commands restoring the state
+// before the change.
 //
 // The arguments are made from the profile settings by the same code that
 // assembles them at write time: the plan cannot express a command this
-// module does not know.
+// module does not know. The other mechanisms restore a state document kept
+// next to the plan instead: nmstate applies it (see NmstateRestoreArguments),
+// netplan gets its file back and regenerates.
 func RollbackSteps(plan RollbackPlan) ([][]string, error) {
+	if plan.Adapter != "" && plan.Adapter != AdapterNetworkManager {
+		return nil, fmt.Errorf("a %s plan restores a state document, not a NetworkManager profile", plan.Adapter)
+	}
 	profile := plan.Profile
 	if profile.Connection == "" {
 		return nil, fmt.Errorf("rollback plan without a connection profile")

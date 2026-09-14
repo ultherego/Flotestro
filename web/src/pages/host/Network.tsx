@@ -55,6 +55,18 @@ type Snapshot = {
   unavailable_reason?: string;
 };
 
+/** The write adapters as the host names them, in the spelling the operator knows. */
+const ADAPTER_LABELS: Record<string, string> = {
+  networkmanager: "NetworkManager",
+  nmstate: "nmstate",
+  netplan: "netplan",
+};
+
+/** The label of a write adapter; an unknown name is shown as the host sent it. */
+function adapterLabel(adapter: string): string {
+  return ADAPTER_LABELS[adapter] ?? adapter;
+}
+
 type Intent = {
   action: string;
   label: string;
@@ -162,7 +174,7 @@ export function Network() {
           </Fact>
           <Fact label={t("Write adapter")}>
             {snapshot?.write_adapter
-              ? <span className="badge ok">{snapshot.write_adapter}</span>
+              ? <span className="badge ok">{adapterLabel(snapshot.write_adapter)}</span>
               : <span className="badge unknown">{t("none")}</span>}
           </Fact>
           <Fact label={t("By kind")} wide>
@@ -297,7 +309,7 @@ export function Network() {
           <span>
             {t("Management channel")}: {snapshot?.management_interface || t("unknown")}
             {snapshot?.management_address && ` · ${snapshot.management_address}`}
-            {snapshot?.write_adapter && ` · ${t("write adapter {name}", { name: snapshot.write_adapter })}`}
+            {snapshot?.write_adapter && ` · ${t("write adapter {name}", { name: adapterLabel(snapshot.write_adapter) })}`}
           </span>
           {snapshot?.observed_at && (
             <span>
