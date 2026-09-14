@@ -54,6 +54,10 @@ type Schedule struct {
 	// NextRun is computed on the host and sent as a fact: the panel knows
 	// neither the host's time zone nor its calendar.
 	NextRun *time.Time `json:"next_run,omitempty"`
+	// NextRuns are the following dates, the first of them NextRun again.
+	// Three of them show the rhythm of an entry the way a single date
+	// cannot: "03:00" tomorrow says nothing about whether it is daily.
+	NextRuns []time.Time `json:"next_runs,omitempty"`
 	// Timezone of the host. Without it "03:00" means nothing specific.
 	Timezone string `json:"timezone,omitempty"`
 	// LastResult describes the last known run; empty means no knowledge,

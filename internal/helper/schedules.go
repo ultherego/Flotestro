@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -190,12 +191,48 @@ func (s *Server) readSchedules(ctx context.Context) schedules.Snapshot {
 		// nothing.
 		Timezone: schedules.HostTimezone(),
 	}
-	snapshot.Schedules = append(snapshot.Schedules,
-		schedules.ReadTimers(
-			systemctlOutput(ctx, "list-timers", "--all", "--no-pager", "--no-legend"),
-			systemctlOutput(ctx, "list-units", "--type=timer", "--all", "--no-pager", "--no-legend", "--plain"),
-			systemctlOutput(ctx, "show", "--property=Id", "--property=TimersCalendar", "*.timer"))...)
+	timers := schedules.ReadTimers(
+		systemctlOutput(ctx, "list-timers", "--all", "--no-pager", "--no-legend"),
+		systemctlOutput(ctx, "list-units", "--type=timer", "--all", "--no-pager", "--no-legend", "--plain"),
+		systemctlOutput(ctx, "show", "--property=Id", "--property=TimersCalendar", "*.timer"))
+	attachTimerRuns(ctx, timers)
+	snapshot.Schedules = append(snapshot.Schedules, timers...)
 	return snapshot
+}
+
+// attachTimerRuns adds the coming runs of the timers with a calendar
+// expression.
+//
+// systemd computes them itself: its calendar language is richer than
+// cron's and the module does not reimplement it. One call covers every
+// expression, so a host with many timers does not start a process for
+// each; a timer whose expression the tool refuses simply keeps the single
+// date the timer list gave it.
+func attachTimerRuns(ctx context.Context, timers []schedules.Schedule) {
+	var specs []string
+	seen := map[string]bool{}
+	for _, timer := range timers {
+		if timer.Expression == "" || !timer.Enabled || seen[timer.Expression] {
+			continue
+		}
+		seen[timer.Expression] = true
+		specs = append(specs, timer.Expression)
+	}
+	if len(specs) == 0 {
+		return
+	}
+	arguments := append([]string{"calendar", "--iterations=" + strconv.Itoa(schedules.PreviewRuns)}, specs...)
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-analyze", arguments...)
+	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
+	// A bad specification makes the tool exit non-zero after printing the
+	// good ones; the output is read either way.
+	output, _ := cmd.Output()
+	runs := schedules.ParseCalendarPreview(string(output), time.Local)
+	for i := range timers {
+		if dates := runs[timers[i].Expression]; len(dates) > 0 {
+			timers[i].NextRuns = dates
+		}
+	}
 }
 
 func (s *Server) managedEntry(ctx context.Context, id string) *schedules.Schedule {

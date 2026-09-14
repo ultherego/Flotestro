@@ -33,6 +33,11 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 	if payload.Since != "" {
 		args = append(args, "--since="+payload.Since)
 	}
+	// A cursor continues a read the unit detail began: the lines start right
+	// after the position the cursor names, still bounded by the line count.
+	if payload.AfterCursor != "" {
+		args = append(args, "--after-cursor="+payload.AfterCursor)
+	}
 
 	timeout := timeoutOf(task, opspec.ActionReadJournal)
 	result := runCommand(ctx, timeout, journalctlPath, args...)

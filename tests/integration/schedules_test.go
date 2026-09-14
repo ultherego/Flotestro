@@ -12,15 +12,16 @@ import (
 
 // scheduleView mirrors one entry in the scheduled jobs snapshot.
 type scheduleView struct {
-	ID          string     `json:"id"`
-	Kind        string     `json:"kind"`
-	Source      string     `json:"source"`
-	Enabled     bool       `json:"enabled"`
-	Expression  string     `json:"expression"`
-	Command     []string   `json:"command"`
-	CommandLine string     `json:"command_line"`
-	Path        string     `json:"path"`
-	NextRun     *time.Time `json:"next_run"`
+	ID          string      `json:"id"`
+	Kind        string      `json:"kind"`
+	Source      string      `json:"source"`
+	Enabled     bool        `json:"enabled"`
+	Expression  string      `json:"expression"`
+	Command     []string    `json:"command"`
+	CommandLine string      `json:"command_line"`
+	Path        string      `json:"path"`
+	NextRun     *time.Time  `json:"next_run"`
+	NextRuns    []time.Time `json:"next_runs"`
 }
 
 type schedulesSnapshot struct {
@@ -247,4 +248,108 @@ func lastMessage(attempts []attemptView) string {
 	}
 	last := attempts[len(attempts)-1]
 	return last.ErrorCode + ": " + last.Message
+}
+
+// TestNextRunsComeFromTheHost checks that an active entry carries its coming
+// runs computed on the host: three of them, in order, the first of them the
+// single next run again. The timers get theirs from systemd itself.
+func TestNextRunsComeFromTheHost(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	const id = "next-runs-test"
+
+	t.Cleanup(func() {
+		h.createOperation(host.ID, map[string]any{
+			"action": "schedule.remove", "reason": scheduleReason,
+			"payload": map[string]any{"schedule": map[string]any{"id": id}},
+		})
+	})
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "schedule.ensure", "reason": scheduleReason,
+		"payload": map[string]any{"schedule": map[string]any{
+			"id":         id,
+			"expression": "30 4 * * *",
+			"command":    []string{"/usr/bin/true"},
+			"user":       "root",
+			"enabled":    true,
+		}},
+	}, 90*time.Second)
+	if job.State != "succeeded" {
+		t.Fatalf("creating the entry: state = %s, %s", job.State, lastMessage(attempts))
+	}
+
+	entry := hostEntry(t, h, host.ID, id)
+	if len(entry.NextRuns) != 3 {
+		t.Fatalf("next runs = %v, want three", entry.NextRuns)
+	}
+	if entry.NextRun == nil || !entry.NextRuns[0].Equal(*entry.NextRun) {
+		t.Errorf("the first of the next runs %v is not the next run %v", entry.NextRuns[0], entry.NextRun)
+	}
+	for i := 1; i < len(entry.NextRuns); i++ {
+		if !entry.NextRuns[i].After(entry.NextRuns[i-1]) {
+			t.Errorf("the runs are not in order: %v", entry.NextRuns)
+		}
+		if entry.NextRuns[i].Hour() != 4 || entry.NextRuns[i].Minute() != 30 {
+			t.Errorf("run %d = %v, want 04:30 in the host zone", i, entry.NextRuns[i])
+		}
+	}
+
+	// A timer with a calendar expression gets its runs from systemd. A host
+	// without such a timer has nothing to check here, which is not a failure.
+	for _, timer := range schedulesOf(t, h, host.ID).Schedules {
+		if timer.Kind != "timer" || timer.Expression == "" || !timer.Enabled {
+			continue
+		}
+		if len(timer.NextRuns) == 0 {
+			t.Errorf("the timer %s (%s) has no next runs", timer.ID, timer.Expression)
+		}
+		break
+	}
+}
+
+// TestSchedulePreviewComesFromTheHost checks the preview the form shows: the
+// dates are computed on the host, in its zone, with the zone named, and an
+// expression the host does not understand is refused before it is sent.
+func TestSchedulePreviewComesFromTheHost(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action":  "schedule.preview",
+		"payload": map[string]any{"schedule": map[string]any{"expression": "15 2 * * 1-5"}},
+	}, 60*time.Second)
+	if job.RequiresApproval {
+		t.Error("a preview should not require approval")
+	}
+	if job.State != "succeeded" {
+		t.Fatalf("preview: state = %s, %s", job.State, lastMessage(attempts))
+	}
+	var preview struct {
+		Expression string      `json:"expression"`
+		Timezone   string      `json:"timezone"`
+		NextRuns   []time.Time `json:"next_runs"`
+		Error      string      `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(attempts[len(attempts)-1].Stdout), &preview); err != nil {
+		t.Fatalf("the preview is not a JSON document: %v", err)
+	}
+	if preview.Error != "" {
+		t.Fatalf("the preview reports an error: %s", preview.Error)
+	}
+	if preview.Timezone == "" {
+		t.Error("the preview names no host zone")
+	}
+	if len(preview.NextRuns) != 3 {
+		t.Fatalf("next runs = %v, want three", preview.NextRuns)
+	}
+	for i, date := range preview.NextRuns {
+		if date.Hour() != 2 || date.Minute() != 15 || date.Weekday() == time.Saturday || date.Weekday() == time.Sunday {
+			t.Errorf("run %d = %v, want a weekday at 02:15 in the host zone", i, date)
+		}
+	}
+
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "schedule.preview",
+			"payload": map[string]any{"schedule": map[string]any{"expression": "0 25 * * *"}}},
+		nil, http.StatusBadRequest)
 }

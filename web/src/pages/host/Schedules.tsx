@@ -23,10 +23,23 @@ type Schedule = {
   path?: string;
   line?: number;
   next_run?: string;
+  // The coming runs, the first of them next_run again: three show the
+  // rhythm of an entry the way a single date cannot.
+  next_runs?: string[];
   timezone?: string;
   last_result?: string;
   comment?: string;
 };
+
+/** The answer of schedule.preview: the next runs computed on the host. */
+type Preview = {
+  expression?: string;
+  timezone?: string;
+  next_runs?: string[];
+  error?: string;
+};
+
+type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string };
 
 type Snapshot = {
   schedules?: Schedule[];
@@ -133,6 +146,8 @@ export function Schedules() {
 
       {form && (
         <NewEntry
+          hostId={host.id}
+          online={host.connection_state === "online"}
           onRequest={(payload) =>
             request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
           }
@@ -171,7 +186,16 @@ export function Schedules() {
                     {entry.expression || <span className="badge unknown">{t("event-based")}</span>}
                     {entry.timezone && <span className="source"> · {entry.timezone}</span>}
                   </td>
-                  <td>{entry.next_run ? <Time value={entry.next_run} /> : "—"}</td>
+                  {/* The next run, and the two after it: the rhythm of the
+                      entry is read from three dates, not from one. */}
+                  <td>
+                    {entry.next_run ? <Time value={entry.next_run} /> : "—"}
+                    {(entry.next_runs ?? []).length > 1 && (
+                      <span className="source" title={t("The following runs, in the host zone")}>
+                        {" "}· {t("then")} {(entry.next_runs ?? []).slice(1).map((run) => hostClock(run)).join(", ")}
+                      </span>
+                    )}
+                  </td>
                   {/* A pre-existing entry is a shell line, an owned one - an
                       argument list. We show what the host will really run. */}
                   <td className="hm-mono" title={command(entry)}>{command(entry).slice(0, 50)}</td>
@@ -262,6 +286,16 @@ export function Schedules() {
   );
 }
 
+/**
+ * The wall clock of a run as the host wrote it, not converted to the
+ * browser's zone: "03:00" is what the entry says, and the operator compares
+ * it with the expression, not with their own watch.
+ */
+function hostClock(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/.exec(value);
+  return match ? `${match[1]} ${match[2]}` : value;
+}
+
 /** The entry's command in the form the host will run it. */
 function command(entry: Schedule): string {
   return entry.command_line || (entry.command ?? []).join(" ");
@@ -273,8 +307,10 @@ function command(entry: Schedule): string {
  * host.
  */
 function NewEntry({
-  onRequest,
+  hostId, online, onRequest,
 }: {
+  hostId: string;
+  online: boolean;
   onRequest: (payload: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -283,7 +319,35 @@ function NewEntry({
   const [commandLine, setCommandLine] = useState("");
   const [user, setUser] = useState("root");
   const [comment, setComment] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
+
+  // The next runs come from the host, not from the browser: the browser
+  // knows neither the host's zone nor its clock, and a preview in the
+  // wrong zone would show the entry running at the wrong hour.
+  const preview = useMutation({
+    mutationFn: async (spec: string) => {
+      const job = await api.post<Job>(`/api/v1/hosts/${hostId}/operations`, {
+        action: "schedule.preview",
+        payload: { schedule: { expression: spec } },
+      });
+      for (let attempt = 0; attempt < 20; attempt++) {
+        await new Promise((done) => setTimeout(done, 1500));
+        const attempts = await api.get<{ items: Attempt[] }>(`/api/v1/jobs/${job.id}/attempts`);
+        const last = attempts.items[attempts.items.length - 1];
+        if (!last?.status) continue;
+        if (last.status !== "succeeded") {
+          throw new Error(last.message || last.error_code || t("The host refused the read."));
+        }
+        return JSON.parse(last.stdout ?? "{}") as Preview;
+      }
+      throw new Error(t("The host did not answer in time."));
+    },
+    onSuccess: () => setPreviewError(""),
+    onError: (error) => setPreviewError(error instanceof Error ? error.message : String(error)),
+  });
+  // A preview of another expression than the one in the field is stale.
+  const shown = preview.data && preview.data.expression === expression.trim() ? preview.data : undefined;
 
   return (
     <Section title={t("New schedule")} span={12}>
@@ -316,7 +380,25 @@ function NewEntry({
             {t("Will run:")} <span className="hm-mono">{args.map((argument, i) => `[${i}] ${argument}`).join("  ")}</span>
           </FormNote>
         )}
+        {previewError && <Message text={previewError} error />}
+        {shown && (
+          <FormNote>
+            {shown.error
+              ? t("The host does not accept the expression: {reason}", { reason: shown.error })
+              : t("Next runs in {zone}:", { zone: shown.timezone || t("the host zone") })}{" "}
+            {!shown.error && (
+              <span className="hm-mono">{(shown.next_runs ?? []).map((run) => hostClock(run)).join(", ")}</span>
+            )}
+          </FormNote>
+        )}
         <FormActions>
+          <button
+            className="secondary"
+            onClick={() => preview.mutate(expression.trim())}
+            disabled={!expression.trim() || preview.isPending || !online}
+          >
+            {preview.isPending ? t("Asking the host…") : t("Preview next runs")}
+          </button>
           <button
             onClick={() =>
               onRequest({

@@ -136,9 +136,10 @@ func readCronFile(path string, withUser bool, now time.Time) []Schedule {
 		// has no next run and giving one would be false.
 		if entry.Enabled {
 			if expression, err := ParseExpression(entry.Expression); err == nil {
-				if dates := expression.NextRuns(now, 1); len(dates) > 0 {
+				if dates := expression.NextRuns(now, PreviewRuns); len(dates) > 0 {
 					date := dates[0]
 					entry.NextRun = &date
+					entry.NextRuns = dates
 				}
 			}
 		}

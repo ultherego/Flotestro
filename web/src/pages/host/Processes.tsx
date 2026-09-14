@@ -29,6 +29,9 @@ type Process = {
 
 type Snapshot = { processes?: Process[]; total?: number; truncated?: boolean };
 
+/** One row of the table: the process, and where it stands in the tree. */
+type Row = { process: Process; depth: number; children: number };
+
 /**
  * The host's processes.
  *
@@ -43,6 +46,8 @@ export function Processes() {
   const module = useModule<Snapshot>(host.id, "processes");
   const [sort, setSort] = useState("rss");
   const [filter, setFilter] = useState("");
+  const [tree, setTree] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
   const [toSignal, setToSignal] = useState<{ process: Process; signal: string } | null>(null);
   const [message, setMessage] = useState("");
 
@@ -73,7 +78,7 @@ export function Processes() {
     acc[user] = (acc[user] ?? 0) + 1;
     return acc;
   }, {})).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const processes = (snapshot?.processes ?? []).filter((process) => {
+  const matches = (process: Process) => {
     if (!filter) return true;
     const needle = filter.toLowerCase();
     return (
@@ -82,7 +87,23 @@ export function Processes() {
       (process.unit ?? "").toLowerCase().includes(needle) ||
       String(process.pid) === filter
     );
-  });
+  };
+  const processes = (snapshot?.processes ?? []).filter(matches);
+  // The tree is computed here from the ppid of every row: the host sends a
+  // flat slice, and nesting it is the panel's work. A parent outside the
+  // slice makes its child a root - the slice is a slice, not the host.
+  const rows: Row[] = tree
+    ? treeRows(snapshot?.processes ?? [], matches, collapsed)
+    : processes.map((process) => ({ process, depth: 0, children: 0 }));
+
+  function toggleNode(pid: number) {
+    setCollapsed((previous) => {
+      const next = new Set(previous);
+      if (next.has(pid)) next.delete(pid);
+      else next.add(pid);
+      return next;
+    });
+  }
 
   return (
     <ModulePage>
@@ -151,14 +172,22 @@ export function Processes() {
 
       <Section
         title={t("Processes")}
-        count={snapshot ? processes.length : undefined}
+        count={snapshot ? rows.length : undefined}
         span={12}
         tools={snapshot && (
-          <input
-            placeholder={t("Filter by command, user, unit or PID")}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-          />
+          <>
+            <input
+              placeholder={t("Filter by command, user, unit or PID")}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            {/* The tree nests children under parents; the flat slice
+                sorted by the chosen measure stays the default. */}
+            <label className="toggle">
+              <input type="checkbox" checked={tree} onChange={(e) => setTree(e.target.checked)} />
+              {t("Tree")}
+            </label>
+          </>
         )}
         flush
       >
@@ -186,7 +215,7 @@ export function Processes() {
                 </tr>
               </thead>
               <tbody>
-                {processes.map((process) => (
+                {rows.map(({ process, depth, children }) => (
                   <tr key={process.pid}>
                     <td className="hm-num">{process.pid}</td>
                     <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
@@ -207,7 +236,22 @@ export function Processes() {
                         ? `${t("container")} ${process.container.slice(0, 12)}`
                         : process.unit || "—"}
                     </td>
+                    {/* In the tree the command is indented by its depth and a
+                        parent carries the fold; the flat table has neither. */}
                     <td className="hm-mono" title={process.command || process.name}>
+                      {tree && depth > 0 && <span style={{ display: "inline-block", width: depth * 16 }} />}
+                      {tree && children > 0 && (
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => toggleNode(process.pid)}
+                          aria-expanded={!collapsed.has(process.pid)}
+                          title={collapsed.has(process.pid) ? t("Show {n} children", { n: children }) : t("Hide children")}
+                        >
+                          {collapsed.has(process.pid) ? "▸" : "▾"}
+                        </button>
+                      )}
+                      {tree && children > 0 && " "}
                       {(process.command || process.name).slice(0, 60)}
                     </td>
                     <td>
@@ -224,7 +268,7 @@ export function Processes() {
             <Foot>
               <span>
                 {t("{shown} of {listed} shown · {total} on the host · read", {
-                  shown: processes.length, listed: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
+                  shown: rows.length, listed: snapshot.processes?.length ?? 0, total: snapshot.total ?? 0,
                 })}{" "}
                 <Time value={module.data?.observed_at} />
               </span>
@@ -269,4 +313,54 @@ export function Processes() {
       )}
     </ModulePage>
   );
+}
+
+/**
+ * The rows of the tree: every process under its parent, in the order of
+ * the slice, with the collapsed branches folded away. A filter keeps the
+ * matching processes and the path down to them, so a match deep in the
+ * tree is still seen where it stands.
+ */
+function treeRows(processes: Process[], matches: (process: Process) => boolean, collapsed: Set<number>): Row[] {
+  const byPid = new Map<number, Process>(processes.map((process) => [process.pid, process]));
+  const children = new Map<number, Process[]>();
+  const roots: Process[] = [];
+  for (const process of processes) {
+    // A parent outside the slice makes its child a root: the slice is what
+    // the host sent, not the whole host.
+    const parent = process.ppid !== process.pid ? byPid.get(process.ppid) : undefined;
+    if (!parent) {
+      roots.push(process);
+      continue;
+    }
+    const siblings = children.get(parent.pid) ?? [];
+    siblings.push(process);
+    children.set(parent.pid, siblings);
+  }
+
+  // A row is kept when it matches or when something under it does.
+  const kept = new Map<number, boolean>();
+  const keep = (process: Process): boolean => {
+    const known = kept.get(process.pid);
+    if (known !== undefined) return known;
+    // Written before the descent, so a cycle in the data cannot loop.
+    kept.set(process.pid, false);
+    let result = matches(process);
+    for (const child of children.get(process.pid) ?? []) {
+      if (keep(child)) result = true;
+    }
+    kept.set(process.pid, result);
+    return result;
+  };
+
+  const rows: Row[] = [];
+  const walk = (process: Process, depth: number) => {
+    if (!keep(process)) return;
+    const below = (children.get(process.pid) ?? []).filter(keep);
+    rows.push({ process, depth, children: below.length });
+    if (collapsed.has(process.pid)) return;
+    for (const child of below) walk(child, depth + 1);
+  };
+  for (const root of roots) walk(root, 0);
+  return rows;
 }

@@ -98,6 +98,33 @@ func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnve
 	}
 }
 
+// previewSchedule computes the coming runs of an expression on the host.
+//
+// The read needs no helper: the evaluator is the one the panel checks the
+// expression with, and the zone is the host's own - which is the point of
+// asking the host rather than computing the dates in the browser. The
+// answer travels in the typed preview field and, as JSON, on stdout, the
+// channel every result reaches the panel through unchanged. It is not a
+// snapshot: the state of the host's schedules did not change.
+func (e *TaskExecutor) previewSchedule(task *agentv1.TaskEnvelope,
+	payload *opspec.SchedulePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"the schedule payload is missing")
+	}
+	preview := schedules.PreviewExpression(payload.Expression, time.Now(), schedules.HostTimezone())
+	encoded, err := json.Marshal(preview)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
+	}
+	return &agentv1.TaskResult{
+		TaskId:         task.GetTaskId(),
+		Status:         agentv1.TaskResult_STATUS_SUCCEEDED,
+		Stdout:         encoded,
+		ScheduleResult: &agentv1.ScheduleResult{Preview: encoded},
+	}
+}
+
 func dekodujHarmonogramy(result *helperv1.ScheduleResult) (schedules.Snapshot, error) {
 	if result == nil || len(result.GetSnapshot()) == 0 {
 		return schedules.Snapshot{}, nil
