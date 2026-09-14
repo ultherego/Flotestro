@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/gateway"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -191,6 +192,26 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 	envelope, err := buildEnvelope(item)
 	if err != nil {
 		return nil, err
+	}
+
+	// The hash is spelled in the newest scheme the agent at the other end
+	// verifies. An agent from before a scheme change refuses a hash it
+	// cannot recompute - and it would refuse every task, with the host
+	// managed by nobody until somebody upgraded it by hand.
+	if session, ok := s.registry.Get(item.Job.HostID); ok {
+		scheme := min(buildinfo.PayloadHashSchemeFor(session.AgentVersion), opspec.PayloadHashVersion)
+		if scheme != opspec.PayloadHashVersion {
+			var payload opspec.Payload
+			if err := json.Unmarshal(item.Job.Payload, &payload); err != nil {
+				return nil, err
+			}
+			hash, err := opspec.PayloadHashOfScheme(scheme, opspec.ActionType(item.Job.ActionType),
+				item.Job.ActionVersion, payload)
+			if err != nil {
+				return nil, err
+			}
+			envelope.PayloadHash = hash
+		}
 	}
 
 	// The secrets named in the task get their leases exactly at delivery

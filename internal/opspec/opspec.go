@@ -3478,12 +3478,12 @@ func (p Payload) withoutEmpty() Payload {
 // line. Version 2 hashes the canonical JSON of RFC 8785 with a scheme line in
 // front, so the digest depends on the document alone and another
 // implementation of the scheme comes out the same. The agent verifies both;
-// the panel issues version 1 until every agent of the fleet knows version 2,
+// the panel issued version 1 until every agent of the fleet knew version 2,
 // because an agent from before the change refuses a hash it cannot recompute
-// and the fleet would stop taking tasks. Raising the constant is the whole
-// switch: it is made once the agents have been upgraded, not together with
-// them.
-const PayloadHashVersion = 1
+// and the fleet would stop taking tasks. Raising the constant was the whole
+// switch, made once the agents had been upgraded, not together with them:
+// an agent older than 0.43 does not verify version 2.
+const PayloadHashVersion = 2
 
 // PayloadHash computes the plan hash of the scheme the panel issues,
 // PayloadHashVersion. The agent computes it the same way and compares it
@@ -3494,7 +3494,7 @@ func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error
 
 // PayloadHashSchemes lists the scheme versions the agent recognises, the
 // one the panel issues first.
-var PayloadHashSchemes = []int{PayloadHashVersion, 2}
+var PayloadHashSchemes = []int{PayloadHashVersion, 1}
 
 // PayloadHashOfScheme computes the plan hash of one scheme version.
 //

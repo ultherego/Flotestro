@@ -118,3 +118,25 @@ func compareVersions(a, b []int) int {
 	}
 	return 0
 }
+
+// hashSchemeByVersion says from which release the agent verifies a given
+// plan hash scheme, oldest first. The scheme is not the protocol: an agent
+// that speaks the protocol of a task still refuses it when it cannot
+// recompute the hash the panel put on it, so the panel hashes for the
+// agent it is talking to.
+var hashSchemeByVersion = []protocolStep{
+	{Since: "0.1.0", Protocol: 1},
+	{Since: "0.43.0", Protocol: 2},
+}
+
+// PayloadHashSchemeFor returns the newest plan hash scheme an agent of the
+// given version verifies. A version that cannot be read gets the oldest
+// scheme: every agent verifies that one, and refusing to dispatch over a
+// version string would cut the host off for a spelling.
+func PayloadHashSchemeFor(version string) int {
+	scheme, err := minimumProtocol(hashSchemeByVersion, version)
+	if err != nil {
+		return 1
+	}
+	return scheme
+}

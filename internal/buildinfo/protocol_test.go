@@ -78,3 +78,16 @@ func TestTheRealTableIsConsistent(t *testing.T) {
 		t.Fatalf("this binary's own version is refused: %v", err)
 	}
 }
+
+func TestTheHashSchemeFollowsTheAgentVersion(t *testing.T) {
+	cases := map[string]int{
+		"0.1.0": 1, "0.42.0": 1, "0.42.9-1": 1,
+		"0.43.0": 2, "0.44.0": 2, "1.0.0": 2,
+		"": 1, "devel": 1,
+	}
+	for version, want := range cases {
+		if got := PayloadHashSchemeFor(version); got != want {
+			t.Errorf("PayloadHashSchemeFor(%q) = %d, want %d", version, got, want)
+		}
+	}
+}
