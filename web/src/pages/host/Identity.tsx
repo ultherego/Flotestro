@@ -1,9 +1,24 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "../../lib/api";
-import type { Host, HostAccess } from "../../lib/types";
+import type { Host, HostAccess, OfflineVerdict } from "../../lib/types";
 import { Time, OptionalFlag } from "../../components/ui";
+import { absoluteTime } from "../../lib/format";
 import { Fact, Facts, Foot, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, Unknown, useHost, useModule } from "./shared";
 import { useT } from "../../i18n";
+
+/**
+ * The offline policy as the helper read it from sssd.conf. A missing field is
+ * a value that could not be read; a key named in `defaulted` was absent from
+ * the file and took the SSSD default, which is shown as such.
+ */
+type SssdOfflinePolicy = {
+  cache_credentials?: boolean;
+  offline_credentials_expiration_days?: number;
+  entry_cache_timeout_seconds?: number;
+  krb5_store_password_if_offline?: boolean;
+  defaulted?: string[];
+  unavailable_reason?: string;
+};
 
 type IdentityState = {
   servers?: string[];
@@ -13,6 +28,7 @@ type IdentityState = {
   keytab_kvno?: number;
   time_synchronized?: boolean;
   unavailable_reason?: string;
+  sssd_offline_policy?: SssdOfflinePolicy;
 };
 
 export function Identity() {
@@ -58,8 +74,101 @@ export function Identity() {
         </Facts>
       </Section>
 
+      {host.identity.enrolled && (
+        <OfflinePolicy policy={identity.sssd_offline_policy} verdict={host.identity.offline_verdict} />
+      )}
+
       <EffectiveAccess host={host} />
     </ModulePage>
+  );
+}
+
+/**
+ * What happens to directory logins when the directory is unreachable. The
+ * facts come from sssd.conf on the host; the verdict is the panel's and is
+ * drawn as unknown whenever a fact is missing - a host that did not report
+ * its policy is not a host without a cache.
+ */
+function OfflinePolicy({ policy, verdict }: { policy?: SssdOfflinePolicy; verdict?: OfflineVerdict }) {
+  const t = useT();
+  const defaulted = new Set(policy?.defaulted ?? []);
+
+  const flag = (key: string, value: boolean | undefined) => {
+    if (value === undefined) return <Unknown />;
+    return (
+      <>
+        {value ? t("yes") : t("no")}
+        {defaulted.has(key) && <> <span className="badge">{t("default")}</span></>}
+      </>
+    );
+  };
+  const number = (key: string, value: number | undefined, render: (n: number) => string) => {
+    if (value === undefined) return <Unknown />;
+    return (
+      <>
+        {render(value)}
+        {defaulted.has(key) && <> <span className="badge">{t("default")}</span></>}
+      </>
+    );
+  };
+
+  return (
+    <Section
+      title={t("Logins during a directory outage")}
+      description={t("What sssd.conf on the host says about cached credentials, and what the panel concludes from it.")}
+      flush
+    >
+      <Facts>
+        <Fact label={t("Verdict")} wide><VerdictChip verdict={verdict} /></Fact>
+        <Fact label={t("Credentials cached")}>{flag("cache_credentials", policy?.cache_credentials)}</Fact>
+        <Fact label={t("Cached credentials expire")}>
+          {number("offline_credentials_expiration", policy?.offline_credentials_expiration_days,
+            (days) => days === 0 ? t("never") : t("after {days} days", { days }))}
+        </Fact>
+        <Fact label={t("Entry cache timeout")}>
+          {number("entry_cache_timeout", policy?.entry_cache_timeout_seconds, (seconds) => `${seconds} s`)}
+        </Fact>
+        <Fact label={t("Password kept when offline")}>
+          {flag("krb5_store_password_if_offline", policy?.krb5_store_password_if_offline)}
+        </Fact>
+      </Facts>
+      {policy?.unavailable_reason && (
+        <Foot><Unknown /> {policy.unavailable_reason}</Foot>
+      )}
+      {!policy && (
+        <Foot>{t("The host has not reported its SSSD offline policy; an agent from before this check sends none.")}</Foot>
+      )}
+    </Section>
+  );
+}
+
+/** The verdict as a chip, with the one sentence behind it. */
+function VerdictChip({ verdict }: { verdict?: OfflineVerdict }) {
+  const t = useT();
+  if (!verdict) {
+    return <><Unknown /> {t("The panel has no verdict for this host yet.")}</>;
+  }
+  const labels: Record<OfflineVerdict["verdict"], string> = {
+    cached_logins_until: t("cached logins until {when}", { when: verdict.until ? absoluteTime(verdict.until) : "?" }),
+    cached_logins_indefinitely: t("cached logins indefinitely"),
+    no_cached_logins: t("no cached logins"),
+    unknown: t("unknown"),
+  };
+  const tone: Record<OfflineVerdict["verdict"], string> = {
+    cached_logins_until: "ok",
+    cached_logins_indefinitely: "ok",
+    // No cache during an outage locks everybody out; before the outage it
+    // is a warning about what the outage would do.
+    no_cached_logins: verdict.in_force ? "error" : "warn",
+    unknown: "unknown",
+  };
+  return (
+    <>
+      <span className={`badge ${tone[verdict.verdict]}`}>{labels[verdict.verdict]}</span>
+      {verdict.in_force && <> <span className="badge warn">{t("outage in progress")}</span></>}
+      {" "}
+      <span>{verdict.reason}</span>
+    </>
   );
 }
 

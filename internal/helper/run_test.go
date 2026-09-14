@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"reflect"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/helper/runscope"
@@ -21,7 +22,8 @@ func TestScopeWrapsTheSameArgvUnderSystemdRun(t *testing.T) {
 			}
 			return "/usr/bin/systemd-run", nil
 		},
-		log: slog.New(slog.DiscardHandler),
+		log:      slog.New(slog.DiscardHandler),
+		sequence: new(atomic.Uint64),
 	}
 	argv := []string{"/usr/bin/apt-get", "-o", "Dpkg::Options::=--force-confdef", "upgrade", "a b"}
 	wrapped, scoped := runner.wrap("0b0e7a3e-0000-4000-8000-000000000001", opspec.FamilyPackages,
@@ -31,7 +33,7 @@ func TestScopeWrapsTheSameArgvUnderSystemdRun(t *testing.T) {
 	}
 	want := []string{
 		"/usr/bin/systemd-run", "--scope", "--quiet",
-		"--unit=flotestro-op-0b0e7a3e-0000-4000-8000-000000000001",
+		"--unit=flotestro-op-0b0e7a3e-0000-4000-8000-000000000001-1",
 		"--description=Flotestro: packages operation",
 		"--property=CollectMode=inactive-or-failed",
 		"--property=CPUWeight=50", "--property=IOWeight=50", "--property=MemoryHigh=536870912",
@@ -84,13 +86,13 @@ func TestScopeIsSkippedWhenNobodyAsked(t *testing.T) {
 // only what a unit name takes gets into it.
 func TestScopeUnitNameIsFiltered(t *testing.T) {
 	cases := map[string]string{
-		"abc-123":      "flotestro-op-abc-123",
-		"a b/c;d":      "flotestro-op-abcd",
-		"":             "flotestro-op-unnamed",
-		"../../evil\n": "flotestro-op-....evil",
+		"abc-123":      "flotestro-op-abc-123-7",
+		"a b/c;d":      "flotestro-op-abcd-7",
+		"":             "flotestro-op-unnamed-7",
+		"../../evil\n": "flotestro-op-....evil-7",
 	}
 	for in, want := range cases {
-		if got := scopeUnit(in); got != want {
+		if got := scopeUnit(in, 7); got != want {
 			t.Errorf("scopeUnit(%q) = %q, expected %q", in, got, want)
 		}
 	}
@@ -123,6 +125,7 @@ func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 		scopes: scopeRunner{
 			lookPath: func(string) (string, error) { return "/usr/bin/systemd-run", nil },
 			log:      slog.New(slog.DiscardHandler),
+			sequence: new(atomic.Uint64),
 		},
 	}
 	argv := []string{"/usr/bin/restic", "backup", "/srv"}
@@ -130,7 +133,9 @@ func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 	ctx := server.scopeContext(context.Background(), "task-1", opspec.FamilyBackups)
 	want := []string{
 		"/usr/bin/systemd-run", "--scope", "--quiet",
-		"--unit=flotestro-op-task-1",
+		// The probe that decided on the scope took number 1; the first tool
+		// is the second unit of the task.
+		"--unit=flotestro-op-task-1-2",
 		"--description=Flotestro: backups operation",
 		"--property=CollectMode=inactive-or-failed",
 		"--property=CPUWeight=30", "--property=IOWeight=30", "--property=MemoryHigh=1073741824",
@@ -145,6 +150,11 @@ func TestScopeContextCarriesThePrefixOfTheRequest(t *testing.T) {
 	second := runscope.Apply(ctx, []string{"/usr/bin/restic", "forget"})
 	if first[len(first)-1] != "check" || second[len(second)-1] != "forget" {
 		t.Fatalf("the tools were mixed up: %q and %q", first, second)
+	}
+	// Each tool has a unit of its own: systemd refuses a name that is
+	// still loaded from the tool before, and a scope is collected late.
+	if first[unitArgIndex] == second[unitArgIndex] {
+		t.Fatalf("two tools of one task share the unit %q", first[unitArgIndex])
 	}
 
 	// A family without limits clears the scope, even one recorded higher up.

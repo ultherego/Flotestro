@@ -6,6 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
 // IdentityState describes the integration of the host with the domain. It is
@@ -31,6 +34,24 @@ type IdentityState struct {
 
 	ConfigIssues      []string `json:"config_issues,omitempty"`
 	UnavailableReason string   `json:"unavailable_reason,omitempty"`
+
+	// SSSDOfflinePolicy is what sssd.conf says happens to logins during a
+	// directory outage. Nil means the helper did not read it at all; the
+	// panel judges the policy, the host only carries the facts.
+	SSSDOfflinePolicy *SSSDOfflinePolicy `json:"sssd_offline_policy,omitempty"`
+}
+
+// SSSDOfflinePolicy is the offline behaviour SSSD was configured with for the
+// joined domain. A nil field is a value that could not be read; a key absent
+// from the file took the SSSD default and is named in Defaulted, so the panel
+// never mistakes an assumed value for a configured one.
+type SSSDOfflinePolicy struct {
+	CacheCredentials                 *bool    `json:"cache_credentials,omitempty"`
+	OfflineCredentialsExpirationDays *uint32  `json:"offline_credentials_expiration_days,omitempty"`
+	EntryCacheTimeoutSeconds         *uint32  `json:"entry_cache_timeout_seconds,omitempty"`
+	StorePasswordIfOffline           *bool    `json:"krb5_store_password_if_offline,omitempty"`
+	Defaulted                        []string `json:"defaulted,omitempty"`
+	UnavailableReason                string   `json:"unavailable_reason,omitempty"`
 }
 
 const ipaConfigPath = "/etc/ipa/default.conf"
@@ -73,6 +94,7 @@ type PrivilegedIdentity struct {
 	SSSDOnline        *bool
 	ConfigIssues      []string
 	UnavailableReason string
+	SSSDOfflinePolicy *SSSDOfflinePolicy
 }
 
 // Merge joins the result from the helper into the state read without
@@ -84,7 +106,41 @@ func (s IdentityState) Merge(privileged PrivilegedIdentity) IdentityState {
 	s.SSSDOnline = privileged.SSSDOnline
 	s.ConfigIssues = privileged.ConfigIssues
 	s.UnavailableReason = privileged.UnavailableReason
+	s.SSSDOfflinePolicy = privileged.SSSDOfflinePolicy
 	return s
+}
+
+// sssdOfflinePolicyFromHelper takes the policy out of the helper's answer.
+// A helper from before the field sends nothing, and nothing is what the
+// panel then sees: an older helper must not look like a host without a cache.
+func sssdOfflinePolicyFromHelper(message *helperv1.SssdOfflinePolicy) *SSSDOfflinePolicy {
+	if message == nil {
+		return nil
+	}
+	return &SSSDOfflinePolicy{
+		CacheCredentials:                 message.CacheCredentials,
+		OfflineCredentialsExpirationDays: message.OfflineCredentialsExpirationDays,
+		EntryCacheTimeoutSeconds:         message.EntryCacheTimeoutSeconds,
+		StorePasswordIfOffline:           message.Krb5StorePasswordIfOffline,
+		Defaulted:                        message.GetDefaulted(),
+		UnavailableReason:                message.GetUnavailableReason(),
+	}
+}
+
+// sssdOfflinePolicyToProto carries the policy to the control plane. Nil stays
+// nil and an unread value stays unset; the wire adds no certainty.
+func sssdOfflinePolicyToProto(policy *SSSDOfflinePolicy) *agentv1.SssdOfflinePolicy {
+	if policy == nil {
+		return nil
+	}
+	return &agentv1.SssdOfflinePolicy{
+		CacheCredentials:                 policy.CacheCredentials,
+		OfflineCredentialsExpirationDays: policy.OfflineCredentialsExpirationDays,
+		EntryCacheTimeoutSeconds:         policy.EntryCacheTimeoutSeconds,
+		Krb5StorePasswordIfOffline:       policy.StorePasswordIfOffline,
+		Defaulted:                        policy.Defaulted,
+		UnavailableReason:                policy.UnavailableReason,
+	}
 }
 
 // parseIPAConfig reads /etc/ipa/default.conf. The presence of the file is the

@@ -15,9 +15,9 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 )
 
-// probeIdentity reads the privileged part of the domain state: the host keytab
-// and the SSSD cache database. The agent has no access to them and should not
-// have one.
+// probeIdentity reads the privileged part of the domain state: the host keytab,
+// the SSSD cache database and the SSSD offline policy in sssd.conf. The agent
+// has no access to them and should not have one.
 func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.IdentityProbeRequest) *helperv1.HelperResponse {
 	result := &helperv1.IdentityProbeResult{}
@@ -51,6 +51,15 @@ func (s *Server) probeIdentity(ctx context.Context, request *helperv1.HelperRequ
 	default:
 		result.SssdOnline = online
 		result.ConfigIssues = issues
+	}
+
+	// The offline policy is a file read, not a tool run, so a stuck SSSD
+	// cannot hide it; its own reason travels inside the message because a
+	// half-read policy is still worth showing next to what is unknown.
+	policy := readSSSDOfflinePolicy(action.GetDomain())
+	result.SssdOfflinePolicy = sssdOfflinePolicyToProto(policy)
+	if policy.UnavailableReason != "" {
+		missing = append(missing, "sssd.conf: "+policy.UnavailableReason)
 	}
 
 	if len(missing) > 0 {

@@ -244,7 +244,8 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 }
 
 // ProbePrivilegedIdentity reads through the helper the parts of the domain
-// state that need root: the host keytab and the SSSD cache database.
+// state that need root: the host keytab, the SSSD cache database and the
+// SSSD offline policy.
 func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain string) (PrivilegedIdentity, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TaskId:         "identity-probe",
@@ -267,6 +268,7 @@ func (e *TaskExecutor) ProbePrivilegedIdentity(ctx context.Context, domain strin
 		SSSDOnline:        result.SssdOnline,
 		ConfigIssues:      result.GetConfigIssues(),
 		UnavailableReason: result.GetUnavailableReason(),
+		SSSDOfflinePolicy: sssdOfflinePolicyFromHelper(result.GetSssdOfflinePolicy()),
 	}, nil
 }
 

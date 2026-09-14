@@ -278,6 +278,10 @@ type HostIdentity struct {
 	Realm      string     `json:"realm,omitempty"`
 	SSSDOnline *bool      `json:"sssd_online"`
 	CheckedAt  *time.Time `json:"checked_at,omitempty"`
+	// OfflineVerdict is the panel's judgement on directory logins during an
+	// outage, from the facts the host reported. Absent for a host outside a
+	// domain: there is nothing to judge.
+	OfflineVerdict *OfflineVerdict `json:"offline_verdict,omitempty"`
 }
 
 // Store provides access to the host tables.
@@ -1094,7 +1098,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.identity_sssd_online, h.identity_checked_at,
 		       h.maintenance_until, coalesce(h.maintenance_reason, ''),
 		       coalesce(h.maintenance_by, ''), h.maintenance_at,
-		       coalesce(c.rejestr, '[]'::json)
+		       coalesce(c.rejestr, '[]'::json),
+		       i.payload, i.observed_at
 		from hosts h
 		left join lateral (
 		    select json_agg(json_build_object(
@@ -1104,6 +1109,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		           order by r.name) as rejestr
 		      from host_capability_registry r where r.host_id = h.id
 		) c on true
+		left join host_module_inventory i
+		  on i.host_id = h.id and i.module = 'identity'
 		` + clause
 
 	rows, err := s.pool.Query(ctx, query, args...)
@@ -1117,6 +1124,10 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var h Host
 		var windowUntil, windowFrom *time.Time
 		var windowReason, windowBy string
+		// The identity module rides along so the verdict on offline logins
+		// is judged from the same facts the host tab shows.
+		var identityPayload []byte
+		var identityObservedAt *time.Time
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
 			&h.ReleaseChannel,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
@@ -1128,8 +1139,12 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
 			&windowUntil, &windowReason, &windowBy, &windowFrom,
-			&h.Capabilities); err != nil {
+			&h.Capabilities, &identityPayload, &identityObservedAt); err != nil {
 			return nil, err
+		}
+		if h.Identity.Enrolled {
+			h.Identity.OfflineVerdict = judgeFromFragment(h.Identity.SSSDOnline,
+				identityPayload, identityObservedAt)
 		}
 		// An empty tag list is a fact about the host and is sent as one,
 		// not as a missing field.

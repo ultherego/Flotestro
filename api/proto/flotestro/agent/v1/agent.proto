@@ -434,6 +434,29 @@ message IdentityState {
   repeated string config_issues = 13;
   // The reason the state could not be determined.
   string unavailable_reason = 14;
+  // The offline policy from sssd.conf, as the helper read it. Nil means the
+  // policy was not read at all; the panel judges what the facts mean for
+  // logins during a directory outage, the host only reports them.
+  SssdOfflinePolicy sssd_offline_policy = 15;
+}
+
+// SssdOfflinePolicy is what sssd.conf says SSSD does for the joined domain
+// when the directory is unreachable. An unset field is a value that could
+// not be read; a key absent from the file takes the SSSD default and is
+// named in defaulted, so an assumed value never looks like a measured one.
+message SssdOfflinePolicy {
+  // cache_credentials, default false.
+  optional bool cache_credentials = 1;
+  // offline_credentials_expiration in days, default 0 = never expires.
+  optional uint32 offline_credentials_expiration_days = 2;
+  // entry_cache_timeout in seconds, default 5400.
+  optional uint32 entry_cache_timeout_seconds = 3;
+  // krb5_store_password_if_offline, default false.
+  optional bool krb5_store_password_if_offline = 4;
+  // The sssd.conf keys that were absent and took the SSSD default.
+  repeated string defaulted = 5;
+  // The reason the policy, or part of it, could not be read.
+  string unavailable_reason = 6;
 }
 
 // LocalAccount describes an account visible on the host.

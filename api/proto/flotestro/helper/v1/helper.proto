@@ -129,8 +129,8 @@ message DomainEnrollRequest {
 }
 
 // IdentityProbeRequest reads the elements of the domain state that require
-// root: the host keytab and the SSSD cache database. The agent reads the
-// rest itself.
+// root: the host keytab, the SSSD cache database and the SSSD configuration.
+// The agent reads the rest itself.
 message IdentityProbeRequest {
   string domain = 1;
 }
@@ -1193,6 +1193,39 @@ message IdentityProbeResult {
   optional bool sssd_online = 4;
   repeated string config_issues = 5;
   // The reason part of the state could not be determined.
+  string unavailable_reason = 6;
+  // The offline policy SSSD was configured with for the domain. The helper
+  // reads it because sssd.conf is readable by root only; the panel, not the
+  // host, judges what it means for logins during a directory outage.
+  SssdOfflinePolicy sssd_offline_policy = 7;
+}
+
+// SssdOfflinePolicy is what sssd.conf says SSSD does for the joined domain
+// when the directory is unreachable. Read from the file, never from a
+// running process: the policy is what would apply, whether or not the host
+// is offline right now.
+//
+// An unset field means the value could not be read (missing file, missing
+// domain section, or a value that does not parse). A key absent from the
+// file takes the SSSD default and is listed in defaulted, so the panel can
+// tell an assumed value from a configured one.
+message SssdOfflinePolicy {
+  // Whether SSSD keeps the credentials of users who logged in while the
+  // directory was reachable (cache_credentials, default false).
+  optional bool cache_credentials = 1;
+  // How many days a cached credential stays usable after the last online
+  // login (offline_credentials_expiration, default 0 = never expires).
+  optional uint32 offline_credentials_expiration_days = 2;
+  // How long a cached directory entry is served before a refresh is tried
+  // (entry_cache_timeout, default 5400 seconds).
+  optional uint32 entry_cache_timeout_seconds = 3;
+  // Whether a password entered while offline is kept for a later ticket
+  // (krb5_store_password_if_offline, default false).
+  optional bool krb5_store_password_if_offline = 4;
+  // The keys that were absent from the configuration and took the SSSD
+  // default, by their sssd.conf name.
+  repeated string defaulted = 5;
+  // The reason the policy, or part of it, could not be read.
   string unavailable_reason = 6;
 }
 

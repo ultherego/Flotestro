@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"os/exec"
+	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/ultherego/flotestro/internal/helper/runscope"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -25,17 +27,32 @@ import (
 // in systemctl and told apart from the agent replacement unit.
 const scopeUnitPrefix = "flotestro-op-"
 
+// unitArgIndex is where the unit name sits in a wrapped argument array.
+const unitArgIndex = 3
+
 // scopeRunner turns an argument array into one that runs under a transient
 // scope. The path lookup is injected, so a test can stand in for a host
 // with and without systemd-run.
 type scopeRunner struct {
 	lookPath func(file string) (string, error)
 	log      *slog.Logger
+	// sequence numbers the scopes this helper started, so that two tools of
+	// one operation never share a unit name. The counter is shared by every
+	// runner made from the same server; a zero runner counts alone.
+	sequence *atomic.Uint64
 }
 
 // newScopeRunner builds the runner of the helper.
 func newScopeRunner(log *slog.Logger) scopeRunner {
-	return scopeRunner{lookPath: exec.LookPath, log: log}
+	return scopeRunner{lookPath: exec.LookPath, log: log, sequence: new(atomic.Uint64)}
+}
+
+// next hands out the number of the next scope.
+func (r scopeRunner) next() uint64 {
+	if r.sequence == nil {
+		return 0
+	}
+	return r.sequence.Add(1)
 }
 
 // wrap returns the argument array of the tool under a scope with the given
@@ -75,14 +92,17 @@ func (r scopeRunner) prefix(taskID string, family opspec.ResourceFamily,
 	}
 	prefixed := []string{
 		systemdRun, "--scope", "--quiet",
-		"--unit=" + scopeUnit(taskID),
+		// Every tool gets a unit of its own, numbered after the task. The
+		// tools of one operation used to share the task's name, one after
+		// the other - and systemd refused the second one with "already
+		// loaded" whenever the first had ended a moment before, because a
+		// scope is collected asynchronously. A name nobody used yet is
+		// never taken.
+		"--unit=" + scopeUnit(taskID, r.next()),
 		"--description=Flotestro: " + string(family) + " operation",
-		// The tools of one operation share one unit name, one after the
-		// other. A scope whose tool failed stays behind as a failed unit
-		// until somebody resets it, and the next tool of the same operation
-		// - a retry of the manager, the check after a copy - would then be
-		// refused for a name already taken. Collected on failure as well,
-		// the name is free again the moment the tool ends.
+		// A scope whose tool failed stays behind as a failed unit until
+		// somebody resets it; collected on failure as well, it leaves
+		// nothing for the operator to clean up.
 		"--property=CollectMode=inactive-or-failed",
 	}
 	for _, property := range limits.Properties() {
@@ -91,10 +111,11 @@ func (r scopeRunner) prefix(taskID string, family opspec.ResourceFamily,
 	return append(prefixed, "--"), true
 }
 
-// scopeUnit names the scope of a task. A unit name takes letters, digits and
-// a few punctuation marks; a task identifier is a UUID, but the name is
-// filtered anyway, because the identifier arrives from the network.
-func scopeUnit(taskID string) string {
+// scopeUnit names the scope of one tool of a task. A unit name takes
+// letters, digits and a few punctuation marks; a task identifier is a UUID,
+// but the name is filtered anyway, because the identifier arrives from the
+// network. The sequence tells the tools of one task apart.
+func scopeUnit(taskID string, sequence uint64) string {
 	var name strings.Builder
 	for _, char := range taskID {
 		switch {
@@ -110,7 +131,7 @@ func scopeUnit(taskID string) string {
 	if name.Len() == 0 {
 		name.WriteString("unnamed")
 	}
-	return scopeUnitPrefix + name.String()
+	return scopeUnitPrefix + name.String() + "-" + strconv.FormatUint(sequence, 10)
 }
 
 // scoped wraps the argument array of a heavy operation in the scope of its
@@ -127,7 +148,7 @@ func (s *Server) scoped(taskID string, family opspec.ResourceFamily, argv []stri
 	wrapped, scoped := runner.wrap(taskID, family, opspec.FamilyLimits(family), argv)
 	if scoped && s.log != nil {
 		s.log.Info("the operation runs in a resource scope",
-			"task_id", taskID, "family", string(family), "unit", scopeUnit(taskID))
+			"task_id", taskID, "family", string(family), "unit", wrapped[unitArgIndex])
 	}
 	return wrapped
 }
@@ -148,15 +169,17 @@ func (s *Server) scopeContext(ctx context.Context, taskID string,
 	if runner.lookPath == nil {
 		runner = newScopeRunner(s.log)
 	}
-	prefix, ok := runner.prefix(taskID, family, opspec.FamilyLimits(family))
-	if !ok {
+	if _, ok := runner.prefix(taskID, family, opspec.FamilyLimits(family)); !ok {
 		return runscope.With(ctx, nil)
 	}
 	if s.log != nil {
 		s.log.Info("the operation runs in a resource scope",
-			"task_id", taskID, "family", string(family), "unit", scopeUnit(taskID))
+			"task_id", taskID, "family", string(family), "unit", scopeUnitPrefix+"*")
 	}
 	return runscope.With(ctx, func(argv []string) []string {
+		// The prefix is computed anew for every tool, so each gets its own
+		// unit number; only the presence of a scope was decided above.
+		prefix, _ := runner.prefix(taskID, family, opspec.FamilyLimits(family))
 		return runscope.Prefixed(prefix, argv)
 	})
 }

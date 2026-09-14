@@ -4,17 +4,51 @@ import (
 	"net/http"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// handleIdentityStatus describes the state of the directory connection.
+// fleetIdentityStatus is the fleet half of the identity status: the hosts
+// whose SSSD last reported itself cut off from the directory, each with the
+// panel's verdict on their logins, and the verdicts counted.
+type fleetIdentityStatus struct {
+	OfflineFromDirectory []hosts.OfflineHost `json:"offline_from_directory"`
+	OfflineCount         int                 `json:"offline_count"`
+	ByVerdict            map[string]int      `json:"by_verdict"`
+}
+
+// handleIdentityStatus describes the state of the directory connection and
+// of the hosts cut off from it. The two halves are independent: a directory
+// the panel cannot reach says nothing about which hosts still let users in,
+// and the fleet half is reported even without a directory connector.
 func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "identity", ""); !ok {
 		return
 	}
+
+	offline, err := s.hosts.OfflineFromDirectory(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	fleet := fleetIdentityStatus{
+		OfflineFromDirectory: offline,
+		OfflineCount:         len(offline),
+		ByVerdict: map[string]int{
+			hosts.VerdictCachedLoginsUntil:        0,
+			hosts.VerdictCachedLoginsIndefinitely: 0,
+			hosts.VerdictNoCachedLogins:           0,
+			hosts.VerdictUnknown:                  0,
+		},
+	}
+	for _, host := range offline {
+		fleet.ByVerdict[host.Verdict.Verdict]++
+	}
+
 	if s.directory == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"configured": false,
 			"detail":     "no directory connector is configured",
+			"hosts":      fleet,
 		})
 		return
 	}
@@ -28,6 +62,7 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 			"reachable":  false,
 			"principal":  s.directory.Principal(),
 			"error":      err.Error(),
+			"hosts":      fleet,
 		})
 		return
 	}
@@ -36,6 +71,7 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 		"reachable":  true,
 		"principal":  s.directory.Principal(),
 		"summary":    summary,
+		"hosts":      fleet,
 	})
 }
 

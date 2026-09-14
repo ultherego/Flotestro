@@ -105,6 +105,7 @@ func identityToProto(state IdentityState) *agentv1.IdentityState {
 		TimeSynchronized:  state.TimeSynchronized,
 		ConfigIssues:      state.ConfigIssues,
 		UnavailableReason: state.UnavailableReason,
+		SssdOfflinePolicy: sssdOfflinePolicyToProto(state.SSSDOfflinePolicy),
 	}
 }
 

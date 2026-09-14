@@ -38,6 +38,19 @@ export type HostIdentity = {
   realm?: string;
   sssd_online: boolean | null;
   checked_at?: string;
+  offline_verdict?: OfflineVerdict;
+};
+
+/**
+ * The panel's judgement on directory logins during an outage. The host only
+ * reports the SSSD policy and the cache age; "unknown" is a missing fact,
+ * never "no cached logins".
+ */
+export type OfflineVerdict = {
+  verdict: "cached_logins_until" | "cached_logins_indefinitely" | "no_cached_logins" | "unknown";
+  until?: string;
+  in_force: boolean;
+  reason: string;
 };
 
 export type Host = {
