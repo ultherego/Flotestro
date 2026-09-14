@@ -72,7 +72,7 @@ export function Sidebar({ face, collapsed, open, onClose }: {
           can be left for, and the drawer closes behind it like behind any
           other item. */}
       <Link to="/dashboard" className="sidebar-brand" onClick={onClose} title={t("Fleet dashboard")}>
-        <span className="sidebar-mark" aria-hidden="true"><LogoMark size={26} /></span>
+        <span className="sidebar-mark" aria-hidden="true"><LogoMark size={26} ground="color-mix(in srgb, var(--accent) 16%, var(--bg-sidebar))" /></span>
         <span className="sidebar-title">Flotestro</span>
       </Link>
 

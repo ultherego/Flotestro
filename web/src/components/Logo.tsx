@@ -1,48 +1,59 @@
 import type { CSSProperties } from "react";
 
 /**
- * The brand: a spine and three bars on a 24-unit grid. The spine on the
- * left is the control plane; the three bars beside it are hosts, drawn as
- * separate blocks with a gap from the spine because the fleet is many
- * machines under one plane, not one machine. The bars shorten downwards,
- * so the whole reads as an "F" and as a flow leaving the spine. Filled
- * shapes, no strokes: they stay crisp at 16 px in a browser tab.
- *
- * The favicon and the packaging logo in web/public repeat these shapes on
- * a 64-unit grid; a change here has to be carried there by hand.
+ * The brand: an "F" for the control plane with a cable leaving its bars to
+ * three hosts, each in its own colour - a fleet is many machines under one
+ * plane, not one machine. The mark is drawn on a 128-unit grid, the same
+ * one docs/logo.svg and the favicon use; a change here has to be carried
+ * there by hand. Filled shapes and one round stroke, so it stays legible
+ * at 16 px in a browser tab.
  */
-const SPINE = { x: 2, y: 2, width: 5, height: 20 };
-const BARS = [
-  { x: 10, y: 2, width: 12, height: 4 },
-  { x: 10, y: 10, width: 9, height: 4 },
-  { x: 10, y: 18, width: 6, height: 4 },
+const PLANE =
+  "M36 31h60a10 10 0 0 1 10 10v6a10 10 0 0 1-10 10H62v14h25a10 10 0 0 1 10 10v5a10 10 0 0 1-10 10H62v16H36z";
+const CABLE = "M96 44h16v59H52M87 83.5h25";
+const PORTS = [
+  { cx: 96, cy: 44 },
+  { cx: 87, cy: 83.5 },
+  { cx: 52, cy: 104 },
 ];
-const CORNER = 1.5;
+const HOSTS = [
+  { cy: 44, fill: "#a6e3a1" },
+  { cy: 83.5, fill: "#89b4fa" },
+  { cy: 103, fill: "#cba6f7" },
+];
 
 /**
- * The mark alone, in the colour of the text around it. With `accent` the
- * spine takes the theme accent and the bars stay in currentColor; without
- * it the mark is one colour, for a tile that already carries the accent.
+ * The mark alone. The plane and the cable take the colour of the text
+ * around them (the theme accent with `accent`); the three hosts keep the
+ * brand colours, and the ports where the cable leaves the plane are cut
+ * in the colour of the ground behind it, so the mark reads on any tile.
  * The mark is decorative wherever it appears - a title or a label always
  * stands next to it - so it is hidden from assistive technology.
  */
-export function LogoMark({ size = 24, className, accent = false }: {
+export function LogoMark({ size = 24, className, accent = false, ground = "var(--bg-panel)" }: {
   size?: number;
   className?: string;
   accent?: boolean;
+  /** The colour behind the mark: the ports and the host rings are cut in it. */
+  ground?: string;
 }) {
+  const ink = accent ? "var(--accent)" : "currentColor";
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 24 24"
+      viewBox="28 24 96 96"
       className={className}
       aria-hidden="true"
       focusable="false"
       style={{ display: "block", flex: "none" }}
     >
-      <rect {...SPINE} rx={CORNER} fill={accent ? "var(--accent)" : "currentColor"} />
-      {BARS.map((bar) => <rect key={bar.y} {...bar} rx={CORNER} fill="currentColor" />)}
+      <path d={PLANE} fill={ink} />
+      {PORTS.map((port) => <circle key={port.cy} {...port} r={4} fill={ground} />)}
+      <path d={CABLE} fill="none" stroke={ink} strokeWidth={5} strokeLinecap="round" strokeLinejoin="round" />
+      {HOSTS.map((host) => (
+        <circle key={host.cy} cx={112} cy={host.cy} r={7} fill={host.fill} stroke={ground} strokeWidth={4} />
+      ))}
     </svg>
   );
 }
