@@ -196,7 +196,11 @@ type Spec struct {
 	RebootPolicy             RebootPolicy
 	HealthCheckUnits         []string
 	JobTimeoutSeconds        int
-	RequiresApproval         bool
+	// RebootTimeoutSeconds bounds the wait for a host to come back after
+	// the reboot the campaign ordered. Zero means DefaultRebootTimeout; a
+	// given value has to lie between MinRebootTimeout and MaxRebootTimeout.
+	RebootTimeoutSeconds int
+	RequiresApproval     bool
 	// OfflinePolicy says what happens to a host that is not connected when
 	// its turn comes. Empty means the operation's own policy; the handler
 	// resolves it before the campaign is created, so the record always
@@ -235,6 +239,30 @@ func (s Spec) Deadline() time.Duration {
 	return time.Duration(s.DeadlineMinutes) * time.Minute
 }
 
+// The bounds of the wait for a rebooted host. Without a bound the campaign
+// would wait forever for a machine that never came up; a bound under a
+// minute would fail hosts that merely take their time through the BIOS,
+// and one over two hours is no longer a wait but a forgotten host.
+const (
+	DefaultRebootTimeout = 15 * time.Minute
+	MinRebootTimeout     = time.Minute
+	MaxRebootTimeout     = 2 * time.Hour
+)
+
+// RebootTimeout returns the wait for a rebooted host as a duration.
+func (s Spec) RebootTimeout() time.Duration {
+	return rebootTimeoutOf(s.RebootTimeoutSeconds)
+}
+
+// rebootTimeoutOf resolves the recorded seconds to a duration; zero is the
+// default, so a campaign from before the field waits as it always did.
+func rebootTimeoutOf(seconds int) time.Duration {
+	if seconds <= 0 {
+		return DefaultRebootTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // Validate checks that the description of the campaign holds together.
 func (s Spec) Validate() error {
 	if s.Name == "" {
@@ -261,6 +289,14 @@ func (s Spec) Validate() error {
 	}
 	if s.OfflinePolicy != "" && !opspec.KnownOfflinePolicy(s.OfflinePolicy) {
 		return fmt.Errorf("unknown offline policy %q", s.OfflinePolicy)
+	}
+	// Zero is "the default"; anything else has to be a wait the bounds
+	// allow, a negative number included - it is not an absence, it is a
+	// mistake.
+	if s.RebootTimeoutSeconds != 0 && (s.RebootTimeoutSeconds < int(MinRebootTimeout/time.Second) ||
+		s.RebootTimeoutSeconds > int(MaxRebootTimeout/time.Second)) {
+		return fmt.Errorf("the reboot timeout has to be between %d and %d seconds",
+			int(MinRebootTimeout/time.Second), int(MaxRebootTimeout/time.Second))
 	}
 	if s.DeadlineMinutes < 0 {
 		return fmt.Errorf("the deadline must not be negative")
@@ -371,6 +407,7 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 			Reboot           RebootPolicy `json:"reboot_policy"`
 			Units            []string     `json:"health_check_units"`
 			Timeout          int          `json:"job_timeout_seconds"`
+			RebootTimeout    int          `json:"reboot_timeout_seconds"`
 			WindowFrom       *time.Time   `json:"maintenance_start,omitempty"`
 			WindowTo         *time.Time   `json:"maintenance_end,omitempty"`
 			// What happens to an offline host, how long the campaign waits
@@ -392,6 +429,9 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 	content.Rollout.Reboot = spec.RebootPolicy
 	content.Rollout.Units = spec.HealthCheckUnits
 	content.Rollout.Timeout = spec.JobTimeoutSeconds
+	// Recorded resolved, like the deadline: how long a rebooted host is
+	// waited for is part of what the approver read, default or not.
+	content.Rollout.RebootTimeout = int(spec.RebootTimeout() / time.Second)
 	content.Rollout.WindowFrom = spec.MaintenanceStart
 	content.Rollout.WindowTo = spec.MaintenanceEnd
 	content.Rollout.Offline = spec.OfflinePolicy
@@ -453,7 +493,10 @@ type Campaign struct {
 	RebootPolicy             RebootPolicy    `json:"reboot_policy"`
 	HealthCheckUnits         []string        `json:"health_check_units"`
 	JobTimeoutSeconds        int             `json:"job_timeout_seconds"`
-	RequiresApproval         bool            `json:"requires_approval"`
+	// RebootTimeoutSeconds is how long the campaign waits for a host to
+	// come back after the reboot it ordered, before the host is failed.
+	RebootTimeoutSeconds int  `json:"reboot_timeout_seconds"`
+	RequiresApproval     bool `json:"requires_approval"`
 	// OfflinePolicy is what the campaign does with a host that is not
 	// connected when its turn comes; DeadlineAt is how long it waits for
 	// such a host under a waiting policy.
@@ -505,6 +548,11 @@ type CampaignLink struct {
 	State State  `json:"state"`
 }
 
+// RebootTimeout returns the wait for a rebooted host as a duration.
+func (c Campaign) RebootTimeout() time.Duration {
+	return rebootTimeoutOf(c.RebootTimeoutSeconds)
+}
+
 // Target is a host within a campaign.
 type Target struct {
 	ID         string      `json:"id"`
@@ -524,6 +572,11 @@ type Target struct {
 	Message      string     `json:"message,omitempty"`
 	StartedAt    *time.Time `json:"started_at,omitempty"`
 	FinishedAt   *time.Time `json:"finished_at,omitempty"`
+	// StateSince is when the target entered its current state. StartedAt
+	// says when the host began the change; only the last transition says
+	// when its reboot began, and the wait for the host is counted from
+	// there. Absent from reads that do not need it.
+	StateSince *time.Time `json:"state_since,omitempty"`
 }
 
 // Report summarises the course of a campaign.
@@ -552,6 +605,22 @@ const ConnectivityLostCode = "lease_expired"
 // while its task ran rather than because the change failed.
 func (t Target) ConnectivityLost() bool {
 	return t.State == TargetFailed && t.ErrorCode == ConnectivityLostCode
+}
+
+// RebootWindowClosedCode is the error code of a host that was still
+// rebooting when the campaign's maintenance window closed. The change on
+// it is done; what is unknown is whether it will come back, and the window
+// the operator promised the fleet in has ended.
+const RebootWindowClosedCode = "reboot_window_closed"
+
+// PauseWindowClosedMidReboot is the reason a campaign is paused with when a
+// host did not come back from its reboot inside the maintenance window.
+const PauseWindowClosedMidReboot = "maintenance_window_closed_mid_reboot"
+
+// RebootWindowClosed says whether the host ended because the maintenance
+// window closed while it was rebooting.
+func (t Target) RebootWindowClosed() bool {
+	return t.State == TargetFailed && t.ErrorCode == RebootWindowClosedCode
 }
 
 // WaveSummary describes one wave.

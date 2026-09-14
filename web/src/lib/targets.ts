@@ -61,6 +61,14 @@ export type CompensationLinks = {
   compensated_by?: { id: string; name: string; state: string }[];
 };
 
+/**
+ * The bounds of the wait for a rebooted host, in seconds, as the server
+ * validates them. The default is what a campaign waits when the order
+ * says nothing; the form starts there so the approver reads the bound
+ * that will apply.
+ */
+export const REBOOT_TIMEOUT = { min: 60, max: 7200, default: 900 };
+
 /** The states a target can be in, for the filter. */
 export const TARGET_STATES = [
   "pending", "awaiting_budget", "queued_offline", "planning", "running", "rebooting", "verifying",

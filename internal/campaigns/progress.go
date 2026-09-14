@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/remediation"
@@ -81,9 +82,26 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		if RebootPolicy(campaign.RebootPolicy) == RebootNever {
 			why = "the reboot policy of the campaign is never"
 		}
-		o.finishTargetSteps(ctx, campaign, target, TargetSucceeded, "", "",
-			changed, stepOutcome{Key: StepReboot, State: StepSkipped, Reason: why})
-		return nil
+		notRebooted := stepOutcome{Key: StepReboot, State: StepSkipped, Reason: why}
+		if len(campaign.HealthCheckUnits) == 0 {
+			o.finishTargetSteps(ctx, campaign, target, TargetSucceeded, "", "", changed, notRebooted)
+			return nil
+		}
+		// The units are verified whether or not a reboot came between:
+		// the canary is there to say if the change left the service
+		// standing, and a restart campaign with no reboot in it is the
+		// one case where nothing else would ever look. The verification
+		// follows the change directly, and the strip says the reboot was
+		// skipped rather than never reached.
+		host, err := o.hosts.Get(ctx, target.HostID)
+		if err != nil {
+			o.finishTargetSteps(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error(),
+				changed, notRebooted, stepOutcome{Key: StepVerify, State: StepFailed,
+					Reason: stepReason("host_unavailable", err.Error())})
+			return nil
+		}
+		return o.orderHealthCheck(ctx, campaign, target, host, StepExecute,
+			"the change is done, verification is under way", changed, notRebooted)
 	}
 
 	host, err := o.hosts.Get(ctx, target.HostID)
@@ -218,9 +236,13 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 	}
 	// A new boot ID and an active session mean the host has come back.
 	if host.ConnectionState != "online" || host.BootID == "" || host.BootID == target.BootIDBefore {
-		if o.rebootTimedOut(target) {
-			o.finishTarget(ctx, campaign, target, TargetFailed, "reboot_timeout",
-				"the host did not come back after the reboot within the given time")
+		since, known := rebootOrderedAt(target)
+		if !known {
+			return nil
+		}
+		verdict := judgeReboot(since, campaign.MaintenanceEnd, campaign.RebootTimeout(), time.Now())
+		if !verdict.Waiting {
+			o.finishTarget(ctx, campaign, target, TargetFailed, verdict.Code, verdict.Message)
 		}
 		return nil
 	}
@@ -234,14 +256,26 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 				Reason: "the campaign names no units to check after the reboot"})
 		return nil
 	}
+	return o.orderHealthCheck(ctx, campaign, target, host, StepReboot,
+		"the host came back, verification is under way", rebooted)
+}
 
+// orderHealthCheck orders the verification of the campaign's units on a
+// host whose change is done: right after the change when no reboot
+// follows, or once the host came back from one. The steps that ended for
+// the verification to start close in the same transaction, and the step
+// row names the one it followed, so the strip reads the same whichever
+// way the host got here.
+func (o *Orchestrator) orderHealthCheck(ctx context.Context, campaign Campaign, target *Target,
+	host *hosts.Host, after StepKey, message string, closes ...stepOutcome) error {
 	healthJobID, err := o.submitJob(ctx, campaign, host, opspec.ActionUnitStatus,
 		opspec.Payload{UnitStatus: &opspec.UnitStatusPayload{Units: campaign.HealthCheckUnits}},
 		"campaign:"+campaign.ID+":health:"+target.HostID+":"+host.BootID)
 	if err != nil {
+		notVerified := stepOutcome{Key: StepVerify, State: StepFailed,
+			Reason: stepReason("health_create_failed", err.Error())}
 		o.finishTargetSteps(ctx, campaign, target, TargetFailed, "health_create_failed", err.Error(),
-			rebooted, stepOutcome{Key: StepVerify, State: StepFailed,
-				Reason: stepReason("health_create_failed", err.Error())})
+			append(append([]stepOutcome(nil), closes...), notVerified)...)
 		return nil
 	}
 	planHash, _, _, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
@@ -249,27 +283,68 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 		return err
 	}
 	if err := o.startStep(ctx, target, stepStart{
-		Key: StepVerify, DependsOn: StepReboot, PlanHash: planHash,
+		Key: StepVerify, DependsOn: after, PlanHash: planHash,
 		JobID: healthJobID, Column: "health_job_id", State: TargetVerifying,
-		Message: "the host came back, verification is under way", Closes: []stepOutcome{rebooted},
+		Message: message, Closes: closes, Planned: campaignPlans(campaign),
 	}); err != nil {
 		return err
 	}
 
-	o.log.Info("the host came back after the reboot, verification is under way",
-		"campaign_id", campaign.ID, "host_id", target.HostID, "boot_id", host.BootID)
+	o.log.Info("the campaign orders a health check of a host",
+		"campaign_id", campaign.ID, "host_id", target.HostID, "after", after,
+		"boot_id", host.BootID, "job_id", healthJobID)
 	return nil
 }
 
-// rebootTimeout bounds the wait for the host to come back. Without it the
-// campaign would wait forever for a machine that never came up.
-const rebootTimeout = 15 * time.Minute
-
-func (o *Orchestrator) rebootTimedOut(target *Target) bool {
-	if target.StartedAt == nil {
-		return false
+// rebootOrderedAt says since when the host has been away: the moment the
+// target entered the rebooting state. The change before the reboot may
+// have taken half an hour, and a wait counted from the start of the change
+// would fail a host the moment its reboot was ordered. A target without
+// either time cannot be judged and is waited for.
+func rebootOrderedAt(target *Target) (time.Time, bool) {
+	switch {
+	case target.StateSince != nil:
+		return *target.StateSince, true
+	case target.StartedAt != nil:
+		return *target.StartedAt, true
+	default:
+		return time.Time{}, false
 	}
-	return time.Since(*target.StartedAt) > rebootTimeout
+}
+
+// rebootVerdict is the judgement on a host that has not come back from
+// its reboot: Waiting while the campaign still waits for it, otherwise
+// the code and the message the host is closed with.
+type rebootVerdict struct {
+	Waiting bool
+	Code    string
+	Message string
+}
+
+// judgeReboot decides whether a host away since the given moment is still
+// waited for, from the campaign's maintenance window and its reboot
+// timeout.
+//
+// The window is judged first and the timeout only then. The window is the
+// operator's promise about when the fleet is touched: a host that is down
+// after it ended is outside that promise however short its absence, and
+// a timeout that merely has not run out yet does not put it back inside.
+// The document lists "the host does not come back within the maintenance
+// window" among the mandatory scenarios and keeps such a host failed; it
+// says nothing about waiting past the end, so the campaign does not.
+func judgeReboot(since time.Time, windowEnd *time.Time, timeout time.Duration, now time.Time) rebootVerdict {
+	away := now.Sub(since).Round(time.Second)
+	if windowEnd != nil && now.After(*windowEnd) {
+		return rebootVerdict{Code: RebootWindowClosedCode,
+			Message: fmt.Sprintf("the maintenance window ended at %s and the host has been away for %s since the reboot was ordered",
+				windowEnd.UTC().Format(time.RFC3339), away)}
+	}
+	if now.Sub(since) > timeout {
+		return rebootVerdict{Code: "reboot_timeout",
+			Message: fmt.Sprintf("the host did not come back within %s of the reboot; it has been away for %s",
+				timeout, away)}
+	}
+	return rebootVerdict{Waiting: true}
 }
 
 // afterHealthCheck settles a host after the units are verified.
@@ -287,9 +362,18 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 	if job.State != jobs.StateSucceeded {
 		// A failed health check is a failure of the host in the campaign: the
 		// change was carried out, but the host did not return to a working
-		// state.
-		o.finishTarget(ctx, campaign, target, TargetFailed,
-			firstNonEmpty(job.ResultErrorCode, "health_check_failed"), job.ResultMessage)
+		// state. The host carries the campaign's verdict - the check failed -
+		// and the agent's finding travels in the message and on the task;
+		// the policy and the threshold read one code for one stage. A
+		// session lost during the check is the one exception: it is not a
+		// verdict on the units, and the campaign counts it with the other
+		// lost sessions.
+		code := "health_check_failed"
+		if job.ResultErrorCode == ConnectivityLostCode {
+			code = ConnectivityLostCode
+		}
+		o.finishTarget(ctx, campaign, target, TargetFailed, code,
+			stepReason(job.ResultErrorCode, job.ResultMessage))
 		return nil
 	}
 	o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "the health check passed")
@@ -321,6 +405,11 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 		return
 	}
 	target.State = state
+	// The code stays on the target in memory as it is in the row: the pass
+	// that settled the host reads it back to decide whether the campaign
+	// goes on.
+	target.ErrorCode = errorCode
+	target.Message = message
 	// The tokens go back to the pool together with the end of the host. The
 	// release is separate from the expiry of the lease: the capacity is to
 	// come back now rather than in two minutes.
@@ -364,6 +453,42 @@ func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign,
 	})
 	o.log.Warn("the campaign was held back after crossing the failure threshold",
 		"campaign_id", campaign.ID, "reason", reason, "failed", failed, "finished", finished)
+	return nil
+}
+
+// pauseOnWindowClosed holds a campaign back once a host was still
+// rebooting when the maintenance window ended.
+//
+// The threshold has no say here. A host that is down after the window
+// closed is exactly the case an operator must look at: the window is
+// what the fleet was promised, the host is outside it, and whether the
+// next wave may start after that is a decision, not a percentage. The
+// document keeps such a host failed and says it blocks its failure
+// domain; where it is silent about the campaign, the campaign stops and
+// asks.
+func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaign, hostIDs []string) error {
+	// The judgement only closes a host this way under a window with an
+	// end; the guard is for a row somebody settled by hand with the code.
+	ended := "an unknown time"
+	if campaign.MaintenanceEnd != nil {
+		ended = campaign.MaintenanceEnd.UTC().Format(time.RFC3339)
+	}
+	reason := fmt.Sprintf("%s: %d hosts were still rebooting when the maintenance window ended at %s",
+		PauseWindowClosedMidReboot, len(hostIDs), ended)
+	if err := o.store.SetState(ctx, campaign.ID, StatePaused, reason); err != nil {
+		return err
+	}
+	o.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "campaign.pause", TargetType: "campaign", TargetID: campaign.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeFailure,
+		Detail: map[string]any{
+			"reason": PauseWindowClosedMidReboot, "hosts": hostIDs,
+			"maintenance_end": campaign.MaintenanceEnd,
+		},
+	})
+	o.log.Warn("the campaign was held back after hosts did not come back inside the maintenance window",
+		"campaign_id", campaign.ID, "hosts", hostIDs, "maintenance_end", campaign.MaintenanceEnd)
 	return nil
 }
 
@@ -542,8 +667,16 @@ type stepStart struct {
 	Note    string
 	// BootID, when set, is recorded as the boot ID from before the change.
 	BootID *string
-	// Closes are the steps that ended for this one to start.
+	// Closes are the steps that ended for this one to start. A step among
+	// them that was never ordered - a reboot the policy skipped on the way
+	// to the verification - has no open row to close and is recorded as it
+	// ended instead, the way settleTarget records a step a settled host
+	// never got to.
 	Closes []stepOutcome
+	// Planned says whether the hosts of the campaign computed a plan step;
+	// it places a step recorded from Closes on the strip. Read only when
+	// such a record is written.
+	Planned bool
 	// Compensates names the campaign whose change on this host the step
 	// undoes; set on the change step of a compensating campaign only. The
 	// original's target for the same host gets its compensate step opened
@@ -563,7 +696,18 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	for _, done := range start.Closes {
-		if _, err := o.store.FinishStep(ctx, tx, target.ID, done.Key, done.State, done.Reason); err != nil {
+		settled, err := o.store.FinishStep(ctx, tx, target.ID, done.Key, done.State, done.Reason)
+		if err != nil {
+			return err
+		}
+		if settled {
+			continue
+		}
+		if err := o.store.RecordStep(ctx, tx, StepRecord{
+			Target: *target, Key: done.Key,
+			DependsOn: dependencyOf(done.Key, start.Planned, target.RebootJobID != nil),
+			State:     done.State, Reason: done.Reason,
+		}); err != nil {
 			return err
 		}
 	}

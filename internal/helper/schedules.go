@@ -221,18 +221,36 @@ func attachTimerRuns(ctx context.Context, timers []schedules.Schedule) {
 	if len(specs) == 0 {
 		return
 	}
-	arguments := append([]string{"calendar", "--iterations=" + strconv.Itoa(schedules.PreviewRuns)}, specs...)
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-analyze", arguments...)
-	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
-	// A bad specification makes the tool exit non-zero after printing the
-	// good ones; the output is read either way.
-	output, _ := cmd.Output()
-	runs := schedules.ParseCalendarPreview(string(output), time.Local)
+	runs := calendarRuns(ctx, specs)
+	if len(runs) < len(specs) {
+		// The tool stops at the first specification it refuses and the ones
+		// after it go unanswered. They are asked one by one, so a single
+		// odd timer does not hide the runs of every timer listed behind it.
+		for _, spec := range specs {
+			if _, answered := runs[spec]; answered {
+				continue
+			}
+			for key, dates := range calendarRuns(ctx, []string{spec}) {
+				runs[key] = dates
+			}
+		}
+	}
 	for i := range timers {
 		if dates := runs[timers[i].Expression]; len(dates) > 0 {
 			timers[i].NextRuns = dates
 		}
 	}
+}
+
+// calendarRuns asks systemd for the coming runs of the given
+// specifications. A bad specification makes the tool exit non-zero after
+// printing the good ones before it; the output is read either way.
+func calendarRuns(ctx context.Context, specs []string) map[string][]time.Time {
+	arguments := append([]string{"calendar", "--iterations=" + strconv.Itoa(schedules.PreviewRuns)}, specs...)
+	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-analyze", arguments...)
+	cmd.Env = []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin"}
+	output, _ := cmd.Output()
+	return schedules.ParseCalendarPreview(string(output), time.Local)
 }
 
 func (s *Server) managedEntry(ctx context.Context, id string) *schedules.Schedule {

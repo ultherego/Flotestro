@@ -175,6 +175,9 @@ func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
 		"no canary":          func(s *Spec, _ *[]TargetHost) { s.CanarySize = 0 },
 		"a higher threshold": func(s *Spec, _ *[]TargetHost) { s.FailureThresholdPercent = 100 },
 		"rebooting hosts":    func(s *Spec, _ *[]TargetHost) { s.RebootPolicy = RebootAlways },
+		// How long a rebooted host is waited for is part of the risk: a
+		// longer wait is a longer outage nobody is told about.
+		"a longer reboot wait": func(s *Spec, _ *[]TargetHost) { s.RebootTimeoutSeconds = 3600 },
 		// Undoing a named campaign is a different decision from the same
 		// change ordered on its own.
 		"compensating a campaign": func(s *Spec, _ *[]TargetHost) { s.CompensatesCampaignID = "orig" },
@@ -253,5 +256,71 @@ func TestTheGateAndTheOfflinePolicyAreValidated(t *testing.T) {
 				t.Fatal("an invalid description passed validation")
 			}
 		})
+	}
+}
+
+// TestTheRebootTimeoutIsBoundedAndDefaulted guards the reboot timeout
+// field: zero is the default of fifteen minutes, so a campaign from before
+// the field waits as it always did; anything else has to lie within the
+// bounds, and a negative number is a mistake rather than an absence.
+func TestTheRebootTimeoutIsBoundedAndDefaulted(t *testing.T) {
+	valid := Spec{Name: "test", WaveSize: 10, MaxConcurrent: 5, RebootPolicy: RebootNever}
+	if valid.RebootTimeout() != DefaultRebootTimeout {
+		t.Errorf("a missing reboot timeout is %s, expected %s", valid.RebootTimeout(), DefaultRebootTimeout)
+	}
+	if (Campaign{}).RebootTimeout() != DefaultRebootTimeout {
+		t.Error("a campaign without the field does not wait the default")
+	}
+	if (Campaign{RebootTimeoutSeconds: 120}).RebootTimeout() != 2*time.Minute {
+		t.Error("the campaign does not wait what was recorded")
+	}
+	for _, seconds := range []int{60, 900, 7200} {
+		spec := valid
+		spec.RebootTimeoutSeconds = seconds
+		if err := spec.Validate(); err != nil {
+			t.Errorf("a reboot timeout of %d seconds was rejected: %v", seconds, err)
+		}
+		if spec.RebootTimeout() != time.Duration(seconds)*time.Second {
+			t.Errorf("a reboot timeout of %d seconds became %s", seconds, spec.RebootTimeout())
+		}
+	}
+	for _, seconds := range []int{-1, 1, 59, 7201} {
+		spec := valid
+		spec.RebootTimeoutSeconds = seconds
+		if err := spec.Validate(); err == nil {
+			t.Errorf("a reboot timeout of %d seconds passed validation", seconds)
+		}
+	}
+}
+
+// TestACanaryHealthFailureCountsTowardsTheThreshold guards the mandatory
+// scenario "canary health check negative, wave two stopped": a canary
+// whose units did not come up after the change is a failure like any
+// other, so the threshold that keeps the next wave from starting fires on
+// it the same way it fires on a change that did not run.
+func TestACanaryHealthFailureCountsTowardsTheThreshold(t *testing.T) {
+	targets := []Target{
+		{Wave: 0, State: TargetFailed, ErrorCode: "health_check_failed"},
+		{Wave: 1, State: TargetPending},
+		{Wave: 1, State: TargetPending},
+	}
+	counts := tallyTargets(targets)
+	if counts.Failed != 1 || counts.Finished != 1 || counts.Lost != 0 {
+		t.Fatalf("tally = %+v, expected one finished host that failed", counts)
+	}
+	// The default threshold of the API is twenty percent: one failed out of
+	// one finished is a hundred, and the campaign pauses before wave one.
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, len(targets), 20, 0); !exceeded {
+		t.Error("a failed canary health check did not cross the threshold before the next wave")
+	}
+	if exceeded, _ := ThresholdExceeded(counts.Failed, counts.Finished, len(targets), 0, 1); !exceeded {
+		t.Error("a failed canary health check did not count towards the absolute threshold")
+	}
+	// A host closed because the window ended mid-reboot is a failure too.
+	if !(Target{State: TargetFailed, ErrorCode: RebootWindowClosedCode}).RebootWindowClosed() {
+		t.Error("a host failed with reboot_window_closed is not recognised")
+	}
+	if (Target{State: TargetSucceeded, ErrorCode: RebootWindowClosedCode}).RebootWindowClosed() {
+		t.Error("a succeeded host counts as closed by the window")
 	}
 }

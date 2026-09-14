@@ -55,10 +55,11 @@ const (
 // ParseCalendarPreview reads the output of "systemd-analyze calendar
 // --iterations N spec...".
 //
-// The output is one block per specification: the original form, the
-// normalized form, then "Next elapse:" and "Iter. #n:" lines, each
+// The output is one block per specification: the original form (only when
+// it differs from the normalized one), the normalized form, then "Next
+// elapse:" and "Iteration #n:" lines ("Iter. #n:" on older systemd), each
 // followed by an "(in UTC):" line when the host zone is not UTC. The dates
-// are keyed by the original form, the very text the timer was asked with.
+// are keyed by both forms, so the text the timer was asked with finds them.
 // The UTC line is preferred when it exists: the local one carries a zone
 // abbreviation, and an abbreviation is unambiguous only inside the zone it
 // belongs to. Every date comes back in the given zone.
@@ -68,13 +69,31 @@ func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.
 	}
 	result := map[string][]time.Time{}
 	lines := strings.Split(output, "\n")
-	spec := ""
+	// A block is keyed by both forms of its specification. The tool prints
+	// the original form only when it differs from the normalized one - a
+	// timer's expression as systemd reports it is already normalized and
+	// has no "Original form" line at all - so a date is filed under every
+	// name the block gives it.
+	var keys []string
+	file := func(date time.Time) {
+		for _, key := range keys {
+			result[key] = append(result[key], date)
+		}
+	}
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(lines[i])
 		switch {
+		case line == "":
+			keys = nil
 		case strings.HasPrefix(line, "Original form:"):
-			spec = strings.TrimSpace(strings.TrimPrefix(line, "Original form:"))
-		case spec != "" && (strings.HasPrefix(line, "Next elapse:") || strings.HasPrefix(line, "Iter. #")):
+			keys = []string{strings.TrimSpace(strings.TrimPrefix(line, "Original form:"))}
+		case strings.HasPrefix(line, "Normalized form:"):
+			normalized := strings.TrimSpace(strings.TrimPrefix(line, "Normalized form:"))
+			if len(keys) == 0 || keys[0] != normalized {
+				keys = append(keys, normalized)
+			}
+		case len(keys) > 0 && (strings.HasPrefix(line, "Next elapse:") ||
+			strings.HasPrefix(line, "Iter. #") || strings.HasPrefix(line, "Iteration #")):
 			_, value, _ := strings.Cut(line, ":")
 			value = strings.TrimSpace(value)
 			var date time.Time
@@ -89,7 +108,7 @@ func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.
 			// "never" and a date the layout does not read leave the list as
 			// it is: a missing run is more honest than a guessed one.
 			if err == nil {
-				result[spec] = append(result[spec], date.In(zone))
+				file(date.In(zone))
 			}
 		}
 	}

@@ -106,26 +106,33 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 
 	// First we settle what is already running: without that the thresholds
 	// would be computed against a stale state.
+	//
+	// The hosts closed on this pass because the maintenance window ended
+	// while they rebooted are noted as they are closed: the pause that
+	// answers them is an answer to the event, not to the state. Read from
+	// the state, the same failed host would pause the campaign again on
+	// the first pass after the operator resumed it.
+	var windowClosed []string
 	for i := range targets {
+		open := !targets[i].State.Finished()
 		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
 			o.log.Error("failure while handling a campaign target",
 				"campaign_id", campaign.ID, "host_id", targets[i].HostID, "err", err)
 		}
-	}
-
-	failed, finished, lost := 0, 0, 0
-	for _, target := range targets {
-		if target.State.Finished() {
-			finished++
-		}
-		if target.State == TargetFailed {
-			failed++
-		}
-		if target.ConnectivityLost() {
-			lost++
+		if open && targets[i].RebootWindowClosed() {
+			windowClosed = append(windowClosed, targets[i].HostID)
 		}
 	}
 
+	counts := tallyTargets(targets)
+	failed, finished, lost := counts.Failed, counts.Finished, counts.Lost
+
+	// A host that did not come back inside the window stops the campaign
+	// before the threshold has its say: the reason the operator reads is
+	// to name the window, not a percentage the window pushed over.
+	if len(windowClosed) > 0 {
+		return o.pauseOnWindowClosed(ctx, campaign, windowClosed)
+	}
 	// We check the stop threshold before starting anything new.
 	if exceeded, reason := ThresholdExceeded(failed, finished, len(targets),
 		campaign.FailureThresholdPercent, campaign.FailureThresholdAbsolute); exceeded {
@@ -552,6 +559,36 @@ func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *h
 		return "", err
 	}
 	return job.ID, nil
+}
+
+// targetTally is what the stop rules read off the targets: how many are
+// settled, how many of those failed, and how many failed because their
+// session broke.
+type targetTally struct {
+	Failed   int
+	Finished int
+	Lost     int
+}
+
+// tallyTargets counts the targets the way the stop rules read them. A
+// host is a failure whatever step failed it: a canary whose units did not
+// come up after the change is as much a failure as one whose change did
+// not run, and the threshold that keeps the next wave from starting reads
+// both the same way.
+func tallyTargets(targets []Target) targetTally {
+	var counts targetTally
+	for _, target := range targets {
+		if target.State.Finished() {
+			counts.Finished++
+		}
+		if target.State == TargetFailed {
+			counts.Failed++
+		}
+		if target.ConnectivityLost() {
+			counts.Lost++
+		}
+	}
+	return counts
 }
 
 func allFinished(targets []Target) bool {

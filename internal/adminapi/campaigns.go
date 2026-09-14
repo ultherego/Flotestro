@@ -39,7 +39,12 @@ type createCampaignRequest struct {
 	RebootPolicy             string     `json:"reboot_policy,omitempty"`
 	HealthCheckUnits         []string   `json:"health_check_units,omitempty"`
 	JobTimeoutSeconds        *int       `json:"job_timeout_seconds,omitempty"`
-	RequiresApproval         *bool      `json:"requires_approval,omitempty"`
+	// RebootTimeoutSeconds bounds the wait for a host to come back after
+	// the reboot the campaign ordered; absent or zero means the default
+	// of fifteen minutes. A value outside 60..7200 is refused rather than
+	// rounded: the approver reads the bound as it will apply.
+	RebootTimeoutSeconds *int  `json:"reboot_timeout_seconds,omitempty"`
+	RequiresApproval     *bool `json:"requires_approval,omitempty"`
 	// OfflinePolicy overrides what the operation declares for a host that
 	// is not connected when its turn comes. It may only tighten the
 	// declaration: wait_until_deadline may become skip_if_offline or
@@ -287,6 +292,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RebootPolicy:             campaigns.RebootPolicy(orDefault(request.RebootPolicy, "never")),
 		HealthCheckUnits:         request.HealthCheckUnits,
 		JobTimeoutSeconds:        valueOr(request.JobTimeoutSeconds, action.DefaultTimeout()),
+		RebootTimeoutSeconds:     valueAsGiven(request.RebootTimeoutSeconds),
 		// A campaign is always approved: the consent binds the fingerprint
 		// of what runs on many hosts, and a request cannot waive it.
 		RequiresApproval:         true,
@@ -336,6 +342,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"offline_policy": string(campaign.OfflinePolicy), "deadline_at": campaign.DeadlineAt,
 			"manual_gate":                campaign.ManualGate,
 			"connectivity_lost_absolute": campaign.ConnectivityLostAbsolute,
+			"reboot_timeout_seconds":     campaign.RebootTimeoutSeconds,
 			"approval_fingerprint":       campaign.ApprovalFingerprint,
 			"compensates_campaign_id":    campaign.CompensatesCampaignID,
 		}, stepUpEvidence),
@@ -1428,6 +1435,17 @@ func valueOrDefault(value *int, fallback int) int {
 func valueOr(value *int, fallback int) int {
 	if value == nil || *value <= 0 {
 		return fallback
+	}
+	return *value
+}
+
+// valueAsGiven passes a number through as the request gave it, zero when
+// it was left out. Unlike valueOr it keeps a negative value: the store's
+// validation is to refuse it with a reason rather than the handler quietly
+// turning a mistake into the default.
+func valueAsGiven(value *int) int {
+	if value == nil {
+		return 0
 	}
 	return *value
 }

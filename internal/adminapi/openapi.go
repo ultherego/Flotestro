@@ -364,6 +364,13 @@ var requestSchemas = map[string]map[string]any{
 			"failure_threshold_percent":  map[string]any{"type": "integer"},
 			"failure_threshold_absolute": map[string]any{"type": "integer"},
 			"reboot_policy":              map[string]any{"type": "string", "enum": []string{"never", "if_required", "always"}},
+			"health_check_units": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "Units verified on every host after its change - after the reboot when there is one, " +
+					"right after the change otherwise. A unit that is not active fails the host with health_check_failed."},
+			"reboot_timeout_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 7200,
+				"description": "How long the campaign waits for a host to come back after the reboot it ordered " +
+					"before the host fails with reboot_timeout; the default is 900. A host still rebooting when the " +
+					"maintenance window ends fails with reboot_window_closed and pauses the campaign."},
 			"compensates_campaign_id": map[string]any{"type": "string",
 				"description": "A finished campaign this one undoes. The operation has to be the declared reverse of that campaign's " +
 					"and the targets hosts it changed; an empty selector takes exactly those hosts. The original is linked, never rewritten. " +

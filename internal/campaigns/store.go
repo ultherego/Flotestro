@@ -116,10 +116,14 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       requires_approval, created_by, request_id,
 		                       approval_fingerprint, idempotency_key,
 		                       offline_policy, deadline_at, manual_gate,
-		                       connectivity_lost_absolute, compensates_campaign_id)
+		                       connectivity_lost_absolute, compensates_campaign_id,
+		                       reboot_timeout_seconds)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-		        $22, now() + make_interval(mins => $23), $24, $25, $26)
+		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
+	// The reboot timeout is recorded resolved, like the deadline: the row
+	// says how long the campaign really waits, and the orchestrator does
+	// not have to know what the default was on the day of the order.
 	tag, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
 		spec.FailureThresholdPercent, spec.FailureThresholdAbsolute,
@@ -128,7 +132,8 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		spec.RequiresApproval, spec.CreatedBy, nullable(spec.RequestID),
 		fingerprint, nullable(spec.IdempotencyKey),
 		string(spec.OfflinePolicy), int(spec.Deadline()/time.Minute), spec.ManualGate,
-		spec.ConnectivityLostAbsolute, nullable(spec.CompensatesCampaignID))
+		spec.ConnectivityLostAbsolute, nullable(spec.CompensatesCampaignID),
+		int(spec.RebootTimeout()/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
@@ -815,7 +820,7 @@ const campaignColumns = `
 	       coalesce(pause_reason, ''), coalesce(canceled_by, ''),
 	       created_by, coalesce(request_id, ''), started_at, finished_at, created_at, updated_at,
 	       offline_policy, deadline_at, manual_gate, coalesce(gate_advanced_by, ''),
-	       gate_advanced_at, connectivity_lost_absolute,
+	       gate_advanced_at, connectivity_lost_absolute, reboot_timeout_seconds,
 	       coalesce(compensates_campaign_id::text, ''),
 	       coalesce((select o.name from campaigns o where o.id = campaigns.compensates_campaign_id), ''),
 	       coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'state', c.state)
@@ -845,7 +850,7 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CreatedBy, &c.RequestID, &c.StartedAt, &c.FinishedAt,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
-			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute,
+			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute, &c.RebootTimeoutSeconds,
 			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy); err != nil {
 			return nil, err
 		}
@@ -954,7 +959,8 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		select t.id, t.campaign_id, t.host_id, coalesce(h.hostname, ''), t.wave, t.position,
 		       t.state, t.job_id, t.plan_job_id, t.reboot_job_id, t.health_job_id,
 		       coalesce(t.boot_id_before, ''),
-		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at
+		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at,
+		       t.state_since
 		from campaign_targets t
 		left join hosts h on h.id = t.host_id ` + where + `
 		order by t.wave, t.position`
@@ -974,7 +980,7 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		var t Target
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
 			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
-			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt); err != nil {
+			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince); err != nil {
 			return page, err
 		}
 		page.Items = append(page.Items, t)

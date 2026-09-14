@@ -11,7 +11,7 @@ import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
-import { loadedTargets, useTargets } from "../lib/targets";
+import { loadedTargets, REBOOT_TIMEOUT, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
 import { useT } from "../i18n";
@@ -58,6 +58,7 @@ export function Bulk() {
     thresholdPercent: 20,
     thresholdCount: 0,
     rebootPolicy: "never",
+    rebootTimeoutSeconds: REBOOT_TIMEOUT.default,
     offlinePolicy: "",
     deadlineMinutes: 24 * 60,
     manualGate: false,
@@ -235,6 +236,8 @@ type Order = {
   thresholdPercent: number;
   thresholdCount: number;
   rebootPolicy: string;
+  // How long a rebooted host is waited for before it fails, in seconds.
+  rebootTimeoutSeconds: number;
   // What happens to a host that is not connected when its turn comes. An
   // empty value keeps the operation's own policy; a chosen one may only
   // tighten it.
@@ -1036,6 +1039,13 @@ function RolloutStep({
             <option value="always">{t("reboot: always")}</option>
           </select>
         </Field>
+        <Field label={t("Reboot timeout (seconds)")}
+          hint={t("How long a rebooted host is waited for before it fails; a host still away when the maintenance window ends fails at once and pauses the campaign.")}>
+          <input type="number" min={REBOOT_TIMEOUT.min} max={REBOOT_TIMEOUT.max} step={60}
+            value={order.rebootTimeoutSeconds}
+            disabled={order.rebootPolicy === "never"}
+            onChange={(e) => change({ rebootTimeoutSeconds: +e.target.value })} />
+        </Field>
         <Field label={t("connectivity loss threshold")}
           hint={t("Pause once this many hosts lose their session mid-task; 0 turns the check off. A change that cuts hosts off shows up here, not among the failures.")}>
           <input type="number" min={0} value={order.connectivityLost}
@@ -1110,6 +1120,10 @@ function CreateStep({
         failure_threshold_percent: order.thresholdPercent,
         failure_threshold_absolute: order.thresholdCount,
         reboot_policy: order.rebootPolicy,
+        // Sent only when it differs from the default, so an order with the
+        // default reads like one that said nothing about it.
+        reboot_timeout_seconds: order.rebootTimeoutSeconds !== REBOOT_TIMEOUT.default
+          ? order.rebootTimeoutSeconds : undefined,
         offline_policy: order.offlinePolicy || undefined,
         deadline_minutes: order.deadlineMinutes,
         manual_gate: order.manualGate && order.canary > 0,

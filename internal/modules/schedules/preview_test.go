@@ -119,3 +119,31 @@ Normalized form: *-02-30 00:00:00
 		t.Errorf("runs = %v", runs)
 	}
 }
+
+// A specification that is already in its normalized form has no "Original
+// form" line, and systemd 257 numbers the runs "Iteration #n". A timer's
+// expression is such a specification, and the runs must still find it.
+func TestANormalizedSpecificationIsKeyedByItsOnlyForm(t *testing.T) {
+	output := `Normalized form: Sun *-*-* 03:10:00
+    Next elapse: Sun 2026-09-20 03:10:00 UTC
+       From now: 5 days left
+   Iteration #2: Sun 2026-09-27 03:10:00 UTC
+       From now: 1 week 5 days left
+
+  Original form: daily
+Normalized form: *-*-* 00:00:00
+    Next elapse: Tue 2026-09-15 00:00:00 UTC
+       From now: 8h left
+Failed to parse calendar specification 'bogus spec': Invalid argument
+`
+	runs := ParseCalendarPreview(output, time.UTC)
+	if len(runs["Sun *-*-* 03:10:00"]) != 2 {
+		t.Errorf("runs of the normalized spec = %v", runs["Sun *-*-* 03:10:00"])
+	}
+	if len(runs["daily"]) != 1 || len(runs["*-*-* 00:00:00"]) != 1 {
+		t.Errorf("runs of daily = %v / %v", runs["daily"], runs["*-*-* 00:00:00"])
+	}
+	if len(runs) != 3 {
+		t.Errorf("keys = %d, want the two forms of daily and the one of the timer", len(runs))
+	}
+}

@@ -38,7 +38,10 @@ func BuildReport(campaign Campaign, targets []Target) Report {
 		if target.State == TargetFailed {
 			report.Failures = append(report.Failures, target)
 		}
-		if target.State == TargetRebooting || target.State == TargetVerifying {
+		// A host verifying its units without a reboot behind it is not
+		// waiting for one; only a reboot that was ordered keeps the host on
+		// this list until the verification settles it.
+		if target.State == TargetRebooting || (target.State == TargetVerifying && target.RebootJobID != nil) {
 			report.RebootPending = append(report.RebootPending, target.HostID)
 		}
 		// A host that came back with a different plan ran nothing, and the
