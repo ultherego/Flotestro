@@ -190,16 +190,45 @@ func parseConfigCheck(ctx context.Context) []string {
 // its standard input. The name never comes from the request, so it cannot
 // point at an arbitrary program.
 func runIdentityTool(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
-	return identityToolRunner(ctx, timeout, nil, tool, args...)
+	stdout, stderr, err := identityToolRunner(ctx, timeout, nil, tool, args...)
+	var exit *exitStatusError
+	if errors.As(err, &exit) {
+		// A query tool that printed its answer and then complained is
+		// believed for the answer: klist lists the keytab and exits with
+		// a warning about a missing default, and the listing is the point.
+		return stdout, stderr, nil
+	}
+	return stdout, stderr, err
 }
 
 // runIdentityToolWithInput runs a tool with the given text on its standard
-// input. It exists for one purpose: a credential that must not travel in
-// argv, where every user of the host can read it in the process list, is
-// handed to the tool's own prompt instead.
+// input, for a tool that takes a credential on its prompt rather than in
+// argv. No tool of the join does today (ipa-client-install refuses a
+// prompt unattended); the runner stays for the one that will.
 func runIdentityToolWithInput(ctx context.Context, timeout time.Duration, input string,
 	tool string, args ...string) (string, string, error) {
 	return identityToolRunner(ctx, timeout, strings.NewReader(input), tool, args...)
+}
+
+// runIdentityToolStrict runs a tool whose exit code is the verdict. The
+// lenient runner forgives a non-zero exit when the tool printed a result,
+// which suits a query tool; a join or a leave prints its banner and then
+// fails, and the banner must not pass for success.
+func runIdentityToolStrict(ctx context.Context, timeout time.Duration, tool string, args ...string) (string, string, error) {
+	return identityToolRunner(ctx, timeout, nil, tool, args...)
+}
+
+// exitStatusError says the tool ended with a non-zero code; the lenient
+// runner returns it alongside a result, the strict one treats it as the
+// failure it is.
+type exitStatusError struct {
+	tool   string
+	code   int
+	stderr string
+}
+
+func (e *exitStatusError) Error() string {
+	return fmt.Sprintf("%s: exit status %d: %s", e.tool, e.code, firstLineOf(e.stderr))
 }
 
 // identityToolRunner is the seam the tests replace: the join and the leave
@@ -245,8 +274,11 @@ func execIdentityTool(ctx context.Context, timeout time.Duration, input io.Reade
 	}
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) && stdout.Len() > 0 {
-		// The tool may have returned a result despite a non-zero code.
-		return stdout.String(), stderr.String(), nil
+		// The tool may have returned a result despite a non-zero code. The
+		// result goes back with the code, and the caller decides which one
+		// it believes.
+		return stdout.String(), stderr.String(),
+			&exitStatusError{tool: tool, code: exitErr.ExitCode(), stderr: stderr.String()}
 	}
 	if err != nil {
 		return stdout.String(), stderr.String(), fmt.Errorf("%s: %v", tool, firstLineOf(stderr.String()))

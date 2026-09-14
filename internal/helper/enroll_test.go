@@ -283,8 +283,22 @@ func TestBlockingFailuresIgnoreAdvisoryChecks(t *testing.T) {
 // it succeeded: the tests below are about what the helper hands to the
 // tools, not about what the tools say back.
 type fakeIdentityTool struct {
-	calls  [][]string
-	inputs []string
+	calls    [][]string
+	inputs   []string
+	failures []fakeFailure
+}
+
+// fakeFailure makes a tool whose argv carries the marker end with the
+// given code and stderr, the way the real one fails: with a banner on
+// stdout first.
+type fakeFailure struct {
+	tool, marker string
+	code         int
+	stderr       string
+}
+
+func (f *fakeIdentityTool) fail(tool, marker string, code int, stderr string) {
+	f.failures = append(f.failures, fakeFailure{tool: tool, marker: marker, code: code, stderr: stderr})
 }
 
 func (f *fakeIdentityTool) run(_ context.Context, _ time.Duration, input io.Reader,
@@ -296,6 +310,17 @@ func (f *fakeIdentityTool) run(_ context.Context, _ time.Duration, input io.Read
 		text = string(data)
 	}
 	f.inputs = append(f.inputs, text)
+	for _, failure := range f.failures {
+		if failure.tool != tool {
+			continue
+		}
+		for _, arg := range args {
+			if arg == failure.marker {
+				return "This program will set up IPA client.\n", failure.stderr,
+					&exitStatusError{tool: tool, code: failure.code, stderr: failure.stderr}
+			}
+		}
+	}
 	return "", "", nil
 }
 
@@ -345,21 +370,16 @@ func resolvableHostname(t *testing.T) string {
 	return ""
 }
 
-// TestTheJoinArgumentsCarryNoPassword pins the shape of the argv: the
-// password is asked for with -W and never written after --password=, so
-// the process list of the host shows no credential for the length of the
-// join.
-func TestTheJoinArgumentsCarryNoPassword(t *testing.T) {
+// TestTheJoinArgumentsCarryThePassword pins the measured residual: the
+// unattended tool takes the one-time password nowhere but in argv (it
+// refuses -W without a terminal), so the argv carries it, and every
+// message of the result is redacted instead.
+func TestTheJoinArgumentsCarryThePassword(t *testing.T) {
 	args := enrollArguments(&helperv1.DomainEnrollRequest{
 		Domain: "flotestro.test", Realm: "FLOTESTRO.TEST", Server: "ipa.flotestro.test",
 		OneTimePassword: "one-time-secret-4711",
 	}, "web1.flotestro.test")
-
-	joined := strings.Join(args, " ")
-	if strings.Contains(joined, "--password") || strings.Contains(joined, "one-time-secret-4711") {
-		t.Fatalf("the password is in the argv: %v", args)
-	}
-	for _, wanted := range []string{"-W", "--unattended", "--domain=flotestro.test",
+	for _, wanted := range []string{"--password=one-time-secret-4711", "--unattended", "--domain=flotestro.test",
 		"--realm=FLOTESTRO.TEST", "--hostname=web1.flotestro.test", "--server=ipa.flotestro.test"} {
 		found := false
 		for _, arg := range args {
@@ -371,20 +391,24 @@ func TestTheJoinArgumentsCarryNoPassword(t *testing.T) {
 			t.Errorf("the argv lacks %s: %v", wanted, args)
 		}
 	}
+	for _, arg := range args {
+		if arg == "-W" {
+			t.Fatalf("the argv asks for a prompt the unattended tool refuses: %v", args)
+		}
+	}
 }
 
-// TestTheJoinHandsThePasswordToThePrompt runs the whole join against the
-// fake tools and checks the one thing the residual was about: the
-// one-time password reaches ipa-client-install on its standard input, as
-// the answer to the -W prompt, and nowhere in the argv. The preflight is
-// the real one, so the test needs a name that resolves and a machine that
-// is in no domain.
-func TestTheJoinHandsThePasswordToThePrompt(t *testing.T) {
+// TestAJoinThatExitsWithAnErrorIsNotASuccess guards the verdict: the tool
+// prints its banner before it fails, and a banner on stdout must not turn
+// a non-zero exit into a join. The preflight is the real one, so the test
+// needs a name that resolves and a machine that is in no domain.
+func TestAJoinThatExitsWithAnErrorIsNotASuccess(t *testing.T) {
 	if _, err := os.Stat("/etc/ipa/default.conf"); err == nil {
 		t.Skip("this machine is joined to a domain; the realm check would refuse the join")
 	}
 	hostname := resolvableHostname(t)
 	fake := useFakeIdentityTool(t)
+	fake.fail("ipa-client-install", "--unattended", 1, "Password must be provided in non-interactive mode")
 
 	const password = "one-time-secret-4711"
 	action := &helperv1.DomainEnrollRequest{
@@ -392,33 +416,14 @@ func TestTheJoinHandsThePasswordToThePrompt(t *testing.T) {
 		Hostname: hostname, OneTimePassword: password,
 	}
 	response := testServer().enrollDomain(context.Background(), enrollRequest(action), action)
-	if !response.GetAccepted() {
-		t.Fatalf("the join was refused: %s %s (checks: %v)", response.GetErrorCode(),
-			response.GetMessage(), checkNames(response.GetEnrollResult().GetChecks()))
+	if response.GetAccepted() || response.GetEnrollResult().GetEnrolled() {
+		t.Fatalf("a join that failed is reported as a success: %+v", response)
 	}
-	if !response.GetEnrollResult().GetEnrolled() {
-		t.Fatal("the join ran and does not report the host as enrolled")
+	if response.GetErrorCode() != "enroll_failed" {
+		t.Fatalf("error code = %q, expected enroll_failed", response.GetErrorCode())
 	}
-
-	args, input, ok := fake.call("ipa-client-install", "--unattended")
-	if !ok {
-		t.Fatalf("ipa-client-install was not run for the join; calls: %v", fake.calls)
-	}
-	for _, arg := range args {
-		if strings.HasPrefix(arg, "--password") || strings.Contains(arg, password) {
-			t.Fatalf("the password is in the argv: %v", args)
-		}
-	}
-	if _, _, ok := fake.call("ipa-client-install", "-W"); !ok {
-		t.Fatalf("the join does not ask for the password with -W: %v", args)
-	}
-	if input != password+"\n" {
-		t.Fatalf("stdin of the join = %q, expected the password and a newline", input)
-	}
-	// The version query of the preflight prompts for nothing, so it gets
-	// no input at all: a tool that does not ask must not be handed a secret.
-	if _, input, ok := fake.call("ipa-client-install", "--version"); !ok || input != "" {
-		t.Fatalf("the version query got %q on stdin (ran: %v)", input, ok)
+	if strings.Contains(response.GetMessage(), password) || strings.Contains(string(response.GetStderr()), password) {
+		t.Fatalf("the password leaked into the result: %s", response.GetMessage())
 	}
 }
 

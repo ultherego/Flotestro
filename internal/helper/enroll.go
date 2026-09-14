@@ -61,18 +61,19 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	}
 	defer release()
 
-	// The one-time password does not travel in argv: the process list of
-	// the host is readable by every user on it for the length of the join,
-	// and a credential valid until its first use is still a credential
-	// while the join is running. With -W ipa-client-install asks for the
-	// password through Python's getpass, which reads standard input when no
-	// terminal is attached, so the helper hands it over on stdin and the
-	// tool's own prompt takes it. The password is kept out of the logs and
-	// of every message of the result all the same.
+	// The one-time password travels in argv, so it is readable in the
+	// process list of the host for the length of the join. That is the
+	// residual, and it is a measured one: ipa-client-install (4.12) refuses
+	// "-W" together with "--unattended" ("Password must be provided in
+	// non-interactive mode"), and the helper has no terminal to answer a
+	// prompt on, so there is no other channel for it. The password is
+	// bound to this host, single-use and spent by the join itself, so
+	// what the process list shows is a credential nobody can use again.
+	// It is kept out of the logs and of every message of the result.
 	args := enrollArguments(action, hostname)
 
-	stdout, stderr, err := runIdentityToolWithInput(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
-		action.GetOneTimePassword()+"\n", "ipa-client-install", args...)
+	stdout, stderr, err := runIdentityToolStrict(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
+		"ipa-client-install", args...)
 	if err != nil {
 		// The one-time password must not reach the error message or the logs.
 		response := reject("enroll_failed", redactSecret(err.Error(), action.GetOneTimePassword()))
@@ -95,16 +96,15 @@ func (s *Server) enrollDomain(ctx context.Context, request *helperv1.HelperReque
 	return &helperv1.HelperResponse{Accepted: true, EnrollResult: result}
 }
 
-// enrollArguments builds the argv of the join. The one-time password is
-// not among them: -W makes the tool prompt for it, and the prompt is
-// answered on standard input.
+// enrollArguments builds the argv of the join, the one-time password
+// among them: the unattended tool takes it nowhere else.
 func enrollArguments(action *helperv1.DomainEnrollRequest, hostname string) []string {
 	args := []string{
 		"--unattended", "--mkhomedir", "--no-ntp",
 		"--domain=" + action.GetDomain(),
 		"--realm=" + action.GetRealm(),
 		"--hostname=" + hostname,
-		"-W",
+		"--password=" + action.GetOneTimePassword(),
 	}
 	if server := action.GetServer(); server != "" {
 		args = append(args, "--server="+server)
@@ -316,7 +316,7 @@ func (s *Server) leaveDomain(ctx context.Context, request *helperv1.HelperReques
 	// --uninstall unenrolls the host in the directory with its own keytab
 	// and restores the files the join changed. No credential is needed, so
 	// nothing travels on stdin here.
-	_, stderr, err := runIdentityTool(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
+	_, stderr, err := runIdentityToolStrict(ctx, timeLimit(request, 10*time.Minute, 30*time.Minute),
 		"ipa-client-install", "--uninstall", "--unattended")
 	if err != nil {
 		response := reject("leave_failed", err.Error())
