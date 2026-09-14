@@ -1,3 +1,6 @@
 # The agent service account. Without a shell and without a home directory:
 # the agent is not an identity anybody logs into the host with.
 u flotestro-agent - "Flotestro agent" /var/lib/flotestro-agent /usr/bin/nologin
+# Reading the journal without root requires membership in systemd-journal;
+# the same membership the Debian and RPM packages grant in their scripts.
+m flotestro-agent systemd-journal
