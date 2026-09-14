@@ -122,6 +122,9 @@ type Probe struct {
 	DelaySeconds  *float64 `json:"delay_seconds"`
 	LeapStatus    string   `json:"leap_status,omitempty"`
 	Error         string   `json:"error,omitempty"`
+	// silent says that the question got no answer at all, as opposed to
+	// a refusal or a malformed reply; the query repeats only such a one.
+	silent bool
 }
 
 // Snapshot is the picture of the host clock.

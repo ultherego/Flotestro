@@ -280,7 +280,7 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			continue
 		}
 
-		jobID, err := o.createJob(ctx, campaign, target, host)
+		jobID, planHash, err := o.createJob(ctx, campaign, target, host)
 		if err != nil {
 			// The task was not created, so the tokens have nothing to guard.
 			o.releaseCapacity(ctx, target)
@@ -291,16 +291,16 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			o.finishTarget(ctx, campaign, target, TargetFailed, code, err.Error())
 			continue
 		}
-		if err := o.store.AttachJob(ctx, target.ID, "job_id", jobID); err != nil {
+		// The task, the boot ID, the transition and the step go in one
+		// transaction: a host that is running has its change step open,
+		// and a step that is open has a host that is running.
+		if err := o.startStep(ctx, target, stepStart{
+			Key: StepExecute, DependsOn: dependencyOf(StepExecute, campaignPlans(campaign), false),
+			PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetRunning,
+			BootID: &host.BootID,
+		}); err != nil {
 			return err
 		}
-		if err := o.store.SetBootIDBefore(ctx, target.ID, host.BootID); err != nil {
-			return err
-		}
-		if err := o.store.UpdateTarget(ctx, target.ID, TargetRunning, "", ""); err != nil {
-			return err
-		}
-		target.State = TargetRunning
 		running++
 
 		o.log.Info("the campaign started a host",
@@ -340,13 +340,15 @@ func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign
 	return false, ""
 }
 
-// createJob creates the campaign's main task for a host.
+// createJob creates the campaign's main task for a host. It returns the
+// task together with the digest of the plan the task runs under - empty
+// for a campaign without a planner - so the step record can name it.
 func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
-	target *Target, host *hosts.Host) (string, error) {
+	target *Target, host *hosts.Host) (string, string, error) {
 	var payload opspec.Payload
 	if len(campaign.Payload) > 0 {
 		if err := json.Unmarshal(campaign.Payload, &payload); err != nil {
-			return "", err
+			return "", "", err
 		}
 	}
 	action := opspec.ActionType(campaign.ActionType)
@@ -354,27 +356,30 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 	// A change computed per host travels with that host's plan digest. The
 	// host compares it with the state it has now and refuses when the plan
 	// has gone stale - the consent concerned that diff, not this one.
+	var planHash string
 	if opspec.PlanningAction(action) != "" {
 		hash, plan, computedAt, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		if hash == "" {
-			return "", fmt.Errorf("the host %s has no computed plan", target.HostID)
+			return "", "", fmt.Errorf("the host %s has no computed plan", target.HostID)
 		}
 		// The digest still matches what was approved, but the world the
 		// plan described is a day old: a plan computed before a weekend of
 		// vendor updates would carry a different change than the approver
 		// read. The host compares digests too; this is the bound in time.
 		if age := time.Since(computedAt); age > PlanTTL {
-			return "", fmt.Errorf("%w: computed %s ago, the limit is %s",
+			return "", "", fmt.Errorf("%w: computed %s ago, the limit is %s",
 				ErrPlanExpired, age.Round(time.Minute), PlanTTL)
 		}
 		payload = withPlan(action, payload, hash, plan)
+		planHash = hash
 	}
 
-	return o.submitJob(ctx, campaign, host, action, payload,
+	jobID, err := o.submitJob(ctx, campaign, host, action, payload,
 		"campaign:"+campaign.ID+":main:"+target.HostID)
+	return jobID, planHash, err
 }
 
 // startRemediation starts a host's remediation plan from the campaign's
@@ -459,14 +464,16 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 		return err
 	}
 
-	if err := o.store.SetBootIDBefore(ctx, target.ID, host.BootID); err != nil {
+	// The change step of a remediation has no task of its own: the plan
+	// runs its steps in the remediation store. The step row names the
+	// plan instead, so the strip still says what the host is carrying.
+	if err := o.startStep(ctx, target, stepStart{
+		Key: StepExecute, PlanHash: hash, State: TargetRunning,
+		Message: fmt.Sprintf("remediation plan %s: %d steps", created.ID, len(created.Steps)),
+		Note:    "remediation plan " + created.ID, BootID: &host.BootID,
+	}); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetRunning, "",
-		fmt.Sprintf("remediation plan %s: %d steps", created.ID, len(created.Steps))); err != nil {
-		return err
-	}
-	target.State = TargetRunning
 	o.log.Info("the campaign started a host's remediation plan",
 		"campaign_id", campaign.ID, "host_id", host.ID, "plan_id", created.ID,
 		"wave", target.Wave, "steps", len(created.Steps))

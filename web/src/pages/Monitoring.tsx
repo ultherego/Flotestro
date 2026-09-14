@@ -218,7 +218,7 @@ export function FleetMonitoring() {
           <StatGrid compact>
             <Stat label={t("Hosts reporting")} value={data ? data.hosts_reporting : "—"} tone="ok" hint={t("a sample within the last few minutes")} />
             <Stat label={t("Hosts silent")} value={data ? data.hosts_silent : "—"} tone={(data?.hosts_silent ?? 0) > 0 ? "warn" : undefined} hint={t("enrolled, but no recent sample")} />
-            <Stat label={t("Rules")} value={data ? data.rules : "—"} hint={data ? <>{t("as of")} <Time value={data.generated_at} /></> : undefined} />
+            <Stat label={t("Enabled rules")} value={data ? data.rules : "—"} hint={data ? <>{t("as of")} <Time value={data.generated_at} /></> : undefined} />
           </StatGrid>
         </Card>
 

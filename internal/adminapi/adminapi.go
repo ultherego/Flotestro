@@ -352,6 +352,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/campaigns/{id}/report", s.handleCampaignReport)
 	s.route(mux, "GET /api/v1/campaigns/{id}/timeline", s.handleCampaignTimeline)
 	s.route(mux, "GET /api/v1/campaigns/{id}/plans", s.handleCampaignPlans)
+	// The steps of the targets: which task carried which step of which
+	// host, on which attempt, and why a step did not run.
+	s.route(mux, "GET /api/v1/campaigns/{id}/steps", s.handleCampaignSteps)
 	s.route(mux, "GET /api/v1/campaigns/{id}/events", s.handleCampaignEvents)
 	s.route(mux, "GET /api/v1/campaigns/{id}/approvals", s.handleCampaignApprovals)
 	s.route(mux, "POST /api/v1/campaigns/{id}/approve", s.handleApproveCampaign)

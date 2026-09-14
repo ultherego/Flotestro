@@ -11,7 +11,7 @@ import { StatusBar } from "../components/widgets";
 import { type HostPlan, JobPlan, PlanSummary } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
-import { loadedTargets, TARGET_STATES, useTargets } from "../lib/targets";
+import { type CampaignStep, loadedTargets, TARGET_STATES, useTargets, useTargetSteps } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
   bulkPrefill, ContractChips, contractWords, type PlanGroups, REVERSE_OPERATION, reversePayload, useOperation,
@@ -41,6 +41,11 @@ export function Campaign() {
   // several lines and the windowed table needs rows of one fixed height, so
   // the plan is shown below the table for one host at a time.
   const [selectedPlanJob, setSelectedPlanJob] = useState<{ jobId: string; host: string } | null>(null);
+  // The host whose steps are open below the table. The strip of one host
+  // is five pills with their tasks and reasons; the windowed table has no
+  // room for that in a row of fixed height, and a strip per row would be
+  // one request per host on a campaign of thousands.
+  const [selectedStepsHost, setSelectedStepsHost] = useState<{ hostId: string; host: string } | null>(null);
 
   const campaign = useQuery({
     queryKey: ["campaign", id],
@@ -94,6 +99,7 @@ export function Campaign() {
     ["campaign-targets", id],
     ["campaign-report", id],
     ["campaign-timeline", id],
+    ["campaign-steps", id],
   ]);
   // The progress of the campaign's running operations, per host.
   const progress = useProgress(id ? `/api/v1/campaigns/${id}/events` : null);
@@ -510,9 +516,9 @@ export function Campaign() {
             items={loaded}
             rowHeight={40}
             height={480}
-            columns={7}
+            columns={8}
             rowKey={(target) => target.host_id}
-            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
+            head={<tr><th>{t("Host")}</th><th className="num">{t("Wave")}</th><th>{t("Plan")}</th><th>{t("Steps")}</th><th>{t("State")}</th><th>{t("Progress")}</th><th>{t("Error code")}</th><th>{t("Message")}</th></tr>}
             onNearEnd={targets.hasNextPage && !targets.isFetchingNextPage ? () => targets.fetchNextPage() : undefined}
             loading={targets.isFetchingNextPage}
             render={(target) => {
@@ -547,6 +553,22 @@ export function Campaign() {
                     ) : (
                       "—"
                     )}
+                  </td>
+                  {/* The steps of the host - plan, change, reboot, verify,
+                      compensate - open below the table for the same reason
+                      the plan does: a strip does not fit a row. */}
+                  <td>
+                    <button
+                      className="inline"
+                      aria-pressed={selectedStepsHost?.hostId === target.host_id}
+                      onClick={() => setSelectedStepsHost(
+                        selectedStepsHost?.hostId === target.host_id
+                          ? null
+                          : { hostId: target.host_id, host: target.hostname || target.host_id.slice(0, 8) },
+                      )}
+                    >
+                      {t("steps")}
+                    </button>
                   </td>
                   <td><JobState state={target.state} /></td>
                   {/* The progress belongs to the operation currently running
@@ -592,6 +614,81 @@ export function Campaign() {
         >
           <JobPlan jobId={selectedPlanJob.jobId} />
         </Card>
+      )}
+      {selectedStepsHost && (
+        <Card
+          title={t("Steps for {host}", { host: selectedStepsHost.host })}
+          description={t("Every executable step of the host with its task, its attempts and the reason it did not run. A step without a record has not been reached.")}
+          footer={
+            <Actions>
+              <button className="secondary" onClick={() => setSelectedStepsHost(null)}>{t("Close")}</button>
+            </Actions>
+          }
+        >
+          <TargetSteps campaignID={id} hostID={selectedStepsHost.hostId} />
+        </Card>
+      )}
+    </>
+  );
+}
+
+/** The step names as the strip shows them; the keys are the server's step kinds. */
+const STEP_NAMES: Record<string, string> = {
+  plan: "plan", execute: "execute", reboot: "reboot", verify: "verify", compensate: "compensate",
+};
+
+/**
+ * The strip of one host's steps: plan → execute → reboot → verify →
+ * compensate, each with its state, its task and - where it did not run -
+ * the reason. The order comes from the server's contract, not from this
+ * file. A step the host has not reached has no record and is drawn as
+ * unknown rather than as pending: nothing decided about it yet.
+ */
+function TargetSteps({ campaignID, hostID }: { campaignID: string; hostID: string }) {
+  const t = useT();
+  const steps = useTargetSteps(campaignID, hostID);
+  if (steps.error) return <ErrorBox error={steps.error} />;
+  if (!steps.data) return <Empty>{t("Loading…")}</Empty>;
+  const order = steps.data.step_order.length > 0 ? steps.data.step_order : Object.keys(STEP_NAMES);
+  const byKey = new Map<string, CampaignStep>(steps.data.items.map((step) => [step.step_key, step]));
+  if (byKey.size === 0) return <Empty>{t("No step recorded yet.")}</Empty>;
+  const explained = order.map((key) => byKey.get(key)).filter((step): step is CampaignStep => !!step?.reason);
+  return (
+    <>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }} data-testid="step-strip">
+        {order.map((key, index) => {
+          const step = byKey.get(key);
+          const name = t(STEP_NAMES[key] ?? key);
+          return (
+            <span key={key} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {index > 0 && <span className="source">→</span>}
+              {step ? (
+                <span className="chip" title={step.reason || undefined}>
+                  {name}
+                  <JobState state={step.state} />
+                  {/* The task carried the step; the task list filtered on
+                      the campaign is where it opens. The short identifier
+                      is enough to find it there; the whole one is on hover. */}
+                  {step.job_id && (
+                    <Link to={`/jobs?campaign_id=${campaignID}`} className="mono" title={step.job_id}>
+                      {step.job_id.slice(0, 8)}
+                    </Link>
+                  )}
+                  {step.attempts > 1 && <span className="source">{t("attempt {n}", { n: step.attempts })}</span>}
+                </span>
+              ) : (
+                <span className="chip unknown" title={t("The host has not reached this step.")}>{name} —</span>
+              )}
+            </span>
+          );
+        })}
+      </div>
+      {explained.length > 0 && (
+        <Pairs>
+          {explained.map((step) => (
+            <Pair key={step.step_key} label={t(STEP_NAMES[step.step_key] ?? step.step_key)}>{step.reason}</Pair>
+          ))}
+        </Pairs>
       )}
     </>
   );

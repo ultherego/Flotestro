@@ -65,27 +65,32 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		return nil
 	}
 
+	// From here on the change itself is done; whatever follows is the
+	// reboot's outcome, and the step records say so.
+	changed := stepOutcome{Key: StepExecute, State: StepSucceeded}
 	needsReboot, err := o.rebootNeeded(ctx, campaign, *target.JobID)
 	if err != nil {
 		return err
 	}
 	if !needsReboot {
-		o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "")
+		// A reboot that did not happen is a decision, and the strip is to
+		// say whose: the policy's or the host's.
+		why := "the host did not report that the change requires a reboot"
+		if RebootPolicy(campaign.RebootPolicy) == RebootNever {
+			why = "the reboot policy of the campaign is never"
+		}
+		o.finishTargetSteps(ctx, campaign, target, TargetSucceeded, "", "",
+			changed, stepOutcome{Key: StepReboot, State: StepSkipped, Reason: why})
 		return nil
 	}
 
 	host, err := o.hosts.Get(ctx, target.HostID)
 	if err != nil {
-		o.finishTarget(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error())
+		o.finishTargetSteps(ctx, campaign, target, TargetFailed, "host_unavailable", err.Error(),
+			changed, stepOutcome{Key: StepReboot, State: StepFailed,
+				Reason: stepReason("host_unavailable", err.Error())})
 		return nil
 	}
-	// The boot ID from before the reboot is the only certain proof that the
-	// host really came back rather than merely failed to disconnect in
-	// time.
-	if err := o.store.SetBootIDBefore(ctx, target.ID, host.BootID); err != nil {
-		return err
-	}
-	target.BootIDBefore = host.BootID
 
 	rebootJobID, err := o.submitJob(ctx, campaign, host, opspec.ActionSystemReboot,
 		opspec.Payload{Reboot: &opspec.RebootPayload{
@@ -93,16 +98,25 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 			Reason:       "Flotestro: campaign " + campaign.Name,
 		}}, "campaign:"+campaign.ID+":reboot:"+target.HostID)
 	if err != nil {
-		o.finishTarget(ctx, campaign, target, TargetFailed, "reboot_create_failed", err.Error())
+		o.finishTargetSteps(ctx, campaign, target, TargetFailed, "reboot_create_failed", err.Error(),
+			changed, stepOutcome{Key: StepReboot, State: StepFailed,
+				Reason: stepReason("reboot_create_failed", err.Error())})
 		return nil
 	}
-	if err := o.store.AttachJob(ctx, target.ID, "reboot_job_id", rebootJobID); err != nil {
+	// The boot ID from before the reboot is the only certain proof that the
+	// host really came back rather than merely failed to disconnect in
+	// time. It is recorded with the transition, in the same transaction.
+	planHash, _, _, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
+	if err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetRebooting, "", "a reboot was scheduled"); err != nil {
+	if err := o.startStep(ctx, target, stepStart{
+		Key: StepReboot, DependsOn: StepExecute, PlanHash: planHash,
+		JobID: rebootJobID, Column: "reboot_job_id", State: TargetRebooting,
+		Message: "a reboot was scheduled", BootID: &host.BootID, Closes: []stepOutcome{changed},
+	}); err != nil {
 		return err
 	}
-	target.State = TargetRebooting
 
 	o.log.Info("the campaign orders a reboot of a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", rebootJobID)
@@ -209,8 +223,13 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 		return nil
 	}
 
+	// The host is back with a new boot ID: the reboot step is done, and
+	// what follows is the verification's outcome.
+	rebooted := stepOutcome{Key: StepReboot, State: StepSucceeded, Reason: "the host came back with boot ID " + host.BootID}
 	if len(campaign.HealthCheckUnits) == 0 {
-		o.finishTarget(ctx, campaign, target, TargetSucceeded, "", "the host came back after the reboot")
+		o.finishTargetSteps(ctx, campaign, target, TargetSucceeded, "", "the host came back after the reboot",
+			rebooted, stepOutcome{Key: StepVerify, State: StepSkipped,
+				Reason: "the campaign names no units to check after the reboot"})
 		return nil
 	}
 
@@ -218,16 +237,22 @@ func (o *Orchestrator) afterReboot(ctx context.Context, campaign Campaign, targe
 		opspec.Payload{UnitStatus: &opspec.UnitStatusPayload{Units: campaign.HealthCheckUnits}},
 		"campaign:"+campaign.ID+":health:"+target.HostID+":"+host.BootID)
 	if err != nil {
-		o.finishTarget(ctx, campaign, target, TargetFailed, "health_create_failed", err.Error())
+		o.finishTargetSteps(ctx, campaign, target, TargetFailed, "health_create_failed", err.Error(),
+			rebooted, stepOutcome{Key: StepVerify, State: StepFailed,
+				Reason: stepReason("health_create_failed", err.Error())})
 		return nil
 	}
-	if err := o.store.AttachJob(ctx, target.ID, "health_job_id", healthJobID); err != nil {
+	planHash, _, _, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
+	if err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetVerifying, "", "the host came back, verification is under way"); err != nil {
+	if err := o.startStep(ctx, target, stepStart{
+		Key: StepVerify, DependsOn: StepReboot, PlanHash: planHash,
+		JobID: healthJobID, Column: "health_job_id", State: TargetVerifying,
+		Message: "the host came back, verification is under way", Closes: []stepOutcome{rebooted},
+	}); err != nil {
 		return err
 	}
-	target.State = TargetVerifying
 
 	o.log.Info("the host came back after the reboot, verification is under way",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "boot_id", host.BootID)
@@ -270,9 +295,25 @@ func (o *Orchestrator) afterHealthCheck(ctx context.Context, campaign Campaign, 
 }
 
 // finishTarget settles a host in a campaign and records that in the audit trail.
+//
+// The step the host was carrying ends with it: the outcome is derived
+// from the target's state, so a host settled while running closes its
+// change and a host settled while waiting records the step it never got
+// to, with the reason. The places that know better - a change that
+// succeeded and a reboot that could not be ordered - name the outcomes
+// themselves through finishTargetSteps.
 func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string) {
-	if err := o.store.UpdateTarget(ctx, target.ID, state, errorCode, message); err != nil {
+	o.finishTargetSteps(ctx, campaign, target, state, errorCode, message,
+		settledOutcomes(campaign, target, state, errorCode, message)...)
+}
+
+// finishTargetSteps settles a host together with the named outcomes of
+// its steps, in one transaction: a target cannot end with its step left
+// open, and a step cannot close without the target that carried it.
+func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign, target *Target,
+	state TargetState, errorCode, message string, outcomes ...stepOutcome) {
+	if err := o.settleTarget(ctx, campaign, target, state, errorCode, message, outcomes); err != nil {
 		o.log.Error("the state of a campaign target was not recorded",
 			"campaign_id", campaign.ID, "host_id", target.HostID, "err", err)
 		return
@@ -367,4 +408,114 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// settleTarget writes the target's terminal state and the outcomes of its
+// steps in one transaction.
+//
+// An outcome closes the open step of its kind where there is one. Where
+// there is none - the host was settled before the step was ordered - the
+// step is recorded as it ended, so that the strip says "skipped: the host
+// is in a maintenance window" instead of showing no step at all.
+func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, target *Target,
+	state TargetState, errorCode, message string, outcomes []stepOutcome) error {
+	tx, err := o.store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, state, errorCode, message); err != nil {
+		return err
+	}
+	for _, outcome := range outcomes {
+		settled, err := o.store.FinishStep(ctx, tx, target.ID, outcome.Key, outcome.State, outcome.Reason)
+		if err != nil {
+			return err
+		}
+		if settled {
+			continue
+		}
+		if err := o.store.RecordStep(ctx, tx, StepRecord{
+			Target: *target, Key: outcome.Key,
+			DependsOn: dependencyOf(outcome.Key, campaignPlans(campaign), target.RebootJobID != nil),
+			State:     outcome.State, Reason: outcome.Reason,
+		}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// stepStart describes a step being ordered for a host: the task that
+// carries it, the state the target runs it in and the steps it closes.
+type stepStart struct {
+	Key       StepKey
+	DependsOn StepKey
+	PlanHash  string
+	// JobID and Column bind the task to the target row; both empty for a
+	// step without a task of its own, such as a remediation plan.
+	JobID  string
+	Column string
+	State  TargetState
+	// Message is the target's message; Note travels on the step.
+	Message string
+	Note    string
+	// BootID, when set, is recorded as the boot ID from before the change.
+	BootID *string
+	// Closes are the steps that ended for this one to start.
+	Closes []stepOutcome
+}
+
+// startStep orders a step: it binds the task, moves the target into the
+// state the step runs in and opens the step row - in one transaction, so
+// that the target and its step never disagree about what is under way.
+func (o *Orchestrator) startStep(ctx context.Context, target *Target, start stepStart) error {
+	tx, err := o.store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	for _, done := range start.Closes {
+		if _, err := o.store.FinishStep(ctx, tx, target.ID, done.Key, done.State, done.Reason); err != nil {
+			return err
+		}
+	}
+	if start.Column != "" {
+		if err := o.store.AttachJobTx(ctx, tx, target.ID, start.Column, start.JobID); err != nil {
+			return err
+		}
+	}
+	if start.BootID != nil {
+		if err := o.store.SetBootIDBeforeTx(ctx, tx, target.ID, *start.BootID); err != nil {
+			return err
+		}
+	}
+	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, start.State, "", start.Message); err != nil {
+		return err
+	}
+	if err := o.store.StartStep(ctx, tx, StepRecord{
+		Target: *target, Key: start.Key, DependsOn: start.DependsOn,
+		PlanHash: start.PlanHash, JobID: start.JobID, Reason: start.Note,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	target.State = start.State
+	target.ErrorCode = ""
+	if start.BootID != nil {
+		target.BootIDBefore = *start.BootID
+	}
+	return nil
+}
+
+// campaignPlans says whether the hosts of this campaign computed a plan
+// step of their own before the change. A plan handed in with the order -
+// a fleet remediation - is no step of the host, so the change of such a
+// campaign follows nothing on the host's strip.
+func campaignPlans(campaign Campaign) bool {
+	return opspec.PlanningAction(opspec.ActionType(campaign.ActionType)) != ""
 }

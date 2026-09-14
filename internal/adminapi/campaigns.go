@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
@@ -712,6 +714,51 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": course, "count": len(course)})
+}
+
+// handleCampaignSteps returns the executable steps of the campaign's
+// targets: plan, change, reboot, verification and compensation, each with
+// its task, its attempts and the reason it did not run.
+//
+// The target row says where a host stands; the steps say how it got there,
+// and that is what a diagnosis needs - which step failed, on which attempt,
+// under which plan. The list goes page by page in the order of the rollout
+// and is cut between hosts, never inside one, so a host's strip is always
+// read whole. A host filter answers the question the screen asks most:
+// "what happened on this one".
+func (s *Server) handleCampaignSteps(w http.ResponseWriter, r *http.Request) {
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
+	if !ok {
+		return
+	}
+	query := r.URL.Query()
+	cursor, err := campaigns.ParseTargetCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, err := strconv.Atoi(query.Get("limit"))
+	if err != nil || limit <= 0 {
+		limit = defaultTargetPage
+	}
+	hostID := query.Get("host_id")
+	if hostID != "" {
+		if _, err := uuid.Parse(hostID); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_host_id", "host_id must be a host identifier")
+			return
+		}
+	}
+	page, err := s.campaigns.StepsOfCampaign(r.Context(), campaign.ID, hostID, cursor, limit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
+		// The order the steps of one host run in, so a screen draws the
+		// strip from the contract rather than from a list of its own.
+		"step_order": campaigns.StepOrder,
+	})
 }
 
 // handleCampaignPlans groups the host plans by their fingerprint.

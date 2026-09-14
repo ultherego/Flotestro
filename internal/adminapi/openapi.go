@@ -67,6 +67,7 @@ func (s *Server) openAPI() map[string]any {
 	register("Campaign", campaigns.Campaign{})
 	register("CampaignTarget", campaigns.Target{})
 	register("TimelineEntry", campaigns.Event{})
+	register("CampaignStep", campaigns.Step{})
 	register("AuditEvent", audit.Event{})
 	register("Payload", opspec.Payload{})
 	schemas["Problem"] = map[string]any{
@@ -250,6 +251,11 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/hosts/{id}/metrics": {
 		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
 	},
+	"GET /api/v1/campaigns/{id}/steps": {
+		{"host_id", "string", "Only the steps of this host."},
+		{"limit", "integer", "How many hosts one page covers: 200 by default, 1000 at most; a page is cut between hosts, never inside one."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+	},
 	"GET /api/v1/monitoring/alerts": {
 		{"state", "string", "pending, firing or resolved."},
 		{"severity", "string", "critical, warning or info."},
@@ -301,6 +307,7 @@ var responseSchemas = map[string]map[string]any{
 	"POST /api/v1/campaigns/{id}/cancel":  ref("Campaign"),
 	"GET /api/v1/campaigns/{id}/targets":  pagedCollection("CampaignTarget"),
 	"GET /api/v1/campaigns/{id}/timeline": collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":    cursorCollection("CampaignStep"),
 	"GET /api/v1/audit":                   cursorCollection("AuditEvent"),
 	"GET /api/v1/hosts/{id}/audit":        collection("AuditEvent"),
 }

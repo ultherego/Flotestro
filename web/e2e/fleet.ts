@@ -68,3 +68,60 @@ export async function openHostList(page: Page) {
   await expect(table).toBeVisible();
   return table;
 }
+
+/**
+ * The permissions of the token, as the panel reads them to show or hide a
+ * section. A test of a gated page skips without the permission instead of
+ * failing on the refusal the page would show.
+ */
+export async function permissions(request: APIRequestContext): Promise<Set<string>> {
+  const response = await request.get("/api/v1/whoami");
+  expect(response.ok(), `GET /api/v1/whoami answered ${response.status()}`).toBeTruthy();
+  const body = (await response.json()) as { permissions?: string[] };
+  return new Set(body.permissions ?? []);
+}
+
+/** The hosts the API lists as online; a read from a host needs one. */
+export function onlineHosts(hosts: Host[]): Host[] {
+  return hosts.filter((host) => host.connection_state === "online");
+}
+
+/** An online host with a working adapter of the given name, or undefined. */
+export function onlineHostWith(hosts: Host[], capability: string): Host | undefined {
+  return hostWith(onlineHosts(hosts), capability);
+}
+
+/**
+ * Opens a module of the host workspace and waits for it to settle: the
+ * module header when the host backs it, or the notice saying why it does
+ * not. The notice is returned so the test can skip with the reason.
+ */
+export async function openModule(page: Page, host: Host, segment: string, name: string): Promise<string | null> {
+  await page.goto(`/hosts/${host.id}/${segment}`);
+  const header = page.locator(".hm-header").getByRole("heading", { name, exact: true });
+  const notice = page.getByText(`${name} is not available on this host:`);
+  await expect(header.or(notice).first()).toBeVisible();
+  return (await notice.isVisible()) ? await notice.textContent() : null;
+}
+
+/** The state of a job, as the API records it. */
+export async function jobState(request: APIRequestContext, id: string): Promise<string> {
+  const response = await request.get(`/api/v1/jobs/${id}`);
+  expect(response.ok(), `GET /api/v1/jobs/${id} answered ${response.status()}`).toBeTruthy();
+  const job = (await response.json()) as { state: string };
+  return job.state;
+}
+
+/** The tags of a host, straight from the API. */
+export async function hostTags(request: APIRequestContext, id: string): Promise<string[]> {
+  const response = await request.get(`/api/v1/hosts/${id}`);
+  expect(response.ok(), `GET /api/v1/hosts/${id} answered ${response.status()}`).toBeTruthy();
+  const host = (await response.json()) as { tags?: string[] };
+  return host.tags ?? [];
+}
+
+/** Replaces the tags of a host; the whole list, as the API takes it. */
+export async function setHostTags(request: APIRequestContext, id: string, tags: string[]) {
+  const response = await request.put(`/api/v1/hosts/${id}/tags`, { data: { tags } });
+  expect(response.ok(), `PUT /api/v1/hosts/${id}/tags answered ${response.status()}`).toBeTruthy();
+}

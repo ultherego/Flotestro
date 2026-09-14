@@ -24,6 +24,15 @@ const (
 	secondFraction = 1 << 32
 )
 
+// queryAttempts is how many questions a server gets before it counts as
+// silent. NTP runs over UDP and a single datagram is lost now and then,
+// on the way out or back; a time daemon asks again as a matter of
+// course, and so does the probe - otherwise one lost packet would refuse
+// a change of the time source or report a working server as unreachable.
+// Only a question without any answer is repeated: a refusal or a
+// malformed reply is an answer.
+const queryAttempts = 3
+
 // Query asks one SNTP question and describes the answer.
 //
 // The result never lies about what it did not measure: an unreachable
@@ -37,9 +46,26 @@ func Query(ctx context.Context, server string, timeout time.Duration) Probe {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	return queryAt(ctx, server, ntpPort, timeout)
+}
+
+// queryAt asks the server on the given port, again after a lost datagram.
+func queryAt(ctx context.Context, server, port string, timeout time.Duration) Probe {
+	var probe Probe
+	for attempt := 1; ; attempt++ {
+		probe = queryOnce(ctx, server, port, timeout)
+		if !probe.silent || attempt >= queryAttempts || ctx.Err() != nil {
+			return probe
+		}
+	}
+}
+
+// queryOnce sends one question and waits for its answer.
+func queryOnce(ctx context.Context, server, port string, timeout time.Duration) Probe {
+	probe := Probe{Server: server}
 
 	dialer := net.Dialer{Timeout: timeout}
-	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(server, ntpPort))
+	conn, err := dialer.DialContext(ctx, "udp", net.JoinHostPort(server, port))
 	if err != nil {
 		probe.Error = err.Error()
 		return probe
@@ -76,6 +102,7 @@ func Query(ctx context.Context, server string, timeout time.Duration) Probe {
 	t4 := time.Now()
 	if err != nil {
 		probe.Error = "the server did not answer: " + err.Error()
+		probe.silent = true
 		return probe
 	}
 	if n < 48 {

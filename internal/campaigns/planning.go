@@ -105,13 +105,11 @@ func (o *Orchestrator) orderPlan(ctx context.Context, campaign Campaign, target 
 		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_create_failed", err.Error())
 		return nil
 	}
-	if err := o.store.AttachJob(ctx, target.ID, "plan_job_id", jobID); err != nil {
+	if err := o.startStep(ctx, target, stepStart{
+		Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning,
+	}); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetPlanning, "", ""); err != nil {
-		return err
-	}
-	target.State = TargetPlanning
 	target.PlanJobID = &jobID
 	o.log.Info("the campaign is planning a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", jobID)
@@ -191,16 +189,40 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 		o.finishTarget(ctx, campaign, target, TargetIneligible, "plan_refused", reason)
 		return true, nil
 	}
-	if err := o.store.SavePlan(ctx, campaign.ID, target.HostID, hash, plan); err != nil {
-		return false, err
-	}
 	// The host goes back to the queue: the plan is computed, the change will
 	// start once the consent is given.
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetPending, "", ""); err != nil {
+	if err := o.acceptPlan(ctx, campaign, target, hash, plan, ""); err != nil {
 		return false, err
 	}
-	target.State = TargetPending
 	return true, nil
+}
+
+// acceptPlan records a host's plan, closes its plan step and returns the
+// host to the queue - in one transaction, because a plan on record with
+// the host still planning, or a host queued without its plan, is a state
+// the next pass cannot read.
+func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target *Target,
+	hash string, plan json.RawMessage, message string) error {
+	tx, err := o.store.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := o.store.SavePlanTx(ctx, tx, campaign.ID, target.HostID, hash, plan); err != nil {
+		return err
+	}
+	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, TargetPending, "", message); err != nil {
+		return err
+	}
+	if _, err := o.store.FinishStep(ctx, tx, target.ID, StepPlan, StepSucceeded, "plan "+shortHash(hash)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	target.State = TargetPending
+	target.ErrorCode = ""
+	return nil
 }
 
 // planFingerprint takes the plan digest out of the result of the planning

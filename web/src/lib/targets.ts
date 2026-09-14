@@ -1,4 +1,4 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api } from "./api";
 import type { CampaignTarget } from "./types";
 import { OPERATIONS_INTERVAL } from "./stream";
@@ -53,3 +53,55 @@ export const TARGET_STATES = [
   "pending", "awaiting_budget", "queued_offline", "planning", "running", "rebooting", "verifying",
   "succeeded", "failed", "skipped", "ineligible", "excluded", "canceled",
 ];
+
+/** One executable step of a target: plan, execute, reboot, verify or compensate. */
+export type CampaignStep = {
+  id: string;
+  campaign_id: string;
+  target_id: string;
+  host_id: string;
+  hostname?: string;
+  step_key: string;
+  /** The step this one waited for; absent for the first step of the host. */
+  depends_on?: string;
+  /** The digest of the plan the step ran under; absent for the plan step and for a campaign without a planner. */
+  plan_hash?: string;
+  state: "pending" | "running" | "succeeded" | "failed" | "skipped" | "canceled";
+  /** The task of the latest attempt; absent for a step settled without one. */
+  job_id?: string;
+  attempts: number;
+  /** Why the step ended the way it did; never empty for a failed, skipped or canceled step. */
+  reason?: string;
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+  updated_at?: string;
+  wave: number;
+  position: number;
+};
+
+/** One page of a campaign's steps, cut between hosts. */
+export type StepPage = {
+  items: CampaignStep[];
+  count: number;
+  next_cursor?: string;
+  /** The order the steps of one host run in, from the server's contract. */
+  step_order: string[];
+};
+
+/**
+ * The steps of one host in a campaign.
+ *
+ * The strip is read for one host at a time - the one the operator opened
+ * from the target table - so the request names the host and gets a page
+ * of one. The key starts with the campaign, so a stream event refreshing
+ * the campaign refreshes the strip too.
+ */
+export function useTargetSteps(campaignID: string, hostID: string) {
+  return useQuery({
+    queryKey: ["campaign-steps", campaignID, hostID],
+    queryFn: () => api.get<StepPage>(`/api/v1/campaigns/${campaignID}/steps?host_id=${hostID}&limit=1`),
+    enabled: campaignID !== "" && hostID !== "",
+    refetchInterval: OPERATIONS_INTERVAL,
+  });
+}

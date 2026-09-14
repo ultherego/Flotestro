@@ -152,15 +152,14 @@ func (o *Orchestrator) replanTarget(ctx context.Context, campaign Campaign,
 		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_create_failed", err.Error())
 		return nil
 	}
-	if err := o.store.AttachJob(ctx, target.ID, "plan_job_id", jobID); err != nil {
+	// The plan computed again is the next attempt of the same plan step:
+	// the strip shows one plan with two attempts, not two plans.
+	if err := o.startStep(ctx, target, stepStart{
+		Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning,
+		Message: "the host came back; its plan is computed again before the change",
+	}); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetPlanning, "",
-		"the host came back; its plan is computed again before the change"); err != nil {
-		return err
-	}
-	target.State = TargetPlanning
-	target.ErrorCode = ""
 	target.PlanJobID = &jobID
 	o.log.Info("the campaign is planning a returned host again",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", jobID)
@@ -208,21 +207,22 @@ func (o *Orchestrator) afterReplan(ctx context.Context, campaign Campaign, targe
 		return err
 	}
 	if hash != approved {
-		o.finishTarget(ctx, campaign, target, TargetSkipped, "plan_changed_offline",
-			fmt.Sprintf("the plan computed after the reconnect (%s) differs from the approved one (%s); "+
-				"the consent covered the old plan", shortHash(hash), shortHash(approved)))
+		// The plan step did its work - the answer is a different plan. It
+		// is the change that does not run, and the strip says so on the
+		// change rather than on the plan.
+		why := fmt.Sprintf("the plan computed after the reconnect (%s) differs from the approved one (%s); "+
+			"the consent covered the old plan", shortHash(hash), shortHash(approved))
+		o.finishTargetSteps(ctx, campaign, target, TargetSkipped, "plan_changed_offline", why,
+			stepOutcome{Key: StepPlan, State: StepSucceeded, Reason: "plan " + shortHash(hash)},
+			stepOutcome{Key: StepExecute, State: StepSkipped, Reason: stepReason("plan_changed_offline", why)})
 		return nil
 	}
 	// The same plan, freshly verified: its age starts over, so the time
 	// limit on plans does not stop a host that just proved its plan holds.
-	if err := o.store.SavePlan(ctx, campaign.ID, target.HostID, hash, plan); err != nil {
-		return err
-	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetPending, "",
+	if err := o.acceptPlan(ctx, campaign, target, hash, plan,
 		"the plan still matches the approved one; waiting for its turn"); err != nil {
 		return err
 	}
-	target.State = TargetPending
 	o.log.Info("a returned host confirmed its plan",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "plan_hash", hash)
 	return nil

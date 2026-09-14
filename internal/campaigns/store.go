@@ -379,13 +379,17 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The state the campaign is leaving comes back with the update: the
+	// steps recorded below depend on it, and after the update the row no
+	// longer says.
 	const query = `
-		update campaigns set state = $2, canceled_by = $3, canceled_at = now(),
-		                     pause_reason = $4, finished_at = now(), updated_at = now()
-		where id = $1 and state not in ('completed', 'failed', 'canceled')
-		returning id`
-	var updated string
-	err = tx.QueryRow(ctx, query, campaignID, string(StateCanceled), actor, nullable(reason)).Scan(&updated)
+		update campaigns c set state = $2, canceled_by = $3, canceled_at = now(),
+		                       pause_reason = $4, finished_at = now(), updated_at = now()
+		from (select id, state from campaigns where id = $1 for update) old
+		where c.id = old.id and old.state not in ('completed', 'failed', 'canceled')
+		returning old.state`
+	var previous string
+	err = tx.QueryRow(ctx, query, campaignID, string(StateCanceled), actor, nullable(reason)).Scan(&previous)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrConflict
 	}
@@ -400,6 +404,29 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		where campaign_id = $1 and state in ('pending', 'awaiting_budget', 'queued_offline')`,
 		campaignID); err != nil {
 		return nil, err
+	}
+	// Every host that will not start gets the step it was waiting for
+	// recorded as canceled, with the actor and the reason: the strip of a
+	// canceled host is to say who stopped it, not stay blank. The step is
+	// the plan while the campaign was still planning and the change
+	// otherwise. Hosts already at work keep their steps open; they finish
+	// on their own, like the target rows say.
+	why := "the campaign was canceled by " + actor
+	if reason != "" {
+		why += ": " + reason
+	}
+	step := StepExecute
+	if previous == string(StatePlanning) {
+		step = StepPlan
+	}
+	if _, err := tx.Exec(ctx, `
+		insert into campaign_steps (campaign_id, target_id, host_id, step_key, state, reason, finished_at)
+		select t.campaign_id, t.id, t.host_id, $2::text, 'canceled', $3::text, now()
+		  from campaign_targets t
+		 where t.campaign_id = $1 and t.state = 'canceled'
+		on conflict (target_id, step_key, plan_hash) do nothing`,
+		campaignID, string(step), why); err != nil {
+		return nil, fmt.Errorf("recording the canceled steps: %w", err)
 	}
 	// A cancellation ends the campaign, and an ended campaign has its
 	// report - written here, so the record shows the targets as the
@@ -482,6 +509,18 @@ func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
 // consent concerns that diff, not what the host computes now.
 func (s *Store) SavePlan(ctx context.Context, campaignID, hostID, hash string,
 	plan json.RawMessage) error {
+	return s.savePlan(ctx, s.pool, campaignID, hostID, hash, plan)
+}
+
+// SavePlanTx records the plan inside the caller's transaction, next to the
+// target's return to the queue and the close of its plan step.
+func (s *Store) SavePlanTx(ctx context.Context, tx pgx.Tx, campaignID, hostID, hash string,
+	plan json.RawMessage) error {
+	return s.savePlan(ctx, tx, campaignID, hostID, hash, plan)
+}
+
+func (s *Store) savePlan(ctx context.Context, q stepQuerier, campaignID, hostID, hash string,
+	plan json.RawMessage) error {
 	if len(plan) == 0 {
 		plan = json.RawMessage("{}")
 	}
@@ -491,7 +530,7 @@ func (s *Store) SavePlan(ctx context.Context, campaignID, hostID, hash string,
 		on conflict (campaign_id, host_id) do update
 		   set plan_hash = excluded.plan_hash, plan = excluded.plan,
 		       computed_at = now()`
-	_, err := s.pool.Exec(ctx, query, campaignID, hostID, hash, plan)
+	_, err := q.Exec(ctx, query, campaignID, hostID, hash, plan)
 	return err
 }
 
@@ -948,6 +987,20 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 // UpdateTarget records the state of a campaign target.
 func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetState,
 	errorCode, message string) error {
+	return s.updateTarget(ctx, s.pool, targetID, state, errorCode, message)
+}
+
+// UpdateTargetTx records the state inside the caller's transaction. The
+// step rows are written next to the transition, and a transition without
+// its step - or a step without its transition - must not be able to
+// commit alone.
+func (s *Store) UpdateTargetTx(ctx context.Context, tx pgx.Tx, targetID string, state TargetState,
+	errorCode, message string) error {
+	return s.updateTarget(ctx, tx, targetID, state, errorCode, message)
+}
+
+func (s *Store) updateTarget(ctx context.Context, q stepQuerier, targetID string, state TargetState,
+	errorCode, message string) error {
 	// The previous state and the moment it was entered come back with the
 	// update: the time spent in a state is measured when it is left, and
 	// only this statement knows both ends.
@@ -969,7 +1022,7 @@ func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetS
 		returning old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
 	var previous, actionType string
 	var seconds float64
-	err := s.pool.QueryRow(ctx, query, targetID, string(state), nullable(errorCode), nullable(message)).
+	err := q.QueryRow(ctx, query, targetID, string(state), nullable(errorCode), nullable(message)).
 		Scan(&previous, &seconds, &actionType)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -985,6 +1038,15 @@ func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetS
 
 // AttachJob binds a target to the task that was created.
 func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) error {
+	return s.attachJob(ctx, s.pool, targetID, column, jobID)
+}
+
+// AttachJobTx binds the task inside the caller's transaction.
+func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, targetID, column, jobID string) error {
+	return s.attachJob(ctx, tx, targetID, column, jobID)
+}
+
+func (s *Store) attachJob(ctx context.Context, q stepQuerier, targetID, column, jobID string) error {
 	var query string
 	switch column {
 	case "job_id":
@@ -998,13 +1060,22 @@ func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) e
 	default:
 		return fmt.Errorf("unknown task column %q", column)
 	}
-	_, err := s.pool.Exec(ctx, query, targetID, jobID)
+	_, err := q.Exec(ctx, query, targetID, jobID)
 	return err
 }
 
 // SetBootIDBefore records the boot ID from before the reboot.
 func (s *Store) SetBootIDBefore(ctx context.Context, targetID, bootID string) error {
-	_, err := s.pool.Exec(ctx,
+	return s.setBootIDBefore(ctx, s.pool, targetID, bootID)
+}
+
+// SetBootIDBeforeTx records the boot ID inside the caller's transaction.
+func (s *Store) SetBootIDBeforeTx(ctx context.Context, tx pgx.Tx, targetID, bootID string) error {
+	return s.setBootIDBefore(ctx, tx, targetID, bootID)
+}
+
+func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, targetID, bootID string) error {
+	_, err := q.Exec(ctx,
 		`update campaign_targets set boot_id_before = $2 where id = $1`, targetID, nullable(bootID))
 	return err
 }
