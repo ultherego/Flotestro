@@ -9,6 +9,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/ctl"
 	"github.com/ultherego/flotestro/internal/identitystore"
 )
 
@@ -143,22 +144,7 @@ func socketWorks(path string) error {
 }
 
 // rounded shortens a duration into a form a person can read.
-func rounded(duration time.Duration) string {
-	if duration < 0 {
-		duration = -duration
-	}
-	days := int(duration.Hours()) / 24
-	hours := int(duration.Hours()) % 24
-	if days > 0 {
-		return fmt.Sprintf("%dd %02dh", days, hours)
-	}
-	return duration.Round(time.Second).String()
-}
+func rounded(duration time.Duration) string { return ctl.Rounded(duration) }
 
 // shortened trims a digest to a form that can be compared by eye.
-func shortened(value string) string {
-	if len(value) > 12 {
-		return value[:12]
-	}
-	return value
-}
+func shortened(value string) string { return ctl.Shortened(value) }

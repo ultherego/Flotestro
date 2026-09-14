@@ -391,3 +391,125 @@ func (h *harness) labRelay(t *testing.T) (string, string) {
 	}
 	return relayID, "https://" + names[0] + ":8453"
 }
+
+// relayListItem is a relay as the panel lists it.
+type relayListItem struct {
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	Site                string `json:"site"`
+	State               string `json:"state"`
+	HostsAttested       int    `json:"hosts_attested"`
+	CertificateNotAfter string `json:"certificate_not_after"`
+	LastSeenAt          string `json:"last_seen_at"`
+	Buffer              *struct {
+		BufferBytes    int64 `json:"buffer_bytes"`
+		BufferMaxBytes int64 `json:"buffer_max_bytes"`
+		BufferedItems  int   `json:"buffered_items"`
+	} `json:"buffer"`
+}
+
+// TestRelayListCarriesTheStateAndTheAttestedHosts guards what the relay
+// page is made of: the list says which state each relay is in and how many
+// hosts come through it, the same way the metrics count them.
+//
+// The lab relay is not revoked here: it is the route of the ubuntu host,
+// and the other tests need it.
+func TestRelayListCarriesTheStateAndTheAttestedHosts(t *testing.T) {
+	h := newHarness(t)
+	relayID, _ := h.labRelay(t)
+
+	var list struct {
+		Items []relayListItem `json:"items"`
+	}
+	h.get("/api/v1/relays", &list)
+	var lab *relayListItem
+	for i := range list.Items {
+		if list.Items[i].ID == relayID {
+			lab = &list.Items[i]
+		}
+	}
+	if lab == nil {
+		t.Fatalf("the lab relay %s is not in the list: %+v", relayID, list.Items)
+	}
+	switch lab.State {
+	case "active", "silent", "never_seen":
+	default:
+		t.Fatalf("state = %q; the list has to say one of active, silent, never_seen for a relay that is not revoked", lab.State)
+	}
+	if lab.CertificateNotAfter == "" {
+		t.Fatalf("the relay carries no certificate expiry: %+v", lab)
+	}
+
+	// The count of the list is the count of the open sessions attested by
+	// the relay, as the database has them.
+	ctx := context.Background()
+	var attested int
+	if err := h.database(ctx).QueryRow(ctx, `
+		select count(*) from agent_sessions
+		where relay_id = $1::uuid and ended_at is null`, relayID).Scan(&attested); err != nil {
+		t.Fatal(err)
+	}
+	if lab.HostsAttested != attested {
+		t.Fatalf("hosts_attested = %d, the database has %d open sessions through the relay", lab.HostsAttested, attested)
+	}
+	// A relay that attests hosts has been seen: a session marks it, and so
+	// does its heartbeat.
+	if attested > 0 && lab.State == "never_seen" {
+		t.Fatalf("the relay attests %d hosts and is never_seen: %+v", attested, lab)
+	}
+}
+
+// TestRelayPageListsTheAttestedHosts guards that the relay page names the
+// hosts behind the relay: the ubuntu host of the lab connects through it,
+// and the page is where an operator sees that.
+func TestRelayPageListsTheAttestedHosts(t *testing.T) {
+	h := newHarness(t)
+	relayID, _ := h.labRelay(t)
+	ubuntu := h.hostByName("agent-ubuntu")
+
+	ctx := context.Background()
+	var attested bool
+	if err := h.database(ctx).QueryRow(ctx, `
+		select exists (select 1 from agent_sessions
+		               where relay_id = $1::uuid and host_id = $2::uuid and ended_at is null)`,
+		relayID, ubuntu.ID).Scan(&attested); err != nil {
+		t.Fatal(err)
+	}
+	if !attested {
+		t.Skipf("the ubuntu host %s does not connect through the relay %s", ubuntu.Hostname, relayID)
+	}
+
+	var page struct {
+		Relay relayListItem `json:"relay"`
+		Hosts []struct {
+			HostID      string `json:"host_id"`
+			Hostname    string `json:"hostname"`
+			ConnectedAt string `json:"connected_at"`
+		} `json:"hosts"`
+	}
+	h.get("/api/v1/relays/"+relayID, &page)
+	if page.Relay.ID != relayID || page.Relay.State != "active" {
+		t.Fatalf("relay = %+v; a relay with an open session is active", page.Relay)
+	}
+	found := false
+	for _, host := range page.Hosts {
+		if host.HostID == ubuntu.ID {
+			found = true
+			if host.Hostname != ubuntu.Hostname || host.ConnectedAt == "" {
+				t.Fatalf("the ubuntu host is listed without its name or session: %+v", host)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the ubuntu host %s is not on the relay page: %+v", ubuntu.Hostname, page.Hosts)
+	}
+	if page.Relay.HostsAttested != len(page.Hosts) {
+		t.Fatalf("hosts_attested = %d, the page lists %d hosts", page.Relay.HostsAttested, len(page.Hosts))
+	}
+
+	// A relay nobody may read is a relay nobody sees: the page answers as
+	// for a relay that does not exist rather than naming the site.
+	viewer := h.createPrincipal(uniqueSubject("relay-viewer"),
+		[]map[string]string{{"role": "viewer", "site": "*", "environment": "*"}})
+	h.withToken(viewer).do(http.MethodGet, "/api/v1/relays/"+relayID, nil, nil, http.StatusForbidden)
+}

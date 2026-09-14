@@ -5,28 +5,20 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/ctl"
 )
 
-// forcedRenewalFile records when the operator last forced a renewal.
-//
-// It lies in the state directory next to the identity: the limit is a
-// property of the host, and a reinstall of the tool must not reset it.
-const forcedRenewalFile = "renew-forced-at"
-
-// forcedRenewalInterval is the least time between two forced renewals.
-//
-// The gateway rate-limits renewals as well, but the refusal has to come
-// before the network: a renewal repeated in a loop by a script is exactly
-// what the limit is for, and every attempt costs a new key pair.
-const forcedRenewalInterval = 10 * time.Minute
+// The limit on forced renewals is shared with the tool of the relay: the
+// record lies in the state directory next to the identity, so a reinstall
+// of the tool does not reset it.
+const (
+	forcedRenewalFile     = ctl.ForcedRenewalFile
+	forcedRenewalInterval = ctl.ForcedRenewalInterval
+)
 
 // renewCommand forces a renewal of the certificate of the host.
 //
@@ -78,8 +70,8 @@ type renewal struct {
 // of the request itself - too soon after the previous one.
 func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	now := r.Now()
-	if last, ok := r.lastForced(); ok && now.Sub(last) < forcedRenewalInterval {
-		wait := forcedRenewalInterval - now.Sub(last)
+	throttle := ctl.Throttle{StateDir: r.StateDir}
+	if last, wait, tooSoon := throttle.TooSoon(now); tooSoon {
 		fmt.Fprintf(errOut, "the last forced renewal was %s ago; the next one is allowed in %s (at %s)\n",
 			rounded(now.Sub(last)), rounded(wait), last.Add(forcedRenewalInterval).UTC().Format(time.RFC3339))
 		return 2
@@ -107,7 +99,7 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	// The attempt is recorded before it is made: a refusal by the gateway
 	// counts as much as a success, and a script must not be able to hammer
 	// the gateway by retrying a failure.
-	if err := r.recordForced(now); err != nil {
+	if err := throttle.Record(now); err != nil {
 		fmt.Fprintf(errOut, "the renewal record was not written: %v\n", err)
 		return 1
 	}
@@ -126,29 +118,6 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 	return 0
 }
 
-// lastForced reads the time of the previous forced renewal.
-//
-// An unreadable record counts as none: the file is a courtesy to the
-// operator, not a lock, and a damaged one must not block the renewal for
-// good.
-func (r renewal) lastForced() (time.Time, bool) {
-	content, err := os.ReadFile(filepath.Join(r.StateDir, forcedRenewalFile))
-	if err != nil {
-		return time.Time{}, false
-	}
-	last, err := time.Parse(time.RFC3339, strings.TrimSpace(string(content)))
-	if err != nil {
-		return time.Time{}, false
-	}
-	return last, true
-}
-
-// recordForced writes the time of this forced renewal.
-func (r renewal) recordForced(now time.Time) error {
-	return os.WriteFile(filepath.Join(r.StateDir, forcedRenewalFile),
-		[]byte(now.UTC().Format(time.RFC3339)+"\n"), 0o600)
-}
-
 // sameOwner refuses to write the identity as somebody other than its owner.
 //
 // The store writes the new generation as the calling user. Run as root, it
@@ -158,20 +127,5 @@ func (r renewal) recordForced(now time.Time) error {
 // right user. A directory that does not exist yet has no owner to compare
 // with: the caller creates it as itself.
 func sameOwner(stateDir, command string) error {
-	info, err := os.Stat(stateDir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("the state directory: %w", err)
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil
-	}
-	if int(stat.Uid) != os.Geteuid() {
-		return fmt.Errorf("%s belongs to uid %d and this process runs as uid %d; run the command as the agent: sudo -u flotestro-agent flotestro-agentctl %s",
-			stateDir, stat.Uid, os.Geteuid(), command)
-	}
-	return nil
+	return ctl.SameOwner(stateDir, "flotestro-agent", "flotestro-agentctl", command)
 }

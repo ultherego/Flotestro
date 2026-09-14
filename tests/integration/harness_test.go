@@ -327,6 +327,19 @@ func (h *harness) hostByFamily(family string) hostView {
 	return hostView{}
 }
 
+// hostByName returns the connected host of that name; the lab's Ubuntu
+// host is of the debian family, so a family is not enough to pick it.
+func (h *harness) hostByName(hostname string) hostView {
+	h.t.Helper()
+	for _, host := range h.hosts() {
+		if host.Hostname == hostname && host.ConnectionState == "online" {
+			return host
+		}
+	}
+	h.t.Skipf("no connected host named %s", hostname)
+	return hostView{}
+}
+
 // createOperation orders an operation and returns the resulting job.
 func (h *harness) createOperation(hostID string, body map[string]any) jobView {
 	h.t.Helper()

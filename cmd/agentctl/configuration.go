@@ -4,9 +4,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/ctl"
 )
 
 // configurationCommands handles "config validate", "config show" and "config
@@ -99,14 +99,4 @@ func checkConfiguration(args []string, out, errOut io.Writer, show bool) int {
 //
 // The file names the address of the panel and the CA bundle, so the right to
 // write to it is the right to redirect the host to somebody else's panel.
-func filePermissions(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	if info.Mode().Perm()&0o022 != 0 {
-		return fmt.Errorf("%s is writable by the group or by others (%04o)",
-			path, info.Mode().Perm())
-	}
-	return nil
-}
+func filePermissions(path string) error { return ctl.FilePermissions(path) }

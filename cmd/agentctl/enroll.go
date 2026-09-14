@@ -1,18 +1,15 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"time"
-
-	"golang.org/x/term"
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/ctl"
 )
 
 // enrollmentCommand carries out the one-time admission of a host into the
@@ -130,40 +127,9 @@ func enrollmentHint(err error) string {
 
 // readToken takes the token without leaving it in the arguments or in the
 // environment of the process.
-//
-// Every user of the host sees a command line argument in the process list,
-// and an environment variable stays in the file of the service. What is left
-// is a file with narrowed permissions, a pipe or a question with the echo
-// turned off.
 func readToken(path string, in_ io.Reader, errOut io.Writer) ([]byte, error) {
-	if path != "" {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return nil, err
-		}
-		return bytes.TrimSpace(content), nil
-	}
-	if file, ok := in_.(*os.File); ok && term.IsTerminal(int(file.Fd())) {
-		fmt.Fprint(errOut, "Enrollment token: ")
-		value, err := term.ReadPassword(int(file.Fd()))
-		fmt.Fprintln(errOut)
-		return bytes.TrimSpace(value), err
-	}
-	content, err := io.ReadAll(io.LimitReader(in_, 4096))
-	if err != nil {
-		return nil, err
-	}
-	return bytes.TrimSpace(content), nil
+	return ctl.ReadToken(path, in_, errOut)
 }
 
 // wipe overwrites the token in memory.
-//
-// Without illusions: the runtime and the kernel may hold copies of their own,
-// and the only real protection is a short validity, a single use and a
-// revocation after the registration. This is cleaning up after oneself rather
-// than a guarantee.
-func wipe(value []byte) {
-	for i := range value {
-		value[i] = 0
-	}
-}
+func wipe(value []byte) { ctl.Wipe(value) }

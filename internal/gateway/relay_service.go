@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -240,6 +241,18 @@ func (s *RelayService) Ping(ctx context.Context,
 			fmt.Errorf("the relay %s is not active", relayID))
 	}
 	s.relays.MarkSeen(ctx, relayID)
+	// The numbers of the heartbeat are informational and stay in memory:
+	// the panel shows them next to the relay so that a site whose results
+	// stopped arriving is visible before anybody looks at the site itself.
+	s.relays.RecordHeartbeat(relayID, relays.Heartbeat{
+		BufferBytes:    int64(req.Msg.GetBufferBytes()),
+		BufferMaxBytes: int64(req.Msg.GetBufferMaxBytes()),
+		BufferedItems:  int(req.Msg.GetBufferedItems()),
+		BufferDropped:  int64(req.Msg.GetBufferDroppedTotal()),
+		Sessions:       int(req.Msg.GetSessions()),
+		RelayVersion:   req.Msg.GetBuild().GetAgentVersion(),
+		ReportedAt:     time.Now().UTC(),
+	})
 
 	return connect.NewResponse(&agentv1.RelayPingResponse{
 		ServerTime: timestamppb.Now(),

@@ -32,6 +32,7 @@ import (
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/config"
+	"github.com/ultherego/flotestro/internal/ctl"
 	"github.com/ultherego/flotestro/internal/relay"
 	"github.com/ultherego/flotestro/internal/relayconfig"
 )
@@ -218,6 +219,17 @@ func runCommand(args []string, log *slog.Logger) error {
 
 	live := relay.NewLive(identity)
 	gateway := cfg.Upstream.GatewayURLs[0]
+	// The state file is what the tool on the machine reads: whether the
+	// relay reaches the centre, how full its buffer is and when its
+	// certificate ends. Written from the first moment, so that a relay that
+	// never reaches the centre still leaves a record of trying.
+	state := ctl.NewRelayStateWriter(cfg.Relay.StateDir, identity.RelayID, version)
+	state.Update(func(s *ctl.RelayState) {
+		s.Gateway = gateway
+		s.Listen = cfg.Relay.Listen
+		s.BufferMaxBytes = cfg.Buffer()
+		s.CertificateNotAfter = identity.NotAfter
+	})
 	proxy := relay.New(relay.Options{
 		UpstreamURL:  gateway,
 		UpstreamURLs: cfg.Upstream.GatewayURLs,
@@ -264,6 +276,7 @@ func runCommand(args []string, log *slog.Logger) error {
 		Log:        log,
 		AfterRenewal: func(renewed relay.Identity) {
 			proxy.RefreshIdentity(renewed.Certificate, renewed.CAPool)
+			state.Update(func(s *ctl.RelayState) { s.CertificateNotAfter = renewed.NotAfter })
 		},
 	})
 
@@ -271,6 +284,9 @@ func runCommand(args []string, log *slog.Logger) error {
 	// centre is back.
 	go proxy.WatchUpstream(ctx, 15*time.Second)
 	go report(ctx, proxy, log)
+	// The heartbeat tells the centre the relay is alive and how full its
+	// buffer is, and leaves the same picture in the state file.
+	go heartbeat(ctx, proxy, live, state, log)
 
 	listener, err := net.Listen("tcp", cfg.Relay.Listen)
 	if err != nil {

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/ctl"
 )
 
 // diagnoseCommand checks the path from the host to the panel step by step.
@@ -99,39 +99,15 @@ func newDiagnostics(configPath string) diagnostics {
 }
 
 // endpoint is one address of the panel the host connects to.
-type endpoint struct {
-	// Name labels the checks: "enrollment", "gateway", "gateway.2"...
-	Name string
-	URL  string
-	Host string
-	Port string
-}
+type endpoint = ctl.Endpoint
 
 // endpointsOf lists the addresses in the order the agent uses them.
 func endpointsOf(cfg agentconfig.Config) []endpoint {
 	var endpoints []endpoint
-	add := func(name, raw string) {
-		address, err := url.Parse(raw)
-		if err != nil {
-			return
-		}
-		port := address.Port()
-		if port == "" {
-			port = "443"
-		}
-		endpoints = append(endpoints, endpoint{Name: name, URL: raw, Host: address.Hostname(), Port: port})
+	if enrollment, ok := ctl.ParseEndpoint("enrollment", cfg.Connection.EnrollmentURL); ok {
+		endpoints = append(endpoints, enrollment)
 	}
-	add("enrollment", cfg.Connection.EnrollmentURL)
-	for i, raw := range cfg.Connection.GatewayURLs {
-		name := "gateway"
-		if i > 0 {
-			// The further gateways are backups: they get a number rather
-			// than a name of their own.
-			name = fmt.Sprintf("gateway.%d", i+1)
-		}
-		add(name, raw)
-	}
-	return endpoints
+	return append(endpoints, ctl.GatewayEndpoints(cfg.Connection.GatewayURLs)...)
 }
 
 // run carries out every check and gathers the report.
@@ -139,14 +115,14 @@ func (d diagnostics) run(ctx context.Context) Report {
 	report := Report{OK: true}
 
 	cfg, configCheck, usable := d.checkConfiguration()
-	report.add(configCheck)
-	report.add(d.checkMachineID())
+	report.Add(configCheck)
+	report.Add(d.checkMachineID())
 
 	if !usable {
 		why := "the configuration did not load; see config"
 		for _, name := range []string{"clock", "dns.enrollment", "dns.gateway",
 			"tls.enrollment", "tls.gateway", "identity", "helper.socket"} {
-			report.add(notRun(name, why))
+			report.Add(notRun(name, why))
 		}
 	} else {
 		endpoints := endpointsOf(cfg)
@@ -166,25 +142,25 @@ func (d diagnostics) run(ctx context.Context) Report {
 		}
 		switch {
 		case len(endpoints) == 0:
-			report.add(notRun("clock", "no endpoint to compare with"))
+			report.Add(notRun("clock", "no endpoint to compare with"))
 		case !resolved[endpoints[0].Host]:
-			report.add(notRun("clock", "the name "+endpoints[0].Host+" did not resolve (see dns."+endpoints[0].Name+")"))
+			report.Add(notRun("clock", "the name "+endpoints[0].Host+" did not resolve (see dns."+endpoints[0].Name+")"))
 		default:
-			report.add(d.checkClock(ctx, endpoints[0], pool))
+			report.Add(d.checkClock(ctx, endpoints[0], pool))
 		}
 		for _, check := range dns {
-			report.add(check)
+			report.Add(check)
 		}
 		for _, target := range endpoints {
-			report.add(d.checkTLS(ctx, target, pool, poolErr, resolved[target.Host]))
+			report.Add(d.checkTLS(ctx, target, pool, poolErr, resolved[target.Host]))
 		}
 
-		report.add(d.checkIdentity(identity))
-		report.add(d.checkHelper(cfg))
+		report.Add(d.checkIdentity(identity))
+		report.Add(d.checkHelper(cfg))
 	}
 
-	report.add(d.checkCapabilities())
-	report.add(d.checkPacnew())
+	report.Add(d.checkCapabilities())
+	report.Add(d.checkPacnew())
 	return report
 }
 
@@ -275,18 +251,7 @@ func (d diagnostics) checkConfiguration() (agentconfig.Config, Check, bool) {
 }
 
 // codeOf takes the stable code out of an error of the configuration.
-//
-// The errors of the parser start with their code ("config_decode: ..."), so
-// the text up to the first colon is the code - as long as it looks like one.
-func codeOf(err error, fallback string) string {
-	text := err.Error()
-	code, _, _ := strings.Cut(text, ":")
-	code = strings.TrimSpace(code)
-	if code == "" || strings.ContainsAny(code, " \t/") {
-		return fallback
-	}
-	return code
-}
+func codeOf(err error, fallback string) string { return ctl.CodeOf(err, fallback) }
 
 var machineIDPattern = regexp.MustCompile(`^[0-9a-f]{32}$`)
 
