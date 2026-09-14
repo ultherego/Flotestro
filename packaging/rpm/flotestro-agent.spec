@@ -44,8 +44,19 @@ install -m 0640 %{_flotestro_stage}/agent.yaml %{buildroot}%{_sysconfdir}/flotes
 install -m 0640 %{_flotestro_stage}/agent.env  %{buildroot}%{_sysconfdir}/flotestro/agent.env
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-agent
+# The bill of materials of the binaries: written when they were built,
+# read from the build metadata they carry. A stage without it makes a
+# package without it; the release checklist notices, not this file.
+install -d -m 0755 %{buildroot}%{_docdir}/flotestro-agent
+[ -f %{_flotestro_stage}/sbom/flotestro-agent.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-agent.cdx.json %{buildroot}%{_docdir}/flotestro-agent/sbom.cdx.json || :
+[ -f %{_flotestro_stage}/sbom/flotestro-agent-helper.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-agent-helper.cdx.json %{buildroot}%{_docdir}/flotestro-agent/sbom-flotestro-agent-helper.cdx.json || :
+[ -f %{_flotestro_stage}/sbom/flotestro-agentctl.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-agentctl.cdx.json %{buildroot}%{_docdir}/flotestro-agent/sbom-flotestro-agentctl.cdx.json || :
 
 %files
+%{_docdir}/flotestro-agent
 %{_bindir}/flotestro-agent
 %{_bindir}/flotestro-agent-helper
 %{_bindir}/flotestro-agentctl

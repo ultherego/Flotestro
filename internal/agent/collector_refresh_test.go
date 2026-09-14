@@ -29,7 +29,7 @@ func TestARefreshWaitsForTheRevision(t *testing.T) {
 		_ = k.run(ctx, func(context.Context, []string) (Facts, error) {
 			close(collected)
 			return Facts{Hostname: "host"}, nil
-		}, func(Facts) (Refresh, error) {
+		}, func(Facts, []string) (Refresh, error) {
 			return Refresh{Revision: "abc", Changed: true}, nil
 		}, quietLog())
 	}()
@@ -64,7 +64,7 @@ func TestConcurrentRequestsShareTheRead(t *testing.T) {
 			collected.Add(1)
 			<-slow
 			return Facts{Hostname: "host"}, nil
-		}, func(Facts) (Refresh, error) {
+		}, func(Facts, []string) (Refresh, error) {
 			return Refresh{Revision: "abc", Changed: true}, nil
 		}, quietLog())
 	}()
@@ -106,7 +106,7 @@ func TestThePartialScopeReachesTheRead(t *testing.T) {
 		_ = k.run(ctx, func(_ context.Context, modules []string) (Facts, error) {
 			scope <- modules
 			return Facts{}, nil
-		}, func(Facts) (Refresh, error) {
+		}, func(Facts, []string) (Refresh, error) {
 			return Refresh{Revision: "abc"}, nil
 		}, quietLog())
 	}()
@@ -134,7 +134,7 @@ func TestTheEndOfTheSessionEndsTheWaitOnRefresh(t *testing.T) {
 		_ = k.run(ctx, func(ctx context.Context, _ []string) (Facts, error) {
 			<-ctx.Done()
 			return Facts{}, ctx.Err()
-		}, func(Facts) (Refresh, error) {
+		}, func(Facts, []string) (Refresh, error) {
 			return Refresh{}, nil
 		}, quietLog())
 	}()
@@ -175,7 +175,7 @@ func TestARequestDuringACollectionWaitsForTheNextOne(t *testing.T) {
 				<-slow
 			}
 			return Facts{}, nil
-		}, func(Facts) (Refresh, error) {
+		}, func(Facts, []string) (Refresh, error) {
 			return Refresh{Revision: "abc"}, nil
 		}, quietLog())
 	}()

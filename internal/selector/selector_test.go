@@ -52,6 +52,7 @@ func TestCompileRendersEveryLeaf(t *testing.T) {
 		{"connection", `{"connection_state":"online"}`, "h.connection_state = $3", []any{"online"}},
 		{"lifecycle", `{"lifecycle_state":"active"}`, "h.lifecycle_state = $3", []any{"active"}},
 		{"owner", `{"owner":"team-x"}`, "h.owner = $3", []any{"team-x"}},
+		{"channel", `{"channel":"beta"}`, "h.release_channel = $3", []any{"beta"}},
 		{"static group", `{"group_id":"0b0e7a3e-0000-4000-8000-000000000001"}`,
 			"exists (select 1 from host_group_members m where m.group_id = $3::uuid and m.host_id = h.id)",
 			[]any{"0b0e7a3e-0000-4000-8000-000000000001"}},
@@ -119,6 +120,7 @@ func TestValidateRefusesWhatDoesNotHoldTogether(t *testing.T) {
 		"tag with a space":      `{"tag":"role = db"}`,
 		"unknown state":         `{"connection_state":"sleeping"}`,
 		"unknown lifecycle":     `{"lifecycle_state":"parked"}`,
+		"unknown channel":       `{"channel":"nightly"}`,
 		"internal group id":     `{"group_id":"0b0e7a3e-0000-4000-8000-000000000001"}`,
 		"padded value":          `{"site":" warsaw"}`,
 		"too long":              `{"owner":"` + strings.Repeat("x", maxValue+1) + `"}`,
@@ -138,6 +140,7 @@ func TestValidateRefusesWhatDoesNotHoldTogether(t *testing.T) {
 		`{"tag":"tier=gold"}`,
 		`{"tag":"os.version=12.4"}`,
 		`{"group":"databases"}`,
+		`{"channel":"beta"}`,
 		`{"any":[{"site":"a"},{"not":{"environment":"prod"}}]}`,
 	}
 	for _, text := range valid {

@@ -30,7 +30,8 @@ hosts.
 %install
 rm -rf %{buildroot}
 install -d -m 0755 %{buildroot}%{_bindir}
-install -m 0755 %{_flotestro_stage}/flotestro-relay %{buildroot}%{_bindir}/flotestro-relay
+install -m 0755 %{_flotestro_stage}/flotestro-relay    %{buildroot}%{_bindir}/flotestro-relay
+install -m 0755 %{_flotestro_stage}/flotestro-relayctl %{buildroot}%{_bindir}/flotestro-relayctl
 
 install -d -m 0755 %{buildroot}%{_unitdir}
 install -m 0644 %{_flotestro_units}/flotestro-relay.service %{buildroot}%{_unitdir}/
@@ -39,9 +40,19 @@ install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/relay.yaml %{buildroot}%{_sysconfdir}/flotestro/relay.yaml
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro-relay
+# The bill of materials of the binaries: written when they were built,
+# read from the build metadata they carry. A stage without it makes a
+# package without it; the release checklist notices, not this file.
+install -d -m 0755 %{buildroot}%{_docdir}/flotestro-relay
+[ -f %{_flotestro_stage}/sbom/flotestro-relay.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-relay.cdx.json %{buildroot}%{_docdir}/flotestro-relay/sbom.cdx.json || :
+[ -f %{_flotestro_stage}/sbom/flotestro-relayctl.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-relayctl.cdx.json %{buildroot}%{_docdir}/flotestro-relay/sbom-flotestro-relayctl.cdx.json || :
 
 %files
+%{_docdir}/flotestro-relay
 %{_bindir}/flotestro-relay
+%{_bindir}/flotestro-relayctl
 %{_unitdir}/flotestro-relay.service
 %dir %{_sysconfdir}/flotestro
 # The configuration must not be overwritten on an update: it holds the
@@ -67,7 +78,7 @@ if [ -e %{_sharedstatedir}/flotestro-relay/identity/current/agent.pem ]; then
     systemctl start flotestro-relay.service || :
 else
     echo "flotestro-relay: fill in %{_sysconfdir}/flotestro/relay.yaml and enroll the relay" >&2
-    echo "  sudo -u flotestro-relay flotestro-relay enroll -token-file <file>" >&2
+    echo "  sudo -u flotestro-relay flotestro-relayctl enroll --token-file <file>" >&2
     echo "  systemctl start flotestro-relay.service" >&2
 fi
 

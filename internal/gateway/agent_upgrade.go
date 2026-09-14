@@ -18,6 +18,11 @@ import (
 // matter is therefore what the panel sees with its own eyes - the version
 // reported at the new connection. The exit code of the package manager could
 // be zero also when the host never came back.
+//
+// This is the verification of the operation in a campaign as well: a wave
+// of replacements is settled host by host as each one comes back, and the
+// campaign engine reads the job states the way it does for every other
+// operation.
 func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 	hostID, version string) {
 	jobsOpen, err := s.jobs.OpenTasksOfAction(ctx, hostID, string(opspec.ActionAgentUpgrade))
@@ -28,6 +33,14 @@ func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 	for _, job := range jobsOpen {
 		target := targetVersion(job.Payload)
 		if target == "" {
+			continue
+		}
+		// A job without an attempt never reached the host: it waits in its
+		// campaign wave, or for its approval. A reconnect settles nothing
+		// about it - the version the host reports is the version from
+		// before, and a failure written here would fail a wave that has not
+		// started.
+		if job.AttemptID == "" {
 			continue
 		}
 		if target != version {

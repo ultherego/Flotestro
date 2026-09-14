@@ -43,6 +43,21 @@ type Report struct {
 	Fragments []Fragment
 }
 
+// covers says whether the report observed the module: a full report covers
+// everything, a partial one only the modules it carries. An agent from
+// before the split sends no fragments, and its report is a full one.
+func (r Report) covers(module string) bool {
+	if r.Full {
+		return true
+	}
+	for _, fragment := range r.Fragments {
+		if fragment.Module == module {
+			return true
+		}
+	}
+	return false
+}
+
 // Fragment is the state of one module of a host together with a revision and
 // a freshness of its own.
 type Fragment struct {
@@ -126,22 +141,20 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// A revision seen before is not written again, but its observation mark
+	// moves: a host that went back to an earlier picture - a partial cycle
+	// toggles a fast module and toggles it back - has that picture as its
+	// latest, and Latest orders by the mark. xmax tells an insert from an
+	// update, so the caller still learns whether the revision is new.
 	const insert = `
 		insert into inventory_revisions
 			(id, host_id, revision, is_full, schema_version, payload, observed_at)
 		values ($1, $2, $3, $4, $5, $6, now())
-		on conflict (host_id, revision) do nothing
-		returning id`
-	var revisionID string
-	err = tx.QueryRow(ctx, insert, uuid.NewString(), hostID, report.Revision,
-		report.Full, report.SchemaVersion, report.RawJSON).Scan(&revisionID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		stored = false
-	case err != nil:
+		on conflict (host_id, revision) do update set observed_at = now()
+		returning (xmax = 0)`
+	if err := tx.QueryRow(ctx, insert, uuid.NewString(), hostID, report.Revision,
+		report.Full, report.SchemaVersion, report.RawJSON).Scan(&stored); err != nil {
 		return false, fmt.Errorf("writing the inventory revision: %w", err)
-	default:
-		stored = true
 	}
 
 	// The older revisions go in the same transaction as the new one
@@ -164,13 +177,17 @@ func (s *Store) Save(ctx context.Context, hostID string, report Report) (stored 
 			identity_domain            = nullif($8, ''),
 			identity_realm             = nullif($9, ''),
 			identity_sssd_online       = $10,
-			identity_checked_at        = now(),
+			identity_checked_at        = case when $11 then now() else identity_checked_at end,
 			updated_at                 = now()
 		where id = $1`
+	// A partial report carries the identity over from the last read, so the
+	// values are the same - but the date of the check moves only when the
+	// module was really read. Otherwise a domain that fell out an hour ago
+	// would look checked a minute ago.
 	if _, err := tx.Exec(ctx, updateHost, hostID, report.Revision,
 		report.OSFamily, report.OSDistribution, report.OSVersion, report.Architecture,
 		report.IdentityEnrolled, report.IdentityDomain, report.IdentityRealm,
-		report.IdentitySSSDOnline); err != nil {
+		report.IdentitySSSDOnline, report.covers("identity")); err != nil {
 		return false, fmt.Errorf("normalising the inventory of the host: %w", err)
 	}
 

@@ -20,17 +20,29 @@ options=('!debug')
 install=flotestro-relay.install
 source=(
   "flotestro-relay"
+  "flotestro-relayctl"
   'flotestro-relay.service'
   'flotestro-relay.sysusers'
   'flotestro-relay.tmpfiles'
   'relay.yaml'
+  __SBOM__
 )
 sha256sums=(__SUMS__)
 
 package() {
   install -Dm755 flotestro-relay          "$pkgdir/usr/bin/flotestro-relay"
+  install -Dm755 flotestro-relayctl       "$pkgdir/usr/bin/flotestro-relayctl"
   install -Dm644 flotestro-relay.service  "$pkgdir/usr/lib/systemd/system/flotestro-relay.service"
   install -Dm644 flotestro-relay.sysusers "$pkgdir/usr/lib/sysusers.d/flotestro-relay.conf"
   install -Dm644 flotestro-relay.tmpfiles "$pkgdir/usr/lib/tmpfiles.d/flotestro-relay.conf"
   install -Dm640 relay.yaml               "$pkgdir/etc/flotestro/relay.yaml"
+
+  # The bill of materials of every binary, written when the binaries were
+  # built: the relay's own as sbom.cdx.json, the others under their names.
+  if [ -f flotestro-relay.cdx.json ]; then
+    install -Dm644 flotestro-relay.cdx.json "$pkgdir/usr/share/doc/flotestro-relay/sbom.cdx.json"
+  fi
+  if [ -f flotestro-relayctl.cdx.json ]; then
+    install -Dm644 flotestro-relayctl.cdx.json "$pkgdir/usr/share/doc/flotestro-relay/sbom-flotestro-relayctl.cdx.json"
+  fi
 }

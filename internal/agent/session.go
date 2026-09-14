@@ -251,13 +251,22 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		return stream.Send(msg)
 	}
 
-	sendInventory := func(f Facts) error {
+	// A report names only the modules that were read in the cycle. The
+	// revision is still that of the whole picture - the carried-over modules
+	// are part of it - so the panel can tell an unchanged host from a changed
+	// one, and does not get a fresh observation date on a module nobody
+	// looked at.
+	sendInventory := func(f Facts, modules []string) error {
 		rev, raw, err := f.Revision()
 		if err != nil {
 			return err
 		}
+		report := inventoryToProto(f, rev, raw)
+		if len(modules) > 0 {
+			restrictReport(report, modules)
+		}
 		if err := send(&agentv1.AgentMessage{
-			Payload: &agentv1.AgentMessage_Inventory{Inventory: inventoryToProto(f, rev, raw)},
+			Payload: &agentv1.AgentMessage_Inventory{Inventory: report},
 		}); err != nil {
 			return err
 		}
@@ -265,9 +274,23 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		return nil
 	}
 
-	if err := sendInventory(facts); err != nil {
+	if err := sendInventory(facts, nil); err != nil {
 		return err
 	}
+
+	// The periodic cycle: the fast modules every interval, the normal ones
+	// every fourth, the static ones with the full report once a day in the
+	// hour derived from the host identifier. The panel may set the interval
+	// and the ratio in the session configuration.
+	cadence := newCadence(opts.InventoryInterval, opts.Identity.HostID)
+	if remote := sessionConfig.GetInventoryCadence(); remote != nil {
+		cadence.applyRemote(remote.GetIntervalSeconds(), remote.GetNormalEvery(), remote.FullReportHourUtc)
+	}
+	// The report that opened the session was a full one.
+	cadence.started(time.Now())
+	opts.Log.Info("the inventory cadence was set",
+		"interval", cadence.Interval.String(), "normal_every", cadence.NormalEvery,
+		"full_report_hour_utc", cadence.FullHourUTC)
 
 	// The decommission handshake: which attempts run, and whether the host
 	// is leaving. It exists per session, because the final task and the
@@ -376,13 +399,13 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			// scope is to stay as it was and not disappear.
 			return CollectModules(ctx, localAddress, currentFacts(), modules)
 		}
-		accept := func(fresh Facts) (Refresh, error) {
+		accept := func(fresh Facts, modules []string) (Refresh, error) {
 			previous := ""
 			if rev, _, err := currentFacts().Revision(); err == nil {
 				previous = rev
 			}
 			updateFacts(fresh)
-			if err := sendInventory(fresh); err != nil {
+			if err := sendInventory(fresh, modules); err != nil {
 				return Refresh{}, err
 			}
 			current, _, err := fresh.Revision()
@@ -532,8 +555,8 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// time.
 	heartbeatTimer := time.NewTimer(stableOffset(facts.MachineID, heartbeatInterval))
 	defer heartbeatTimer.Stop()
-	inventoryTicker := time.NewTicker(opts.InventoryInterval)
-	defer inventoryTicker.Stop()
+	inventoryTimer := time.NewTimer(cadence.next())
+	defer inventoryTimer.Stop()
 
 	// The resource sampler runs next to the heartbeat rather than inside it:
 	// a sample is a measurement kept for charts and alert rules, the
@@ -569,9 +592,36 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 			heartbeatTimer.Reset(nextHeartbeat(heartbeatInterval, jitterWindow))
 
-		case <-inventoryTicker.C:
-			inventory.request()
+		case <-inventoryTimer.C:
+			modules, full := cadence.due(time.Now())
+			if full {
+				inventory.request()
+			} else {
+				inventory.requestModules(modules)
+			}
+			inventoryTimer.Reset(cadence.next())
 		}
+	}
+}
+
+// restrictReport narrows a report to the modules of a partial collection.
+//
+// The basic facts travel always: they were read with the cycle, and the panel
+// follows the hostname through them. The accounts go only when their module
+// was read - the panel takes an empty account list in a partial report for
+// "nothing new", not for "no accounts".
+func restrictReport(report *agentv1.InventoryReport, modules []string) {
+	report.Full = false
+	selected := moduleSet(modules)
+	kept := report.Fragments[:0]
+	for _, fragment := range report.Fragments {
+		if fragment.GetModule() == ModuleSystem || selected[fragment.GetModule()] {
+			kept = append(kept, fragment)
+		}
+	}
+	report.Fragments = kept
+	if !selected[ModuleAccounts] {
+		report.LocalAccounts = nil
 	}
 }
 

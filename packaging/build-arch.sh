@@ -29,12 +29,12 @@ trap 'rm -rf "$build"' EXIT
 # makepkg refuses to work as root; the sources go into a directory owned by
 # the building user.
 if [ "$COMPONENT" = relay ]; then
-    cp "$STAGE/flotestro-relay" "$build/"
+    cp "$STAGE/flotestro-relay" "$STAGE/flotestro-relayctl" "$build/"
     cp "$here/systemd/flotestro-relay.service" "$build/"
     cp "$here/arch/flotestro-relay.sysusers" "$here/arch/flotestro-relay.tmpfiles" \
        "$here/arch/flotestro-relay.install" "$build/"
     cp "$here/relay.yaml" "$build/relay.yaml"
-    FILES="flotestro-relay flotestro-relay.service flotestro-relay.sysusers"
+    FILES="flotestro-relay flotestro-relayctl flotestro-relay.service flotestro-relay.sysusers"
     FILES="$FILES flotestro-relay.tmpfiles relay.yaml"
     TEMPLATE="$here/arch/relay-PKGBUILD"
 else
@@ -52,6 +52,23 @@ else
     TEMPLATE="$here/arch/PKGBUILD"
 fi
 
+# The bills of materials of the package's binaries travel as sources like
+# everything else, with their checksums. They were written when the
+# binaries were built; a stage without them makes a package without them.
+bills=""
+for file in $FILES; do
+    # A binary has no extension; the units and the configuration do.
+    case "$file" in
+    *.*) continue ;;
+    flotestro-*) ;;
+    *) continue ;;
+    esac
+    [ -f "$STAGE/sbom/$file.cdx.json" ] || continue
+    cp "$STAGE/sbom/$file.cdx.json" "$build/$file.cdx.json"
+    FILES="$FILES $file.cdx.json"
+    bills="$bills'$file.cdx.json' "
+done
+
 # The checksums are computed, not skipped: "SKIP" would mean a package whose
 # content nobody checked, and that is exactly the property the package is
 # made for in the first place.
@@ -60,7 +77,7 @@ for file in $FILES; do
     sums="$sums'$(sha256sum "$build/$file" | cut -d' ' -f1)' "
 done
 
-sed -e "s/__VERSION__/$VERSION/" -e "s/__SUMS__/${sums% }/" \
+sed -e "s/__VERSION__/$VERSION/" -e "s/__SUMS__/${sums% }/" -e "s/__SBOM__/${bills% }/" \
     "$TEMPLATE" > "$build/PKGBUILD"
 
 ( cd "$build" && CARCH="$ARCH" makepkg --nodeps --noconfirm --ignorearch >makepkg.log 2>&1 ) ||

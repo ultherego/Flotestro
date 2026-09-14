@@ -4,7 +4,7 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
-import type { FleetActivity, Host } from "../lib/types";
+import { RELEASE_CHANNELS, type FleetActivity, type Host } from "../lib/types";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, Meter, StatusBar } from "../components/widgets";
@@ -42,6 +42,7 @@ export function Hosts() {
   const [owner, setOwner] = useState(initial.get("owner") ?? "");
   const [maintenance, setMaintenance] = useState(initial.get("maintenance") ?? "");
   const [capability, setCapability] = useState(initial.get("capability") ?? "");
+  const [channel, setChannel] = useState(initial.get("channel") ?? "");
   // Tags typed as words: every one of them has to be on the host. A chip
   // on a row links here with the tag filled in.
   const [tags, setTags] = useState(initial.getAll("tag").join(" "));
@@ -71,6 +72,7 @@ export function Hosts() {
   if (settledOwner) params.set("owner", settledOwner);
   if (maintenance) params.set("maintenance", maintenance);
   if (capability) params.set("capability", capability);
+  if (channel) params.set("channel", channel);
   for (const tag of settledTags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
   params.set("limit", String(LIST_PAGE));
 
@@ -180,6 +182,10 @@ export function Hosts() {
             <select value={capability} onChange={(e) => setCapability(e.target.value)}>
               <option value="">{t("capability: any")}</option>
               {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+            <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+              <option value="">{t("channel: any")}</option>
+              {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </Toolbar>
 

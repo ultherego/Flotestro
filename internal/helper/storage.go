@@ -12,6 +12,7 @@ import (
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/storage"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // The paths of the mount tools. Fixed, not looked up in PATH.
@@ -33,6 +34,9 @@ func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperReque
 
 	actionCtx, cancel := deadline(ctx, request, 10*time.Minute, 60*time.Minute)
 	defer cancel()
+	// The checks and the resizes run their tools in the resource scope of
+	// the storage family; the scope is named after the task.
+	actionCtx = withTask(actionCtx, request.GetTaskId())
 
 	switch action.GetOperation() {
 	case helperv1.StorageRequest_OPERATION_READ_LVM:
@@ -334,7 +338,7 @@ func (s *Server) checkFilesystem(ctx context.Context, action *helperv1.StorageRe
 		// the timeout.
 		arguments = []string{fsckPath, "-y", device}
 	}
-	output, err := runTool(ctx, arguments)
+	output, err := s.runScoped(ctx, opspec.FamilyStorage, arguments)
 	message := "the filesystem was checked without errors"
 	if err != nil {
 		// fsck returns bit codes: 1 means corrected errors, 4 errors left
@@ -363,7 +367,7 @@ func (s *Server) extendVolume(ctx context.Context, action *helperv1.StorageReque
 	if reason := s.noSpaceInGroup(ctx, action.GetDevice()); reason != "" {
 		return reject(ErrorPreconditionFailed, reason)
 	}
-	output, err := runTool(ctx, arguments)
+	output, err := s.runScoped(ctx, opspec.FamilyStorage, arguments)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}
@@ -393,7 +397,7 @@ func (s *Server) extendFilesystem(ctx context.Context, action *helperv1.StorageR
 	if err != nil {
 		return reject(ErrorMalformed, err.Error())
 	}
-	output, err := runTool(ctx, arguments)
+	output, err := s.runScoped(ctx, opspec.FamilyStorage, arguments)
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error()+": "+output)
 	}

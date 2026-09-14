@@ -10,6 +10,7 @@ import (
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/docker/compose"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // dockerCLI is the only entry point into compose. The arguments are assembled
@@ -26,11 +27,16 @@ func (s *Server) composeDirectory() string {
 	return filepath.Join(directory, "compose")
 }
 
-// composeRunner runs compose with a fixed set of arguments.
-func composeRunner(ctx context.Context) compose.Runner {
+// composeRunner runs compose with a fixed set of arguments. The wrapper, when
+// given, puts the argument array under a resource scope; it changes nothing
+// in the array itself.
+func composeRunner(ctx context.Context, wrap func([]string) []string) compose.Runner {
 	return func(callCtx context.Context, args ...string) (string, string, error) {
-		full := append([]string{"compose"}, args...)
-		cmd := exec.CommandContext(callCtx, dockerCLI, full...)
+		argv := append([]string{dockerCLI, "compose"}, args...)
+		if wrap != nil {
+			argv = wrap(argv)
+		}
+		cmd := exec.CommandContext(callCtx, argv[0], argv[1:]...)
 		cmd.Env = []string{
 			"LC_ALL=C", "LANG=C",
 			"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
@@ -65,7 +71,7 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	actionCtx, cancel := deadline(ctx, request, 15*time.Minute, time.Hour)
 	defer cancel()
 
-	planner := compose.Planner{Runner: composeRunner(actionCtx), Dir: s.composeDirectory()}
+	planner := compose.Planner{Runner: composeRunner(actionCtx, nil), Dir: s.composeDirectory()}
 
 	switch action.GetOperation() {
 	case helperv1.ComposeRequest_OPERATION_PLAN:
@@ -76,6 +82,11 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 		return composeResponse(plan)
 
 	case helperv1.ComposeRequest_OPERATION_DEPLOY:
+		// The deployment pulls images and starts containers, so it runs in
+		// the resource scope of its family; the plan before it only reads.
+		planner.Runner = composeRunner(actionCtx, func(argv []string) []string {
+			return s.scoped(request.GetTaskId(), opspec.FamilyCompose, argv)
+		})
 		executor := compose.Executor{Planner: planner}
 		result, err := executor.Deploy(actionCtx, action.GetProject(),
 			action.GetManifest(), action.GetPlanDigest())

@@ -64,6 +64,21 @@ func (c *collector) request() {
 	c.enqueue()
 }
 
+// requestModules orders a collection of the given modules and never blocks
+// the caller. This is the path of the periodic cycle: it names the modules
+// due in this cycle, and a request for the whole inventory waiting next to
+// it absorbs the list.
+func (c *collector) requestModules(modules []string) {
+	if len(modules) == 0 {
+		c.request()
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.addScope(modules)
+	c.enqueue()
+}
+
 // refresh orders a collection and waits for its result.
 //
 // This is the path of the inventory.refresh operation: the task ends only when
@@ -165,8 +180,12 @@ func (c *collector) finish(err error) {
 // collection does not end the work: a read that is unavailable for the moment
 // is no reason to break the session. A send error does end it, because it means
 // a broken stream.
+//
+// accept gets the modules the collection covered next to the picture: an
+// empty list means the whole inventory, and a partial one lets the report
+// name only what was really read.
 func (c *collector) run(ctx context.Context, collect func(context.Context, []string) (Facts, error),
-	accept func(Facts) (Refresh, error), log *slog.Logger) error {
+	accept func(Facts, []string) (Refresh, error), log *slog.Logger) error {
 	defer c.finish(ErrSessionEnded)
 	for {
 		select {
@@ -183,7 +202,7 @@ func (c *collector) run(ctx context.Context, collect func(context.Context, []str
 				c.broadcast(Refresh{Err: err, Modules: modules})
 				continue
 			}
-			result, err := accept(fresh)
+			result, err := accept(fresh, modules)
 			if err != nil {
 				c.broadcast(Refresh{Err: err, Modules: modules})
 				return err

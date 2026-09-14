@@ -69,3 +69,59 @@ func (s *Server) handleSetHostTags(w http.ResponseWriter, r *http.Request) {
 	})
 	writeJSON(w, http.StatusOK, updated)
 }
+
+type hostChannelRequest struct {
+	// Channel is the release channel: stable or beta.
+	Channel string `json:"channel"`
+}
+
+// handleSetHostChannel moves a host to a release channel.
+//
+// The channel is a policy of the panel, like a tag: nothing runs on the host
+// and the host is not asked. It shares the tag permission, because it
+// decides the same thing a tag does - which campaigns reach the host, here
+// which agent releases reach it first.
+func (s *Server) handleSetHostChannel(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	host, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermHostTagWrite, scope, "host", hostID)
+	if !ok {
+		return
+	}
+
+	var request hostChannelRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	channel, err := hosts.NormalizeChannel(request.Channel)
+	if errors.Is(err, hosts.ErrInvalidChannel) {
+		problem(w, http.StatusBadRequest, "invalid_channel", err.Error())
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	updated, err := s.hosts.SetChannel(r.Context(), hostID, channel)
+	if errors.Is(err, hosts.ErrNotFound) {
+		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "host.channel", TargetType: "host", TargetID: host.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"before": host.ReleaseChannel, "after": channel},
+	})
+	writeJSON(w, http.StatusOK, updated)
+}

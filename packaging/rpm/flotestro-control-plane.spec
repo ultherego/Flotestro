@@ -38,6 +38,12 @@ install -d -m 0755 %{buildroot}%{_sysconfdir}/flotestro
 install -m 0640 %{_flotestro_stage}/control-plane.env %{buildroot}%{_sysconfdir}/flotestro/control-plane.env
 
 install -d -m 0700 %{buildroot}%{_sharedstatedir}/flotestro
+# The bill of materials of the binaries: written when they were built,
+# read from the build metadata they carry. A stage without it makes a
+# package without it; the release checklist notices, not this file.
+install -d -m 0755 %{buildroot}%{_docdir}/flotestro-control-plane
+[ -f %{_flotestro_stage}/sbom/flotestro-control-plane.cdx.json ] && \
+    install -m 0644 %{_flotestro_stage}/sbom/flotestro-control-plane.cdx.json %{buildroot}%{_docdir}/flotestro-control-plane/sbom.cdx.json || :
 
 # The web panel is built separately; the package carries the ready files.
 install -d -m 0755 %{buildroot}%{_datadir}/flotestro/web
@@ -48,6 +54,7 @@ if [ -d %{_flotestro_stage}/web ]; then
 fi
 
 %files
+%{_docdir}/flotestro-control-plane
 %{_bindir}/flotestro-control-plane
 %{_unitdir}/flotestro-control-plane.service
 %dir %{_sysconfdir}/flotestro

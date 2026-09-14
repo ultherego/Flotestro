@@ -29,7 +29,7 @@ func TestOrderingACollectionDoesNotBlock(t *testing.T) {
 			<-release
 		})
 		return Facts{}, nil
-	}, func(Facts) (Refresh, error) { return Refresh{}, nil }, quietLogger())
+	}, func(Facts, []string) (Refresh, error) { return Refresh{}, nil }, quietLogger())
 
 	k.request()
 	<-running // the collection started and is running
@@ -62,7 +62,7 @@ func TestOrdersFoldTogether(t *testing.T) {
 			<-release
 		}
 		return Facts{}, nil
-	}, func(Facts) (Refresh, error) { done <- struct{}{}; return Refresh{}, nil }, quietLogger())
+	}, func(Facts, []string) (Refresh, error) { done <- struct{}{}; return Refresh{}, nil }, quietLogger())
 
 	k.request()
 	<-running
@@ -95,7 +95,7 @@ func TestAFailedCollectionDoesNotEndTheWork(t *testing.T) {
 			return Facts{}, context.DeadlineExceeded
 		}
 		return Facts{}, nil
-	}, func(Facts) (Refresh, error) { done <- struct{}{}; return Refresh{}, nil }, quietLogger())
+	}, func(Facts, []string) (Refresh, error) { done <- struct{}{}; return Refresh{}, nil }, quietLogger())
 
 	k.request()
 	time.Sleep(50 * time.Millisecond)
@@ -110,4 +110,51 @@ func TestAFailedCollectionDoesNotEndTheWork(t *testing.T) {
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// A periodic order names the modules due in its cycle, and the report says
+// which ones it covered. A full order waiting next to it absorbs the list:
+// the host reads everything once rather than the list and then everything.
+func TestPeriodicOrdersCarryTheirModules(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	type collection struct{ modules []string }
+	collected := make(chan collection, 8)
+	accepted := make(chan []string, 8)
+	k := newCollector()
+	go k.run(ctx, func(_ context.Context, modules []string) (Facts, error) {
+		collected <- collection{modules}
+		return Facts{}, nil
+	}, func(_ Facts, modules []string) (Refresh, error) {
+		accepted <- modules
+		return Refresh{}, nil
+	}, quietLogger())
+
+	k.requestModules([]string{ModuleServices, ModuleContainers})
+	select {
+	case got := <-collected:
+		if len(got.modules) != 2 || got.modules[0] != ModuleContainers || got.modules[1] != ModuleServices {
+			t.Fatalf("the collection covered %v, expected the two modules in order", got.modules)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the periodic order was not served")
+	}
+	if got := <-accepted; len(got) != 2 {
+		t.Fatalf("the report named %v, expected the two modules", got)
+	}
+
+	// An empty list is the whole inventory.
+	k.requestModules(nil)
+	select {
+	case got := <-collected:
+		if got.modules != nil {
+			t.Fatalf("an empty order collected %v, expected everything", got.modules)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the full order was not served")
+	}
+	if got := <-accepted; got != nil {
+		t.Fatalf("the full report named %v, expected everything", got)
+	}
 }

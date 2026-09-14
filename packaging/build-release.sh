@@ -31,6 +31,10 @@ here="$(cd "$(dirname "$0")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
 GO="${GO:-go}"
 mkdir -p "$OUT"
+# The output directory is made absolute: the bill of materials is written by
+# a tool run from the repository directory, and a relative path would then
+# point somewhere else.
+OUT="$(cd "$OUT" && pwd)"
 
 # The architecture names differ between Go, Debian and RPM. They are
 # translated in one place, because a mistake ends with a package that
@@ -69,7 +73,7 @@ buildBinaries() {
     echo "==> binaries $arch"
     rm -rf "$stage"
     mkdir -p "$stage"
-    for component in agent agent-helper agentctl relay control-plane; do
+    for component in agent agent-helper agentctl relay relayctl control-plane; do
         # CGO disabled: the package is to work on every machine of the given
         # architecture, not only on one with the same libraries.
         # -trimpath removes the build machine paths, so that the same binary
@@ -88,11 +92,41 @@ buildBinaries() {
         mkdir -p "$stage/web"
         cp -r "${FLOTESTRO_WEB:-/usr/share/flotestro/web}/." "$stage/web/"
     fi
-    # The list of modules that enter the binary. It is not a full SBOM and
-    # does not pretend to be: it is exactly the information the binary itself
-    # carries, and it lets one check whether the release contains a
-    # vulnerable dependency version.
-    "$GO" version -m "$stage/flotestro-agent" > "$OUT/modules-$arch.txt"
+    # The list of modules that enter the binaries, as the toolchain prints
+    # it: exactly the information the binaries themselves carry.
+    "$GO" version -m "$stage"/flotestro-* > "$OUT/modules-$arch.txt"
+    sboms "$arch"
+}
+
+# sboms writes the bill of materials of every binary of an architecture:
+# CycloneDX 1.5 JSON, one module per component, read from the build
+# metadata of the binary itself - so the bill describes the artefact and
+# not the go.mod of the working tree. The bills stand next to the packages
+# under the package name, and a copy goes into the stage, from where every
+# package ships its own under /usr/share/doc.
+sboms() {
+    local arch="$1" stage="$OUT/stage-$arch" bills
+    echo "==> sbom $arch"
+    bills="$(mktemp -d)"
+    local args=()
+    local binary
+    for binary in "$stage"/flotestro-*; do
+        [ -f "$binary" ] || continue
+        args+=(-binary "$binary")
+    done
+    # SOURCE_DATE_EPOCH: the bills of one release carry one timestamp, and
+    # a rebuild of the same commit gives the same files.
+    SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(date -u +%s)}" \
+        "$GO" -C "$repo" run ./cmd/sbom -version "$VERSION" -out-dir "$bills" \
+        "${args[@]}" >/dev/null
+    mkdir -p "$stage/sbom"
+    local bill component
+    for bill in "$bills"/*.cdx.json; do
+        component="$(basename "$bill" .cdx.json)"
+        cp "$bill" "$stage/sbom/$component.cdx.json"
+        cp "$bill" "$OUT/${component}_${VERSION}_${arch}.cdx.json"
+    done
+    rm -rf "$bills"
 }
 
 buildPackages() {
@@ -156,6 +190,13 @@ provenance() {
     local gitopt=(-C "$repo" -c "safe.directory=$repo")
     commit="$(git "${gitopt[@]}" rev-parse HEAD 2>/dev/null || echo unknown)"
     description="$(git "${gitopt[@]}" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+    # The manifest names the bills, so whoever reads it knows which files
+    # describe the release and does not have to guess from the directory.
+    local bills="" bill
+    for bill in "$OUT"/*.cdx.json; do
+        [ -e "$bill" ] || continue
+        bills="$bills${bills:+, }\"$(basename "$bill")\""
+    done
     cat > "$OUT/provenance.json" <<EOF
 {
   "version": "$VERSION",
@@ -164,6 +205,8 @@ provenance() {
   "toolchain": "$("$GO" version 2>/dev/null || echo unknown)",
   "flags": "-trimpath -ldflags '-s -w' CGO_ENABLED=0",
   "architectures": "${ARCHITECTURES[*]}",
+  "sbom_format": "CycloneDX 1.5",
+  "sbom": [$bills],
   "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -173,7 +216,7 @@ EOF
 # really goes into the repository - not from intermediate artefacts.
 checksums() {
     echo "==> checksums"
-    ( cd "$OUT" && sha256sum ./*.deb ./*.rpm 2>/dev/null > SHA256SUMS ) || true
+    ( cd "$OUT" && sha256sum ./*.deb ./*.rpm ./*.cdx.json 2>/dev/null > SHA256SUMS ) || true
 }
 
 for arch in "${ARCHITECTURES[@]}"; do

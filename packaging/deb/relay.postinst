@@ -31,7 +31,7 @@ configure)
         systemctl try-restart flotestro-relay.service || true
     else
         echo "flotestro-relay: fill in /etc/flotestro/relay.yaml and enroll the relay" >&2
-        echo "  sudo -u flotestro-relay flotestro-relay enroll -token-file <file>" >&2
+        echo "  sudo -u flotestro-relay flotestro-relayctl enroll --token-file <file>" >&2
         echo "  systemctl start flotestro-relay.service" >&2
     fi
     ;;

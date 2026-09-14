@@ -9,7 +9,7 @@ post_install() {
     systemctl enable flotestro-relay.service >/dev/null 2>&1 || true
     cat >&2 <<'END'
 flotestro-relay: fill in /etc/flotestro/relay.yaml and enroll the relay
-  sudo -u flotestro-relay flotestro-relay enroll -token-file <file>
+  sudo -u flotestro-relay flotestro-relayctl enroll --token-file <file>
   systemctl start flotestro-relay.service
 END
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Job } from "../../lib/types";
+import { RELEASE_CHANNELS, type Host, type Job, type ReleaseChannel } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -71,6 +71,18 @@ export function Packages() {
   const [sourceIntent, setSourceIntent] = useState<SourceIntent | null>(null);
   const [agentVersion, setAgentVersion] = useState("");
   const [message, setMessage] = useState("");
+
+  // The release channel is a policy recorded in the panel, not an operation:
+  // nothing runs on the host, so it goes straight to the host record.
+  const setChannel = useMutation({
+    mutationFn: (channel: ReleaseChannel) => api.put<Host>(`/api/v1/hosts/${host.id}/channel`, { channel }),
+    onSuccess: (updated) => {
+      setMessage(t("The host now follows the {channel} channel.", { channel: updated.release_channel }));
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -250,8 +262,29 @@ export function Packages() {
         span={4}
         description={t("The agent is left alone by ordinary package upgrades: replacing it in the middle of a transaction it is running would cut the host off from management with nobody to report the result. Replacing it is its own operation, and it counts as done only when the host comes back reporting the version that was asked for.")}
       >
+        <Facts>
+          <Fact label={t("Agent version")}>{host.agent_version || <Unknown />}</Fact>
+          <Fact label={t("Release channel")}>
+            <span className={host.release_channel === "beta" ? "badge warn" : "badge ok"}>{host.release_channel}</span>
+          </Fact>
+        </Facts>
         <Form>
           <Fields>
+            {/* The channel decides which releases reach the host first: a
+                fleet upgrade in waves names the beta hosts before the
+                stable ones. It is assigned here explicitly; there is no
+                implicit latest. */}
+            <Field label={t("Release channel")} narrow>
+              <select
+                value={host.release_channel}
+                disabled={setChannel.isPending}
+                onChange={(e) => setChannel.mutate(e.target.value as ReleaseChannel)}
+              >
+                {RELEASE_CHANNELS.map((name) => (
+                  <option key={name} value={name}>{name === "beta" ? t("beta (sees a release first)") : t("stable")}</option>
+                ))}
+              </select>
+            </Field>
             <Field label={t("Target agent version (currently {version})", { version: host.agent_version || t("unknown") })} narrow>
               <input
                 value={agentVersion}

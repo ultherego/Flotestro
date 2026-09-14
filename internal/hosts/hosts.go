@@ -228,6 +228,10 @@ type Host struct {
 	// 'key=value'. The list is always present - a host without tags has an
 	// empty one - so a selector can tell "no tags" from "not asked".
 	Tags []string `json:"tags"`
+	// ReleaseChannel says which agent releases the host follows: stable or
+	// beta. It is a policy recorded in the panel, always set - a host on no
+	// channel would follow nothing.
+	ReleaseChannel string `json:"release_channel"`
 	// Empty fields mean an undetermined state, not zero.
 	RebootRequired           *bool  `json:"reboot_required"`
 	FailedUnits              *int   `json:"failed_units"`
@@ -773,6 +777,8 @@ type ListFilter struct {
 	Capability string
 	// Tags keeps the hosts carrying every one of the given tags.
 	Tags []string
+	// Channel keeps the hosts on the given release channel.
+	Channel string
 	// IDs keeps the named hosts. Nil does not narrow; an empty list keeps
 	// nothing, because a list of nobody names nobody.
 	IDs []string
@@ -809,6 +815,7 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	add("h.identity_domain", f.IdentityDomain)
 	add("h.lifecycle_state", f.LifecycleState)
 	add("h.owner", f.Owner)
+	add("h.release_channel", f.Channel)
 
 	if f.Search != "" {
 		// A tag is one of the things an operator remembers about a host,
@@ -1074,6 +1081,7 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
+		       h.release_channel,
 		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at,
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
@@ -1110,6 +1118,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var windowUntil, windowFrom *time.Time
 		var windowReason, windowBy string
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
+			&h.ReleaseChannel,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
@@ -1331,6 +1340,46 @@ func NormalizeTags(tags []string) ([]string, error) {
 	}
 	sort.Strings(normalized)
 	return normalized, nil
+}
+
+// The release channels a host may follow. The list is the same one the
+// host table constrains.
+const (
+	ChannelStable = "stable"
+	ChannelBeta   = "beta"
+)
+
+// ErrInvalidChannel means a channel the panel does not have.
+var ErrInvalidChannel = errors.New("invalid release channel")
+
+// NormalizeChannel checks a channel name. An empty name is refused rather
+// than read as the default: assigning a host to a channel is an explicit
+// decision, and "no channel" is not one.
+func NormalizeChannel(channel string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case ChannelStable:
+		return ChannelStable, nil
+	case ChannelBeta:
+		return ChannelBeta, nil
+	}
+	return "", fmt.Errorf("%w: %q is not a channel (stable or beta)", ErrInvalidChannel, channel)
+}
+
+// SetChannel moves a host to a release channel.
+func (s *Store) SetChannel(ctx context.Context, hostID, channel string) (*Host, error) {
+	normalized, err := NormalizeChannel(channel)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`update hosts set release_channel = $2, updated_at = now() where id = $1`, hostID, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("setting the release channel: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
 }
 
 // SetTags replaces the tags of a host. The list is the whole list: a tag

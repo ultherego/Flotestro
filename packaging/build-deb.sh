@@ -30,6 +30,26 @@ done
 
 install -d -m 0755 "$root/usr/bin" "$root/lib/systemd/system" "$root/etc/flotestro"
 
+# installSBOM ships the bill of materials of the package's binaries under
+# /usr/share/doc/<package>: the first binary's bill as sbom.cdx.json, the
+# others under their own names. The bills are written when the binaries are
+# built; a stage without them makes a package without them, which the
+# release checklist is to notice rather than the package script to hide.
+#
+#   installSBOM <package> <binary> [binary ...]
+installSBOM() {
+    package="$1"
+    first="$2"
+    shift
+    for binary in "$@"; do
+        [ -f "$STAGE/sbom/$binary.cdx.json" ] || continue
+        target="sbom-$binary.cdx.json"
+        [ "$binary" = "$first" ] && target="sbom.cdx.json"
+        install -d -m 0755 "$root/usr/share/doc/$package"
+        install -m 0644 "$STAGE/sbom/$binary.cdx.json" "$root/usr/share/doc/$package/$target"
+    done
+}
+
 case "$COMPONENT" in
 agent)
     install -m 0755 "$STAGE/flotestro-agent"        "$root/usr/bin/flotestro-agent"
@@ -53,14 +73,17 @@ agent)
     install -m 0640 "$here/agent.env" "$root/etc/flotestro/agent.env"
     install -d -m 0700 "$root/var/lib/flotestro-agent"
     name="flotestro-agent"
+    installSBOM flotestro-agent flotestro-agent flotestro-agent-helper flotestro-agentctl
     ;;
 relay)
-    install -m 0755 "$STAGE/flotestro-relay" "$root/usr/bin/flotestro-relay"
+    install -m 0755 "$STAGE/flotestro-relay"    "$root/usr/bin/flotestro-relay"
+    install -m 0755 "$STAGE/flotestro-relayctl" "$root/usr/bin/flotestro-relayctl"
     install -m 0644 "$here/systemd/flotestro-relay.service" \
         "$root/lib/systemd/system/flotestro-relay.service"
     install -m 0640 "$here/relay.yaml" "$root/etc/flotestro/relay.yaml"
     install -d -m 0700 "$root/var/lib/flotestro-relay"
     name="flotestro-relay"
+    installSBOM flotestro-relay flotestro-relay flotestro-relayctl
     ;;
 control-plane)
     install -m 0755 "$STAGE/flotestro-control-plane" "$root/usr/bin/flotestro-control-plane"
@@ -76,6 +99,7 @@ control-plane)
         find "$root/usr/share/flotestro/web" -type f -exec chmod 0644 {} +
     fi
     name="flotestro-control-plane"
+    installSBOM flotestro-control-plane flotestro-control-plane
     ;;
 *)
     echo "unknown component: $COMPONENT" >&2

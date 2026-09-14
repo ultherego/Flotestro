@@ -1,0 +1,26 @@
+/tmp/flotestro-release/out/stage-amd64/flotestro-agent: go1.25.0
+	path	github.com/ultherego/flotestro/cmd/agent
+	mod	github.com/ultherego/flotestro	(devel)	
+	dep	connectrpc.com/connect	v1.16.2	h1:ybSwrjGjM4dVyv4eqsMgKE2BeU1F6JOlEHvxxIWU6vA=
+	dep	github.com/google/uuid	v1.6.0	h1:NIvaJDMOsjHA8n1jAhKSXzs2WOuHDIsLOMvcTMcqe/M=
+	dep	golang.org/x/net	v0.30.0	h1:AcW1SDZMkb8IpzCdQUaIq2sP4sZ4zw+55h6ynffypl4=
+	=>	github.com/ultherego/net	v0.30.1	h1:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz=
+	dep	google.golang.org/protobuf	v1.34.2	h1:6xV6lTsCfpGD21XK49h7MhtcApnLqkfYgPcdHftf6hg=
+	build	-buildmode=exe
+	build	-compiler=gc
+	build	-ldflags="-s -w -X github.com/ultherego/flotestro/internal/buildinfo.Version=0.41.0"
+	build	-trimpath=true
+	build	CGO_ENABLED=0
+	build	GOARCH=amd64
+	build	GOOS=linux
+	build	GOAMD64=v1
+	build	vcs=git
+	build	vcs.revision=3f3b0e0c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a
+	build	vcs.time=2026-09-14T08:00:00Z
+	build	vcs.modified=false
+/tmp/flotestro-release/out/stage-amd64/flotestro-relay: go1.25.0
+	path	github.com/ultherego/flotestro/cmd/relay
+	mod	github.com/ultherego/flotestro	(devel)	
+	dep	golang.org/x/net	v0.30.0	h1:AcW1SDZMkb8IpzCdQUaIq2sP4sZ4zw+55h6ynffypl4=
+	build	GOARCH=amd64
+	build	GOOS=linux

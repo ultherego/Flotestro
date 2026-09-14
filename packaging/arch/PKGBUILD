@@ -33,6 +33,7 @@ source=(
   'flotestro-agent.sysusers'
   'flotestro-agent.tmpfiles'
   'agent.yaml'
+  __SBOM__
 )
 sha256sums=(__SUMS__)
 
@@ -49,4 +50,16 @@ package() {
   install -Dm644 flotestro-agent.sysusers  "$pkgdir/usr/lib/sysusers.d/flotestro-agent.conf"
   install -Dm644 flotestro-agent.tmpfiles  "$pkgdir/usr/lib/tmpfiles.d/flotestro-agent.conf"
   install -Dm640 agent.yaml                "$pkgdir/etc/flotestro/agent.yaml"
+
+  # The bill of materials of every binary, written when the binaries were
+  # built: the agent's own as sbom.cdx.json, the others under their names.
+  if [ -f flotestro-agent.cdx.json ]; then
+    install -Dm644 flotestro-agent.cdx.json "$pkgdir/usr/share/doc/flotestro-agent/sbom.cdx.json"
+  fi
+  local bill
+  for bill in flotestro-agent-helper flotestro-agentctl; do
+    if [ -f "$bill.cdx.json" ]; then
+      install -Dm644 "$bill.cdx.json" "$pkgdir/usr/share/doc/flotestro-agent/sbom-$bill.cdx.json"
+    fi
+  done
 }

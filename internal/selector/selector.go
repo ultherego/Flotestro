@@ -43,6 +43,9 @@ type Expression struct {
 	ConnectionState string `json:"connection_state,omitempty"`
 	LifecycleState  string `json:"lifecycle_state,omitempty"`
 	Owner           string `json:"owner,omitempty"`
+	// Channel is the release channel the host follows: stable or beta. An
+	// agent upgrade in waves names the beta hosts first.
+	Channel string `json:"channel,omitempty"`
 
 	// MemberOf is the expanded form of a reference to a static group: the
 	// identifier whose member list decides. Expand produces it; a selector
@@ -78,6 +81,7 @@ var TagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*(=[a-zA-Z0-9_.:/-]+)?$
 var (
 	connectionStates = []string{"online", "offline", "stale", "unknown"}
 	lifecycleStates  = []string{"active", "quarantined", "recovery", "retiring", "retired"}
+	releaseChannels  = []string{"stable", "beta"}
 )
 
 var (
@@ -179,6 +183,11 @@ func (e *Expression) validate(depth int, nodes *int, at string) error {
 				return fmt.Errorf("%w: %s.lifecycle_state %q is not one of %s", ErrInvalid, at, fact.value,
 					strings.Join(lifecycleStates, ", "))
 			}
+		case "channel":
+			if !contains(releaseChannels, fact.value) {
+				return fmt.Errorf("%w: %s.channel %q is not one of %s", ErrInvalid, at, fact.value,
+					strings.Join(releaseChannels, ", "))
+			}
 		}
 	}
 	return nil
@@ -203,6 +212,7 @@ func (e *Expression) leaves() []leaf {
 		{"connection_state", e.ConnectionState},
 		{"lifecycle_state", e.LifecycleState},
 		{"owner", e.Owner},
+		{"channel", e.Channel},
 		{"group_id", e.MemberOf},
 	}
 }
@@ -403,6 +413,8 @@ func (c *compiler) node(e *Expression) (string, error) {
 		return "h.lifecycle_state = " + c.param(e.LifecycleState), nil
 	case e.Owner != "":
 		return "h.owner = " + c.param(e.Owner), nil
+	case e.Channel != "":
+		return "h.release_channel = " + c.param(e.Channel), nil
 	case e.MemberOf != "":
 		return "exists (select 1 from host_group_members m" +
 			" where m.group_id = " + c.param(e.MemberOf) + "::uuid and m.host_id = h.id)", nil
