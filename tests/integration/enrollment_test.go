@@ -173,6 +173,18 @@ func TestIdentityRecoveryOrderIsBoundToTheHost(t *testing.T) {
 	var order orderView
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery",
 		map[string]any{"description": "after a reinstall"}, &order, http.StatusCreated)
+	// The order puts the lab host into recovery; revoking it lets the host
+	// back at once, so the fleet is as it was for the next test.
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+order.ID+"/revoke", nil, nil, 0)
+		var view struct {
+			LifecycleState string `json:"lifecycle_state"`
+		}
+		h.get("/api/v1/hosts/"+host.ID, &view)
+		if view.LifecycleState != "active" {
+			t.Errorf("the host did not come back from recovery after the order was revoked: %q", view.LifecycleState)
+		}
+	})
 
 	if order.Purpose != "replace_identity" {
 		t.Fatalf("purpose = %q", order.Purpose)
@@ -289,9 +301,17 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	// decommissioned.
 	host := h.enrollSyntheticHost(t)
 
+	var identity struct {
+		MachineID string `json:"machine_id"`
+	}
+	h.get("/api/v1/hosts/"+host.ID, &identity)
+
 	var result struct {
-		LifecycleState      string `json:"lifecycle_state"`
-		CertificatesRevoked int    `json:"certificates_revoked"`
+		LifecycleState           string   `json:"lifecycle_state"`
+		CertificatesRevoked      int      `json:"certificates_revoked"`
+		RemoteCleanupUnconfirmed bool     `json:"remote_cleanup_unconfirmed"`
+		Phase                    string   `json:"phase"`
+		RunningTasks             []string `json:"running_tasks"`
 	}
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
 		map[string]any{"reason": "machine handed over", "typed_confirmation": host.Hostname},
@@ -299,10 +319,27 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	if result.LifecycleState != "retired" {
 		t.Fatalf("state = %q", result.LifecycleState)
 	}
-	// Decommissioning always revokes the certificates: the host cannot come
-	// back on its own with a valid certificate in hand.
+	// Decommissioning revokes the certificates: the host cannot come back
+	// on its own with a valid certificate in hand.
 	if result.CertificatesRevoked == 0 {
 		t.Error("decommissioning revoked no certificate")
+	}
+	// The synthetic host has no session, so nobody on the machine confirmed
+	// the wipe. The answer says so rather than reporting a clean handshake.
+	if !result.RemoteCleanupUnconfirmed || result.Phase != "no_session" {
+		t.Errorf("a host without a session reported as cleaned up: %+v", result)
+	}
+	if result.RunningTasks == nil {
+		t.Error("running_tasks is missing from the answer")
+	}
+
+	var view struct {
+		LifecycleState  string `json:"lifecycle_state"`
+		LifecycleReason string `json:"lifecycle_reason"`
+	}
+	h.get("/api/v1/hosts/"+host.ID, &view)
+	if view.LifecycleState != "retired" || view.LifecycleReason != "machine handed over" {
+		t.Errorf("host after the decommission = %+v", view)
 	}
 
 	// A recovery order for a decommissioned host is a promise without
@@ -314,6 +351,118 @@ func TestDecommissionedHostDoesNotComeBackWithAToken(t *testing.T) {
 	// either.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": "return attempt"}, nil, http.StatusConflict)
+
+	// Nor does an operation reach a retired host.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "inventory.refresh", "reason": "return attempt"}, nil, http.StatusConflict)
+
+	// The machine itself is held back: a "new host" token does not fit it
+	// for the retention period. The refusal reaches the order, with the
+	// reason that names the retired host rather than a duplicate.
+	var order orderView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "retired machine comes back", "site": "lab", "environment": "test",
+	}, &order, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+order.ID+"/revoke", nil, nil, 0)
+	})
+	status, body := h.enrollAttempt(t, order.Token, identity.MachineID, testCSR(t, identity.MachineID))
+	if status != http.StatusForbidden {
+		t.Fatalf("a retired machine was answered with %d: %s", status, body)
+	}
+	var trail struct {
+		Items []struct {
+			Detail struct {
+				Reason string `json:"reason"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/audit?actor="+identity.MachineID+"&outcome=denied", &trail)
+	found := false
+	for _, item := range trail.Items {
+		if item.Detail.Reason == "machine_id_retired" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the trail does not name the retired machine: %+v", trail.Items)
+	}
+}
+
+// TestIdentityRecoveryPutsTheHostIntoRecovery guards the state between the
+// recovery order and the first session of the new certificate: the host
+// takes no operation, like a quarantined one, and the panel says which "no"
+// this is.
+func TestIdentityRecoveryPutsTheHostIntoRecovery(t *testing.T) {
+	h := newHarness(t)
+	host := h.enrollSyntheticHost(t)
+
+	var order orderView
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
+		"reason": "planned key replacement", "ttl_seconds": 600,
+	}, &order, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+order.ID+"/revoke", nil, nil, 0)
+	})
+
+	var view struct {
+		LifecycleState  string `json:"lifecycle_state"`
+		LifecycleReason string `json:"lifecycle_reason"`
+	}
+	h.get("/api/v1/hosts/"+host.ID, &view)
+	if view.LifecycleState != "recovery" {
+		t.Fatalf("state after the recovery order = %q", view.LifecycleState)
+	}
+	if view.LifecycleReason != "planned key replacement" {
+		t.Errorf("reason = %q", view.LifecycleReason)
+	}
+
+	var denial struct {
+		Code string `json:"code"`
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+		map[string]any{"action": "inventory.refresh", "reason": "read during recovery"},
+		&denial, http.StatusConflict)
+	if denial.Code != "host_recovery" {
+		t.Errorf("code = %q, expected host_recovery", denial.Code)
+	}
+
+	// A second order while the first is pending changes nothing about the
+	// state; revoking both leaves the host nothing to wait for, and it
+	// comes back to active with the old key still its identity.
+	var second orderView
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
+		"reason": "planned key replacement, second try", "ttl_seconds": 600,
+	}, &second, http.StatusCreated)
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+order.ID+"/revoke", nil, nil, http.StatusNoContent)
+	h.get("/api/v1/hosts/"+host.ID, &view)
+	if view.LifecycleState != "recovery" {
+		t.Errorf("the host left recovery while an order was still pending: %q", view.LifecycleState)
+	}
+	h.do(http.MethodPost, "/api/v1/enrollment-requests/"+second.ID+"/revoke", nil, nil, http.StatusNoContent)
+	h.get("/api/v1/hosts/"+host.ID, &view)
+	if view.LifecycleState != "active" {
+		t.Errorf("the host did not come back once its orders were revoked: %q", view.LifecycleState)
+	}
+
+	// Back in recovery, the host can still be decommissioned: the operator
+	// who ordered a new key may decide the host leaves instead.
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/identity-recovery", map[string]any{
+		"reason": "planned key replacement, third try", "ttl_seconds": 600,
+	}, &order, http.StatusCreated)
+	h.get("/api/v1/hosts/"+host.ID, &view)
+	if view.LifecycleState != "recovery" {
+		t.Fatalf("state after the third order = %q", view.LifecycleState)
+	}
+	var result struct {
+		LifecycleState string `json:"lifecycle_state"`
+	}
+	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/decommission",
+		map[string]any{"reason": "left during recovery", "typed_confirmation": host.Hostname},
+		&result, http.StatusOK)
+	if result.LifecycleState != "retired" {
+		t.Errorf("state = %q", result.LifecycleState)
+	}
 }
 
 // TestInstallationProgressDescribesTheSteps guards that the installation

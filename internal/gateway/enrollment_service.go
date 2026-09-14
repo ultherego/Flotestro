@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
@@ -401,7 +402,27 @@ func (s *EnrollmentService) checkPurpose(ctx context.Context, tx pgx.Tx,
 	switch scope.Purpose {
 	case enrollment.PurposeNew:
 		if existing != "" {
-			return errors.New("machine_id_known")
+			// A retired host holds its machine identifier for the retention
+			// period: the machine that left the fleet does not come back as
+			// a new host on the strength of a token alone. After that the
+			// retired row lets the identifier go, and the machine is a
+			// stranger again - with the history of the old host kept under
+			// the old row.
+			retired, until, err := s.hosts.RetiredMachine(ctx, tx, existing)
+			if err != nil {
+				return err
+			}
+			if !retired {
+				return errors.New("machine_id_known")
+			}
+			if time.Now().Before(until) {
+				return errors.New(enrollment.DenialMachineRetired)
+			}
+			if err := s.hosts.ReleaseMachineID(ctx, tx, existing); err != nil {
+				return err
+			}
+			s.log.Info("a retired host released its machine identifier to a new enrollment",
+				"retired_host_id", existing, "machine_id", msg.GetMachineId())
 		}
 	case enrollment.PurposeReplace:
 		if scope.ExpectedHostID == "" {
@@ -475,6 +496,8 @@ func denialMessage(code string) string {
 		return "the machine is not the one the order was bound to"
 	case enrollment.DenialTokenUnknown:
 		return "the token matched no order"
+	case enrollment.DenialMachineRetired:
+		return "the machine belongs to a retired host and is held back; a new-host token does not fit it yet"
 	default:
 		return "the token was refused"
 	}

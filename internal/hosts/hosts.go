@@ -204,21 +204,26 @@ type Identity struct {
 
 // Host is the view of a host returned by the API.
 type Host struct {
-	ID              string     `json:"id"`
-	MachineID       string     `json:"machine_id"`
-	Hostname        string     `json:"hostname"`
-	Site            string     `json:"site"`
-	Environment     string     `json:"environment"`
-	Owner           string     `json:"owner,omitempty"`
-	LifecycleState  string     `json:"lifecycle_state"`
-	OSFamily        string     `json:"os_family,omitempty"`
-	OSDistribution  string     `json:"os_distribution,omitempty"`
-	OSVersion       string     `json:"os_version,omitempty"`
-	Architecture    string     `json:"architecture,omitempty"`
-	AgentVersion    string     `json:"agent_version,omitempty"`
-	ConnectionState string     `json:"connection_state"`
-	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
-	BootID          string     `json:"boot_id,omitempty"`
+	ID             string `json:"id"`
+	MachineID      string `json:"machine_id"`
+	Hostname       string `json:"hostname"`
+	Site           string `json:"site"`
+	Environment    string `json:"environment"`
+	Owner          string `json:"owner,omitempty"`
+	LifecycleState string `json:"lifecycle_state"`
+	// LifecycleReason and LifecycleChangedAt are the decision behind a
+	// state other than active: who cut the host off and why is part of the
+	// host, not a line to dig out of the audit trail.
+	LifecycleReason    string     `json:"lifecycle_reason,omitempty"`
+	LifecycleChangedAt *time.Time `json:"lifecycle_changed_at,omitempty"`
+	OSFamily           string     `json:"os_family,omitempty"`
+	OSDistribution     string     `json:"os_distribution,omitempty"`
+	OSVersion          string     `json:"os_version,omitempty"`
+	Architecture       string     `json:"architecture,omitempty"`
+	AgentVersion       string     `json:"agent_version,omitempty"`
+	ConnectionState    string     `json:"connection_state"`
+	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
+	BootID             string     `json:"boot_id,omitempty"`
 	// Tags are what operators recorded about the host: 'key' or
 	// 'key=value'. The list is always present - a host without tags has an
 	// empty one - so a selector can tell "no tags" from "not asked".
@@ -359,17 +364,48 @@ func (s *Store) AdoptMachine(ctx context.Context, tx pgx.Tx, hostID string, id I
 //
 // Only an active host gets tasks, sessions, secrets and renewals. The other
 // states are different kinds of "no" and each means something else to the
-// operator: quarantine is reversible, retiring is under way, retired is the
-// end of trust.
+// operator: quarantine is reversible, recovery waits for a new key, retiring
+// is under way, retired is the end of trust.
 const (
 	StateActive      = "active"
 	StateQuarantined = "quarantined"
-	StateRetiring    = "retiring"
-	StateRetired     = "retired"
+	// StateRecovery is the host between an identity recovery order and the
+	// first session of the new certificate. No operation and no secret, as
+	// in quarantine; the old certificate may still open a session for the
+	// overlap, so that the operator keeps reading the host until the new
+	// key has proven it works.
+	StateRecovery = "recovery"
+	// StateRetiring is the host in the decommission handshake: the final
+	// task went out and the host is finishing what it started.
+	StateRetiring = "retiring"
+	StateRetired  = "retired"
 )
+
+// RecoveryOverlap is how long the certificate replaced by a recovery may
+// still open a session. Long enough to cover a reinstall that takes a day;
+// short enough that a key nobody replaced does not keep working for good.
+const RecoveryOverlap = 24 * time.Hour
+
+// RetiredMachineRetention is how long the machine identifier of a retired
+// host is refused for a "new host" token.
+const RetiredMachineRetention = 30 * 24 * time.Hour
 
 // Active says whether in this state the panel may order the host anything.
 func Active(state string) bool { return state == StateActive }
+
+// Connectable says whether a certificate of a host in this state may open a
+// session at the given moment. Only an active host connects without a
+// condition; a host in recovery connects while the overlap since the order
+// lasts, so that the operator can still read it with the old key.
+func Connectable(state string, changedAt *time.Time, now time.Time) bool {
+	switch state {
+	case StateActive:
+		return true
+	case StateRecovery:
+		return changedAt != nil && now.Before(changedAt.Add(RecoveryOverlap))
+	}
+	return false
+}
 
 // ErrForbiddenTransition means a state change that must not be carried out.
 var ErrForbiddenTransition = errors.New("forbidden lifecycle transition")
@@ -388,9 +424,11 @@ func (s *Store) ChangeLifecycleState(ctx context.Context, tx pgx.Tx, hostID stri
 			lifecycle_changed_at = now(),
 			lifecycle_changed_by = $4,
 			retired_at           = case when $2 = 'retired' then now() else retired_at end,
+			retired_machine_id_until = case when $2 = 'retired' then now() + $6::interval
+			                           else retired_machine_id_until end,
 			updated_at           = now()
 		where id = $1::uuid and lifecycle_state = any($5)`
-	tag, err := tx.Exec(ctx, query, hostID, newState, reason, actor, fromStates)
+	tag, err := tx.Exec(ctx, query, hostID, newState, reason, actor, fromStates, RetiredMachineRetention)
 	if err != nil {
 		return fmt.Errorf("changing the lifecycle state: %w", err)
 	}
@@ -414,6 +452,110 @@ func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reaso
 		return 0, fmt.Errorf("revoking the certificates: %w", err)
 	}
 	return int(tag.RowsAffected()), nil
+}
+
+// LeaveRecovery moves a host from recovery back to active once a certificate
+// issued after the recovery order has opened a session.
+//
+// The presented certificate is compared with the moment of the order rather
+// than with "the newest one": the old certificate may still connect during
+// the overlap, and its session must not close a recovery it has nothing to
+// do with. The return value says whether the state changed.
+func (s *Store) LeaveRecovery(ctx context.Context, hostID string, fingerprint []byte) (bool, error) {
+	const query = `
+		update hosts set
+			lifecycle_state      = 'active',
+			lifecycle_reason     = 'the identity was recovered',
+			lifecycle_changed_at = now(),
+			lifecycle_changed_by = 'agent',
+			updated_at           = now()
+		where id = $1::uuid and lifecycle_state = 'recovery'
+		  and exists (select 1 from agent_certificates c
+		              where c.host_id = hosts.id and c.fingerprint_sha256 = $2
+		                and c.created_at >= coalesce(hosts.lifecycle_changed_at, c.created_at))`
+	tag, err := s.pool.Exec(ctx, query, hostID, fingerprint)
+	if err != nil {
+		return false, fmt.Errorf("leaving the recovery state: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// LapseRecoveries returns to active the hosts whose recovery has nothing
+// left to wait for: no pending recovery order, and no certificate issued
+// since the order. The old key is then still the identity of the host, and
+// keeping it cut off would punish it for an order somebody revoked or let
+// expire. A host whose order was used stays in recovery until the new
+// certificate opens its first session - that is what the state is for.
+// The identifiers of the hosts that came back are returned for the trail.
+func (s *Store) LapseRecoveries(ctx context.Context) ([]string, error) {
+	const query = `
+		update hosts h set
+			lifecycle_state      = 'active',
+			lifecycle_reason     = 'the recovery order lapsed without a new certificate',
+			lifecycle_changed_at = now(),
+			lifecycle_changed_by = 'panel',
+			updated_at           = now()
+		where h.lifecycle_state = 'recovery'
+		  and not exists (select 1 from enrollment_requests r
+		                  where r.expected_host_id = h.id and r.purpose = 'replace_identity'
+		                    and r.revoked_at is null and r.expires_at > now()
+		                    and r.uses < r.max_uses)
+		  and not exists (select 1 from agent_certificates c
+		                  where c.host_id = h.id and c.revoked_at is null
+		                    and c.created_at >= coalesce(h.lifecycle_changed_at, c.created_at))
+		returning h.id::text`
+	rows, err := s.pool.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("lapsing the recoveries: %w", err)
+	}
+	defer rows.Close()
+	var lapsed []string
+	for rows.Next() {
+		var hostID string
+		if err := rows.Scan(&hostID); err != nil {
+			return nil, err
+		}
+		lapsed = append(lapsed, hostID)
+	}
+	return lapsed, rows.Err()
+}
+
+// RetiredMachine says whether the host with this identifier is retired, and
+// until when its machine identifier is held back from "new host" tokens. A
+// host that is not retired answers false with a zero time.
+func (s *Store) RetiredMachine(ctx context.Context, tx pgx.Tx, hostID string) (retired bool, until time.Time, err error) {
+	// A host retired before the hold existed gets the same retention from
+	// its retirement: the rule is about the machine, not about the release
+	// that introduced the column.
+	const query = `
+		select lifecycle_state = 'retired',
+		       coalesce(retired_machine_id_until, retired_at + $2::interval, now())
+		from hosts where id = $1::uuid`
+	if err := tx.QueryRow(ctx, query, hostID, RetiredMachineRetention).Scan(&retired, &until); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, time.Time{}, nil
+		}
+		return false, time.Time{}, fmt.Errorf("reading the retired host: %w", err)
+	}
+	return retired, until, nil
+}
+
+// ReleaseMachineID frees the machine identifier of a retired host, so that
+// the same machine can enter the fleet as a new host once the retention has
+// passed. The retired row keeps its history under a marked identifier: the
+// unique index on machine_id leaves no other way to have both rows.
+func (s *Store) ReleaseMachineID(ctx context.Context, tx pgx.Tx, hostID string) error {
+	const query = `
+		update hosts set machine_id = 'retired:' || id::text || ':' || machine_id, updated_at = now()
+		where id = $1::uuid and lifecycle_state = 'retired'`
+	tag, err := tx.Exec(ctx, query, hostID)
+	if err != nil {
+		return fmt.Errorf("releasing the machine identifier: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrForbiddenTransition
+	}
+	return nil
 }
 
 // RevokeSupersededCertificates revokes the certificates of a host older
@@ -472,8 +614,11 @@ func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, 
 type CertificateStatus struct {
 	HostID         string
 	LifecycleState string
-	Revoked        bool
-	Known          bool
+	// LifecycleChangedAt is when the host entered its state. The recovery
+	// overlap is counted from it.
+	LifecycleChangedAt *time.Time
+	Revoked            bool
+	Known              bool
 	// Serial identifies the certificate in the audit trail; on a renewal it
 	// allows linking the new certificate with the replaced one.
 	Serial string
@@ -484,13 +629,13 @@ type CertificateStatus struct {
 // based on this result.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (CertificateStatus, error) {
 	const query = `
-		select c.host_id, h.lifecycle_state, c.revoked_at is not null, c.serial
+		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial
 		from agent_certificates c
 		join hosts h on h.id = c.host_id
 		where c.fingerprint_sha256 = $1`
 	var status CertificateStatus
 	err := s.pool.QueryRow(ctx, query, fingerprint).
-		Scan(&status.HostID, &status.LifecycleState, &status.Revoked, &status.Serial)
+		Scan(&status.HostID, &status.LifecycleState, &status.LifecycleChangedAt, &status.Revoked, &status.Serial)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CertificateStatus{}, nil
 	}
@@ -929,7 +1074,8 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
-		       h.lifecycle_state, coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
+		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at,
+		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
 		       h.reboot_required, h.failed_units, h.pending_updates, h.pending_security_updates,
@@ -964,7 +1110,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var windowUntil, windowFrom *time.Time
 		var windowReason, windowBy string
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
-			&h.LifecycleState, &h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
+			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
+			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.RebootRequired, &h.FailedUnits, &h.PendingUpdates, &h.PendingSecurityUpdates,
 			&h.CurrentInventoryRevision, &h.PackageDatabaseBroken, &h.EnrolledAt,

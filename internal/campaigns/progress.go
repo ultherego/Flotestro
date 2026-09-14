@@ -3,12 +3,14 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/remediation"
 )
 
 // progressTarget settles one step of a host in a campaign: the change, the
@@ -32,6 +34,11 @@ func (o *Orchestrator) progressTarget(ctx context.Context, campaign Campaign, ta
 
 // afterMainJob reacts to the result of the main task and decides about a reboot.
 func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, target *Target) error {
+	// A fleet remediation runs a plan of steps rather than one task; the
+	// host settles with the plan.
+	if opspec.ActionType(campaign.ActionType) == opspec.ActionSecurityRemediate {
+		return o.afterRemediation(ctx, campaign, target)
+	}
 	if target.JobID == nil {
 		return nil
 	}
@@ -99,6 +106,46 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 
 	o.log.Info("the campaign orders a reboot of a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", rebootJobID)
+	return nil
+}
+
+// afterRemediation settles a host of a fleet remediation from the state of
+// its plan.
+//
+// The runner drives the steps and closes the plan: succeeded once every
+// step went through, failed at the first step that did not, stopped when
+// an operator stopped it. A step that requires a reboot already waits for
+// the host to come back inside the plan, so the campaign has no reboot
+// phase of its own here.
+func (o *Orchestrator) afterRemediation(ctx context.Context, campaign Campaign, target *Target) error {
+	plan, err := o.remediation.ForCampaignHost(ctx, campaign.ID, target.HostID)
+	if errors.Is(err, remediation.ErrNotFound) {
+		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_missing",
+			"the host's remediation plan is gone")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	switch plan.State {
+	case remediation.StateRunning:
+		return nil
+	case remediation.StateSucceeded:
+		o.finishTarget(ctx, campaign, target, TargetSucceeded, "",
+			fmt.Sprintf("remediation plan %s: %d steps succeeded", plan.ID, len(plan.Steps)))
+	case remediation.StateStopped:
+		o.finishTarget(ctx, campaign, target, TargetFailed, "remediation_stopped",
+			"the remediation plan "+plan.ID+" was stopped before it finished")
+	default:
+		code, message := "remediation_failed", "the remediation plan "+plan.ID+" failed"
+		for _, step := range plan.Steps {
+			if step.State == remediation.StepFailed {
+				message = "step " + step.CheckID + " (" + step.ActionType + "): " + step.Reason
+				break
+			}
+		}
+		o.finishTarget(ctx, campaign, target, TargetFailed, code, message)
+	}
 	return nil
 }
 

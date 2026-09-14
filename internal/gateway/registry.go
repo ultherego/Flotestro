@@ -42,6 +42,16 @@ type Session struct {
 	closed chan struct{}
 	once   sync.Once
 	reason atomic.Pointer[string]
+	// finalReady carries the agent's answer to the final task to whoever
+	// drives the decommission handshake. One slot: the handshake asks once
+	// and a second answer has nobody to reach.
+	finalReady chan *agentv1.FinalReady
+	// finished closes when the stream of the session has ended for good.
+	// The handshake waits on it after the final commit: the agent is
+	// expected to leave on its own, and the session must not be cut before
+	// the commit has left the buffer.
+	finished     chan struct{}
+	finishedOnce sync.Once
 }
 
 // NewSession creates a session with a buffer of outgoing messages.
@@ -52,10 +62,32 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 	return &Session{
 		ID: id, HostID: hostID, AgentVersion: agentVersion, BootID: bootID,
 		RemoteAddr: remoteAddr, StartedAt: time.Now(),
-		outbound: make(chan *agentv1.ServerMessage, buffer),
-		closed:   make(chan struct{}),
+		outbound:   make(chan *agentv1.ServerMessage, buffer),
+		closed:     make(chan struct{}),
+		finalReady: make(chan *agentv1.FinalReady, 1),
+		finished:   make(chan struct{}),
 	}
 }
+
+// AcceptFinalReady hands the agent's answer to the handshake. A second
+// answer, or one nobody asked for, is dropped: the handshake reads one.
+func (s *Session) AcceptFinalReady(ready *agentv1.FinalReady) bool {
+	select {
+	case s.finalReady <- ready:
+		return true
+	default:
+		return false
+	}
+}
+
+// FinalReady is the channel the handshake reads the agent's answer from.
+func (s *Session) FinalReady() <-chan *agentv1.FinalReady { return s.finalReady }
+
+// Finish marks the end of the stream. Idempotent.
+func (s *Session) Finish() { s.finishedOnce.Do(func() { close(s.finished) }) }
+
+// Finished is the channel that closes when the stream has ended.
+func (s *Session) Finished() <-chan struct{} { return s.finished }
 
 // End closes the session on the initiative of the panel.
 //

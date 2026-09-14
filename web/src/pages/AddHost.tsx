@@ -57,6 +57,7 @@ const errorDescriptions: Record<string, string> = {
   duplicate_machine_id: "The machine is already in the fleet under another host; a new-host token does not fit it. Use identity recovery on that host instead.",
   csr_invalid: "The certificate request from the host was refused. Check the agent journal on the host.",
   host_retired: "The host was decommissioned and does not come back with a token.",
+  machine_id_retired: "The machine belongs to a retired host and is held back for the retention period; a new-host token does not fit it yet.",
   enrolled_not_connected: "The certificate was issued, but no session has opened. Check that the service runs and that the gateway address is reachable from the host.",
   inventory_unavailable: "The agent is connected, but no inventory has arrived. Check the agent journal for a module that fails to read the host.",
 };

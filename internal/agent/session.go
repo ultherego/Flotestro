@@ -125,6 +125,11 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		}
 
 		switch {
+		case errors.Is(err, ErrDecommissioned):
+			// The panel ended the host's membership and the identity is
+			// gone: there is nothing to reconnect with, and knocking would
+			// only fill the audit trail of the panel with refusals.
+			return err
 		case errors.Is(err, errIdentityRenewed):
 			// A break after a certificate renewal is not an error of the gateway:
 			// the next connection goes with the new identity and to the same
@@ -264,6 +269,23 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		return err
 	}
 
+	// The decommission handshake: which attempts run, and whether the host
+	// is leaving. It exists per session, because the final task and the
+	// commit travel in it.
+	final := newFinalHandshake()
+	var wipe finalWiper
+	if opts.Executor != nil {
+		wipe = helperWiper(opts.Executor.helper)
+	}
+	// Whichever error ends the stream after the commit - the agent's own or
+	// the panel closing the session - the reason the session ended is the
+	// decommission, and Run must not reconnect.
+	defer func() {
+		if final.done.Load() {
+			result = ErrDecommissioned
+		}
+	}()
+
 	// The facts are read by the task executor while checking the preconditions
 	// and updated by the inventory cycle, so they need synchronization.
 	var factsMu sync.RWMutex
@@ -296,6 +318,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		// nowhere - neither in the journal of the agent nor in the result of the
 		// task.
 		opts.Executor.secrets = func(ctx context.Context, taskID, name string, version int) ([]byte, error) {
+			// After the final task the leases are dropped: no secret is
+			// fetched for a host that is leaving, whatever the task.
+			if final.isLeaving() {
+				return nil, errLeasesDropped
+			}
 			response, err := client.FetchSecret(ctx, connect.NewRequest(&agentv1.FetchSecretRequest{
 				TaskId: taskID, SecretName: name, SecretVersion: uint32(version),
 			}))
@@ -393,6 +420,22 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				// and the heartbeat and the next tasks must not wait for it.
 				task := payload.Task
 				go func() {
+					// A host that is leaving starts nothing new. The refusal is an
+					// answer; the panel cancelled the queue already, so this task
+					// was in flight when the final task went out.
+					if !final.start(task.GetTaskId()) {
+						opts.Log.Info("the task was refused: the host is leaving the fleet",
+							"task_id", task.GetTaskId())
+						if err := send(&agentv1.AgentMessage{
+							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: refuseRetiring(task.GetTaskId())},
+						}); err != nil {
+							opts.Log.Error("the refusal of the task was not sent back",
+								"task_id", task.GetTaskId(), "err", err)
+						}
+						return
+					}
+					defer final.finish(task.GetTaskId())
+
 					// The resources first, the budget slot second: a task waiting
 					// for a busy resource has no reason to hold a slot that would
 					// be useful to an operation without a collision.
@@ -446,6 +489,26 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					}); err != nil {
 						opts.Log.Error("the result of the task was not sent back",
 							"task_id", task.GetTaskId(), "err", err)
+					}
+				}()
+
+			case *agentv1.ServerMessage_FinalTask:
+				// The first step of the decommission handshake runs next to the
+				// receive loop: it waits for the running work, and the commit
+				// has to be able to arrive meanwhile.
+				go func() {
+					if err := answerFinalTask(sessionCtx, payload.FinalTask, final, send, opts.Log); err != nil {
+						opts.Log.Error("FinalReady was not sent back", "err", err)
+					}
+				}()
+
+			case *agentv1.ServerMessage_FinalCommit:
+				// The second step ends the session - and the process - when the
+				// wipe went through. A refusal of the helper leaves everything as
+				// it was, and the loop goes on.
+				go func() {
+					if err := applyFinalCommit(sessionCtx, payload.FinalCommit, final, wipe, opts.Log); err != nil {
+						reportError(err)
 					}
 				}()
 

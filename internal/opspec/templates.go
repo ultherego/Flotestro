@@ -22,7 +22,7 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 			Name:        "example", TimeoutSeconds: 10}}
 	}
 	switch action {
-	case ActionUnitStart, ActionUnitStop, ActionUnitRestart, ActionUnitReload:
+	case ActionUnitStart, ActionUnitStop, ActionUnitRestart, ActionUnitReload, ActionUnitResetFailed:
 		return unit(), true
 	case ActionUnitEnableSet:
 		return Payload{UnitToggle: &UnitToggle{Unit: "example.service", Enabled: true}}, true
@@ -78,6 +78,10 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Kernel: &KernelPayload{Settings: map[string]string{"net.ipv4.ip_forward": "0"}}}, true
 	case ActionSELinuxModeSet:
 		return Payload{Security: &SecurityPayload{Mode: "enforcing"}}, true
+	case ActionSecurityRemediate:
+		// The composite names checks, not steps; the security view fills
+		// the list from the findings the operator ticked.
+		return Payload{Security: &SecurityPayload{CheckIDs: []string{"ssh.password-auth"}}}, true
 	case ActionTimezoneSet:
 		return Payload{Time: &TimePayload{Timezone: "Etc/UTC"}}, true
 	case ActionTimeConfigApply:

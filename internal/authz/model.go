@@ -69,6 +69,9 @@ const (
 	// masking takes away the ability to start it even manually.
 	PermUnitEnableWrite Permission = "unit.enable.write"
 	PermUnitMaskWrite   Permission = "unit.mask.write"
+	// Clearing the failed state of a unit touches no process; it belongs
+	// with restarting, which is the verb it usually follows.
+	PermUnitResetFailed Permission = "unit.reset_failed"
 	// Reading a log file reaches beyond the system journal.
 	PermLogFileRead Permission = "logfile.read"
 	// A live view keeps a process on the host for its whole duration, so it
@@ -99,6 +102,9 @@ const (
 	PermScheduleDisable Permission = "schedule.disable"
 	PermScheduleRemove  Permission = "schedule.remove"
 	PermScheduleRun     Permission = "schedule.run"
+	// A preview of the next runs of an expression computes dates on the
+	// host and writes nothing.
+	PermSchedulePreview Permission = "schedule.preview"
 	// The network. Reading the profiles is preparation for a change, so it is
 	// cheap; changing an address or a route can cut the host off from the
 	// panel, and then no further order will arrive. Routes have their own
@@ -410,7 +416,8 @@ var rolePermissions = map[Role][]Permission{
 		// now.
 		PermInventoryRefresh,
 		PermJobCreate, PermJobCancel,
-		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
+		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermUnitResetFailed,
+		PermJournalRead,
 		// The operator runs containers but does not delete them: removing and
 		// pruning are irreversible and belong to the administrator. The log of
 		// a container is diagnostics, like the journal.
@@ -474,7 +481,8 @@ var rolePermissions = map[Role][]Permission{
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermInventoryRefresh, PermJobRead, PermAuditRead,
 		PermJobCreate, PermJobApprove, PermJobCancel,
-		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermJournalRead,
+		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermUnitResetFailed,
+		PermJournalRead,
 		// The administrator also has the irreversible container operations.
 		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart,
@@ -485,6 +493,7 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
 		PermPackagesRepository,
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
+		PermSchedulePreview,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
 		PermDNSRead, PermDNSPlan, PermDNSHostWrite,

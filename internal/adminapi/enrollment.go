@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -429,7 +430,31 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		Action: "host.enrollment.revoke", TargetType: "enrollment_request",
 		TargetID: r.PathValue("id"), Outcome: audit.OutcomeSuccess,
 	})
+	// A revoked recovery order may have been the only thing a host in
+	// recovery was waiting for; it comes back to active at once rather than
+	// at the next sweep.
+	s.lapseRecoveries(r.Context(), principal.Subject)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// lapseRecoveries returns to active the hosts whose recovery has nothing
+// left to wait for, and puts each return on the trail.
+func (s *Server) lapseRecoveries(ctx context.Context, actor string) {
+	lapsed, err := s.hosts.LapseRecoveries(ctx)
+	if err != nil {
+		s.log.Error("the lapsed recoveries were not closed", "err", err)
+		return
+	}
+	for _, hostID := range lapsed {
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorUser, ActorID: actor,
+			Action: "host.identity.recovery.lapsed", TargetType: "host", TargetID: hostID,
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"state": hosts.StateActive, "reason": "the recovery order lapsed without a new certificate",
+			},
+		})
+	}
 }
 
 // handleIdentityRecovery orders the identity recovery of an existing host.
@@ -452,7 +477,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 	// A retired host does not return to the fleet with a token. An order
 	// that cannot be used anyway would be an empty promise - the return
 	// starts with reversing the decommissioning decision.
-	if host.LifecycleState == hosts.StateRetired {
+	if host.LifecycleState == hosts.StateRetired || host.LifecycleState == hosts.StateRetiring {
 		problem(w, http.StatusConflict, "host_retired",
 			"a retired host cannot be brought back with a recovery token")
 		return
@@ -513,6 +538,21 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			s.registry.EndSession(hostID, "identity_recovery")
 		}
 	}
+	// An active host enters recovery: no operation and no secret until the
+	// new certificate opens its first session, while the old one may still
+	// connect for the overlap. A quarantined host stays quarantined - the
+	// quarantine is the stronger "no", and its release is a decision of its
+	// own once the identity is back.
+	state := host.LifecycleState
+	canceled := 0
+	if host.LifecycleState == hosts.StateActive {
+		canceled, err = s.enterRecovery(r, hostID, reason, principal.Subject)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		state = hosts.StateRecovery
+	}
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.identity.recovery", TargetType: "host", TargetID: hostID,
@@ -521,10 +561,36 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			"request_id": order.ID, "expires_at": order.ExpiresAt,
 			"expected_machine_id": order.ExpectedMachineID,
 			"reason":              reason, "revoke_old_immediately": req.RevokeOldImmediately,
-			"certificates_revoked": revoked,
+			"certificates_revoked": revoked, "state": state, "jobs_canceled": canceled,
 		}, evidence),
 	})
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
+}
+
+// enterRecovery moves an active host into the recovery state and cancels
+// what was queued for it, as a quarantine does: a host whose key is being
+// replaced takes no mutation until the new key has proven it works. A host
+// that is no longer active when the write lands - a quarantine placed a
+// moment earlier - is left as it is: that decision is the stronger one.
+func (s *Server) enterRecovery(r *http.Request, hostID, reason, actor string) (int, error) {
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	err = s.hosts.ChangeLifecycleState(r.Context(), tx, hostID, []string{hosts.StateActive},
+		hosts.StateRecovery, reason, actor)
+	if errors.Is(err, hosts.ErrForbiddenTransition) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	canceled, err := s.jobs.CancelUndelivered(r.Context(), tx, hostID, actor, "host.identity.recovery")
+	if err != nil {
+		return 0, err
+	}
+	return canceled, tx.Commit(r.Context())
 }
 
 // revokeNow revokes every live certificate of the host in its own

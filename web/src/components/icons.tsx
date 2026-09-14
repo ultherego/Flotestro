@@ -5,7 +5,7 @@
  * are hidden from assistive technology.
  */
 export type IconName =
-  | "dashboard" | "hosts" | "add-host" | "groups" | "jobs" | "bulk" | "campaigns"
+  | "dashboard" | "hosts" | "add-host" | "groups" | "jobs" | "bulk" | "campaigns" | "reads"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
   | "backups" | "monitoring" | "directory" | "access" | "audit"
   | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user" | "back" | "star"
@@ -23,6 +23,9 @@ const PATHS: Record<IconName, string> = {
   jobs: "M9 5h6M9 3h6v4H9zM5 6h2v15h10V6h2M9 12l2 2 4-4",
   bulk: "M4 6h16M4 12h16M4 18h10M18 16l2 2 2-4",
   campaigns: "M4 20V4M4 4h13l-2 4 2 4H4",
+  // One question asked of several hosts at once: a lens over a stack of
+  // hosts, because a fan-out reads and changes nothing.
+  reads: "M3 5h11v4H3zM3 11h11v4H3zM3 17h11v4H3zM6 7h.01M6 13h.01M6 19h.01M18 8a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM20.1 13.1L22.5 15.5",
   security: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z",
   vulnerabilities: "M12 3l9 16H3zM12 10v4M12 17.5h.01",
   certificates: "M12 3l2.5 2.5H18v3.5L20.5 12 18 15v3.5h-3.5L12 21l-2.5-2.5H6V15L3.5 12 6 9V5.5h3.5zM9 12l2 2 4-4",

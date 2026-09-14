@@ -888,7 +888,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_Network{Network: network}
 
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
-		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
+		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow,
+		opspec.ActionSchedulePreview:
 		operation := agentv1.ScheduleAction_OPERATION_ENSURE
 		switch action {
 		case opspec.ActionScheduleDisable:
@@ -897,6 +898,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operation = agentv1.ScheduleAction_OPERATION_REMOVE
 		case opspec.ActionScheduleRunNow:
 			operation = agentv1.ScheduleAction_OPERATION_RUN_NOW
+		case opspec.ActionSchedulePreview:
+			operation = agentv1.ScheduleAction_OPERATION_PREVIEW
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Schedule{
 			Schedule: &agentv1.ScheduleAction{
@@ -983,8 +986,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 	case opspec.ActionUnitStatus:
 		envelope.Action = &agentv1.TaskEnvelope_ReadUnitStatus{
 			ReadUnitStatus: &agentv1.ReadUnitStatus{
-				Units: payload.UnitStatus.Units,
-				All:   payload.UnitStatus.All,
+				Units:  payload.UnitStatus.Units,
+				All:    payload.UnitStatus.All,
+				Detail: payload.UnitStatus.Detail,
 			},
 		}
 
@@ -998,9 +1002,10 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionReadJournal:
 		request := &agentv1.ReadJournal{
-			Unit:  payload.Journal.Unit,
-			Lines: payload.Journal.Lines,
-			Since: payload.Journal.Since,
+			Unit:        payload.Journal.Unit,
+			Lines:       payload.Journal.Lines,
+			Since:       payload.Journal.Since,
+			AfterCursor: payload.Journal.AfterCursor,
 		}
 		if payload.Journal.MaxPriority != nil {
 			request.MaxPriority = payload.Journal.MaxPriority
@@ -1023,6 +1028,9 @@ var unitOperations = map[opspec.ActionType]agentv1.UnitAction_Operation{
 	opspec.ActionUnitStop:    agentv1.UnitAction_OPERATION_STOP,
 	opspec.ActionUnitRestart: agentv1.UnitAction_OPERATION_RESTART,
 	opspec.ActionUnitReload:  agentv1.UnitAction_OPERATION_RELOAD,
+	// Clearing the failed state travels like the other unit operations: one
+	// unit, one verb.
+	opspec.ActionUnitResetFailed: agentv1.UnitAction_OPERATION_RESET_FAILED,
 }
 
 // localUserOperations translates an operation type into the contract's

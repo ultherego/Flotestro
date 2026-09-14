@@ -77,7 +77,7 @@ var TagPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*(=[a-zA-Z0-9_.:/-]+)?$
 // silently match nothing.
 var (
 	connectionStates = []string{"online", "offline", "stale", "unknown"}
-	lifecycleStates  = []string{"active", "quarantined", "retiring", "retired"}
+	lifecycleStates  = []string{"active", "quarantined", "recovery", "retiring", "retired"}
 )
 
 var (

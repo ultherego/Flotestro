@@ -185,6 +185,58 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	return s.getTx(ctx, tx, campaignID)
 }
 
+// HostPlanSpec is a per-host plan computed in the panel and handed in
+// together with the order.
+type HostPlanSpec struct {
+	HostID   string
+	PlanHash string
+	Plan     json.RawMessage
+}
+
+// CreatePlanned creates a campaign whose per-host plans exist before the
+// order: a fleet remediation, where the panel computes every host's steps
+// from its findings.
+//
+// The plans go into the same transaction as the snapshot, and the approval
+// fingerprint is recomputed over the set at once: there is no moment at
+// which the campaign waits for a consent that would not cover its plans.
+// The campaign starts where a planned one ends - at the decision.
+func (s *Store) CreatePlanned(ctx context.Context, tx pgx.Tx, spec Spec, hosts []TargetHost,
+	plans []HostPlanSpec) (*Campaign, error) {
+	campaign, err := s.Create(ctx, tx, spec, hosts)
+	if err != nil {
+		return campaign, err
+	}
+	if len(plans) == 0 {
+		return nil, fmt.Errorf("a planned campaign needs at least one host plan")
+	}
+	set := map[string]string{}
+	for _, plan := range plans {
+		content := plan.Plan
+		if len(content) == 0 {
+			content = json.RawMessage("{}")
+		}
+		if _, err := tx.Exec(ctx, `
+			insert into campaign_plans (campaign_id, host_id, plan_hash, plan)
+			values ($1, $2, $3, $4)`, campaign.ID, plan.HostID, plan.PlanHash, content); err != nil {
+			return nil, fmt.Errorf("recording a host plan: %w", err)
+		}
+		set[plan.HostID] = plan.PlanHash
+	}
+	planSetHash := PlanSetFingerprint(set)
+	fingerprint, err := FingerprintWithPlans(*campaign, planSetHash)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `
+		update campaigns
+		   set plan_set_hash = $2, approval_fingerprint = $3, updated_at = now()
+		 where id = $1`, campaign.ID, planSetHash, fingerprint); err != nil {
+		return nil, fmt.Errorf("recording the plan set: %w", err)
+	}
+	return s.getTx(ctx, tx, campaign.ID)
+}
+
 // StateQueuedOrApproval returns the initial state of a campaign.
 func StateQueuedOrApproval(requiresApproval bool) State {
 	if requiresApproval {

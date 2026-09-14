@@ -241,6 +241,10 @@ var contracts = map[ActionType]contract{
 	ActionUnitReload:    {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyUnitHealth},
 	ActionUnitEnableSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
 	ActionUnitMaskSet:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
+	// Clearing the failed state changes a record, not a process: it can be
+	// cancelled at any point, repeated freely, and there is nothing to put
+	// back - the failure it clears has already happened.
+	ActionUnitResetFailed: {cancel: CancelSafe, retry: RetryAutomatic, rollback: RollbackNone, verify: VerifyUnitHealth},
 
 	// Scheduled jobs. A managed entry keeps its previous version; writing
 	// it is a sequence of steps (the unit files, the reload, the enable) and
@@ -292,6 +296,12 @@ var contracts = map[ActionType]contract{
 	// rules are not unloaded by the panel.
 	ActionSELinuxModeSet:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimSecurity)}},
 	ActionAuditRulesReload: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimSecurity)}},
+	// A fleet remediation is a plan of steps: a cancel is honoured between
+	// them, the step under way finishes. It is repeated only after the
+	// findings are assessed again, the way back depends on the steps and
+	// part of them has no compensation, and the verification is the same
+	// checks computed anew. The claims are the steps' own.
+	ActionSecurityRemediate: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackBestEffort, verify: VerifyCustom},
 
 	// Certificates. Trust changes are steps with a recomputed bundle at
 	// the end; the reverse of adding an anchor is removing it. A deployment

@@ -50,14 +50,17 @@ type Server struct {
 	campaigns *campaigns.Store
 	// budgets show the capacity of the fleet and the sites. Nil means an
 	// installation in which nobody enforces the capacity.
-	budgets   *budgets.Store
-	tokens    *enrollment.Store
-	authz     *authz.Store
-	audit     *audit.Recorder
-	registry  *gateway.Registry
-	oidc      *oidc.Provider
-	directory *freeipa.Client
-	changes   *identity.Store
+	budgets  *budgets.Store
+	tokens   *enrollment.Store
+	authz    *authz.Store
+	audit    *audit.Recorder
+	registry *gateway.Registry
+	// decommissioner drives the handshake that ends a host's membership:
+	// it needs the session, so it lives with the gateway rather than here.
+	decommissioner *gateway.Decommissioner
+	oidc           *oidc.Provider
+	directory      *freeipa.Client
+	changes        *identity.Store
 	// files holds the desired state of configuration files and their history.
 	files *managedfiles.Store
 	// certificates hold the watch scope and the deployment history. The
@@ -172,7 +175,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 	if authzStore != nil {
 		authzStore.SetSessionIdle(limits.Idle)
 	}
-	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
+	server := &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		files:        managedfiles.NewStore(pool),
 		certificates: certificatestore.NewStore(pool),
 		backups:      backupstore.NewStore(pool),
@@ -184,6 +187,10 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
 		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR, RefuseTokens: options.StepUpRefuseTokens},
 		metrics: options.Metrics, trust: options.Trust}
+	// The handshake needs the sessions of this gateway and the same stores
+	// as the panel, so it is built here rather than handed in.
+	server.decommissioner = gateway.NewDecommissioner(pool, hostStore, jobStore, recorder, registry, log)
+	return server
 }
 
 // Routes builds the API router.
@@ -264,6 +271,12 @@ func (s *Server) Routes() http.Handler {
 	// a hundred - and that is visible only when the findings stand side by
 	// side.
 	s.route(mux, "GET /api/v1/security", s.handleFleetSecurity)
+	// A fleet remediation: chosen checks on chosen hosts, every host with
+	// its own plan of steps, one approval over the whole set, carried out
+	// as a campaign. The preview shows the plans grouped; the order creates
+	// the campaign.
+	s.route(mux, "POST /api/v1/security/remediation/preview", s.handleFleetRemediationPreview)
+	s.route(mux, "POST /api/v1/security/remediation", s.handleFleetRemediation)
 	// Compliance with the hardening profile is computed by the panel from
 	// the facts the host reports anyway; the remediation is a plan and
 	// separate module tasks.
@@ -331,6 +344,13 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/cancel", s.handleCancelCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
+
+	// Diagnostic read fan-outs: the same read on a handful of hosts at once,
+	// one ordinary job per host, merged into one answer. Not a campaign -
+	// nothing changes, nothing is approved.
+	s.route(mux, "GET /api/v1/reads", s.handleListReads)
+	s.route(mux, "POST /api/v1/reads", s.handleCreateRead)
+	s.route(mux, "GET /api/v1/reads/{id}", s.handleGetRead)
 
 	// Principals and API tokens.
 	s.route(mux, "GET /api/v1/principals", s.handleListPrincipals)

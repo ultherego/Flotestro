@@ -67,6 +67,9 @@ const (
 	DenialRelayScope       = "relay_scope_mismatch"
 	DenialDuplicateMachine = "duplicate_machine_id"
 	DenialCSRInvalid       = "csr_invalid"
+	// DenialMachineRetired is a "new host" token used on a machine that
+	// belongs to a retired host still within its retention period.
+	DenialMachineRetired = "machine_id_retired"
 )
 
 // ErrRepeated means the creator already placed an order under this

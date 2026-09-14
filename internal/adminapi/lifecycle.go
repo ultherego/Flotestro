@@ -8,6 +8,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
@@ -30,7 +31,9 @@ type lifecycleChange struct {
 func (s *Server) handleQuarantineHost(w http.ResponseWriter, r *http.Request) {
 	s.changeLifecycle(w, r, lifecycleTransition{
 		Permission: authz.PermHostQuarantine,
-		FromStates: []string{hosts.StateActive, hosts.StateQuarantined},
+		// A host in recovery can be quarantined too: a key change under way
+		// does not rule out a theft found meanwhile.
+		FromStates: []string{hosts.StateActive, hosts.StateRecovery, hosts.StateQuarantined},
 		To:         hosts.StateQuarantined,
 		Action:     "host.quarantine",
 		// Tasks already delivered stay: the agent may be half-way through an
@@ -55,26 +58,100 @@ func (s *Server) handleReleaseHost(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// decommissionRequest is the body of a decommission order.
+type decommissionRequest struct {
+	lifecycleChange
+	// LocalIdentityWipe asks the agent to remove its identity and journal
+	// and to disable its service once the panel has revoked the
+	// certificates. Default true: a host leaving the fleet is not to keep a
+	// key that used to open the panel.
+	LocalIdentityWipe *bool `json:"local_identity_wipe"`
+	// RevokeImmediatelyIfOffline revokes the certificates of a host that
+	// has no session, without waiting for it. Default true. Off, the
+	// certificates are revoked at the host's first contact instead.
+	RevokeImmediatelyIfOffline *bool `json:"revoke_immediately_if_offline"`
+}
+
 // handleDecommissionHost ends the trust in a host on the panel side.
+//
+// A connected host is asked to stop first: it finishes what it started,
+// drops its secret leases, reports it is ready, and only then are its
+// certificates revoked and its identity wiped. A host without a session, or
+// one that does not answer in time, is retired all the same - with the
+// cleanup marked as unconfirmed, in the answer and in the audit trail, so
+// nobody takes a machine on a shelf for a machine that wiped itself.
 //
 // The host record, the inventory and the audit log stay: decommissioning is
 // a loss of trust, not deleting history. Physically removing the data is a
 // separate matter of the retention policy.
 func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) {
-	s.changeLifecycle(w, r, lifecycleTransition{
-		Permission:           authz.PermHostDecommission,
-		FromStates:           []string{hosts.StateActive, hosts.StateQuarantined, hosts.StateRetiring},
-		To:                   hosts.StateRetired,
-		Action:               "host.decommission",
-		RequiresConfirmation: true,
-		// Decommissioning always revokes the certificates: a host leaving
-		// the fleet must not come back on its own with a valid certificate
-		// in hand.
-		AlwaysRevoke: true,
-		CancelJobs:   true,
-		CloseSession: true,
+	hostID := r.PathValue("id")
+	host, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermHostDecommission, scope, "host", hostID)
+	if !ok {
+		return
+	}
+
+	var req decommissionRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+			return
+		}
+	}
+	req.Reason = strings.TrimSpace(req.Reason)
+	if req.Reason == "" {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"a lifecycle change must state its reason")
+		return
+	}
+	if req.TypedConfirmation != host.Hostname {
+		problem(w, http.StatusBadRequest, "confirmation_mismatch",
+			"type the hostname to confirm this change")
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, principal, req.Reason, "host.decommission", "host", hostID)
+	if !ok {
+		return
+	}
+
+	outcome, err := s.decommissioner.Run(r.Context(), gateway.Decommission{
+		HostID: hostID, Reason: req.Reason, Actor: principal.Subject,
+		// A host in recovery is decommissioned like any other: the recovery
+		// order it had becomes moot, and the token issued for it is refused
+		// at enrollment as the token of a retired host.
+		FromStates: []string{hosts.StateActive, hosts.StateQuarantined,
+			hosts.StateRecovery, hosts.StateRetiring},
+		LocalIdentityWipe:          defaultTrue(req.LocalIdentityWipe),
+		RevokeImmediatelyIfOffline: defaultTrue(req.RevokeImmediatelyIfOffline),
+		StepUp:                     evidence,
+	})
+	if err != nil {
+		if gateway.IsForbiddenTransition(err) {
+			problem(w, http.StatusConflict, "lifecycle_conflict",
+				"the host is not in a state that allows this change")
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"host_id": hostID, "lifecycle_state": outcome.State, "reason": req.Reason,
+		"phase":                      outcome.Phase,
+		"remote_cleanup_unconfirmed": outcome.RemoteCleanupUnconfirmed,
+		"running_tasks":              outcome.RunningTasks,
+		"leases_dropped":             outcome.LeasesDropped,
+		"jobs_canceled":              outcome.JobsCanceled,
+		"certificates_revoked":       outcome.CertificatesRevoked,
+		"session_closed":             outcome.SessionClosed,
 	})
 }
+
+// defaultTrue reads an optional flag whose absence means yes.
+func defaultTrue(flag *bool) bool { return flag == nil || *flag }
 
 // lifecycleTransition describes one state transition.
 type lifecycleTransition struct {

@@ -176,6 +176,8 @@ message AgentMessage {
     TaskProgress task_progress = 5;
     TaskLogLines task_log_lines = 6;
     MetricsSample metrics_sample = 7;
+    // The answer to a FinalTask: the host has stopped taking work.
+    FinalReady final_ready = 8;
   }
 }
 
@@ -185,6 +187,12 @@ message ServerMessage {
     InventoryRequest inventory_request = 2;
     TaskEnvelope task = 3;
     CancelTask cancel_task = 4;
+    // The two steps of the decommission handshake. A typed message rather
+    // than a task: a task can be replayed from the journal, refused by a
+    // resource lock or held by the budget, and none of that may happen to
+    // the order that ends the host's work.
+    FinalTask final_task = 5;
+    FinalCommit final_commit = 6;
   }
 }
 
@@ -599,6 +607,10 @@ message UnitAction {
     OPERATION_STOP = 2;
     OPERATION_RESTART = 3;
     OPERATION_RELOAD = 4;
+    // Clearing the failed state of a unit. It changes no process: only what
+    // the host says about the unit, so the next failure is told from the
+    // one the operator has already seen.
+    OPERATION_RESET_FAILED = 5;
   }
   string unit = 1;
   Operation operation = 2;
@@ -610,6 +622,10 @@ message ReadJournal {
   // The syslog priority: 0 emerg ... 7 debug. Empty means no filter.
   optional uint32 max_priority = 3;
   string since = 4;
+  // AfterCursor starts the read right after a journal position: the unit
+  // detail view hands over the cursor of its last line so the Logs page
+  // continues where the detail ended.
+  string after_cursor = 5;
 }
 
 // SystemReboot restarts the host. A reboot is a separate campaign phase, not
@@ -650,6 +666,10 @@ message PowerResult {
 message ReadUnitStatus {
   repeated string units = 1;
   bool all = 2;
+  // Detail asks for the full picture of the named units: dependencies,
+  // drop-ins, the last journal lines. It costs several processes per unit,
+  // so a health check does not order it by accident.
+  bool detail = 3;
 }
 
 // DomainEnroll joins the host to the directory domain.
@@ -751,6 +771,39 @@ message PackageRepairResult {
 
 message CancelTask {
   string task_id = 1;
+  string reason = 2;
+}
+
+// FinalTask tells the agent the host is leaving the fleet. From this message
+// on the agent refuses every new task, drops its secret leases and lets the
+// tasks under way finish; then it answers with FinalReady.
+message FinalTask {
+  string reason = 1;
+  // Whether the commit that follows will wipe the identity on the host. The
+  // agent learns it now so that it can say in FinalReady whether it is able
+  // to - the helper may be absent on a host that only reads.
+  bool local_identity_wipe = 2;
+  // How long the agent may wait for the running tasks before it answers
+  // anyway. Zero means the agent's default.
+  uint32 grace_seconds = 3;
+}
+
+// FinalReady is the agent's answer to FinalTask.
+message FinalReady {
+  // The attempts still running when the agent stopped waiting. Empty means
+  // the host is idle; a non-empty list is not a refusal - the panel goes on
+  // and records which operations were cut short.
+  repeated string running_tasks = 1;
+  // Whether the secret leases were dropped: no secret is fetched from now
+  // on, and none is kept in memory.
+  bool leases_dropped = 2;
+}
+
+// FinalCommit closes the handshake. The panel has revoked the certificates
+// by now; the agent wipes its identity and journal, disables its service and
+// exits. Without a wipe it only exits.
+message FinalCommit {
+  bool local_identity_wipe = 1;
   string reason = 2;
 }
 
@@ -1071,6 +1124,9 @@ message ScheduleAction {
     OPERATION_REMOVE = 3;
     OPERATION_RUN_NOW = 4;
     OPERATION_READ = 5;
+    // A preview of the next runs of an expression, computed on the host in
+    // its time zone. Nothing is written.
+    OPERATION_PREVIEW = 6;
   }
   Operation operation = 1;
   string id = 2;
@@ -1085,6 +1141,10 @@ message ScheduleAction {
 message ScheduleResult {
   bytes snapshot = 1;
   string message = 2;
+  // Preview is the JSON answer of schedule.preview: the expression, the
+  // host time zone and the next runs. Separate from the snapshot, because
+  // a preview is not the state of the host.
+  bytes preview = 3;
 }
 
 // NetworkAction describes a change of the host network configuration. Every
@@ -1873,6 +1933,52 @@ message UnitStatusResult {
   // Truncated means a listing cut short by the limit. A cut list without
   // this marker would look full.
   bool truncated = 2;
+  // Details carries the full picture of the units read with detail = true.
+  // Such a read leaves units empty: the detail of one unit is not a listing
+  // of the host and must not replace one.
+  repeated UnitDetail details = 3;
+}
+
+// UnitDetail is the full picture of one unit: what it depends on, what
+// starts it, what overrides its file and what it last wrote to the journal.
+message UnitDetail {
+  UnitState state = 1;
+  string description = 2;
+  string fragment_path = 3;
+  // The dependency lists, as systemd names them.
+  repeated string requires = 4;
+  repeated string wants = 5;
+  repeated string after = 6;
+  repeated string before = 7;
+  repeated string binds_to = 8;
+  repeated string part_of = 9;
+  // TriggeredBy lists the socket, timer and path units that activate this
+  // unit; triggers lists what this unit activates.
+  repeated string triggered_by = 10;
+  repeated string triggers = 11;
+  repeated UnitDropIn drop_ins = 12;
+  // ExecMainStart is the start time of the main process: RFC 3339 when
+  // the host's words could be read as a date, otherwise the words
+  // themselves. Empty for a unit without a running main process.
+  string exec_main_start = 13;
+  // The last journal lines of the unit and the cursor of the last one, so
+  // a longer read can continue from there.
+  repeated string journal_lines = 14;
+  string journal_cursor = 15;
+  bool journal_truncated = 16;
+  // JournalError says why the journal could not be read; the rest of the
+  // detail stands on its own.
+  string journal_error = 17;
+}
+
+// UnitDropIn is one override file with its content.
+message UnitDropIn {
+  string path = 1;
+  string content = 2;
+  bool truncated = 3;
+  // Error says why the content could not be read - a path outside the
+  // allowed directories or a file the agent may not open.
+  string error = 4;
 }
 
 

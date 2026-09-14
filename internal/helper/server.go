@@ -46,6 +46,9 @@ type Server struct {
 	lookupAccount func(name string) (accountRecord, error)
 	accountTool   accountTool
 	hostsFile     string
+	// agentStateDir is the directory the final wipe clears. Empty means the
+	// agent's real one; a test points it at a directory of its own.
+	agentStateDir string
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -282,6 +285,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 
 	case *helperv1.HelperRequest_Hostname:
 		return s.applyHostname(ctx, request, action.Hostname)
+
+	case *helperv1.HelperRequest_FinalWipe:
+		return s.applyFinalWipe(ctx, request, action.FinalWipe)
 
 	case *helperv1.HelperRequest_PackageRepair:
 		return s.repairPackages(ctx, request, action.PackageRepair)
@@ -541,6 +547,8 @@ var unitOperations = map[helperv1.UnitActionRequest_Operation]systemd.Operation{
 	helperv1.UnitActionRequest_OPERATION_DISABLE: systemd.OperationDisable,
 	helperv1.UnitActionRequest_OPERATION_MASK:    systemd.OperationMask,
 	helperv1.UnitActionRequest_OPERATION_UNMASK:  systemd.OperationUnmask,
+	// Clearing the failed state touches no process, only the record.
+	helperv1.UnitActionRequest_OPERATION_RESET_FAILED: systemd.OperationResetFail,
 }
 
 func reject(code, message string) *helperv1.HelperResponse {

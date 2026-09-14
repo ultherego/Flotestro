@@ -221,7 +221,7 @@ var queryParameters = map[string][]queryParameter{
 		{"environment", "string", ""},
 		{"os_family", "string", ""},
 		{"connection_state", "string", "online, offline, stale or unknown."},
-		{"lifecycle_state", "string", "active, quarantined, retiring or retired."},
+		{"lifecycle_state", "string", "active, quarantined, recovery, retiring or retired."},
 		{"owner", "string", ""},
 		{"maintenance", "boolean", "true keeps the hosts inside a maintenance window now, false those outside one."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},

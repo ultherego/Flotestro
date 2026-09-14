@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -274,6 +275,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
 		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
 		return e.applySchedule(ctx, task, action, payload.Schedule)
+	case opspec.ActionSchedulePreview:
+		return e.previewSchedule(task, payload.Schedule)
 	case opspec.ActionProcessList:
 		return e.listProcesses(ctx, task, payload.ProcessList)
 	case opspec.ActionProcessSignal:
@@ -305,6 +308,12 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 	// every query is a separate process.
 	if payload.All {
 		return e.listUnits(statusCtx, task)
+	}
+	// The full picture of a few units is a separate path as well: it starts
+	// several processes per unit and reads files, and its result is not a
+	// listing of the host.
+	if payload.Detail {
+		return e.detailUnits(statusCtx, task, payload.Units)
 	}
 
 	states := make([]*agentv1.UnitState, 0, len(payload.Units))
@@ -343,6 +352,95 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 		result.Message = "units in a bad state: " + strings.Join(unhealthy, ", ")
 	}
 	return result
+}
+
+// detailUnits reads the full picture of a few units: the dependencies, the
+// drop-ins with their content, the last journal lines and the cursor to
+// continue from.
+//
+// The detail travels in the typed field of the result and, as JSON, on
+// stdout - the channel every result reaches the panel through unchanged.
+// The units list stays empty: the detail of one unit is not a listing of
+// the host and must not replace one. A failed unit is exactly what the
+// operator opens the detail for, so its state is a fact in the payload
+// rather than a failure of the read.
+func (e *TaskExecutor) detailUnits(ctx context.Context, task *agentv1.TaskEnvelope,
+	units []string) *agentv1.TaskResult {
+	details := make([]systemd.UnitDetail, 0, len(units))
+	typed := make([]*agentv1.UnitDetail, 0, len(units))
+	for _, unit := range units {
+		detail, err := systemd.ShowDetail(ctx, unit)
+		if err != nil {
+			status := agentv1.TaskResult_STATUS_REJECTED
+			if ctx.Err() != nil {
+				status = agentv1.TaskResult_STATUS_TIMED_OUT
+			}
+			return rejected(status, RejectInvalidRequest, err.Error())
+		}
+		details = append(details, detail)
+		typed = append(typed, unitDetailToAgent(detail))
+	}
+
+	encoded, err := json.Marshal(map[string]any{"kind": "unit_detail", "units": details})
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError, err.Error())
+	}
+	// A cut JSON document is no document at all, so the limit refuses the
+	// result instead of trimming it.
+	limit := int(task.GetLimits().GetMaxOutputBytes())
+	if limit > 0 && len(encoded) > limit {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, "output_too_large",
+			fmt.Sprintf("the unit detail takes %d bytes, the task allows %d", len(encoded), limit))
+	}
+	return &agentv1.TaskResult{
+		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
+		ExitCode: 0,
+		Stdout:   encoded,
+		Detail: &agentv1.TaskResult_UnitStatus{
+			UnitStatus: &agentv1.UnitStatusResult{Details: typed},
+		},
+	}
+}
+
+// unitDetailToAgent translates the detail into the contract message.
+func unitDetailToAgent(detail systemd.UnitDetail) *agentv1.UnitDetail {
+	dropIns := make([]*agentv1.UnitDropIn, 0, len(detail.DropIns))
+	for _, dropIn := range detail.DropIns {
+		dropIns = append(dropIns, &agentv1.UnitDropIn{
+			Path:      dropIn.Path,
+			Content:   dropIn.Content,
+			Truncated: dropIn.Truncated,
+			Error:     dropIn.Error,
+		})
+	}
+	return &agentv1.UnitDetail{
+		State: &agentv1.UnitState{
+			Name:          detail.State.Name,
+			LoadState:     detail.State.LoadState,
+			ActiveState:   detail.State.ActiveState,
+			SubState:      detail.State.SubState,
+			UnitFileState: detail.State.UnitFileState,
+			Result:        detail.State.Result,
+			MainPid:       detail.State.MainPID,
+			NRestarts:     detail.State.NRestarts,
+		},
+		Description:      detail.Description,
+		FragmentPath:     detail.FragmentPath,
+		Requires:         detail.Requires,
+		Wants:            detail.Wants,
+		After:            detail.After,
+		Before:           detail.Before,
+		BindsTo:          detail.BindsTo,
+		PartOf:           detail.PartOf,
+		TriggeredBy:      detail.TriggeredBy,
+		Triggers:         detail.Triggers,
+		DropIns:          dropIns,
+		ExecMainStart:    detail.ExecMainStart,
+		JournalLines:     detail.JournalLines,
+		JournalCursor:    detail.JournalCursor,
+		JournalTruncated: detail.JournalTruncated,
+		JournalError:     detail.JournalError,
+	}
 }
 
 // rebootHost orders a restart through the helper. The result is sent back
@@ -464,6 +562,9 @@ var helperOperations = map[opspec.ActionType]helperv1.UnitActionRequest_Operatio
 	opspec.ActionUnitStop:    helperv1.UnitActionRequest_OPERATION_STOP,
 	opspec.ActionUnitRestart: helperv1.UnitActionRequest_OPERATION_RESTART,
 	opspec.ActionUnitReload:  helperv1.UnitActionRequest_OPERATION_RELOAD,
+	// Clearing the failed state goes through the helper like every other
+	// unit verb: systemctl reset-failed needs the manager's consent.
+	opspec.ActionUnitResetFailed: helperv1.UnitActionRequest_OPERATION_RESET_FAILED,
 }
 
 // checkPreconditions checks whether the base state has changed since the
@@ -1043,6 +1144,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionScheduleRemove
 		case agentv1.ScheduleAction_OPERATION_RUN_NOW:
 			kind = opspec.ActionScheduleRunNow
+		case agentv1.ScheduleAction_OPERATION_PREVIEW:
+			kind = opspec.ActionSchedulePreview
 		}
 		return kind, opspec.Payload{Schedule: &opspec.SchedulePayload{
 			ID:         schedule.GetId(),
@@ -1086,17 +1189,19 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_ReadUnitStatus:
 		return opspec.ActionUnitStatus, opspec.Payload{
 			UnitStatus: &opspec.UnitStatusPayload{
-				Units: action.ReadUnitStatus.GetUnits(),
-				All:   action.ReadUnitStatus.GetAll(),
+				Units:  action.ReadUnitStatus.GetUnits(),
+				All:    action.ReadUnitStatus.GetAll(),
+				Detail: action.ReadUnitStatus.GetDetail(),
 			},
 		}, nil
 
 	case *agentv1.TaskEnvelope_ReadJournal:
 		request := action.ReadJournal
 		payload := opspec.JournalPayload{
-			Unit:  request.GetUnit(),
-			Lines: request.GetLines(),
-			Since: request.GetSince(),
+			Unit:        request.GetUnit(),
+			Lines:       request.GetLines(),
+			Since:       request.GetSince(),
+			AfterCursor: request.GetAfterCursor(),
 		}
 		if request.MaxPriority != nil {
 			priority := request.GetMaxPriority()
@@ -1114,6 +1219,9 @@ var unitActionTypes = map[agentv1.UnitAction_Operation]opspec.ActionType{
 	agentv1.UnitAction_OPERATION_STOP:    opspec.ActionUnitStop,
 	agentv1.UnitAction_OPERATION_RESTART: opspec.ActionUnitRestart,
 	agentv1.UnitAction_OPERATION_RELOAD:  opspec.ActionUnitReload,
+	// The map is the whole set of verbs the agent accepts: a verb outside it
+	// is refused, not guessed.
+	agentv1.UnitAction_OPERATION_RESET_FAILED: opspec.ActionUnitResetFailed,
 }
 
 func timeoutOf(task *agentv1.TaskEnvelope, action opspec.ActionType) time.Duration {

@@ -396,7 +396,7 @@ function RuleValue({ rule, onChange }: { rule: Rule; onChange: (value: string) =
       return (
         <select value={rule.value} onChange={(e) => onChange(e.target.value)}>
           <option value="">{t("pick a state…")}</option>
-          {["active", "quarantined", "retiring", "retired"].map((state) => <option key={state} value={state}>{t(state)}</option>)}
+          {["active", "quarantined", "recovery", "retiring", "retired"].map((state) => <option key={state} value={state}>{t(state)}</option>)}
         </select>
       );
     case "group":

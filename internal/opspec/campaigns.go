@@ -1,5 +1,10 @@
 package opspec
 
+import (
+	"fmt"
+	"strings"
+)
+
 // campaignModes is the registry of bulk-operation modes.
 //
 // The registry is an explicit list, not a property derived from risk: an
@@ -20,6 +25,9 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionUnitReload:    CampaignSamePayload,
 	ActionUnitEnableSet: CampaignSamePayload,
 	ActionUnitMaskSet:   CampaignSamePayload,
+	// Clearing the failed state of the same unit everywhere after a fleet
+	// wide fix is the very case of the same payload meaning the same thing.
+	ActionUnitResetFailed: CampaignSamePayload,
 
 	// Scheduled jobs: an entry is a declaration, not a diff of state.
 	ActionScheduleEnsure:  CampaignSamePayload,
@@ -97,6 +105,10 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionPackageRepair:          CampaignSpecialized,
 	ActionNetworkRollback:        CampaignSpecialized,
 	ActionFirewallRulesetRestore: CampaignSpecialized,
+	// A fleet remediation: every host gets its own plan of typed steps,
+	// computed in the panel from its findings, and the engine drives the
+	// plan through the remediation runner instead of creating one task.
+	ActionSecurityRemediate: CampaignSpecialized,
 }
 
 // PlanningAction says which operation computes the plan for a mutating one.
@@ -225,8 +237,42 @@ func CampaignExclusionReason(action ActionType) string {
 	case ActionBackupRestore:
 		return "a restore unpacks old state onto a running system and needs an " +
 			"operator present at every host; a campaign does not queue it"
+	case ActionSecurityRemediate:
+		// The generic order has no findings to plan from. The composite is
+		// ordered from the security view, which computes the plan of every
+		// host and hands the campaign the whole set for one approval.
+		return "a fleet remediation is ordered from the security view, where the " +
+			"per-host plans are computed from the findings; a generic campaign order " +
+			"has nothing to plan them from"
 	}
 	return ""
+}
+
+// ValidateRemediationOrder checks the payload of a fleet remediation as the
+// security view orders it.
+//
+// Validate refuses the composite outright, because it must not become a
+// task on one host. The campaign that carries it needs the list of checks
+// and nothing else: the steps live in the per-host plans, not in the
+// payload.
+func ValidateRemediationOrder(payload Payload) error {
+	if payload.Security == nil || len(payload.Security.CheckIDs) == 0 {
+		return fmt.Errorf("a fleet remediation names the checks to fix; there is no fix-all")
+	}
+	if payload.Security.Mode != "" {
+		return fmt.Errorf("a fleet remediation carries the checks alone; the MAC mode is a step, not the order")
+	}
+	seen := map[string]bool{}
+	for _, id := range payload.Security.CheckIDs {
+		if strings.TrimSpace(id) == "" {
+			return fmt.Errorf("a check identifier is empty")
+		}
+		if seen[id] {
+			return fmt.Errorf("the check %s is named twice", id)
+		}
+		seen[id] = true
+	}
+	return nil
 }
 
 // FullCoverageReason names the operations that must not be carried out on
@@ -266,9 +312,11 @@ func ExecutableMode(action ActionType) bool {
 		return PlanningAction(action) != ""
 	case CampaignSpecialized:
 		// A reboot has its own phase in the engine: a new boot ID and a check
-		// of the units after the host comes back. The other specialised
-		// operations do not have one yet.
-		return action == ActionSystemReboot
+		// of the units after the host comes back. A fleet remediation has
+		// one too: the engine starts the host's plan of steps and settles the
+		// host when the plan settles. The other specialised operations do
+		// not have one yet.
+		return action == ActionSystemReboot || action == ActionSecurityRemediate
 	}
 	return false
 }

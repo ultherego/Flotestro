@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"os"
@@ -217,6 +218,14 @@ func main() {
 		// panel learns from whether the agent really speaks to the gateway.
 		State: agent.NewStateWriter(*stateDir, identity.HostID),
 	}); err != nil {
+		// A decommission is the panel ending this host's membership: the
+		// helper has wiped the identity and disabled the service, and the
+		// process leaves cleanly rather than as a failed unit for systemd
+		// to restart.
+		if errors.Is(err, agent.ErrDecommissioned) {
+			log.Warn("the host was decommissioned; the agent ends", "host_id", identity.HostID)
+			return
+		}
 		log.Error("the agent ended with an error", "err", err)
 		os.Exit(1)
 	}

@@ -51,6 +51,10 @@ export type Host = {
   // list; a host without tags has an empty one.
   tags: string[];
   lifecycle_state: string;
+  // The decision behind a state other than active: the reason given and
+  // when it was taken. Absent for a host that has always been active.
+  lifecycle_reason?: string;
+  lifecycle_changed_at?: string;
   os_family?: string;
   os_distribution?: string;
   os_version?: string;
@@ -139,6 +143,25 @@ export type FleetSummary = {
   latest_agent_version?: string;
   agent_certificates_expiring?: number;
   degraded_relays?: number;
+};
+
+/**
+ * What a decommission ended with. remote_cleanup_unconfirmed is the honest
+ * part: the host is retired either way, but only a host that answered the
+ * final task has wiped its identity - one without a session, or silent
+ * past the deadline, may still hold its files.
+ */
+export type DecommissionOutcome = {
+  host_id: string;
+  lifecycle_state: string;
+  reason: string;
+  phase: "committed" | "no_session" | "timeout";
+  remote_cleanup_unconfirmed: boolean;
+  running_tasks: string[];
+  leases_dropped: boolean;
+  jobs_canceled: number;
+  certificates_revoked: number;
+  session_closed: boolean;
 };
 
 export type Job = {
@@ -832,4 +855,130 @@ export type CampaignReportOrigin = {
   plan_set_hash?: string;
   approved_by?: string;
   created_by?: string;
+};
+
+/** The hosts of a read fan-out by state: what waits, what runs, what came back and what did not. */
+export type ReadFanOutCounts = {
+  queued: number;
+  running: number;
+  succeeded: number;
+  failed: number;
+};
+
+/**
+ * A diagnostic read ordered on many hosts at once. Not a campaign: nothing
+ * changes and nothing is approved. One ordinary job per host carries the
+ * result, and the fan-out is the row that groups them.
+ */
+export type ReadFanOut = {
+  id: string;
+  action: string;
+  payload: Record<string, unknown>;
+  created_by: string;
+  reason?: string;
+  created_at: string;
+  host_count: number;
+  counts: ReadFanOutCounts;
+};
+
+/** One host of a fan-out: its job, and what the job brought back. */
+export type ReadFanOutHost = {
+  job_id: string;
+  host_id: string;
+  hostname: string;
+  state: string;
+  error_code?: string;
+  message?: string;
+  finished_at?: string;
+  truncated?: boolean;
+  /** The lines of a line read, as the host gave them. */
+  lines?: string[];
+  /** The typed result of a structured read, as the job stored it. */
+  detail?: Record<string, unknown>;
+  /** The inventory state the read refreshed, for reads that answer there. */
+  snapshot?: Record<string, unknown>;
+};
+
+/** One line of the merged timeline; `at` is set when the line carries a timestamp. */
+export type ReadTimelineLine = {
+  host_id: string;
+  hostname: string;
+  at?: string;
+  line: string;
+};
+
+/** The lines of one host that carry no timestamp, grouped under the timeline. */
+export type ReadUntimedLines = {
+  host_id: string;
+  hostname: string;
+  lines: string[];
+};
+
+/** A matched host the fan-out did not reach, with the reason. */
+export type ReadSkippedHost = {
+  host_id: string;
+  hostname: string;
+  reason: string;
+  message: string;
+};
+
+/** A fan-out with its hosts and the merged result. */
+export type ReadFanOutView = ReadFanOut & {
+  /** How the result merges: a timeline of lines, or a typed result per host. */
+  kind: "timeline" | "structured";
+  hosts: ReadFanOutHost[];
+  timeline?: ReadTimelineLine[];
+  untimed?: ReadUntimedLines[];
+  skipped?: ReadSkippedHost[];
+};
+
+/** One step of a fleet remediation plan: a typed operation of the module that owns the finding. */
+export type RemediationStep = {
+  position: number;
+  check_id: string;
+  check_version: number;
+  action_type: string;
+  payload?: unknown;
+  lock_class?: string;
+  requires_reboot: boolean;
+  state?: string;
+};
+
+/** Hosts that get the same steps: one change, however many hosts. */
+export type RemediationPlanGroup = {
+  plan_hash: string;
+  steps: RemediationStep[];
+  changes: string[];
+  count: number;
+  hosts: { host_id: string; hostname: string }[];
+};
+
+/** A host of the remediation snapshot that gets no plan, with the reason. */
+export type RemediationExcludedHost = {
+  host_id: string;
+  hostname: string;
+  reason: string;
+  message: string;
+};
+
+/**
+ * What a fleet remediation would do: the per-host plans grouped by their
+ * steps, and the hosts left out. The order recomputes the same shape and
+ * records it as the campaign's plan set.
+ */
+export type RemediationPreview = {
+  check_ids: string[];
+  hosts: number;
+  eligible: number;
+  groups: RemediationPlanGroup[];
+  excluded: RemediationExcludedHost[];
+  notes?: { reason: string; count: number; sample: string[] }[];
+  generated_at: string;
+};
+
+/** The answer to a fleet remediation order: the campaign, awaiting approval, with its plan groups. */
+export type RemediationOrder = {
+  campaign: Campaign;
+  groups: RemediationPlanGroup[];
+  excluded: RemediationExcludedHost[];
 };

@@ -591,7 +591,16 @@ func run() error {
 	// month, the trail after the configured retention if there is one, and
 	// the expired browser sessions with their abandoned logins alongside.
 	go housekeeping.New(pool, log, housekeeping.Options{Audit: *auditRetention}).
-		Also("web sessions", authzStore.PurgeExpired).Run(ctx)
+		Also("web sessions", authzStore.PurgeExpired).
+		// A host whose recovery order expired unused comes back to active on
+		// the same clock: nobody revoked the order, so nothing else would.
+		Also("lapsed recoveries", func(ctx context.Context) error {
+			lapsed, err := hostStore.LapseRecoveries(ctx)
+			if len(lapsed) > 0 {
+				log.Info("hosts came back from a lapsed recovery", "hosts", len(lapsed))
+			}
+			return err
+		}).Run(ctx)
 	if *auditRetention > 0 {
 		log.Info("the audit trail has a retention", "retention", auditRetention.String())
 	}

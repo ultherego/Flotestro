@@ -68,6 +68,10 @@ message HelperRequest {
     // Renaming the host: hostnamectl plus the entries of /etc/hosts that
     // name the old hostname.
     HostnameRequest hostname = 50;
+    // The end of the host's membership in the fleet: the identity and the
+    // journal are removed and the agent service is disabled. The agent is
+    // unprivileged and cannot do any of it itself.
+    FinalWipeRequest final_wipe = 51;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -201,6 +205,8 @@ message UnitActionRequest {
     OPERATION_DISABLE = 6;
     OPERATION_MASK = 7;
     OPERATION_UNMASK = 8;
+    // Clearing the failed state: no process is touched, only the record.
+    OPERATION_RESET_FAILED = 9;
   }
   string unit = 1;
   Operation operation = 2;
@@ -250,6 +256,7 @@ message HelperResponse {
   DockerLogsResult docker_logs_result = 37;
   HostnameResult hostname_result = 38;
   SmartResult smart_result = 39;
+  FinalWipeResult final_wipe_result = 40;
 }
 
 // DockerReadRequest describes what to read from the engine. The scope is
@@ -1068,6 +1075,23 @@ message HostnameResult {
   string current = 2;
   bool changed = 3;
   bool hosts_file_updated = 4;
+}
+
+// FinalWipeRequest ends the host's membership in the fleet. The helper
+// removes the identity store and the idempotency journal of the agent,
+// disables flotestro-agent.service and schedules its stop for after the
+// reply - the agent has to hear the answer before its process ends. The
+// request names no path: the helper runs as root and removes only what it
+// knows to be the agent's.
+message FinalWipeRequest {
+  string reason = 1;
+}
+
+message FinalWipeResult {
+  // The paths that were removed, so the agent can log what is gone.
+  repeated string removed = 1;
+  bool service_disabled = 2;
+  bool stop_scheduled = 3;
 }
 
 // SmartResult carries what smartctl reports about one device. A device

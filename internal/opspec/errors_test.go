@@ -17,6 +17,7 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 		}
 	}
 	for _, excluded := range []string{"capability_missing", "maintenance", "offline", "conflict", "quarantined",
+		"recovery", "retiring", "retired", "host_retiring",
 		"skipped_offline", "offline_deadline", "plan_changed_offline"} {
 		guide, ok := ErrorGuideFor(excluded)
 		if !ok || guide.CountsAsFailure {

@@ -286,6 +286,7 @@ func (s *AgentService) Connect(ctx context.Context,
 
 	defer func() {
 		s.registry.Remove(hostID, session.ID)
+		session.Finish()
 		// The context of the request is already cancelled, so the cleanup has
 		// one of its own.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
@@ -514,6 +515,16 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 				s.log.Debug("the progress was not broadcast",
 					"host_id", hostID, "task_id", progress.GetTaskId(), "err", err)
 			}
+		}
+		return nil
+
+	case *agentv1.AgentMessage_FinalReady:
+		// The answer to the final task goes to the handshake waiting on this
+		// session. An answer nobody asked for is noted: it means an agent that
+		// stopped working on somebody else's word.
+		if !session.AcceptFinalReady(payload.FinalReady) {
+			s.log.Warn("an unsolicited FinalReady from the agent",
+				"host_id", hostID, "session_id", session.ID)
 		}
 		return nil
 
@@ -1766,6 +1777,25 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 				},
 			})
 		}
+		// A recovery ends when the new key has proven it works - that is,
+		// here, with the first session it opened. The store checks that the
+		// certificate is one issued after the order: the old key connecting
+		// during the overlap closes nothing.
+		recovered, err := s.hosts.LeaveRecovery(ctx, session.HostID, fingerprint)
+		if err != nil {
+			s.log.Error("the recovery state was not left", "host_id", session.HostID, "err", err)
+		} else if recovered {
+			s.log.Info("the identity of the host was recovered", "host_id", session.HostID)
+			s.audit.Record(ctx, audit.Event{
+				ActorType: audit.ActorAgent, ActorID: session.HostID,
+				Action: "host.identity.recovered", TargetType: "host", TargetID: session.HostID,
+				Outcome: audit.OutcomeSuccess,
+				Detail: map[string]any{
+					"state": hosts.StateActive, "session_id": session.ID,
+					"cert_fingerprint": hex.EncodeToString(fingerprint),
+				},
+			})
+		}
 	}
 
 	// The older sessions of this host are closed in the database at once: a row
@@ -2105,7 +2135,7 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		return "", "", connect.NewError(connect.CodePermissionDenied,
 			errors.New("the host does not belong to the site of the relay"))
 	}
-	if !hosts.Active(host.LifecycleState) {
+	if !hosts.Connectable(host.LifecycleState, host.LifecycleChangedAt, time.Now()) {
 		s.denied(ctx, asserted, "lifecycle_"+host.LifecycleState)
 		return "", "", connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("the host is in the state %s", host.LifecycleState))
@@ -2127,15 +2157,60 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("the identity does not match the certificate"))
-	case !hosts.Active(status.LifecycleState):
+	case status.LifecycleState == hosts.StateRetired:
+		// A retired host decommissioned while offline may have kept a valid
+		// certificate when the operator chose not to revoke blind. The first
+		// contact is where the certificate is revoked: the host has shown it
+		// is alive and holds a key that is no longer its.
+		s.revokeOnContact(ctx, hostID)
+		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
+		return connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("the host is in the state %s", status.LifecycleState))
+	case !hosts.Connectable(status.LifecycleState, status.LifecycleChangedAt, time.Now()):
 		// A quarantine, a withdrawal in progress and a withdrawal differ for
 		// the operator, but for a connection they mean the same: this host has
-		// no right to work.
+		// no right to work. A recovery is the exception for the length of the
+		// overlap: the old key still reads, so that the operator does not
+		// lose the host before the new key works.
 		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
 		return connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("the host is in the state %s", status.LifecycleState))
 	}
 	return nil
+}
+
+// revokeOnContact revokes the live certificates of a retired host that has
+// just tried to connect. Nothing to do is the usual case - the decommission
+// revoked them - and is not reported.
+func (s *AgentService) revokeOnContact(ctx context.Context, hostID string) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		s.log.Error("the certificates of the retired host were not revoked", "host_id", hostID, "err", err)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	revoked, err := s.hosts.RevokeCertificates(ctx, tx, hostID, "retired host made contact")
+	if err == nil && revoked > 0 {
+		err = s.audit.RecordTx(ctx, tx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: hostID,
+			Action: "host.certificate.revoke", TargetType: "host", TargetID: hostID,
+			Outcome: audit.OutcomeSuccess,
+			Detail: map[string]any{
+				"reason": "retired_host_contact", "certificates_revoked": revoked,
+			},
+		})
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		s.log.Error("the certificates of the retired host were not revoked", "host_id", hostID, "err", err)
+		return
+	}
+	if revoked > 0 {
+		s.log.Warn("a retired host made contact with a live certificate; it was revoked",
+			"host_id", hostID, "revoked", revoked)
+	}
 }
 
 // nullableRelay returns nil for a direct connection. An empty string in the

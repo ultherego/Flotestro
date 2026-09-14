@@ -45,7 +45,11 @@ const (
 	ActionUnitStop    ActionType = "unit.stop"
 	ActionUnitRestart ActionType = "unit.restart"
 	ActionUnitReload  ActionType = "unit.reload"
-	ActionReadJournal ActionType = "journal.read"
+	// Clearing the failed state of a unit touches no process: it changes what
+	// the host says about the unit, so the next failure is told from the one
+	// the operator has already seen.
+	ActionUnitResetFailed ActionType = "unit.reset_failed"
+	ActionReadJournal     ActionType = "journal.read"
 	// Reading a log file is limited by the host administrator's allowlist.
 	ActionReadLogFile ActionType = "logfile.read"
 	// A live view of the journal. The stream is short-lived and bounded from
@@ -100,6 +104,12 @@ const (
 	// onto a typed operation of the module responsible for that thing.
 	ActionSecurityScan   ActionType = "security.scan"
 	ActionSELinuxModeSet ActionType = "selinux.mode.set"
+	// A fleet remediation is the composite of the module operations that
+	// remove the chosen findings, run host by host as a campaign. It is
+	// never delivered to a host as one task: the campaign records a plan of
+	// typed steps per host, and every step goes out as the task of its own
+	// module, with that module's permission, risk and lock.
+	ActionSecurityRemediate ActionType = "security.remediate"
 	// Reloading the audit rules is a separate operation, because a rule that
 	// is written and not loaded records nothing, and the auditd unit on some
 	// distributions refuses a manual restart.
@@ -150,6 +160,7 @@ const (
 	ActionScheduleDisable ActionType = "schedule.disable"
 	ActionScheduleRemove  ActionType = "schedule.remove"
 	ActionScheduleRunNow  ActionType = "schedule.run_now"
+	ActionSchedulePreview ActionType = "schedule.preview"
 
 	// The full package list is fetched on request rather than in every
 	// inventory cycle: it is a few hundred kilobytes per host and changes
@@ -374,6 +385,9 @@ type Spec struct {
 	// connected when its turn comes. A campaign may tighten it, never
 	// loosen it.
 	OfflinePolicy OfflinePolicy `json:"offline_policy"`
+	// FanOutLimit says how many hosts one diagnostic read may cover at
+	// once. Zero means a read kept to one host - and every mutation.
+	FanOutLimit int `json:"fanout_limit"`
 	// RequiresPlan marks an operation that must not be ordered without a plan
 	// approved by a human. The plan hash binds the approval to one specific
 	// diff.
@@ -405,6 +419,7 @@ func (a ActionType) Describe() Spec {
 		LockClass:      spec.lockClass,
 		CampaignMode:   a.CampaignMode(),
 		OfflinePolicy:  a.OfflinePolicy(),
+		FanOutLimit:    a.FanOutLimit(),
 		RequiresPlan:   spec.requiresPlan,
 		CancelMode:     declared.CancelMode,
 		RetryClass:     declared.RetryClass,
@@ -592,6 +607,10 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
 	ActionUnitReload: {mutating: true, capability: "systemd", permission: "unit.reload",
 		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+	// Clearing the failed state runs nothing and stops nothing; it is a
+	// change of the record, so it ranks with starting a unit.
+	ActionUnitResetFailed: {mutating: true, capability: "systemd", permission: "unit.reset_failed",
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// Creating a scheduled entry means something will run without the
@@ -606,6 +625,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Running now executes the same command outside the schedule.
 	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
 		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits},
+	// A preview of the next runs of an expression, computed on the host in
+	// its time zone. The panel could compute the dates itself, but it knows
+	// neither the host's zone nor its clock; the numbers come from the host.
+	ActionSchedulePreview: {mutating: false, capability: "schedules", permission: "schedule.preview",
+		timeoutSeconds: 30, risk: RiskLow, maxOutputBytes: 64 << 10},
 
 	// Reading NetworkManager profiles before a change. The plan does not
 	// touch the host.
@@ -723,6 +747,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// nothing.
 	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+	// The composite carries no adapter requirement and no lock of its own:
+	// both belong to the steps. Its risk is the highest, because one order
+	// changes many hosts through operations that may each cut off access;
+	// the permission adds to those of the steps rather than replacing them.
+	ActionSecurityRemediate: {mutating: true, capability: "", permission: "security.remediate",
+		timeoutSeconds: 3600, risk: RiskCritical, lockClass: LockNone},
 	// Reloading the audit rules changes what the host records. It is
 	// reversible and local, but it is not a read.
 	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
@@ -1067,8 +1097,21 @@ func validateJournalPayload(payload *JournalPayload) error {
 	if payload.Since != "" && !periodPattern.MatchString(payload.Since) {
 		return fmt.Errorf("invalid time range %q", payload.Since)
 	}
+	// A cursor is what journalctl printed: a handful of key=value pairs
+	// separated by semicolons. Anything else is not a cursor.
+	if payload.AfterCursor != "" && !cursorPattern.MatchString(payload.AfterCursor) {
+		return fmt.Errorf("invalid journal cursor")
+	}
 	return nil
 }
+
+// cursorPattern matches a journal cursor as journalctl prints it with
+// --show-cursor: "s=...;i=...;b=...;m=...;t=...;x=...". The length bound
+// keeps a task argument from growing into something else.
+var cursorPattern = regexp.MustCompile(`^[A-Za-z0-9=;:+/._-]{1,512}$`)
+
+// maxDetailUnits bounds one detail read of units.
+const maxDetailUnits = 5
 
 // periodPattern allows the formats journalctl accepts: a timestamp, a
 // relative expression and keywords.
@@ -1415,6 +1458,11 @@ type JournalPayload struct {
 	// stream without an upper bound would keep a process on the host
 	// forever, including when nobody is watching any more.
 	FollowSeconds uint32 `json:"follow_seconds,omitempty"`
+	// AfterCursor starts the read right after a journal position. The unit
+	// detail view hands over the cursor of its last line, so the Logs page
+	// continues where the detail ended instead of showing the same lines
+	// again.
+	AfterCursor string `json:"after_cursor,omitempty"`
 }
 
 // PackageChangePayload describes an install, a removal or a hold.
@@ -1521,6 +1569,11 @@ type UnitStatusPayload struct {
 	// All orders the full list. Without it an empty list of units is an
 	// error.
 	All bool `json:"all,omitempty"`
+	// Detail asks for the full picture of the named units: dependencies,
+	// drop-ins with their content, the last journal lines. It costs several
+	// processes per unit, so a health check does not get it by accident,
+	// and it is limited to a few units at once.
+	Detail bool `json:"detail,omitempty"`
 }
 
 // UnitToggle turns a property of a unit on or off.
@@ -1612,6 +1665,10 @@ type InventoryPayload struct {
 type SecurityPayload struct {
 	// Mode is the mode of mandatory access control.
 	Mode string `json:"mode,omitempty"`
+	// CheckIDs names the compliance checks a fleet remediation removes the
+	// findings of. Only the composite security.remediate carries them; an
+	// empty list is not "everything", because there is no fix-all.
+	CheckIDs []string `json:"check_ids,omitempty"`
 }
 
 // MonitoringPayload describes a probe carried out from the host.
@@ -2513,6 +2570,20 @@ func Validate(action ActionType, payload Payload) error {
 	case ActionDockerEvents:
 		return checkEventsRead(payload.DockerEvents)
 
+	case ActionSchedulePreview:
+		if payload.Schedule == nil {
+			return fmt.Errorf("the operation %s requires a schedule payload", action)
+		}
+		if strings.TrimSpace(payload.Schedule.Expression) == "" {
+			return fmt.Errorf("a preview requires an expression")
+		}
+		// The same parser the host uses: an expression it would refuse is
+		// refused here, with the same words.
+		if _, err := schedules.ParseExpression(payload.Schedule.Expression); err != nil {
+			return fmt.Errorf("schedule expression: %w", err)
+		}
+		return nil
+
 	case ActionScheduleEnsure, ActionScheduleDisable, ActionScheduleRemove, ActionScheduleRunNow:
 		if payload.Schedule == nil {
 			return fmt.Errorf("the operation %s requires a schedule payload", action)
@@ -2803,6 +2874,13 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the operation %s requires a security payload", action)
 		}
 		return security.ValidateMode(payload.Security.Mode)
+
+	case ActionSecurityRemediate:
+		// The composite is never one task on one host: its steps are the
+		// tasks. The security module orders it as a campaign after computing
+		// the plan of every host; ordered anywhere else it is refused.
+		return fmt.Errorf("the operation %s is a fleet remediation: it is ordered from the "+
+			"security view as a campaign of per-host plans, not as a task on one host", action)
 
 	case ActionSystemHostnameSet:
 		if payload.Hostname == nil {
@@ -3160,6 +3238,20 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if len(payload.UnitStatus.Units) > 50 {
 			return fmt.Errorf("the list of units is too long")
+		}
+		// A detail read starts several processes per unit and reads files:
+		// it serves one open row in the panel, not a sweep of the host. Its
+		// names reach journalctl and the file system, so they are checked
+		// here as well as on the host.
+		if payload.UnitStatus.Detail {
+			if len(payload.UnitStatus.Units) > maxDetailUnits {
+				return fmt.Errorf("a detail read takes at most %d units", maxDetailUnits)
+			}
+			for _, unit := range payload.UnitStatus.Units {
+				if err := validateUnitName(unit); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 

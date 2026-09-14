@@ -94,6 +94,12 @@ func assessCandidates(candidates []hosts.Host, action opspec.ActionType,
 			result.close(host, campaigns.TargetIneligible, ReasonQuarantined,
 				"the host is quarantined and accepts no operations")
 			continue
+		case !hosts.Active(host.LifecycleState):
+			// Recovery, retiring and retired: the state is the reason, so
+			// the operator reads which "no" this is.
+			result.close(host, campaigns.TargetIneligible, host.LifecycleState,
+				"the host is in the state "+host.LifecycleState+" and accepts no operations")
+			continue
 		case host.Maintenance.Active(now):
 			result.close(host, campaigns.TargetSkipped, ReasonMaintenance,
 				"the host is in a maintenance window until "+host.Maintenance.Until.Format(time.RFC3339))

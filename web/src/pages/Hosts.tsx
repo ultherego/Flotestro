@@ -168,6 +168,7 @@ export function Hosts() {
               <option value="">{t("lifecycle: any")}</option>
               <option value="active">{t("active")}</option>
               <option value="quarantined">{t("quarantined")}</option>
+              <option value="recovery">{t("recovery")}</option>
               <option value="retiring">{t("retiring")}</option>
               <option value="retired">{t("retired")}</option>
             </select>

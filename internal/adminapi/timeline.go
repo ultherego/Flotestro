@@ -68,7 +68,8 @@ type timelineSource struct {
 // the fleet. They come from the trail like every other audit event, but
 // the timeline shows them as their own kind: a quarantine is not one more
 // line among the tag edits.
-const lifecycleActions = "('host.quarantine', 'host.quarantine.release', 'host.decommission')"
+const lifecycleActions = "('host.quarantine', 'host.quarantine.release', 'host.retiring', 'host.decommission', " +
+	"'host.identity.recovery', 'host.identity.recovered', 'host.identity.recovery.lapsed')"
 
 var timelineSources = []timelineSource{
 	{kind: "job", permission: authz.PermJobRead, query: `

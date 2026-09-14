@@ -6,9 +6,9 @@ import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
 import { api, loadedItems } from "../../lib/api";
 import { bytes } from "../../lib/format";
-import type { Host, HostTimelineItem, HostTimelineKind, HostTimelinePage, Job } from "../../lib/types";
+import type { DecommissionOutcome, Host, HostTimelineItem, HostTimelineKind, HostTimelinePage, Job } from "../../lib/types";
 import {
-  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
   Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -81,7 +81,7 @@ export function Overview() {
                 ? <span className="hm-mono">{host.management_address} ({host.management_address_source})</span>
                 : <span className="badge unknown">{t("unknown")}</span>}
             </Fact>
-            <Fact label={t("Lifecycle state")}>{host.lifecycle_state}</Fact>
+            <Fact label={t("Lifecycle state")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
             <Fact label={t("Reboot required")}><OptionalFlag value={host.reboot_required} /></Fact>
             <Fact label={t("Failed units")}><OptionalNumber value={host.failed_units} /></Fact>
             <Fact label={t("Package database")}>
@@ -117,6 +117,17 @@ export function Overview() {
           ) : (
             <Empty>{t("This host has not reported its hardware yet.")}</Empty>
           )}
+        </Section>
+
+        {/* The trust in the host: its state, the decision behind it, and
+            the one change that cannot be undone. */}
+        <Section
+          title={t("Lifecycle")}
+          description={t("Whether the panel trusts this host, and ending that trust.")}
+          span={12}
+          flush
+        >
+          <Lifecycle host={host} />
         </Section>
 
         <Section title={t("Adapters")} count={(host.capabilities ?? []).length} span={12} flush>
@@ -240,6 +251,175 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
           onCancel={() => setConfirming(false)}
         />
       )}
+    </div>
+  );
+}
+
+/** The state of the host as a badge; the colour says which kind of "no" it is. */
+function LifecycleBadge({ state }: { state: string }) {
+  const t = useT();
+  return <span className={`badge ${lifecycleTone(state)}`} data-testid="lifecycle-state">{t(state)}</span>;
+}
+
+/** What a state means for the operator reading the host. */
+function lifecycleMeaning(t: (text: string) => string, state: string): string {
+  switch (state) {
+    case "active": return t("The host takes operations and secrets, and renews its certificate.");
+    case "quarantined": return t("The host is cut off: no operations, no secrets, no session. Release it once the incident is assessed.");
+    case "recovery": return t("An identity recovery is under way: no operations and no secrets until the new certificate opens its first session. The old certificate may still connect for a day, so the host can be read.");
+    case "retiring": return t("The host is being decommissioned: the panel is waiting for it to finish its work.");
+    case "retired": return t("The trust in this host has ended. It does not come back; its record and history stay.");
+    default: return "";
+  }
+}
+
+/**
+ * The lifecycle of the host: the state with the decision behind it, and the
+ * decommission.
+ */
+function Lifecycle({ host }: { host: Host }) {
+  const t = useT();
+  // The outcome lives here rather than in the form: the form goes away once
+  // the host is retired, and the answer - above all an unconfirmed cleanup
+  // - has to stay on screen after that.
+  const [outcome, setOutcome] = useState<DecommissionOutcome | null>(null);
+  return (
+    <>
+      <Facts>
+        <Fact label={t("State")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
+        <Fact label={t("Since")}>{host.lifecycle_changed_at ? <Time value={host.lifecycle_changed_at} /> : "—"}</Fact>
+        <Fact label={t("Reason")}>{host.lifecycle_reason || "—"}</Fact>
+        <Fact label={t("Meaning")} wide>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
+      </Facts>
+      {outcome && <div className="hm-section-body"><DecommissionResult outcome={outcome} /></div>}
+      {host.lifecycle_state !== "retired" && <DecommissionHost host={host} onDone={setOutcome} />}
+    </>
+  );
+}
+
+/**
+ * Decommissioning the host.
+ *
+ * The end of trust, not the end of history: the record, the inventory and
+ * the audit trail stay. A connected host is asked to finish its work, drop
+ * its secret leases and wipe its identity; a host without a session is
+ * retired without that, and the answer says so - a machine on a shelf must
+ * not be taken for a machine that wiped itself. Critical: the operator
+ * types the hostname and gives a reason, and the order asks for fresh
+ * authentication.
+ */
+function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: DecommissionOutcome) => void }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [wipe, setWipe] = useState(true);
+  const [revokeOffline, setRevokeOffline] = useState(true);
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<DecommissionOutcome>(`/api/v1/hosts/${host.id}/decommission`, body),
+    onSuccess: (result) => {
+      onDone(result);
+      setMessage("");
+      setConfirming(false);
+      setOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => {
+      setConfirming(false);
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const online = host.connection_state === "online";
+
+  return (
+    <div className="hm-section-body">
+      {!open ? (
+        <FormActions>
+          <button className="hm-danger" onClick={() => setOpen(true)}>
+            {t("Decommission host…")}
+          </button>
+        </FormActions>
+      ) : (
+        <Form>
+          <Check checked={wipe} onChange={setWipe}>
+            {t("Wipe the identity and the journal on the host and disable its agent service")}
+          </Check>
+          <Check checked={revokeOffline} onChange={setRevokeOffline}>
+            {t("Revoke the certificates at once if the host is offline")}
+          </Check>
+          <FormNote>
+            {online
+              ? t("The host is connected: it will finish the operations under way, drop its secret leases and report it is ready; then its certificates are revoked and, with the wipe, its identity removed. The panel waits up to two minutes for the answer.")
+              : t("The host is not connected: it is retired without its cooperation. Its certificates are revoked now, or at its first contact when the box above is cleared. What is on its disk stays unknown until somebody wipes it out of band.")}
+          </FormNote>
+          <FormNote>
+            {t("The record, the inventory and the audit trail stay. A retired host does not come back; its machine is refused for a new-host token for 30 days.")}
+          </FormNote>
+          <FormActions>
+            <button className="hm-danger" onClick={() => setConfirming(true)} disabled={confirming}>
+              {t("Decommission host…")}
+            </button>
+            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+          </FormActions>
+          <Message text={message} error />
+        </Form>
+      )}
+
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          danger
+          label={t("Decommission host")}
+          description={t("{host} leaves the fleet for good. Its certificates are revoked and nothing brings it back but a new enrollment as a new host.", { host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason, confirmation) =>
+            request.mutate({
+              reason,
+              typed_confirmation: confirmation,
+              local_identity_wipe: wipe,
+              revoke_immediately_if_offline: revokeOffline,
+            })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * What the decommission ended with. The unconfirmed cleanup is shown as a
+ * warning and named for what it is; the confirmed one lists what the host
+ * reported.
+ */
+function DecommissionResult({ outcome }: { outcome: DecommissionOutcome }) {
+  const t = useT();
+  return (
+    <div className="hm-form" data-testid="decommission-result">
+      {outcome.remote_cleanup_unconfirmed ? (
+        <Message
+          error
+          text={outcome.phase === "no_session"
+            ? t("The host is retired, but it had no session: nothing on the machine confirmed a wipe. Its identity files may still be there - wipe it out of band before it is handed over.")
+            : t("The host is retired, but it did not answer the final task in time: nothing on the machine confirmed a wipe. Its identity files may still be there - check it out of band.")}
+        />
+      ) : (
+        <Message text={t("The host is retired. It reported it stopped, its certificates were revoked and it was told to wipe its identity.")} />
+      )}
+      <Facts>
+        <Fact label={t("Certificates revoked")}>{outcome.certificates_revoked}</Fact>
+        <Fact label={t("Jobs cancelled")}>{outcome.jobs_canceled}</Fact>
+        <Fact label={t("Secret leases dropped")}>{outcome.leases_dropped ? t("yes") : t("not confirmed")}</Fact>
+        <Fact label={t("Operations cut short")}>
+          {outcome.running_tasks.length === 0 ? t("none") : outcome.running_tasks.map((id) => <span key={id} className="hm-mono">{id.slice(0, 8)} </span>)}
+        </Fact>
+      </Facts>
     </div>
   );
 }
@@ -393,6 +573,10 @@ function lifecycleTone(state: string): string {
   switch (state) {
     case "active": return "ok";
     case "quarantined": return "warn";
+    // A recovery and a retirement under way are both a host the panel is
+    // waiting on: not cut off for good, not working either.
+    case "recovery": return "warn";
+    case "retiring": return "warn";
     case "retired": return "unknown";
     // A refused or failed attempt carries its outcome in place of a state.
     case "denied":

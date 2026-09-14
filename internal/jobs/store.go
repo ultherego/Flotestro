@@ -45,7 +45,11 @@ type Spec struct {
 	// it the audit trail's correlation breaks off at the operation, and the
 	// campaign screen does not know which operations are its own - the
 	// progress of an upgrade under way had no way of reaching it.
-	CampaignID    string
+	CampaignID string
+	// FanoutID binds the operation to the diagnostic read fan-out that
+	// ordered it, for the same reason: the fan-out page lists its jobs
+	// by it, and the result of every host is read from its own job.
+	FanoutID      string
 	Preconditions Preconditions
 }
 
@@ -64,6 +68,7 @@ type Job struct {
 	// name, and a list of identifiers tells nobody anything.
 	Hostname         string          `json:"hostname,omitempty"`
 	CampaignID       *string         `json:"campaign_id,omitempty"`
+	FanoutID         *string         `json:"fanout_id,omitempty"`
 	ActionType       string          `json:"action_type"`
 	ActionVersion    int             `json:"action_version"`
 	Payload          json.RawMessage `json:"payload"`
@@ -174,16 +179,17 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 		insert into jobs (id, host_id, action_type, action_version, payload, payload_hash,
 		                  idempotency_key, state, requires_approval, preconditions,
 		                  timeout_seconds, max_output_bytes, expires_at, created_by, request_id,
-		                  campaign_id, required_approvals)
+		                  campaign_id, required_approvals, fanout_id)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-		        nullif($16, '')::uuid, $17)
+		        nullif($16, '')::uuid, $17, nullif($18, '')::uuid)
 		on conflict (host_id, idempotency_key) do nothing
 		returning id`
 	jobID := uuid.NewString()
 	err = tx.QueryRow(ctx, query, jobID, spec.HostID, string(spec.Action), opspec.ActionVersion,
 		payloadJSON, payloadHash, idempotencyKey, string(state), spec.RequiresApproval,
 		preconditionsJSON, timeout, maxOutput, time.Now().Add(ttl),
-		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec)).Scan(&jobID)
+		spec.CreatedBy, nullable(spec.RequestID), spec.CampaignID, requiredApprovals(spec),
+		spec.FanoutID).Scan(&jobID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// The same idempotency key returns the existing task instead of
 		// creating a second one. A repeated order is not an error.
@@ -675,11 +681,12 @@ type ListFilter struct {
 	HostID string
 	State  string
 	// Action keeps one operation type; Actor the identity that ordered it;
-	// CampaignID the rollout the tasks belong to; ErrorCode the result the
-	// tasks ended with.
+	// CampaignID the rollout the tasks belong to; FanoutID the read fan-out
+	// that ordered them; ErrorCode the result the tasks ended with.
 	Action     string
 	Actor      string
 	CampaignID string
+	FanoutID   string
 	ErrorCode  string
 	// Since and Until bound the creation time; Until is exclusive.
 	Since *time.Time
@@ -729,6 +736,7 @@ func (f ListFilter) conditions() ([]string, []any) {
 	add("action_type", f.Action)
 	add("created_by", f.Actor)
 	add("campaign_id", f.CampaignID)
+	add("fanout_id", f.FanoutID)
 	add("result_error_code", f.ErrorCode)
 	if f.Since != nil {
 		args = append(args, *f.Since)
@@ -894,7 +902,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       coalesce(result_message, ''), finished_at, created_at, updated_at,
 		       required_approvals,
 		       (select count(*) from job_approvals a where a.job_id = jobs.id),
-		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), '')
+		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), ''),
+		       fanout_id
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -913,7 +922,7 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.CreatedBy, &j.RequestID, &j.ApprovedBy, &j.ApprovedAt,
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
-			&j.RequiredApprovals, &collected, &j.Hostname); err != nil {
+			&j.RequiredApprovals, &collected, &j.Hostname, &j.FanoutID); err != nil {
 			return nil, err
 		}
 		// Every view of a task carries the number of collected approvals:

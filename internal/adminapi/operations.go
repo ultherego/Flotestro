@@ -41,6 +41,21 @@ type createOperationRequest struct {
 	PinBootID bool `json:"pin_boot_id,omitempty"`
 }
 
+// lifecycleRefusal puts a state that takes no operation into words.
+func lifecycleRefusal(state string) string {
+	switch state {
+	case hosts.StateQuarantined:
+		return "the host is quarantined"
+	case hosts.StateRecovery:
+		return "the host is recovering its identity; it takes operations again once the new certificate connects"
+	case hosts.StateRetiring:
+		return "the host is being decommissioned"
+	case hosts.StateRetired:
+		return "the host is retired"
+	}
+	return "the host is in the state " + state
+}
+
 // handleCreateOperation creates an operation plan. A mutation requires
 // approval by default; the order itself changes nothing on the host yet.
 func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
@@ -101,13 +116,17 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if host.LifecycleState == "quarantined" {
+	// Only an active host takes an operation. The other states are different
+	// kinds of "no", and the code names which: a quarantine is lifted, a
+	// recovery ends when the new key connects, a retirement does not end.
+	if !hosts.Active(host.LifecycleState) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
 			Action: "job.create", TargetType: "host", TargetID: hostID,
-			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "quarantined"},
+			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": host.LifecycleState},
 		})
-		problem(w, http.StatusConflict, "host_quarantined", "the host is quarantined")
+		problem(w, http.StatusConflict, "host_"+host.LifecycleState,
+			lifecycleRefusal(host.LifecycleState))
 		return
 	}
 
@@ -446,11 +465,18 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		Action:     query.Get("action"),
 		Actor:      query.Get("actor"),
 		CampaignID: query.Get("campaign_id"),
+		FanoutID:   query.Get("fanout_id"),
 		ErrorCode:  query.Get("error_code"),
 	}
 	if filter.CampaignID != "" {
 		if _, err := uuid.Parse(filter.CampaignID); err != nil {
 			problem(w, http.StatusBadRequest, "invalid_filter", "campaign_id must be a campaign identifier")
+			return
+		}
+	}
+	if filter.FanoutID != "" {
+		if _, err := uuid.Parse(filter.FanoutID); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "fanout_id must be a fan-out identifier")
 			return
 		}
 	}
@@ -556,6 +582,11 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		// OfflinePolicy is what a campaign does with a host that is not
 		// connected when its turn comes; a campaign may only tighten it.
 		OfflinePolicy string `json:"offline_policy"`
+		// FanOutLimit says on how many hosts at once the read may be
+		// ordered as one fan-out; zero means a read kept to one host, and
+		// every mutation. FanOutRefusal says why when it is zero.
+		FanOutLimit   int    `json:"fanout_limit"`
+		FanOutRefusal string `json:"fanout_refusal,omitempty"`
 		// CampaignRefusal carries the reason the operation cannot be ordered
 		// in bulk. A refusal without a reason looks in the interface like a
 		// missing feature, while it is often a boundary drawn deliberately.
@@ -601,6 +632,8 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 			LockClass:          action.LockClass(),
 			CampaignMode:       string(action.CampaignMode()),
 			OfflinePolicy:      string(action.OfflinePolicy()),
+			FanOutLimit:        action.FanOutLimit(),
+			FanOutRefusal:      opspec.FanOutRefusal(action),
 			CampaignReady:      ready,
 			CampaignRefusal:    reason,
 			CancelMode:         contract.CancelMode,

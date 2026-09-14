@@ -108,6 +108,9 @@ var offlinePolicies = map[ActionType]OfflinePolicy{
 	ActionSSHHostKeyRotate:       OfflineRequireOnline,
 	ActionSystemReboot:           OfflineRequireOnline,
 	ActionSystemShutdown:         OfflineRequireOnline,
+	// Clearing a failed state hours later would clear a failure the
+	// operator has not seen.
+	ActionUnitResetFailed: OfflineRequireOnline,
 	// A rename lands on a host whose neighbours were checked at ordering
 	// time; hours later the name may be taken.
 	ActionSystemHostnameSet: OfflineRequireOnline,
@@ -167,6 +170,9 @@ var offlinePolicies = map[ActionType]OfflinePolicy{
 	// A group list and an expiry date are declarations about a name.
 	ActionLocalUserGroupsSet: OfflineWait,
 	ActionLocalUserExpirySet: OfflineWait,
+	// A remediation plan is a declaration about findings the host still
+	// has when it comes back; the plan's own age bound closes it in time.
+	ActionSecurityRemediate: OfflineWait,
 }
 
 // OfflinePolicy returns the policy an operation declares for a host that is

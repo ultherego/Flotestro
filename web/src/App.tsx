@@ -54,6 +54,7 @@ import { Jobs } from "./pages/Jobs";
 import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
+import { Reads } from "./pages/Reads";
 import { Directory } from "./pages/Directory";
 import { Access } from "./pages/Access";
 import { Audit } from "./pages/Audit";
@@ -133,6 +134,10 @@ export function App() {
       label: "Operations",
       items: [
         { to: "/jobs", label: "Jobs", icon: "jobs" },
+        // A read on a handful of hosts at once: a diagnostic, not a change,
+        // so it stands next to the jobs it is made of rather than with the
+        // campaigns.
+        { to: "/reads", label: "Reads", icon: "reads" },
         // A campaign is the main mechanism of change, not a shortcut on the
         // host list: it has its own place in the navigation, next to the
         // work on a single host.
@@ -256,6 +261,8 @@ export function App() {
             <Route path="audit" element={<HostAudit />} />
           </Route>
           <Route path="/jobs" element={<Jobs />} />
+          <Route path="/reads" element={<Reads />} />
+          <Route path="/reads/:id" element={<Reads />} />
           {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
           {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
           {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}

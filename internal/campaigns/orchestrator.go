@@ -14,6 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/remediation"
 )
 
 // Orchestrator runs campaigns: the canary, the waves, the stop thresholds
@@ -28,9 +29,13 @@ type Orchestrator struct {
 	// concurrency limit answers a different question: how many hosts are to
 	// start at once within this change. Ten campaigns of five hosts each are
 	// still fifty simultaneous mutations nobody decided on.
-	budgets  *budgets.Store
-	log      *slog.Logger
-	interval time.Duration
+	budgets *budgets.Store
+	// remediation holds the plans of a fleet remediation. The campaign
+	// starts a host's plan there instead of creating one task; the runner
+	// drives the steps, and the campaign reads the plan's state back.
+	remediation *remediation.Store
+	log         *slog.Logger
+	interval    time.Duration
 	// Authorizer re-checks, immediately before a host is dispatched, that
 	// the creator still holds the right to this operation on this host.
 	// A permission withdrawn after the approval must stop the hosts that
@@ -50,7 +55,8 @@ func NewOrchestrator(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
 		interval = 5 * time.Second
 	}
 	return &Orchestrator{store: store, jobs: jobStore, hosts: hostStore,
-		audit: recorder, budgets: budgetStore, log: log, interval: interval}
+		audit: recorder, budgets: budgetStore, log: log, interval: interval,
+		remediation: remediation.NewStore(store.Pool())}
 }
 
 // Run drives the campaigns until the context is closed.
@@ -261,6 +267,19 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			continue
 		}
 
+		// A fleet remediation has no single task: the host's plan of steps
+		// starts in the remediation store, and the runner carries it. The
+		// host is running from this moment and settles with its plan.
+		if opspec.ActionType(campaign.ActionType) == opspec.ActionSecurityRemediate {
+			if err := o.startRemediation(ctx, campaign, target, host); err != nil {
+				return err
+			}
+			if target.State == TargetRunning {
+				running++
+			}
+			continue
+		}
+
 		jobID, err := o.createJob(ctx, campaign, target, host)
 		if err != nil {
 			// The task was not created, so the tokens have nothing to guard.
@@ -356,6 +375,127 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 
 	return o.submitJob(ctx, campaign, host, action, payload,
 		"campaign:"+campaign.ID+":main:"+target.HostID)
+}
+
+// startRemediation starts a host's remediation plan from the campaign's
+// plan set.
+//
+// The plan the approver read is the plan that runs: its steps come out of
+// the campaign_plans row as recorded, bound in time the way every per-host
+// plan is. The creator's rights are checked once more for every step,
+// because the composite permission is the sum of the steps' permissions
+// and any of them may have been withdrawn since the approval. A failure to
+// start settles the host and gives the capacity back; the returned error is
+// reserved for the store, which the next pass retries.
+func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
+	target *Target, host *hosts.Host) error {
+	fail := func(code, message string) {
+		o.releaseCapacity(ctx, target)
+		o.finishTarget(ctx, campaign, target, TargetFailed, code, message)
+	}
+
+	hash, raw, computedAt, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
+	if err != nil {
+		return err
+	}
+	if hash == "" {
+		fail("plan_missing", "the host has no remediation plan in this campaign")
+		return nil
+	}
+	if age := time.Since(computedAt); age > PlanTTL {
+		fail("plan_stale", fmt.Sprintf("%v: computed %s ago, the limit is %s",
+			ErrPlanExpired, age.Round(time.Minute), PlanTTL))
+		return nil
+	}
+	plan, err := remediation.DecodeHostPlan(raw)
+	if err != nil {
+		fail("plan_invalid", err.Error())
+		return nil
+	}
+	if refused, detail := o.creatorMayRemediate(ctx, campaign, host, plan); refused {
+		o.releaseCapacity(ctx, target)
+		o.finishTarget(ctx, campaign, target, TargetSkipped, "out_of_scope", detail)
+		return nil
+	}
+
+	tx, err := o.remediation.Pool().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	created, err := o.remediation.Create(ctx, tx, remediation.Spec{
+		HostID:          host.ID,
+		PlanHash:        plan.FindingsHash,
+		PlanHashVersion: plan.FindingsHashVersion,
+		Reason:          "campaign " + campaign.Name,
+		CreatedBy:       remediation.CampaignCreator(campaign.ID),
+		StopOnFailure:   true,
+		BootIDBefore:    host.BootID,
+	}, plan.FreshSteps())
+	if errors.Is(err, remediation.ErrPlanRunning) {
+		// Another plan holds the host - one ordered by hand, or a previous
+		// campaign still at work. The steps of both assume the state the
+		// other changes, so this host does not start now.
+		fail("plan_in_progress", "a remediation plan is already running on this host")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if err := o.audit.RecordTx(ctx, tx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: "campaign:" + campaign.ID,
+		Action: "security.remediate", TargetType: "host", TargetID: host.ID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"campaign_id": campaign.ID, "plan_id": created.ID,
+			"plan_hash": plan.FindingsHash, "step_set_hash": hash,
+			"steps": plan.Plan.Changes, "approved_by": campaign.ApprovedBy,
+		},
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+
+	if err := o.store.SetBootIDBefore(ctx, target.ID, host.BootID); err != nil {
+		return err
+	}
+	if err := o.store.UpdateTarget(ctx, target.ID, TargetRunning, "",
+		fmt.Sprintf("remediation plan %s: %d steps", created.ID, len(created.Steps))); err != nil {
+		return err
+	}
+	target.State = TargetRunning
+	o.log.Info("the campaign started a host's remediation plan",
+		"campaign_id", campaign.ID, "host_id", host.ID, "plan_id", created.ID,
+		"wave", target.Wave, "steps", len(created.Steps))
+	return nil
+}
+
+// creatorMayRemediate says whether the campaign's creator still holds the
+// permission of every step of the host's plan, in the scope of the host.
+// The remediation permission alone is checked by creatorMayDispatch; the
+// steps add theirs, and a withdrawn one stops the host before the first
+// task is created.
+func (o *Orchestrator) creatorMayRemediate(ctx context.Context, campaign Campaign,
+	host *hosts.Host, plan remediation.HostPlan) (bool, string) {
+	if o.Authorizer == nil {
+		return false, ""
+	}
+	principal, err := o.Authorizer.PrincipalBySubject(ctx, campaign.CreatedBy)
+	if err != nil {
+		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
+	}
+	scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+	for _, action := range plan.Actions() {
+		permission := authz.Permission(opspec.ActionType(action).Permission())
+		if !principal.Can(permission, scope) {
+			return true, campaign.CreatedBy + " no longer holds " + string(permission) +
+				" on " + host.Site + "/" + host.Environment + " (step " + action + ")"
+		}
+	}
+	return false, ""
 }
 
 // submitJob creates a task approved by the campaign. Approving a campaign is
