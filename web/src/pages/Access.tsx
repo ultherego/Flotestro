@@ -209,13 +209,52 @@ function Mappings() {
   );
 }
 
+/** A freshly issued token, shown once and never fetched again. */
+type IssuedToken = { subject: string; token: string; token_expires_at?: string };
+
 function Identities() {
   const t = useT();
+  const queryClient = useQueryClient();
+  const [warning, setWarning] = useState<ApiError | null>(null);
+  const [issued, setIssued] = useState<IssuedToken | null>(null);
+  const [copied, setCopied] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["principals"],
     queryFn: () => api.get<Collection<Principal>>("/api/v1/principals"),
     retry: false,
   });
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["principals"] });
+  const onError = (error: unknown) => setWarning(error instanceof ApiError ? error : null);
+
+  // Every change here moves who can do what on the fleet, so each one asks
+  // for a reason the same way the group mappings do; the panel demands
+  // fresh authentication behind it.
+  const ask = (question: string) => {
+    const reason = window.prompt(question);
+    return reason && reason.trim().length >= 8 ? reason.trim() : null;
+  };
+  const disable = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.del(`/api/v1/principals/${id}?reason=${encodeURIComponent(reason)}`),
+    onSuccess: refresh, onError,
+  });
+  const revokeToken = useMutation({
+    mutationFn: ({ id, token, reason }: { id: string; token: string; reason: string }) =>
+      api.del(`/api/v1/principals/${id}/tokens/${token}?reason=${encodeURIComponent(reason)}`),
+    onSuccess: refresh, onError,
+  });
+  const issueToken = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      api.post<IssuedToken>(`/api/v1/principals/${id}/tokens`, { reason }),
+    onSuccess: (token) => { setIssued(token); setCopied(false); refresh(); }, onError,
+  });
+  const revokeRole = useMutation({
+    mutationFn: ({ id, role, site, environment, reason }:
+      { id: string; role: string; site: string; environment: string; reason: string }) =>
+      api.del(`/api/v1/principals/${id}/roles/${role}`, { site, environment, reason }),
+    onSuccess: refresh, onError,
+  });
+
   if (error instanceof ApiError && error.forbidden) {
     return <Card><Empty>{t("You do not have permission to manage access.")}</Empty></Card>;
   }
@@ -233,48 +272,139 @@ function Identities() {
   const unassigned = data.items.filter((principal) => (principal.bindings ?? []).length === 0).length;
 
   return (
-    <div className="widgets">
-      <Card className="span-9" title={t("Identities")} flush>
-        <table>
-          <thead><tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th></tr></thead>
-          <tbody>
-            {data.items.map((principal) => (
-              <tr key={principal.id}>
-                <td className="mono">{principal.subject}</td>
-                <td>{principal.display_name || "—"}</td>
-                <td className="source">{principal.kind}</td>
-                <td>
-                  {/* The field may not arrive at all. The interface must not
-                      fall over because of it: one missing key used to take the
-                      whole screen down. */}
-                  {(principal.bindings ?? []).length === 0
-                    ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
-                    : (principal.bindings ?? []).map((binding, index) => (
-                        <div key={index}>
-                          {binding.role}
-                          <span className="source">
-                            {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
-                          </span>
-                        </div>
-                      ))}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </Card>
+    <>
+      <Warning error={warning} close={() => setWarning(null)} />
 
-      <Card className="span-3" title={t("By kind")} description={t("among the {n} listed", { n: data.items.length })}>
-        <Breakdown tone="info" items={byKind.map(([kind, n]) => ({ label: kind, value: n }))} />
-        <h4 className="widget-subhead">{t("Direct roles")}</h4>
-        {byRole.length === 0 ? (
-          <p className="fp-blank">{t("No direct assignments.")}</p>
-        ) : (
-          <Breakdown tone="ok" items={byRole.map(([role, n]) => ({ label: role, value: n }))} />
-        )}
-        <p className="fp-rest">{t("{n} without direct assignments", { n: unassigned })}</p>
-      </Card>
-    </div>
+      {/* The value of a new token is in this answer and nowhere else: the
+          panel keeps only its digest. */}
+      {issued && (
+        <div className="warning">
+          <div>
+            <strong>{t("Token for {subject} issued.", { subject: issued.subject })}</strong>{" "}
+            {t("Shown once; copy it now.")}{" "}
+            <code>{issued.token}</code>
+            {issued.token_expires_at && <> · {t("expires")} <Time value={issued.token_expires_at} /></>}
+          </div>
+          <div className="operations">
+            <button onClick={() => { navigator.clipboard?.writeText(issued.token); setCopied(true); }}>
+              {copied ? t("Token copied") : t("Copy token")}
+            </button>
+            <button className="secondary" onClick={() => setIssued(null)}>{t("Close")}</button>
+          </div>
+        </div>
+      )}
+
+      <div className="widgets">
+        <Card className="span-9" title={t("Identities")} flush>
+          <table>
+            <thead>
+              <tr><th>{t("Subject")}</th><th>{t("Name")}</th><th>{t("Kind")}</th><th>{t("Roles and scopes")}</th><th>{t("Tokens")}</th><th /></tr>
+            </thead>
+            <tbody>
+              {data.items.map((principal) => (
+                <tr key={principal.id}>
+                  <td className="mono">{principal.subject}</td>
+                  <td>{principal.display_name || "—"}</td>
+                  <td className="source">{principal.kind}</td>
+                  <td>
+                    {/* The field may not arrive at all. The interface must not
+                        fall over because of it: one missing key used to take the
+                        whole screen down. */}
+                    {(principal.bindings ?? []).length === 0
+                      ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
+                      : (principal.bindings ?? []).map((binding, index) => (
+                          <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }}>
+                            <span>
+                              {binding.role}
+                              <span className="source">
+                                {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
+                              </span>
+                            </span>
+                            <button
+                              className="secondary"
+                              disabled={revokeRole.isPending}
+                              onClick={() => {
+                                const reason = ask(t("Reason for removing the role {role} from {subject} (min. 8 characters):", { role: binding.role, subject: principal.subject }));
+                                if (reason) revokeRole.mutate({
+                                  id: principal.id, role: binding.role,
+                                  site: binding.scope.site === "*" ? "" : binding.scope.site,
+                                  environment: binding.scope.environment === "*" ? "" : binding.scope.environment,
+                                  reason,
+                                });
+                              }}
+                            >
+                              {t("Remove")}
+                            </button>
+                          </div>
+                        ))}
+                  </td>
+                  <td>
+                    {(principal.tokens ?? []).length === 0
+                      ? <span className="source">{t("none")}</span>
+                      : (principal.tokens ?? []).map((token) => (
+                          <div key={token.id} className="row-actions" style={{ justifyContent: "flex-start" }}>
+                            <span>
+                              {token.description || token.id.slice(0, 8)}
+                              <span className="source">
+                                {" "}{token.expires_at ? <>{t("expires")} <Time value={token.expires_at} /></> : t("never expires")}
+                                {token.last_used_at && <> · {t("last used")} <Time value={token.last_used_at} /></>}
+                              </span>
+                            </span>
+                            <button
+                              className="danger"
+                              disabled={revokeToken.isPending}
+                              onClick={() => {
+                                const reason = ask(t("Reason for revoking the token of {subject} (min. 8 characters):", { subject: principal.subject }));
+                                if (reason) revokeToken.mutate({ id: principal.id, token: token.id, reason });
+                              }}
+                            >
+                              {t("Revoke")}
+                            </button>
+                          </div>
+                        ))}
+                  </td>
+                  <td className="actions-cell">
+                    <div className="row-actions">
+                      <button
+                        className="secondary"
+                        disabled={issueToken.isPending}
+                        onClick={() => {
+                          const reason = ask(t("Reason for issuing a token to {subject} (min. 8 characters):", { subject: principal.subject }));
+                          if (reason) issueToken.mutate({ id: principal.id, reason });
+                        }}
+                      >
+                        {t("Issue token")}
+                      </button>
+                      <button
+                        className="danger"
+                        disabled={disable.isPending}
+                        onClick={() => {
+                          const reason = ask(t("Reason for disabling {subject} - the sessions and tokens end at once (min. 8 characters):", { subject: principal.subject }));
+                          if (reason) disable.mutate({ id: principal.id, reason });
+                        }}
+                      >
+                        {t("Disable")}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+
+        <Card className="span-3" title={t("By kind")} description={t("among the {n} listed", { n: data.items.length })}>
+          <Breakdown tone="info" items={byKind.map(([kind, n]) => ({ label: kind, value: n }))} />
+          <h4 className="widget-subhead">{t("Direct roles")}</h4>
+          {byRole.length === 0 ? (
+            <p className="fp-blank">{t("No direct assignments.")}</p>
+          ) : (
+            <Breakdown tone="ok" items={byRole.map(([role, n]) => ({ label: role, value: n }))} />
+          )}
+          <p className="fp-rest">{t("{n} without direct assignments", { n: unassigned })}</p>
+        </Card>
+      </div>
+    </>
   );
 }
 

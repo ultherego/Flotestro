@@ -224,6 +224,7 @@ func (t *Trust) Prepare() (Authority, error) {
 		return Authority{}, err
 	}
 	created.AgentTTL = t.active.AgentTTL
+	created.ReservedNames = t.active.ReservedNames
 
 	if err := writeFileAtomic(filepath.Join(t.dir, pendingCertFile), certPEM, 0o644); err != nil {
 		return Authority{}, err
@@ -285,6 +286,15 @@ func (t *Trust) Activate() (Authority, error) {
 	_ = os.Remove(filepath.Join(t.dir, pendingAtFile))
 
 	t.retired = append(t.retired, &CA{Certificate: t.active.Certificate, PEM: t.active.PEM})
+	// The policy of the authority - the lifetime it issues and the names it
+	// keeps for the panel - is the installation's, not the key's: a CA read
+	// from disk as pending carries none of it and takes it over here.
+	if t.pending.AgentTTL == 0 {
+		t.pending.AgentTTL = t.active.AgentTTL
+	}
+	if t.pending.ReservedNames == nil {
+		t.pending.ReservedNames = t.active.ReservedNames
+	}
 	t.active = t.pending
 	t.pending = nil
 	return describe(t.active, "active"), nil

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -20,8 +21,18 @@ func TestWebhookSignsAndFiltersTheDelivery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		signature = r.Header.Get(SignatureHeader)
-		if !Verify("secret", body, signature) {
+		timestamp := r.Header.Get(TimestampHeader)
+		if !Verify("secret", body, timestamp, signature) {
 			t.Errorf("the signature does not verify")
+		}
+		// The timestamp is under the signature: a delivery captured and
+		// replayed with another moment does not verify.
+		if Verify("secret", body, "1", signature) {
+			t.Errorf("the signature verifies with another timestamp")
+		}
+		if sent, err := strconv.ParseInt(timestamp, 10, 64); err != nil ||
+			time.Since(time.Unix(sent, 0)) > time.Minute {
+			t.Errorf("the timestamp %q is not the moment of the delivery", timestamp)
 		}
 		_ = json.Unmarshal(body, &got)
 		w.WriteHeader(status)
@@ -52,5 +63,17 @@ func TestWebhookSignsAndFiltersTheDelivery(t *testing.T) {
 	if err := (Webhook{URL: "http://127.0.0.1:1", Prefixes: []string{"nothing."}}).Deliver(
 		context.Background(), events); err != nil {
 		t.Fatalf("an empty delivery reached the network: %v", err)
+	}
+}
+
+// A receiver written against the previous form of the signature - over the
+// body alone - keeps working for one release.
+func TestWebhookVerifiesTheOlderSignature(t *testing.T) {
+	body := []byte(`{"events":[]}`)
+	if !Verify("secret", body, "1700000000", signBodyOnly("secret", body)) {
+		t.Error("the signature over the body alone was refused")
+	}
+	if Verify("other", body, "1700000000", signBodyOnly("secret", body)) {
+		t.Error("a signature with another secret verified")
 	}
 }

@@ -38,7 +38,7 @@ func TestTheKeyLivesInAFileAndComesBackTheSame(t *testing.T) {
 		t.Errorf("permissions of the key file = %v", info.Mode().Perm())
 	}
 
-	nonce, ciphertext, err := first.Encrypt([]byte("secret"))
+	nonce, ciphertext, err := first.Encrypt([]byte("secret"), "id-1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestTheKeyLivesInAFileAndComesBackTheSame(t *testing.T) {
 	if err != nil || created {
 		t.Fatalf("second open: %v, created=%v", err, created)
 	}
-	value, err := second.Decrypt(nonce, ciphertext)
+	value, err := second.Decrypt(nonce, ciphertext, "id-1", 1)
 	if err != nil || string(value) != "secret" {
 		t.Fatalf("decryption: %q, %v", value, err)
 	}
@@ -58,16 +58,16 @@ func TestACiphertextDoesNotOpenWithAnotherKey(t *testing.T) {
 	first := testCipher(t)
 	second := testCipher(t)
 
-	nonce, ciphertext, err := first.Encrypt([]byte("private key"))
+	nonce, ciphertext, err := first.Encrypt([]byte("private key"), "id-1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := second.Decrypt(nonce, ciphertext); err == nil {
+	if _, err := second.Decrypt(nonce, ciphertext, "id-1", 1); err == nil {
 		t.Fatal("somebody else's key decrypted the value")
 	}
 	// The same text encrypted twice gives different ciphertexts: otherwise it
 	// would be possible to tell that two secrets have the same value.
-	_, secondCiphertext, err := first.Encrypt([]byte("private key"))
+	_, secondCiphertext, err := first.Encrypt([]byte("private key"), "id-1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,5 +139,32 @@ func TestWhetherASecretIsIssuable(t *testing.T) {
 	}
 	if !(Secret{CurrentVersion: 2}).Issuable() {
 		t.Error("a secret with a version was treated as not issuable")
+	}
+}
+
+// A ciphertext is bound to its row: moved to another secret or another
+// version it does not open. A version written before the binding still
+// opens, so an installation upgrades without re-entering its secrets.
+func TestACiphertextIsBoundToItsRow(t *testing.T) {
+	c := testCipher(t)
+	nonce, ciphertext, err := c.Encrypt([]byte("value"), "secret-a", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Decrypt(nonce, ciphertext, "secret-b", 2); err == nil {
+		t.Error("the ciphertext opened under another secret")
+	}
+	if _, err := c.Decrypt(nonce, ciphertext, "secret-a", 1); err == nil {
+		t.Error("the ciphertext opened as another version")
+	}
+	if value, err := c.Decrypt(nonce, ciphertext, "secret-a", 2); err != nil || string(value) != "value" {
+		t.Errorf("the ciphertext did not open in its own row: %q, %v", value, err)
+	}
+
+	// The old way: no associated data at all.
+	legacyNonce := make([]byte, c.aead.NonceSize())
+	legacy := c.aead.Seal(nil, legacyNonce, []byte("older value"), nil)
+	if value, err := c.Decrypt(legacyNonce, legacy, "secret-a", 1); err != nil || string(value) != "older value" {
+		t.Errorf("a version from before the binding did not open: %q, %v", value, err)
 	}
 }

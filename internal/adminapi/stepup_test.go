@@ -133,3 +133,26 @@ func TestMissingReasonIsRequestError(t *testing.T) {
 		t.Error("the missing reason was marked as missing authentication")
 	}
 }
+
+// TestStepUpRefusesTokensWhenThePolicySaysSo: the installation may decide
+// that a person has to stand behind every change of the access rules. The
+// refusal then asks for a session rather than for a permission, and a
+// session with fresh authentication still passes.
+func TestStepUpRefusesTokensWhenThePolicySaysSo(t *testing.T) {
+	policy := stepUpPolicy{MaxAge: 5 * time.Minute, RefuseTokens: true}
+	reason := "revoking the token of a leaving contractor"
+
+	_, denial := policy.evaluate(reason, nil)
+	if denial == nil {
+		t.Fatal("the token passed despite the refuse policy")
+	}
+	if denial.Code != "reauthentication_required" || denial.RequestError {
+		t.Errorf("denial = %+v", denial)
+	}
+	if denial.Detail["authentication"] != "api_token" {
+		t.Errorf("the denial does not say a token was refused: %+v", denial.Detail)
+	}
+	if _, denial := policy.evaluate(reason, session(authz.Authentication{At: time.Now()})); denial != nil {
+		t.Errorf("a fresh session was refused under the token policy: %+v", denial)
+	}
+}

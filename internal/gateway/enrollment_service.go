@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 
 	"connectrpc.com/connect"
 	"github.com/jackc/pgx/v5"
@@ -30,13 +31,73 @@ type EnrollmentService struct {
 	tokens     *enrollment.Store
 	audit      *audit.Recorder
 	log        *slog.Logger
+	// The limits of the public door: per source address and per machine
+	// identifier, so neither a guessing client nor a looping installer
+	// gets more than a few attempts a minute.
+	perIP      *rateLimiter
+	perMachine *rateLimiter
 }
 
 func NewEnrollmentService(certIssuer issuer.Issuer, hostStore *hosts.Store,
 	relayStore *relays.Store, tokens *enrollment.Store, recorder *audit.Recorder,
 	log *slog.Logger) *EnrollmentService {
 	return &EnrollmentService{certIssuer: certIssuer, hosts: hostStore, relays: relayStore,
-		tokens: tokens, audit: recorder, log: log}
+		tokens: tokens, audit: recorder, log: log,
+		perIP:      newRateLimiter(enrollPerIPPerMinute),
+		perMachine: newRateLimiter(enrollPerMachinePerMinute)}
+}
+
+// ErrTooManyAttempts is the answer of the public door to a client that
+// knocks too often. It says nothing about the token.
+var ErrTooManyAttempts = errors.New("too many enrollment attempts; try again in a minute")
+
+// throttle applies the limits of the public door. A refusal goes on the
+// trail once a minute per key: the operator is to see that somebody is
+// knocking, not to drown in the knocks.
+func (s *EnrollmentService) throttle(ctx context.Context, req *connect.Request[agentv1.EnrollRequest]) error {
+	ip := peerHost(req.Peer().Addr)
+	machineID := req.Msg.GetMachineId()
+	checks := []struct {
+		limiter *rateLimiter
+		key     string
+		kind    string
+	}{
+		{s.perIP, ip, "source_ip"},
+		{s.perMachine, machineID, "machine_id"},
+	}
+	for _, check := range checks {
+		if check.key == "" {
+			continue
+		}
+		allowed, record := check.limiter.allow(check.key)
+		if allowed {
+			continue
+		}
+		if record {
+			s.audit.Record(ctx, audit.Event{
+				ActorType: audit.ActorAgent, ActorID: machineID,
+				Action: "host.enroll", Outcome: audit.OutcomeDenied,
+				Detail: map[string]any{
+					"reason": "rate_limited", "limit": check.kind, "remote_addr": ip,
+					"hostname": req.Msg.GetHostname(),
+				},
+			})
+			s.log.Warn("enrollment attempts are being throttled",
+				"limit", check.kind, "remote_addr", ip, "machine_id", machineID)
+		}
+		return connect.NewError(connect.CodeResourceExhausted, ErrTooManyAttempts)
+	}
+	return nil
+}
+
+// peerHost strips the port off a peer address. A limit per address has to
+// key on the address alone: every connection has a port of its own.
+func peerHost(addr string) string {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return addr
+	}
+	return host
 }
 
 // relayAttestation describes the relay that forwarded the registration of a
@@ -54,6 +115,9 @@ type relayAttestation struct {
 // Enroll exchanges a valid token and a CSR for the certificate of an agent.
 func (s *EnrollmentService) Enroll(ctx context.Context,
 	req *connect.Request[agentv1.EnrollRequest]) (*connect.Response[agentv1.EnrollResponse], error) {
+	if err := s.throttle(ctx, req); err != nil {
+		return nil, err
+	}
 	return s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
 }
 

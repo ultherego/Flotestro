@@ -279,6 +279,14 @@ func (s *Server) handleSetGroupMembers(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The list replaces the whole membership, the members outside the
+	// caller's scope included. Those the caller cannot see they cannot
+	// mean to remove, so the write is refused rather than quietly dropping
+	// them - a group shared between two sites would otherwise lose the
+	// other site's hosts at the first edit from this one.
+	if ok := s.requireMembersInScope(w, r, principal, group.ID); !ok {
+		return
+	}
 	if err := s.groups.SetMembers(r.Context(), group.ID, hostIDs(visible)); s.groupProblem(w, err) {
 		return
 	}
@@ -338,6 +346,43 @@ func (s *Server) handleGroupHosts(w http.ResponseWriter, r *http.Request) {
 		"items": page.Items, "count": len(page.Items),
 		"total": page.Total, "next_cursor": page.NextCursor,
 	})
+}
+
+// requireMembersInScope refuses a rewrite of a group whose current members
+// include hosts the caller cannot see. The answer has been written when
+// the result is false.
+func (s *Server) requireMembersInScope(w http.ResponseWriter, r *http.Request,
+	principal authz.Principal, groupID string) bool {
+	current, err := s.groups.Members(r.Context(), groupID)
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if len(current) == 0 {
+		return true
+	}
+	seen, err := s.pageHosts(r.Context(), hosts.ListFilter{
+		IDs: current, Scopes: principal.ScopesFor(authz.PermHostRead),
+	})
+	if err != nil {
+		s.fail(w, err)
+		return false
+	}
+	if len(seen) < len(current) {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "host_group.members", TargetType: "host_group", TargetID: groupID,
+			RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"reason": "members_out_of_scope", "members": len(current), "visible": len(seen),
+			},
+		})
+		problem(w, http.StatusForbidden, "members_out_of_scope",
+			fmt.Sprintf("the group has %d members outside your scope; the list can only be replaced by somebody who sees them all",
+				len(current)-len(seen)))
+		return false
+	}
+	return true
 }
 
 // visibleHosts reads the named hosts, narrowed to the caller's scope. A

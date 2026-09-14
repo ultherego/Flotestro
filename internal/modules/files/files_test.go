@@ -22,6 +22,14 @@ func TestForbiddenPathsAreRejectedDespiteAllowlist(t *testing.T) {
 		"/etc/ssh/sshd_config",
 		"/root/.ssh/authorized_keys",
 		"/etc/pam.d/sshd",
+		"/etc/pam.conf",
+		"/etc/sudo.conf",
+		"/etc/ld.so.conf",
+		"/etc/ld.so.conf.d/libc.conf",
+		"/etc/ld.so.preload",
+		"/etc/profile",
+		"/etc/profile.d/proxy.sh",
+		"/etc/environment",
 	} {
 		err := allowlist.Allows(path)
 		if !errors.Is(err, ErrForbidden) {

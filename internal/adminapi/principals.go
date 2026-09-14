@@ -2,8 +2,12 @@ package adminapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
@@ -48,6 +52,13 @@ func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 }
 
+// principalView is an identity as the access screen shows it: with the
+// live tokens, so that one of them can be revoked by its identifier.
+type principalView struct {
+	authz.Principal
+	Tokens []authz.Token `json:"tokens"`
+}
+
 func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", ""); !ok {
 		return
@@ -57,10 +68,300 @@ func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	if principals == nil {
-		principals = []authz.Principal{}
+	items := make([]principalView, 0, len(principals))
+	for _, principal := range principals {
+		tokens, err := s.authz.ListTokens(r.Context(), principal.ID)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		items = append(items, principalView{Principal: principal, Tokens: tokens})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": principals, "count": len(principals)})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
+// principalTarget resolves the identity named in the path. A missing one is
+// a 404 whatever the caller's permission - the permission was checked
+// before, so the answer does not reveal anything to a stranger.
+func (s *Server) principalTarget(w http.ResponseWriter, r *http.Request) (*authz.Principal, bool) {
+	id := r.PathValue("id")
+	if _, err := uuid.Parse(id); err != nil {
+		problem(w, http.StatusNotFound, "principal_not_found", "no such identity")
+		return nil, false
+	}
+	principal, err := s.authz.PrincipalByID(r.Context(), id)
+	if errors.Is(err, authz.ErrNotFound) {
+		problem(w, http.StatusNotFound, "principal_not_found", "no such identity")
+		return nil, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return nil, false
+	}
+	return principal, true
+}
+
+// handleDisablePrincipal takes the access of an identity away. The row
+// stays: the trail names the identity, and a deleted one would leave
+// events pointing at nothing. The sessions and the tokens end with it.
+func (s *Server) handleDisablePrincipal(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	// An administrator disabling themselves would lock the panel with the
+	// last key inside; the refusal is cheaper than the recovery.
+	if target.ID == actor.ID {
+		problem(w, http.StatusConflict, "self_disable", "an identity cannot disable itself")
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.disable", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.authz.DisablePrincipal(r.Context(), tx, target.ID, "disabled: "+reason); err != nil {
+		if errors.Is(err, authz.ErrNotFound) {
+			problem(w, http.StatusConflict, "principal_disabled", "the identity is already disabled")
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.disable", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "roles": target.Roles(),
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type issueTokenRequest struct {
+	Description   string `json:"description"`
+	TokenTTLHours int    `json:"token_ttl_hours"`
+	Reason        string `json:"reason"`
+}
+
+// maxTokenTTL bounds the lifetime of a token issued through the API. A
+// token that never expires is a key that is never looked at again.
+const maxTokenTTL = 365 * 24 * time.Hour
+
+// handleIssueToken issues another token for an identity. The value is in
+// this answer and nowhere else.
+func (s *Server) handleIssueToken(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	var request issueTokenRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	ttl := time.Duration(request.TokenTTLHours) * time.Hour
+	if ttl <= 0 {
+		ttl = 30 * 24 * time.Hour
+	}
+	if ttl > maxTokenTTL {
+		problem(w, http.StatusBadRequest, "invalid_ttl",
+			"a token lives at most a year (token_ttl_hours up to 8760)")
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.token.issue", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	description := request.Description
+	if description == "" {
+		description = "token for " + target.Subject
+	}
+	token, err := s.authz.IssueToken(r.Context(), tx, target.ID, description, ttl, actor.Subject)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.token.issue", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "token_id": token.ID,
+			"description": description, "expires_at": token.ExpiresAt,
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"id": token.ID, "principal_id": target.ID, "subject": target.Subject,
+		"token": token.Value, "token_expires_at": token.ExpiresAt,
+		"description": description,
+	})
+}
+
+// handleRevokeToken ends one token. The identity in the path has to own
+// it; a token identifier alone revokes nothing.
+func (s *Server) handleRevokeToken(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	tokenID := r.PathValue("token")
+	if _, err := uuid.Parse(tokenID); err != nil {
+		problem(w, http.StatusNotFound, "token_not_found", "no such token")
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.token.revoke", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	revoked, err := s.authz.RevokeToken(r.Context(), tx, target.ID, tokenID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !revoked {
+		problem(w, http.StatusNotFound, "token_not_found", "no such live token of this identity")
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.token.revoke", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "token_id": tokenID,
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type revokeRoleRequest struct {
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	Reason      string `json:"reason"`
+}
+
+// handleRevokeRole removes one binding: the role in the path, the scope
+// from the body. The scope is part of the key, because an operator of two
+// sites loses one and keeps the other.
+func (s *Server) handleRevokeRole(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	role := authz.Role(r.PathValue("role"))
+	if !authz.KnownRole(role) {
+		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+string(role))
+		return
+	}
+	var request revokeRoleRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	scope := authz.Scope{Site: strings.TrimSpace(request.Site), Environment: strings.TrimSpace(request.Environment)}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.revoke", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	removed, err := s.authz.RevokeRole(r.Context(), tx, target.ID, role, scope)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !removed {
+		problem(w, http.StatusNotFound, "binding_not_found",
+			"the identity has no binding "+string(role)+" in scope "+scope.String())
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.role.revoke", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "role": string(role), "scope": scope.String(),
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 type createPrincipalRequest struct {

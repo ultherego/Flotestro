@@ -1,6 +1,9 @@
 package adminapi
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -27,6 +30,11 @@ type stepUpPolicy struct {
 	// ACR is the required authentication level. Empty means the
 	// installation did not define it.
 	ACR string
+	// RefuseTokens denies the highest-impact operations to API tokens
+	// altogether. By default a token may carry them out and the trail says
+	// so; an installation that wants a person behind every change of the
+	// access rules sets the policy to refuse.
+	RefuseTokens bool
 }
 
 const minimalStepUpReason = 8
@@ -59,6 +67,16 @@ func (p stepUpPolicy) evaluate(reason string, session *authz.Session) (map[strin
 	}
 
 	if session == nil {
+		if p.RefuseTokens {
+			// The installation decided that no automaton changes the access
+			// rules. The refusal names what is missing: a session, not a
+			// permission.
+			return nil, &stepUpDenial{
+				Code:    "reauthentication_required",
+				Message: "this operation requires a browser session; API tokens may not carry it out in this installation",
+				Detail:  map[string]any{"authentication": "api_token", "policy": "refuse"},
+			}
+		}
 		// An automated identity cannot re-authenticate: there is no human
 		// behind it. The operation is allowed, but the audit log records
 		// directly that the authentication was not refreshed.
@@ -145,4 +163,40 @@ func withStepUp(detail, evidence map[string]any) map[string]any {
 		detail[key] = value
 	}
 	return detail
+}
+
+// requestReason reads the reason of a change: from the body when there is
+// one, otherwise from the query, as the removal of a group mapping takes
+// it. The body is read here once; body, when given, receives what else it
+// carried.
+func requestReason(w http.ResponseWriter, r *http.Request, body any) (string, bool) {
+	reason := r.URL.Query().Get("reason")
+	if r.Body == nil || r.ContentLength == 0 {
+		return reason, true
+	}
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body could not be read")
+		return "", false
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return reason, true
+	}
+	var envelope struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return "", false
+	}
+	if body != nil {
+		if err := json.Unmarshal(raw, body); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+			return "", false
+		}
+	}
+	if envelope.Reason != "" {
+		reason = envelope.Reason
+	}
+	return reason, true
 }

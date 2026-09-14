@@ -108,6 +108,11 @@ const (
 // reserve.
 const MaxTTL = 24 * time.Hour
 
+// MaxUses bounds how many hosts one request may register. A batch of
+// identical machines fits in it; a request good for thousands would be a
+// standing door rather than an order.
+const MaxUses = 500
+
 // Request describes a pending installation.
 type Request struct {
 	ID string `json:"id"`
@@ -236,6 +241,9 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 	maxUses := input.MaxUses
 	if maxUses <= 0 {
 		maxUses = 1
+	}
+	if maxUses > MaxUses {
+		return nil, fmt.Errorf("the request allows at most %d uses", MaxUses)
 	}
 	// Replacing an identity concerns one host, so it concerns one use as
 	// well: a multi-use request would be a spare key to the same machine.

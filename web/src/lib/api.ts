@@ -72,7 +72,9 @@ export const api = {
   post: <T>(path: string, body?: unknown) => request<T>("POST", path, body),
   // A whole-list replacement: tags of a host, members of a group.
   put: <T>(path: string, body?: unknown) => request<T>("PUT", path, body),
-  del: <T>(path: string) => request<T>("DELETE", path),
+  // A removal keyed by more than the path - a role binding by its scope -
+  // carries the key in the body.
+  del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
 };
 
 export type Collection<T> = { items: T[]; count: number };

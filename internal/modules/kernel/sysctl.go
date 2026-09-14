@@ -71,7 +71,15 @@ var forbiddenKeys = map[string]string{
 	"kernel.unprivileged_userns_clone": "disabling user namespaces breaks containers without warning",
 	"kernel.kptr_restrict":             "kptr_restrict protects against leaking kernel addresses",
 	"kernel.dmesg_restrict":            "dmesg_restrict protects against leaking kernel state",
+	"kernel.hotplug":                   "hotplug names the program run by the kernel on every device event",
+	"fs.suid_dumpable":                 "suid_dumpable lets setuid programs write core dumps readable by anyone",
+	"kernel.kexec_load_disabled":       "kexec_load_disabled is a one-way switch that keeps another kernel from being loaded",
+	"kernel.yama.ptrace_scope":         "ptrace_scope decides who may attach a debugger to whose process",
 }
+
+// forbiddenPrefixes list the branches the panel does not touch: every key
+// under them names a program the kernel runs.
+var forbiddenPrefixes = []string{"kernel.usermodehelper."}
 
 var keyName = regexp.MustCompile(`^[a-z0-9_]+(\.[a-z0-9_*-]+){1,8}$`)
 
@@ -123,6 +131,12 @@ func ValidateKey(key string) error {
 	}
 	if reason, forbidden := forbiddenKeys[key]; forbidden {
 		return fmt.Errorf("the panel does not change %s: %s", key, reason)
+	}
+	for _, prefix := range forbiddenPrefixes {
+		if strings.HasPrefix(key, prefix) {
+			return fmt.Errorf("the panel does not change %s: the branch %s names the helpers the kernel runs",
+				key, strings.TrimSuffix(prefix, "."))
+		}
 	}
 	for _, namespace := range allowedNamespaces {
 		if strings.HasPrefix(key, namespace) {

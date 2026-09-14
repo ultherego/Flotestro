@@ -56,7 +56,18 @@ var forbiddenPatterns = []string{
 	"/etc/ssh/sshd_config",
 	"/etc/ssh/sshd_config.d/*",
 	"/etc/pam.d/*",
+	"/etc/pam.conf",
 	"/etc/krb5.keytab",
+	// The loader, the login environment and the sudo front-end: a line in
+	// any of them runs code as every user or as root without a password
+	// hash ever changing.
+	"/etc/sudo.conf",
+	"/etc/ld.so.conf*",
+	"/etc/ld.so.conf.d/*",
+	"/etc/ld.so.preload",
+	"/etc/profile*",
+	"/etc/profile.d/*",
+	"/etc/environment",
 	"*.key",
 	"*.pem",
 	"/root/*",

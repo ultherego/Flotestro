@@ -521,13 +521,19 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 
 	var currentState State
 	var actionType string
-	if err := tx.QueryRow(ctx, `select state, action_type from jobs where id = $1 for update`, jobID).
-		Scan(&currentState, &actionType); err != nil {
+	var maxOutput int
+	if err := tx.QueryRow(ctx, `select state, action_type, max_output_bytes from jobs where id = $1 for update`, jobID).
+		Scan(&currentState, &actionType, &maxOutput); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, ErrNotFound
 		}
 		return false, err
 	}
+	// The agent is asked to bound its output, but the bound is the task's
+	// and holds here whatever the agent sent: an agent that ignores it must
+	// not fill the database with one result.
+	result.Stdout, result.Stderr, result.OutputTruncated = clampOutput(
+		result.Stdout, result.Stderr, result.OutputTruncated, maxOutput)
 
 	// The time from the hand-over to the result is the agent's task
 	// duration, measured here because this is the one place every result
@@ -572,6 +578,24 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		return false, err
 	}
 	return true, tx.Commit(ctx)
+}
+
+// clampOutput cuts the output of an attempt to the bound of its task. The
+// bound covers both streams together, stdout first: the error stream of a
+// failed command is usually the shorter and the more telling one, so it
+// keeps whatever room the standard output has not used. A cut is marked
+// as a truncation, just as one made by the agent.
+func clampOutput(stdout, stderr []byte, truncated bool, limit int) ([]byte, []byte, bool) {
+	if limit <= 0 || len(stdout)+len(stderr) <= limit {
+		return stdout, stderr, truncated
+	}
+	if len(stdout) > limit {
+		stdout = stdout[:limit]
+	}
+	if room := limit - len(stdout); len(stderr) > room {
+		stderr = stderr[:room]
+	}
+	return stdout, stderr, true
 }
 
 // staleReason says whether a refusal means the host state moved after the

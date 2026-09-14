@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -93,18 +94,21 @@ func (s *Server) handleGetBudget(w http.ResponseWriter, r *http.Request) {
 // is a separate permission and goes to the audit log, because raised
 // quietly it takes the meaning away from every limit below.
 func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorizeCollection(w, r, authz.PermBudgetWrite, "budget")
+	key := r.PathValue("key")
+	if key == "" {
+		problem(w, http.StatusBadRequest, "invalid_request", "budget key is required")
+		return
+	}
+	// The scope of the budget is the scope of the change: a site budget is
+	// the site's, everything else - the fleet-wide ones, the backends, a
+	// pattern over every site - moves the whole fleet.
+	principal, ok := s.authorize(w, r, authz.PermBudgetWrite, budgetScope(key), "budget", key)
 	if !ok {
 		return
 	}
 	if s.budgets == nil {
 		problem(w, http.StatusNotImplemented, "budgets_disabled",
 			"budgets are disabled in this installation")
-		return
-	}
-	key := r.PathValue("key")
-	if key == "" {
-		problem(w, http.StatusBadRequest, "invalid_request", "budget key is required")
 		return
 	}
 
@@ -156,4 +160,15 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		setETag(w, etagOfTime(saved.UpdatedAt))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"key": key, "capacity": request.Capacity})
+}
+
+// budgetScope is the authorisation scope of a budget key. A key of the
+// form site:<name>:<family> belongs to the site; a wildcard site and every
+// other family of key belong to the fleet.
+func budgetScope(key string) authz.Scope {
+	parts := strings.Split(key, ":")
+	if len(parts) == 3 && parts[0] == "site" && parts[1] != "" && parts[1] != "*" {
+		return authz.Scope{Site: parts[1]}
+	}
+	return authz.GlobalScope
 }

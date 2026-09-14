@@ -148,6 +148,9 @@ type Options struct {
 	// StepUpACR is the required authentication level, if the installation
 	// defined it at the identity provider.
 	StepUpACR string
+	// StepUpRefuseTokens denies the highest-impact operations to API
+	// tokens; by default they are allowed and recorded as such.
+	StepUpRefuseTokens bool
 	// Metrics exposes the panel state; nil disables the endpoint.
 	Metrics *metrics.Collector
 	// Trust is the set of fleet CAs; nil disables PKI management.
@@ -164,6 +167,11 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		production[environment] = true
 	}
 	limits := authz.SessionLimits{Idle: options.SessionIdle, Absolute: options.SessionAbsolute}
+	// The idle window is refreshed on every request by the store, so it has
+	// to know the configured one rather than a default of its own.
+	if authzStore != nil {
+		authzStore.SetSessionIdle(limits.Idle)
+	}
 	return &Server{pool: pool, hosts: hostStore, inventory: inventoryStore, jobs: jobStore,
 		files:        managedfiles.NewStore(pool),
 		certificates: certificatestore.NewStore(pool),
@@ -174,7 +182,7 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
 		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
-		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR},
+		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR, RefuseTokens: options.StepUpRefuseTokens},
 		metrics: options.Metrics, trust: options.Trust}
 }
 
@@ -327,6 +335,12 @@ func (s *Server) Routes() http.Handler {
 	// Principals and API tokens.
 	s.route(mux, "GET /api/v1/principals", s.handleListPrincipals)
 	s.route(mux, "POST /api/v1/principals", s.handleCreatePrincipal)
+	// An identity is disabled rather than deleted: the trail keeps naming
+	// it. The tokens and the bindings are managed one by one.
+	s.route(mux, "DELETE /api/v1/principals/{id}", s.handleDisablePrincipal)
+	s.route(mux, "POST /api/v1/principals/{id}/tokens", s.handleIssueToken)
+	s.route(mux, "DELETE /api/v1/principals/{id}/tokens/{token}", s.handleRevokeToken)
+	s.route(mux, "DELETE /api/v1/principals/{id}/roles/{role}", s.handleRevokeRole)
 	s.route(mux, "GET /api/v1/whoami", s.handleWhoami)
 	s.route(mux, "GET /api/v1/roles", s.handleListRoles)
 	// The identity directory in read-only mode.

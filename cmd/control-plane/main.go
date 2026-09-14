@@ -36,6 +36,7 @@ import (
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/housekeeping"
 	"github.com/ultherego/flotestro/internal/identity"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/issuer"
@@ -145,6 +146,15 @@ func run() error {
 	flag.DurationVar(&metricsRetention.RollupRetention, "metrics-retention-rollup",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_ROLLUP", monitoring.DefaultRollupRetention),
 		"how long the quarter-hour rollups of the resource samples are kept")
+	// The trail is evidence and is kept forever unless the installation
+	// decides otherwise; the ended agent sessions are swept after a month
+	// on their own, because nothing reads an older one.
+	auditRetention := flag.Duration("audit-retention",
+		config.EnvDuration("FLOTESTRO_AUDIT_RETENTION", 0),
+		"how long the audit trail is kept; zero keeps it forever")
+	stepUpTokens := flag.String("stepup-tokens",
+		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
+		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
 	vulnerabilities := config.Vulnerabilities{}
 	flag.BoolVar(&vulnerabilities.Enabled, "vulnerability-correlator",
 		config.Env("FLOTESTRO_VULN_ENABLED", "true") == "true",
@@ -198,6 +208,9 @@ func run() error {
 	}
 
 	productionEnvironments := splitList(*productionList)
+	if *stepUpTokens != "allow" && *stepUpTokens != "refuse" {
+		return fmt.Errorf("FLOTESTRO_STEPUP_TOKENS must be allow or refuse, not %q", *stepUpTokens)
+	}
 
 	cfg.GatewayID = config.Env("FLOTESTRO_GATEWAY_ID", defaultGatewayID())
 	cfg.StaleAfter = time.Duration(cfg.HeartbeatSeconds+cfg.HeartbeatJitter) * 3 * time.Second
@@ -228,6 +241,10 @@ func run() error {
 	}
 	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
+	// The names of the panel are reserved: a relay certificate carrying one
+	// of them would let the relay stand in for the panel towards the
+	// agents of its site.
+	ca.ReservedNames = splitList(*advertised)
 	log.Info("the CA is ready", "subject", ca.Certificate.Subject.CommonName,
 		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339),
 		"agent_cert_ttl", ca.AgentTTL.String(),
@@ -298,6 +315,7 @@ func run() error {
 	if err := bootstrapAdmin(ctx, authzStore, cfg.StateDir, log); err != nil {
 		return err
 	}
+	warnAboutBootstrapToken(ctx, authzStore, log)
 
 	// The identity provider is optional: without it only the API tokens work,
 	// which is enough for automation but does not meet the requirement of a
@@ -323,6 +341,11 @@ func run() error {
 	// the identity view rather than a panel that does not work.
 	var directory *freeipa.Client
 	if *ipaServer != "" && *ipaPrincipal != "" {
+		// The keytab is a credential of the directory: readable by anyone on
+		// the machine, it hands the connector's identity to anyone.
+		if err := checkKeytabPermissions(*ipaKeytab); err != nil {
+			return fmt.Errorf("the directory connector: %w", err)
+		}
 		directory, err = freeipa.New(freeipa.Config{
 			ServerURL:  *ipaServer,
 			Realm:      *ipaRealm,
@@ -479,6 +502,7 @@ func run() error {
 			DirectoryWrite:         *directoryWrite,
 			StepUpMaxAge:           *stepUpMaxAge,
 			StepUpACR:              *stepUpACR,
+			StepUpRefuseTokens:     *stepUpTokens == "refuse",
 			// The metric of the validity of the CA is to show the signing CA,
 			// after an exchange as well, so it reads the whole trust set.
 			Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
@@ -562,6 +586,15 @@ func run() error {
 	}()
 
 	go markStaleHosts(ctx, pool, cfg.StaleAfter, log)
+
+	// The retention sweep: the ended sessions of the agents go after a
+	// month, the trail after the configured retention if there is one, and
+	// the expired browser sessions with their abandoned logins alongside.
+	go housekeeping.New(pool, log, housekeeping.Options{Audit: *auditRetention}).
+		Also("web sessions", authzStore.PurgeExpired).Run(ctx)
+	if *auditRetention > 0 {
+		log.Info("the audit trail has a retention", "retention", auditRetention.String())
+	}
 
 	// The scheduler delivers approved jobs to the hosts connected to this
 	// gateway and watches over the leases and the TTLs.
@@ -705,7 +738,7 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	principalID, err := store.EnsurePrincipal(ctx, tx, "bootstrap-admin", "Bootstrap administrator", "user")
+	principalID, err := store.EnsurePrincipal(ctx, tx, authz.BootstrapSubject, "Bootstrap administrator", "user")
 	if err != nil {
 		return err
 	}
@@ -713,7 +746,10 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 		authz.GlobalScope, "system"); err != nil {
 		return err
 	}
-	token, err := store.IssueToken(ctx, tx, principalID, "the bootstrap token", 0, "system")
+	// The token lives a month: long enough to create the proper identities,
+	// short enough that a forgotten one does not stay a key to the fleet.
+	token, err := store.IssueToken(ctx, tx, principalID, "the bootstrap token",
+		bootstrapTokenTTL, "system")
 	if err != nil {
 		return err
 	}
@@ -731,7 +767,49 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 	}
 
 	log.Warn("a bootstrap identity was created; delete the token file once the proper accounts exist",
-		"subject", "bootstrap-admin", "token_file", tokenPath)
+		"subject", authz.BootstrapSubject, "token_file", tokenPath)
+	return nil
+}
+
+// bootstrapTokenTTL is the lifetime of the first token of an installation.
+const bootstrapTokenTTL = 30 * 24 * time.Hour
+
+// warnAboutBootstrapToken says at every start that the bootstrap token is
+// still usable although the installation has other administrators. The
+// token was meant for the first hour; once there is somebody to revoke it,
+// it should be revoked.
+func warnAboutBootstrapToken(ctx context.Context, store *authz.Store, log *slog.Logger) {
+	live, others, err := store.BootstrapTokenState(ctx)
+	if err != nil {
+		log.Error("the state of the bootstrap token was not checked", "err", err)
+		return
+	}
+	if live && others {
+		log.Warn("the bootstrap token is still valid although other administrators exist; " +
+			"revoke it in the access screen or with DELETE /api/v1/principals/{id}/tokens/{token}")
+	}
+}
+
+// checkKeytabPermissions refuses a keytab anyone on the machine can read.
+// The owner has to be root or the account the service runs as, and the
+// mode must not grant reading to the group or to others.
+func checkKeytabPermissions(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("keytab %s: %w", path, err)
+	}
+	if info.Mode().Perm()&0o044 != 0 {
+		return fmt.Errorf("keytab %s is readable by the group or by others (mode %04o); "+
+			"chmod 600 it", path, info.Mode().Perm())
+	}
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return nil
+	}
+	if owner := int(stat.Uid); owner != 0 && owner != os.Geteuid() {
+		return fmt.Errorf("keytab %s belongs to uid %d rather than to root or to the service user",
+			path, owner)
+	}
 	return nil
 }
 

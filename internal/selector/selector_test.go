@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -228,5 +229,35 @@ func TestDescribeReadsInOneLine(t *testing.T) {
 	e := parse(t, `{"all":[{"site":"warsaw"},{"not":{"tag":"role=db"}}]}`)
 	if got := e.Describe(); got != "(site=warsaw and not tag=role=db)" {
 		t.Errorf("describe = %q", got)
+	}
+}
+
+// TestExpandRecountsTheNodes: the bound on the size holds after the
+// expansion too. A selector of a few references passes validation; the
+// dynamic groups behind them must not blow it up past what the database
+// is asked to evaluate.
+func TestExpandRecountsTheNodes(t *testing.T) {
+	// A dynamic group with a wide "any": each reference adds all of it.
+	tags := make([]string, 0, MaxNodes/2)
+	for i := 0; i < MaxNodes/2; i++ {
+		tags = append(tags, fmt.Sprintf(`{"tag":"t=%d"}`, i))
+	}
+	groups := fakeGroups{
+		"wide": {ID: "0b0e7a3e-0000-4000-8000-000000000001", Name: "wide", Kind: KindDynamic,
+			Selector: parse(t, `{"any":[`+strings.Join(tags, ",")+`]}`)},
+	}
+	one := parse(t, `{"group":"wide"}`)
+	if err := one.Validate(); err != nil {
+		t.Fatalf("a single reference failed validation: %v", err)
+	}
+	if _, err := Expand(context.Background(), one, groups); err != nil {
+		t.Fatalf("a single reference failed to expand: %v", err)
+	}
+	three := parse(t, `{"all":[{"group":"wide"},{"group":"wide"},{"group":"wide"}]}`)
+	if err := three.Validate(); err != nil {
+		t.Fatalf("three references failed validation: %v", err)
+	}
+	if _, err := Expand(context.Background(), three, groups); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("three references expanded past the bound: %v", err)
 	}
 }

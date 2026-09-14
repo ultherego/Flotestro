@@ -73,7 +73,7 @@ func (s *Store) CreateSession(ctx context.Context, tx pgx.Tx, principalID string
 	hash := sha256.Sum256([]byte(cookieValue))
 
 	if limits.Idle <= 0 {
-		limits.Idle = 8 * time.Hour
+		limits.Idle = defaultIdleWindow
 	}
 	if limits.Absolute <= 0 {
 		limits.Absolute = 24 * time.Hour
@@ -166,10 +166,14 @@ func (s *Store) AuthenticateSession(ctx context.Context, cookieValue string) (*P
 	// Refreshing the idle window; an error must not block the request.
 	// make_interval takes a number directly; concatenating text would require
 	// a cast and would silently break on the argument's type.
+	idle := s.sessionIdle
+	if idle <= 0 {
+		idle = defaultIdleWindow
+	}
 	_, _ = s.pool.Exec(ctx,
 		`update web_sessions set last_seen_at = now(),
 		        idle_expires_at = now() + make_interval(secs => $2)
-		 where id = $1`, session.ID, int(defaultIdleWindow/time.Second))
+		 where id = $1`, session.ID, int(idle/time.Second))
 	return &principal, &session, nil
 }
 

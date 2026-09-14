@@ -1,6 +1,8 @@
 package adminapi
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/authz"
@@ -16,6 +18,14 @@ func TestLocalPathRejectsExternalRedirects(t *testing.T) {
 		"http://evil.example.com",
 		"javascript:alert(1)",
 		"evil.example.com/path",
+		// A backslash is read as a slash by browsers, so this is
+		// //evil.example.com in disguise; the rest are characters no
+		// route of the panel has.
+		`/\evil.example.com/`,
+		`\\evil.example.com`,
+		"/hosts\n",
+		"/hosts<script>",
+		"/hosts;id",
 	}
 	for _, value := range rejected {
 		if got := localPath(value); got != "" {
@@ -98,5 +108,54 @@ func TestPrincipalPermissionsAreComplete(t *testing.T) {
 	// The sum must not add anything none of the roles has.
 	if permissions["pki.rotate"] {
 		t.Error("the summary holds a permission outside the assigned roles")
+	}
+}
+
+// TestBudgetScopeFollowsTheKey: a site budget is the site's to change, a
+// fleet-wide one - and a pattern over every site - is the fleet's. An
+// operator of one site raising the global mutation budget would move every
+// campaign of every other site.
+func TestBudgetScopeFollowsTheKey(t *testing.T) {
+	siteOperator := authz.Principal{
+		Subject: "waw-admin", Kind: "user",
+		Bindings: []authz.Binding{{
+			Role: authz.RolePlatformAdmin, Scope: authz.Scope{Site: "warsaw", Environment: "*"},
+		}},
+	}
+	for key, allowed := range map[string]bool{
+		"site:warsaw:packages":  true,
+		"site:krakow:packages":  false,
+		"site:*:packages":       false,
+		"global:mutations":      false,
+		"backend:copies:backup": false,
+	} {
+		if got := siteOperator.Can(authz.PermBudgetWrite, budgetScope(key)); got != allowed {
+			t.Errorf("%s: allowed=%v, expected %v", key, got, allowed)
+		}
+	}
+}
+
+// TestLoginStateIsBoundToTheBrowser: the callback of the provider is
+// accepted only in the browser that started the login. A state somebody
+// else started, replayed here, would log this browser into their account.
+func TestLoginStateIsBoundToTheBrowser(t *testing.T) {
+	s := &Server{}
+	recorder := httptest.NewRecorder()
+	s.setLoginStateCookie(recorder, httptest.NewRequest(http.MethodGet, "/auth/login", nil), "state-1")
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 || !cookies[0].HttpOnly || cookies[0].Value == "state-1" {
+		t.Fatalf("login cookie = %+v", cookies)
+	}
+
+	callback := httptest.NewRequest(http.MethodGet, "/auth/callback?state=state-1", nil)
+	callback.AddCookie(cookies[0])
+	if !loginStateMatches(callback, "state-1") {
+		t.Error("the browser that started the login was refused")
+	}
+	if loginStateMatches(callback, "state-2") {
+		t.Error("a state of another login passed with this browser's cookie")
+	}
+	if loginStateMatches(httptest.NewRequest(http.MethodGet, "/auth/callback", nil), "state-1") {
+		t.Error("a callback without the cookie passed")
 	}
 }

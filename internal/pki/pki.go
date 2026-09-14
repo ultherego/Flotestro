@@ -6,10 +6,12 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
@@ -40,6 +42,85 @@ type CA struct {
 	// can be used, a longer one lowers the renewal traffic in a large
 	// fleet.
 	AgentTTL time.Duration
+	// ReservedNames are the names and addresses the panel itself is seen
+	// under. A relay certificate never carries one of them: a relay acts as
+	// a server towards the agents of its site, and one named like the panel
+	// could stand in for it.
+	ReservedNames []string
+}
+
+// The refusals of a CSR that the requester can act on. The message starts
+// with a stable code, so the trail and the installation screen can tell a
+// weak key from a name the panel keeps for itself.
+var (
+	// ErrKeyPolicy means a public key below the policy: EC P-256 or P-384,
+	// or RSA of at least 3072 bits.
+	ErrKeyPolicy = errors.New("csr_key_policy")
+	// ErrRelayNameReserved means a relay asking for a name of the panel or
+	// of the loopback.
+	ErrRelayNameReserved = errors.New("relay_name_reserved")
+)
+
+// minimumRSABits is the smallest RSA key the fleet accepts. Below it the
+// key is weaker than the P-256 curve the agents use by default.
+const minimumRSABits = 3072
+
+// checkKeyPolicy refuses the keys the fleet does not trust. The policy is
+// short on purpose: two curves and a floor for RSA. Anything else - a
+// smaller curve, a shorter modulus, an algorithm the agents do not
+// generate - is refused rather than judged case by case.
+func checkKeyPolicy(key any) error {
+	switch k := key.(type) {
+	case *ecdsa.PublicKey:
+		if k.Curve == elliptic.P256() || k.Curve == elliptic.P384() {
+			return nil
+		}
+		return fmt.Errorf("%w: the curve %s is not accepted; use P-256 or P-384", ErrKeyPolicy,
+			k.Curve.Params().Name)
+	case *rsa.PublicKey:
+		if bits := k.N.BitLen(); bits < minimumRSABits {
+			return fmt.Errorf("%w: an RSA key of %d bits is below the floor of %d", ErrKeyPolicy,
+				bits, minimumRSABits)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: the key type %T is not accepted", ErrKeyPolicy, key)
+	}
+}
+
+// checkRelayNames refuses a relay certificate that would carry a name of
+// the panel or of the loopback. The comparison folds case and a trailing
+// dot, because a certificate name matches that way too.
+func (ca *CA) checkRelayNames(dnsNames []string, addresses []net.IP) error {
+	reserved := map[string]bool{"localhost": true}
+	var reservedIPs []net.IP
+	for _, name := range ca.ReservedNames {
+		if ip := net.ParseIP(name); ip != nil {
+			reservedIPs = append(reservedIPs, ip)
+			continue
+		}
+		reserved[canonicalName(name)] = true
+	}
+	for _, name := range dnsNames {
+		if reserved[canonicalName(name)] {
+			return fmt.Errorf("%w: %s is a name of the panel", ErrRelayNameReserved, name)
+		}
+	}
+	for _, address := range addresses {
+		if address.IsLoopback() || address.IsUnspecified() {
+			return fmt.Errorf("%w: %s is a loopback address", ErrRelayNameReserved, address)
+		}
+		for _, taken := range reservedIPs {
+			if taken.Equal(address) {
+				return fmt.Errorf("%w: %s is an address of the panel", ErrRelayNameReserved, address)
+			}
+		}
+	}
+	return nil
+}
+
+func canonicalName(name string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(name)), ".")
 }
 
 // agentCertTTL returns the lifetime of an agent certificate.
@@ -250,6 +331,9 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 	if err := csr.CheckSignature(); err != nil {
 		return nil, fmt.Errorf("CSR signature: %w", err)
 	}
+	if err := checkKeyPolicy(csr.PublicKey); err != nil {
+		return nil, err
+	}
 
 	serial, err := randomSerial()
 	if err != nil {
@@ -280,6 +364,12 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 			// full. Adding them alongside would leave the relay able to give
 			// itself a name the operator never approved.
 			template.DNSNames, template.IPAddresses = splitNames(names)
+		}
+		// The names are checked after the choice between the request and
+		// the registry: a reserved name recorded at an earlier registration
+		// must not be renewed either.
+		if err := ca.checkRelayNames(template.DNSNames, template.IPAddresses); err != nil {
+			return nil, err
 		}
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, ca.Certificate, csr.PublicKey, ca.PrivateKey)

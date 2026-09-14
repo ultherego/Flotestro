@@ -250,7 +250,35 @@ func Expand(ctx context.Context, e *Expression, groups Groups) (*Expression, err
 	if e == nil {
 		return nil, fmt.Errorf("%w: the selector is empty", ErrInvalid)
 	}
-	return expand(ctx, e, groups, nil)
+	expanded, err := expand(ctx, e, groups, nil)
+	if err != nil {
+		return nil, err
+	}
+	// The bound on the size holds after the expansion as before it: a
+	// handful of references to large dynamic groups would otherwise turn a
+	// selector that passed validation into one the database has to chew
+	// through unbounded.
+	if nodes := expanded.count(); nodes > MaxNodes {
+		return nil, fmt.Errorf("%w: the expanded selector has %d conditions, more than %d",
+			ErrInvalid, nodes, MaxNodes)
+	}
+	return expanded, nil
+}
+
+// count is the number of nodes of the tree, the root included.
+func (e *Expression) count() int {
+	if e == nil {
+		return 0
+	}
+	nodes := 1
+	for i := range e.All {
+		nodes += e.All[i].count()
+	}
+	for i := range e.Any {
+		nodes += e.Any[i].count()
+	}
+	nodes += e.Not.count()
+	return nodes
 }
 
 func expand(ctx context.Context, e *Expression, groups Groups, chain []string) (*Expression, error) {

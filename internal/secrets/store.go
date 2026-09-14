@@ -86,7 +86,7 @@ func (s *Store) Rotate(ctx context.Context, name string, value []byte, author st
 // saveVersion records the encrypted value and moves the current version.
 func (s *Store) saveVersion(ctx context.Context, tx pgx.Tx, secretID string,
 	version int, value []byte, author string) error {
-	nonce, ciphertext, err := s.cipher.Encrypt(value)
+	nonce, ciphertext, err := s.cipher.Encrypt(value, secretID, version)
 	if err != nil {
 		return err
 	}
@@ -299,7 +299,7 @@ func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version 
 		return nil, 0, ErrDestroyed
 	}
 
-	value, err := s.cipher.Decrypt(nonce, ciphertext)
+	value, err := s.cipher.Decrypt(nonce, ciphertext, secretID, issuedVersion)
 	if err != nil {
 		return nil, 0, err
 	}

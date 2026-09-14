@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"time"
 )
 
@@ -173,18 +174,41 @@ func OpenCipher(path string) (*Cipher, bool, error) {
 	return &Cipher{aead: aead}, created, nil
 }
 
-// Encrypt returns the nonce and the ciphertext.
-func (s *Cipher) Encrypt(value []byte) (nonce, ciphertext []byte, err error) {
+// Encrypt returns the nonce and the ciphertext of one version of one
+// secret.
+//
+// The identifier and the version go in as the associated data: the
+// ciphertext then opens only in the row it was written for. Without that a
+// ciphertext moved between rows of the database - the current version of
+// a password swapped for an old one, or the value of one secret put under
+// the name of another - would decrypt as if nothing had happened.
+func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, ciphertext []byte, err error) {
 	nonce = make([]byte, s.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return nil, nil, err
 	}
-	return nonce, s.aead.Seal(nil, nonce, value, nil), nil
+	return nonce, s.aead.Seal(nil, nonce, value, associatedData(secretID, version)), nil
 }
 
 // Decrypt returns the value of the secret.
-func (s *Cipher) Decrypt(nonce, ciphertext []byte) ([]byte, error) {
+//
+// A version written before the associated data was introduced carries
+// none, so a ciphertext that does not open with it is tried once more the
+// old way. Such a version stays readable and is not rewritten in place:
+// the next rotation writes the new version bound to its row, and the old
+// one goes when it is destroyed. The order of the two attempts matters -
+// the bound one first, so a moved ciphertext of the new kind never opens.
+func (s *Cipher) Decrypt(nonce, ciphertext []byte, secretID string, version int) ([]byte, error) {
+	value, err := s.aead.Open(nil, nonce, ciphertext, associatedData(secretID, version))
+	if err == nil {
+		return value, nil
+	}
 	return s.aead.Open(nil, nonce, ciphertext, nil)
+}
+
+// associatedData renders the row key the ciphertext is bound to.
+func associatedData(secretID string, version int) []byte {
+	return []byte(secretID + "|" + strconv.Itoa(version))
 }
 
 // Fingerprint computes the checksum of a value.

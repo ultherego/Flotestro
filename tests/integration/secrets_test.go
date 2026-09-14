@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -47,11 +48,14 @@ func newSecret(t *testing.T, h *harness, value string) secretView {
 	t.Helper()
 	name := fmt.Sprintf("integration.%d", time.Now().UnixNano())
 	var secret secretView
+	// A secret is a resource of the whole fleet, so every change to it
+	// carries a reason like a change of the access rules does.
 	h.do(http.MethodPost, "/api/v1/secrets", map[string]any{
-		"name": name, "description": secretReason, "value": value,
+		"name": name, "description": secretReason, "value": value, "reason": secretReason,
 	}, &secret, http.StatusCreated)
 	t.Cleanup(func() {
-		h.do(http.MethodPost, "/api/v1/secrets/"+name+"/retire", nil, nil, 0)
+		h.do(http.MethodPost, "/api/v1/secrets/"+name+"/retire",
+			map[string]any{"reason": secretReason}, nil, 0)
 	})
 	return secret
 }
@@ -118,7 +122,8 @@ func TestSecretMustExistBeforeOrdering(t *testing.T) {
 	}, nil, http.StatusBadRequest)
 
 	// A retired secret can no longer be issued.
-	h.do(http.MethodPost, "/api/v1/secrets/"+secret.Name+"/retire", nil, nil, http.StatusOK)
+	h.do(http.MethodPost, "/api/v1/secrets/"+secret.Name+"/retire",
+		map[string]any{"reason": secretReason}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
 		"action": "file.ensure", "reason": secretReason,
 		"payload": map[string]any{"file": map[string]any{
@@ -137,14 +142,14 @@ func TestRotationKeepsTheOlderVersions(t *testing.T) {
 
 	var afterRotation secretView
 	h.do(http.MethodPost, "/api/v1/secrets/"+secret.Name+"/rotate",
-		map[string]any{"value": "second-value"}, &afterRotation, http.StatusOK)
+		map[string]any{"value": "second-value", "reason": secretReason}, &afterRotation, http.StatusOK)
 	if afterRotation.CurrentVersion != 2 || len(afterRotation.Versions) != 2 {
 		t.Fatalf("secret after the rotation = %+v", afterRotation)
 	}
 
 	// Destroying a version leaves a trace that it existed.
 	var afterDestruction secretView
-	h.do(http.MethodDelete, "/api/v1/secrets/"+secret.Name+"/versions/1", nil,
+	h.do(http.MethodDelete, "/api/v1/secrets/"+secret.Name+"/versions/1?reason="+url.QueryEscape(secretReason), nil,
 		&afterDestruction, http.StatusOK)
 	var version1 secretVersionView
 	for _, version := range afterDestruction.Versions {

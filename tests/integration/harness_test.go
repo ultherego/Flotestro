@@ -451,18 +451,44 @@ func (h *harness) enrollSyntheticHost(t *testing.T) hostView {
 func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostView {
 	t.Helper()
 
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
 	machine := uniqueSubject("test-machine")
-	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
-		&x509.CertificateRequest{Subject: pkix.Name{CommonName: machine}}, key)
-	if err != nil {
+	status, raw := h.enrollAttempt(t, token, machine, testCSR(t, machine))
+	if status != http.StatusOK {
+		t.Fatalf("enrollment rejected: %d %s", status, raw)
+	}
+	var result struct {
+		HostID string `json:"hostId"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatal(err)
 	}
-	csrPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 
+	// The synthetic machine disappears together with the test. A retired
+	// host stays in the fleet forever - and after a few runs the fleet screen
+	// would show nothing but test leftovers. It is deleted straight in the
+	// database, because the product has no such operation and should not.
+	t.Cleanup(func() {
+		ctx := context.Background()
+		if _, err := h.database(ctx).Exec(ctx,
+			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
+			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
+		}
+	})
+
+	for _, host := range h.hosts() {
+		if host.ID == result.HostID {
+			return host
+		}
+	}
+	t.Fatalf("host %s did not appear on the fleet list", result.HostID)
+	return hostView{}
+}
+
+// enrollAttempt knocks on the public enrollment door once and returns the
+// status and the body, whatever they are. The tests of the door itself -
+// its refusals and its limits - need the answer rather than a host.
+func (h *harness) enrollAttempt(t *testing.T, token, machine string, csrPEM []byte) (int, []byte) {
+	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"enrollmentToken": token,
 		"machineId":       machine,
@@ -499,37 +525,25 @@ func (h *harness) enrollSyntheticHostWithToken(t *testing.T, token string) hostV
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		t.Fatalf("enrolling the synthetic host: %v", err)
+		t.Fatalf("calling the enrollment endpoint: %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<12))
-		t.Fatalf("enrollment rejected: %s %s", response.Status, raw)
-	}
-	var result struct {
-		HostID string `json:"hostId"`
-	}
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	raw, _ := io.ReadAll(io.LimitReader(response.Body, 1<<16))
+	return response.StatusCode, raw
+}
+
+// testCSR builds a certificate request with a fresh P-256 key, the kind the
+// agents generate.
+func testCSR(t *testing.T, commonName string) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	// The synthetic machine disappears together with the test. A retired
-	// host stays in the fleet forever - and after a few runs the fleet screen
-	// would show nothing but test leftovers. It is deleted straight in the
-	// database, because the product has no such operation and should not.
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := h.database(ctx).Exec(ctx,
-			`delete from hosts where id = $1::uuid`, result.HostID); err != nil {
-			t.Logf("the synthetic host %s was not cleaned up: %v", result.HostID, err)
-		}
-	})
-
-	for _, host := range h.hosts() {
-		if host.ID == result.HostID {
-			return host
-		}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader,
+		&x509.CertificateRequest{Subject: pkix.Name{CommonName: commonName}}, key)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("host %s did not appear on the fleet list", result.HostID)
-	return hostView{}
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER})
 }

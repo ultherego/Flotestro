@@ -56,6 +56,16 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	if err != nil {
 		return nil, connect.NewError(connect.CodeUnauthenticated, err)
 	}
+	// The certificate is checked the way Connect checks it: a revoked or
+	// unknown one, or one of a host that is no longer active, fetches
+	// nothing - even with a lease issued before the revocation.
+	status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if problem := s.rejectCertificate(ctx, status, hostID); problem != nil {
+		return nil, problem
+	}
 	if s.secrets == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented,
 			errors.New("this panel has no secret store"))

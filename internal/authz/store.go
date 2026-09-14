@@ -19,6 +19,10 @@ import (
 // TokenPrefix distinguishes an API token from other secrets in logs and configuration.
 const TokenPrefix = "flta_"
 
+// BootstrapSubject is the identity created on the first start, before any
+// other exists.
+const BootstrapSubject = "bootstrap-admin"
+
 var (
 	// ErrUnauthenticated means a missing or invalid token.
 	ErrUnauthenticated = errors.New("no valid authentication")
@@ -29,10 +33,20 @@ var (
 // Store provides access to identities, tokens and role assignments.
 type Store struct {
 	pool *pgxpool.Pool
+	// sessionIdle is the idle window of a browser session, refreshed on
+	// every request. Zero means defaultIdleWindow.
+	sessionIdle time.Duration
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+// SetSessionIdle sets the idle window the sessions are refreshed with. The
+// window is a policy of the installation, so the store takes it from the
+// configuration rather than keep a constant of its own.
+func (s *Store) SetSessionIdle(idle time.Duration) {
+	s.sessionIdle = idle
 }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
@@ -46,6 +60,7 @@ type Token struct {
 	Value       string     `json:"value,omitempty"`
 	Description string     `json:"description,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	LastUsedAt  *time.Time `json:"last_used_at,omitempty"`
 	CreatedAt   time.Time  `json:"created_at"`
 }
 
@@ -112,6 +127,139 @@ func (s *Store) IssueToken(ctx context.Context, tx pgx.Tx, principalID, descript
 		return nil, fmt.Errorf("saving the token: %w", err)
 	}
 	return token, nil
+}
+
+// ListTokens returns the live tokens of an identity: neither revoked nor
+// expired. The value is not among them - it was shown once.
+func (s *Store) ListTokens(ctx context.Context, principalID string) ([]Token, error) {
+	const query = `
+		select t.id, t.principal_id, p.subject, coalesce(t.description, ''),
+		       t.expires_at, t.last_used_at, t.created_at
+		from api_tokens t
+		join principals p on p.id = t.principal_id
+		where t.principal_id = $1
+		  and t.revoked_at is null
+		  and (t.expires_at is null or t.expires_at > now())
+		order by t.created_at`
+	rows, err := s.pool.Query(ctx, query, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	tokens := []Token{}
+	for rows.Next() {
+		var token Token
+		if err := rows.Scan(&token.ID, &token.PrincipalID, &token.Subject, &token.Description,
+			&token.ExpiresAt, &token.LastUsedAt, &token.CreatedAt); err != nil {
+			return nil, err
+		}
+		tokens = append(tokens, token)
+	}
+	return tokens, rows.Err()
+}
+
+// RevokeToken ends one token of an identity. The identity is part of the
+// key so that a token identifier read off one identity cannot revoke the
+// token of another through a mistaken path.
+func (s *Store) RevokeToken(ctx context.Context, tx pgx.Tx, principalID, tokenID string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		update api_tokens set revoked_at = now()
+		where id = $2 and principal_id = $1 and revoked_at is null`, principalID, tokenID)
+	if err != nil {
+		return false, fmt.Errorf("revoking the token: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// RevokeTokensOf ends every live token of an identity.
+func (s *Store) RevokeTokensOf(ctx context.Context, tx pgx.Tx, principalID string) (int64, error) {
+	tag, err := tx.Exec(ctx, `
+		update api_tokens set revoked_at = now()
+		where principal_id = $1 and revoked_at is null`, principalID)
+	if err != nil {
+		return 0, fmt.Errorf("revoking the tokens: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
+// DisablePrincipal takes the access of an identity away without deleting
+// it: the trail keeps naming it, and its bindings show what it could do.
+// The sessions and the tokens are ended in the same transaction, so there
+// is no moment when the identity is disabled and still logged in.
+func (s *Store) DisablePrincipal(ctx context.Context, tx pgx.Tx, principalID, reason string) error {
+	tag, err := tx.Exec(ctx, `
+		update principals set disabled_at = now(), updated_at = now()
+		where id = $1 and disabled_at is null`, principalID)
+	if err != nil {
+		return fmt.Errorf("disabling the identity: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	if _, err := tx.Exec(ctx, `
+		update web_sessions set revoked_at = now(), revocation_reason = $2, refresh_token = null
+		where principal_id = $1 and revoked_at is null`, principalID, nullable(reason)); err != nil {
+		return fmt.Errorf("ending the sessions: %w", err)
+	}
+	if _, err := s.RevokeTokensOf(ctx, tx, principalID); err != nil {
+		return err
+	}
+	return nil
+}
+
+// RevokeRole removes one binding of an identity. The scope is part of the
+// key: an operator on one site keeps the role on the other.
+func (s *Store) RevokeRole(ctx context.Context, tx pgx.Tx, principalID string,
+	role Role, scope Scope) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		delete from role_bindings
+		where principal_id = $1 and role = $2 and site = $3 and environment = $4`,
+		principalID, string(role), orWildcard(scope.Site), orWildcard(scope.Environment))
+	if err != nil {
+		return false, fmt.Errorf("removing the binding: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// PrincipalByID reads one identity, disabled or not, with its bindings.
+func (s *Store) PrincipalByID(ctx context.Context, principalID string) (*Principal, error) {
+	const query = `select id, subject, display_name, kind from principals where id = $1`
+	var principal Principal
+	err := s.pool.QueryRow(ctx, query, principalID).
+		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	bindings, err := s.bindingsOf(ctx, principal.ID)
+	if err != nil {
+		return nil, err
+	}
+	if bindings == nil {
+		bindings = []Binding{}
+	}
+	principal.Bindings = bindings
+	return &principal, nil
+}
+
+// BootstrapTokenState says whether the bootstrap token still works and
+// whether anybody else holds the platform administrator role. Both at once
+// mean a token that has done its job and should be revoked.
+func (s *Store) BootstrapTokenState(ctx context.Context) (live, otherAdmins bool, err error) {
+	const query = `
+		select exists (
+			select 1 from api_tokens t
+			join principals p on p.id = t.principal_id
+			where p.subject = $1 and p.disabled_at is null
+			  and t.revoked_at is null and (t.expires_at is null or t.expires_at > now())),
+		exists (
+			select 1 from role_bindings b
+			join principals p on p.id = b.principal_id
+			where b.role = $2 and p.subject <> $1 and p.disabled_at is null)`
+	err = s.pool.QueryRow(ctx, query, BootstrapSubject, string(RolePlatformAdmin)).Scan(&live, &otherAdmins)
+	return live, otherAdmins, err
 }
 
 // Authenticate turns a token into an identity together with its roles.

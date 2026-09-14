@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/paging"
 )
@@ -167,7 +169,38 @@ func parseTimelineCursor(value string) (timelineCursor, error) {
 	if err != nil {
 		return timelineCursor{}, err
 	}
+	if err := validateTimelineKey(parts[1], parts[2]); err != nil {
+		return timelineCursor{}, err
+	}
 	return timelineCursor{At: at, Kind: parts[1], ID: parts[2], Set: true}, nil
+}
+
+// validateTimelineKey checks that the kind and the identifier of a cursor
+// are ones the timeline issues: the kind is a source, and the identifier
+// is the record key of that source - a number for the trail, a UUID with
+// an optional event suffix for everything else. A foreign cursor is an
+// invalid request, not a query the database gets to fail on.
+func validateTimelineKey(kind, id string) error {
+	known := false
+	for _, source := range timelineSources {
+		if source.kind == kind {
+			known = true
+		}
+	}
+	if !known {
+		return fmt.Errorf("%w: unknown kind %q", paging.ErrInvalidCursor, kind)
+	}
+	record, _, _ := strings.Cut(id, ":")
+	if kind == "audit" || kind == "lifecycle" {
+		if _, err := strconv.ParseInt(record, 10, 64); err != nil {
+			return fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+		}
+		return nil
+	}
+	if _, err := uuid.Parse(record); err != nil {
+		return fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return nil
 }
 
 func (c timelineCursor) String() string {

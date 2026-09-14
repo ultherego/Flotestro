@@ -2,9 +2,12 @@ package adminapi
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -52,6 +55,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	s.setLoginStateCookie(w, r, flow.State)
 	http.Redirect(w, r, flow.AuthURL, http.StatusFound)
 }
 
@@ -81,6 +85,20 @@ func (s *Server) handleAuthCallback(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_callback", "missing login code or state")
 		return
 	}
+	// The browser has to be the one that started this login. The check
+	// comes before the state is consumed: a replayed callback must not use
+	// up a login somebody else is in the middle of.
+	if !loginStateMatches(r, state) {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: "anonymous",
+			Action: "auth.login", Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{"reason": "state_not_bound_to_browser", "remote_addr": r.RemoteAddr},
+		})
+		problem(w, http.StatusBadRequest, "invalid_state",
+			"the login was started in another browser or the login cookie expired; start again")
+		return
+	}
+	s.clearLoginStateCookie(w, r)
 
 	// The state is single-use: reading deletes it, so repeating the same
 	// redirect logs nobody in a second time.
@@ -252,16 +270,71 @@ func (s *Server) cookieSecure(r *http.Request) bool {
 	return r.TLS != nil
 }
 
+// localPathPattern is what a redirect target inside the panel looks like:
+// an absolute path of the characters a route of the panel uses. Anything
+// else - a backslash a browser reads as a slash, a control character, a
+// second scheme hidden in the path - is refused rather than normalised.
+var localPathPattern = regexp.MustCompile(`^/[A-Za-z0-9/_.\-?=&%#]*$`)
+
 // localPath rejects redirect targets pointing outside the panel.
 func localPath(value string) string {
-	if value == "" {
+	if value == "" || strings.Contains(value, `\`) || !localPathPattern.MatchString(value) {
 		return ""
 	}
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") {
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") ||
+		strings.HasPrefix(parsed.Path, "//") {
 		return ""
 	}
 	return parsed.Path
+}
+
+// loginStateCookie binds the login to the browser that started it. The
+// state travels through the identity provider and back in the URL, where
+// anybody who sees it can replay it; the cookie stays in the browser that
+// asked. A callback with a state the cookie does not vouch for logs the
+// browser into somebody else's login - that is the login CSRF the cookie
+// closes.
+const loginStateCookie = "flotestro_login"
+
+// setLoginStateCookie remembers the digest of the state for the length of
+// the login flow.
+func (s *Server) setLoginStateCookie(w http.ResponseWriter, r *http.Request, state string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     loginStateCookie,
+		Value:    loginStateDigest(state),
+		Path:     "/auth/",
+		HttpOnly: true,
+		Secure:   s.cookieSecure(r),
+		// Lax rather than Strict: the callback is a top-level navigation
+		// from the provider, which Strict would strip the cookie from.
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   int((10 * time.Minute) / time.Second),
+	})
+}
+
+// loginStateMatches says whether the state of the callback is the one
+// this browser started with.
+func loginStateMatches(r *http.Request, state string) bool {
+	cookie, err := r.Cookie(loginStateCookie)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(cookie.Value), []byte(loginStateDigest(state))) == 1
+}
+
+// loginStateDigest keeps the state itself out of the cookie: the cookie
+// vouches for the state without being a second copy of it.
+func loginStateDigest(state string) string {
+	sum := sha256.Sum256([]byte(state))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+func (s *Server) clearLoginStateCookie(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{
+		Name: loginStateCookie, Value: "", Path: "/auth/", MaxAge: -1,
+		HttpOnly: true, Secure: s.cookieSecure(r), SameSite: http.SameSiteLaxMode,
+	})
 }
 
 func firstNonEmpty(values ...string) string {

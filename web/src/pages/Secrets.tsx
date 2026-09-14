@@ -42,6 +42,9 @@ export function Secrets() {
   const [value, setValue] = useState("");
   const [expanded, setExpanded] = useState("");
   const [rotation, setRotation] = useState("");
+  // Every change of the store is taken with fresh authentication and a
+  // reason: the values land as root-readable files on hosts.
+  const [reason, setReason] = useState("");
   const [message, setMessage] = useState("");
 
   const list = useQuery({
@@ -58,7 +61,7 @@ export function Secrets() {
 
   const create = useMutation({
     mutationFn: () =>
-      api.post<Secret>("/api/v1/secrets", { name, description, value }),
+      api.post<Secret>("/api/v1/secrets", { name, description, value, reason }),
     onSuccess: (secret) => {
       setName("");
       setDescription("");
@@ -68,13 +71,13 @@ export function Secrets() {
   });
 
   const rotate = useMutation({
-    mutationFn: (target: string) => api.post<Secret>(`/api/v1/secrets/${target}/rotate`, { value: rotation }),
+    mutationFn: (target: string) => api.post<Secret>(`/api/v1/secrets/${target}/rotate`, { value: rotation, reason }),
     onSuccess: (secret) => afterChange(t("Secret {name} rotated to version {version}.", { name: secret.name, version: secret.current_version })),
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
   const retire = useMutation({
-    mutationFn: (target: string) => api.post<Secret>(`/api/v1/secrets/${target}/retire`, {}),
+    mutationFn: (target: string) => api.post<Secret>(`/api/v1/secrets/${target}/retire`, { reason }),
     onSuccess: (secret) => afterChange(t("Secret {name} retired; no host can be issued its value now.", { name: secret.name })),
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
@@ -148,6 +151,9 @@ export function Secrets() {
                 placeholder={t("secret value")}
               />
             </Field>
+            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required for every change of the store, at least 8 characters; it covers the rotations and retirements below too.")} wide>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
           </FieldGrid>
         </Card>
 
@@ -203,7 +209,7 @@ export function Secrets() {
                             onChange={(e) => setRotation(e.target.value)}
                             placeholder={t("new value")}
                           />
-                          <button onClick={() => rotate.mutate(secret.name)} disabled={!rotation || rotate.isPending}>
+                          <button onClick={() => rotate.mutate(secret.name)} disabled={!rotation || reason.trim().length < 8 || rotate.isPending}>
                             {t("Rotate")}
                           </button>
                           {/* Retiring does not erase the history: the trace of
@@ -211,7 +217,7 @@ export function Secrets() {
                           <button
                             className="secondary"
                             onClick={() => retire.mutate(secret.name)}
-                            disabled={retire.isPending}
+                            disabled={reason.trim().length < 8 || retire.isPending}
                           >
                             {t("Retire")}
                           </button>
