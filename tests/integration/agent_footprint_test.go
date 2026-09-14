@@ -13,8 +13,8 @@ import (
 // in the monitoring package; they are spelled out here so the gate reads
 // as the document does and a change to either side is a deliberate one.
 const (
-	footprintRSSBudget = 128 << 20
-	footprintCPUBudget = 10.0
+	footprintRSSBudget = 30 << 20
+	footprintCPUBudget = 0.2
 	// footprintFreshness is how old the newest sample may be for the host
 	// to count: three sampling intervals, as the panel counts a host as
 	// reporting.

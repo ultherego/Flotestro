@@ -5,16 +5,18 @@ import (
 	"fmt"
 )
 
-// The agent's footprint budget from the architecture document: the cost
-// the agent may have on a host before a release ships. The release gate
-// asserts it on every host of the lab; the fleet view lists the hosts
-// over it, so a leak on the production fleet is seen on the same page
-// that says the fleet is healthy. The seeded alert rules fire at twice
-// the budget: a rule is for a host that needs attention now, the budget
-// for what the agent is meant to cost.
+// The agent's footprint budget from the architecture document (chapter 8:
+// RSS at most 30 MiB, CPU below 0.2 % of a core, both at the 95th
+// percentile): the cost the agent may have on a host before a release
+// ships. The release gate asserts it on every host of the lab; the fleet
+// view lists the hosts over it, so a leak on the production fleet is seen
+// on the same page that says the fleet is healthy. The seeded alert rules
+// fire well above the budget: a rule is for a host that needs attention
+// now, the budget for what the agent is meant to cost. The idle agent
+// measures 19-25 MiB and a few hundredths of a percent.
 const (
-	FootprintRSSBudgetBytes = 128 << 20
-	FootprintCPUBudget      = 10.0
+	FootprintRSSBudgetBytes = 30 << 20
+	FootprintCPUBudget      = 0.2
 )
 
 // FootprintHost is one host over the budget, with the readings that put
