@@ -1,0 +1,54 @@
+package gateway
+
+import (
+	"testing"
+	"time"
+)
+
+// TestASignOfLifeRenewsTheLeaseOncePerInterval guards the pacing of the
+// renewal: a package transaction reports several times a second, and the
+// lease is minutes long, so the first report writes and the ones within
+// the interval do not - while a report after the interval writes again.
+// An attempt this gateway has not translated, or one reported by another
+// host under a learned identifier, renews nothing.
+func TestASignOfLifeRenewsTheLeaseOncePerInterval(t *testing.T) {
+	service := &AgentService{attempts: map[string]attemptContextEntry{
+		"attempt-1": {jobID: "job-1", hostID: "host-1"},
+	}}
+	start := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
+
+	if !service.leaseRenewalDue("attempt-1", "host-1", start) {
+		t.Fatal("the first report of an attempt does not renew the lease")
+	}
+	for _, later := range []time.Duration{time.Second, 10 * time.Second, leaseRenewalInterval - time.Millisecond} {
+		if service.leaseRenewalDue("attempt-1", "host-1", start.Add(later)) {
+			t.Errorf("a report %s after the renewal wrote again", later)
+		}
+	}
+	if !service.leaseRenewalDue("attempt-1", "host-1", start.Add(leaseRenewalInterval)) {
+		t.Error("a report after the interval did not renew the lease")
+	}
+	if service.leaseRenewalDue("attempt-1", "host-1", start.Add(leaseRenewalInterval+time.Second)) {
+		t.Error("the second renewal did not restart the interval")
+	}
+
+	if service.leaseRenewalDue("attempt-2", "host-1", start) {
+		t.Error("an attempt the gateway has not translated renewed a lease")
+	}
+	if service.leaseRenewalDue("attempt-1", "host-2", start.Add(time.Hour)) {
+		t.Error("another host renewed the lease of an attempt it does not own")
+	}
+}
+
+// TestTheRenewalOutpacesTheReclaim guards the relation between the three
+// durations the mechanism rests on: a renewal buys more time than the
+// pause between renewals plus the housekeeping pass that reclaims
+// expired leases (every thirty seconds in the scheduler), so an attempt
+// that keeps reporting is never reclaimed between two of its reports.
+func TestTheRenewalOutpacesTheReclaim(t *testing.T) {
+	const housekeeping = 30 * time.Second
+	if progressLeaseExtension <= leaseRenewalInterval+housekeeping {
+		t.Fatalf("an extension of %s does not outlast a renewal pause of %s and a housekeeping pass of %s",
+			progressLeaseExtension, leaseRenewalInterval, housekeeping)
+	}
+}

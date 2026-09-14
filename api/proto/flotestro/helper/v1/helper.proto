@@ -1244,6 +1244,12 @@ message PackageActionResult {
   repeated string self_repair = 7;
   // The tail of the tool output on failure.
   repeated string output = 8;
+  // Packages whose maintainer scriptlet failed inside a transaction that
+  // the manager still counts as done. rpm treats a failed %post as
+  // non-fatal: the files are on disk, the database lists the package, and
+  // only the script did not do its part. The transaction is a success with
+  // a defect, and the defect is named rather than hidden in the output.
+  repeated string scriptlet_errors = 9;
 }
 
 // PackageRepairRequest unblocks package operations. The answers to the

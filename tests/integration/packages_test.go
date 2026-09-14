@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -424,19 +425,400 @@ func TestHoldIsReversible(t *testing.T) {
 	}
 }
 
+// labBrokenPackage is the package of the lab repository whose maintainer
+// script fails by design. Vagrant/lab-broken-package.sh builds it for every
+// family and adds it to the repository served by the panel VM.
+const labBrokenPackage = "flotestro-lab-broken"
+
+const labBrokenReason = "integration test of a failing maintainer script"
+
+// brokenScriptExpectation says what the product reports about a failed
+// maintainer script on one family. The failure looks different on each of
+// them, and the assertions follow the manager rather than pretend the
+// families behave the same.
+type brokenScriptExpectation struct {
+	// attentionNamed: the transaction report names the package among the
+	// packages needing attention.
+	attentionNamed bool
+	// databaseBroken: the host flag package_database_broken is raised and
+	// the dashboard counts the host.
+	databaseBroken bool
+	// scriptletDefect: the manager finishes the transaction and the report
+	// names the package whose scriptlet failed; the job succeeds.
+	scriptletDefect bool
+}
+
 // TestAFailingMaintainerScriptIsATypedFailure is the scenario of chapter
-// 23 in which a postinst script fails half-way: the transaction ends as
-// transaction_failed, the attention list names the package, the host flag
-// package_database_broken is raised, and a repair clears it.
+// 23 in which a maintainer script fails half-way: the transaction ends as
+// transaction_failed rather than as an opaque error, the report says what
+// needs attention, the host flag package_database_broken follows the
+// family, a repair clears it where the family has one, and the package can
+// be removed afterwards.
 //
-// The test cannot be carried out from the harness: packages.install takes
-// package names only (packageNamePattern in opspec admits no slash, so a
-// .deb built by the test and placed with file.ensure cannot be named), and
-// the harness has no way to run a command on a lab host. A package with a
-// failing maintainer script has to come from the lab repository on the
-// panel VM; until it does, the scenario is covered by the typed-failure
-// tests of the apt adapter and by TestBrokenPackageDatabaseBlocksOperations,
-// which exercises the flag from the panel's side.
+// The families differ, and the test says how:
+//
+//   - Debian: dpkg leaves the package half-configured. The attention list
+//     names it, the host flag is raised, the dashboard counts the host, and
+//     packages.repair (dpkg --configure -a) finishes the configuration.
+//   - RHEL: rpm runs %post after the files are in place and keeps the
+//     package installed when it fails; the database stays consistent, so
+//     there is nothing to repair and no attention list. dnf5 finishes the
+//     transaction with exit status 0 and a "non-critical error" line, so
+//     the product reports a success with a defect: the job succeeds and
+//     the report names the package under scriptlet_errors. The adapter
+//     reports no repair feature and the panel refuses a repair when ordered.
+//   - Arch: pacman treats a scriptlet failure like rpm does. The pacman
+//     adapter reports no install feature today, so the family is skipped
+//     until it does.
+//
+// A lab that has not run Vagrant/lab-broken-package.sh does not carry the
+// package; the host then answers that the package is unknown and the test
+// skips instead of failing.
 func TestAFailingMaintainerScriptIsATypedFailure(t *testing.T) {
-	t.Skip("package.install takes repository names only; a broken maintainer script needs a lab repository package")
+	for _, tc := range []struct {
+		family string
+		expect brokenScriptExpectation
+	}{
+		{"debian", brokenScriptExpectation{attentionNamed: true, databaseBroken: true}},
+		{"rhel", brokenScriptExpectation{scriptletDefect: true}},
+		{"arch", brokenScriptExpectation{scriptletDefect: true}},
+	} {
+		t.Run(tc.family, func(t *testing.T) {
+			h := newHarness(t)
+			host := h.hostByFamily(tc.family)
+			if tc.family == "arch" && !capabilityFeature(host, "packages.pacman", "install") {
+				t.Skip("the pacman adapter reports no install feature")
+			}
+			brokenMaintainerScriptScenario(t, h, host, tc.expect)
+		})
+	}
+}
+
+func brokenMaintainerScriptScenario(t *testing.T, h *harness, host hostView, expect brokenScriptExpectation) {
+	t.Helper()
+
+	// The host has to see the current repository index: the package is
+	// added to the lab repository after the hosts were set up. A refresh is
+	// the side effect of a plan; the plan itself may refuse on a host that
+	// cannot plan (Arch without checkupdates) and that is not the subject
+	// here.
+	if plan, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "packages.plan", "reason": labBrokenReason,
+		"payload": planPayload(true),
+	}, 5*time.Minute); plan.State != "succeeded" {
+		t.Logf("the metadata refresh plan ended in state %s: %s", plan.State, lastMessage(attempts))
+	}
+
+	// A host that already needs attention would blur the assertions: the
+	// scenario needs a clean baseline.
+	if h.hostPackageDatabaseBroken(host.ID) {
+		t.Skipf("host %s already has a broken package database; the scenario needs a clean baseline", host.Hostname)
+	}
+	counterBefore := h.packageDatabaseBrokenCounter()
+
+	// The lab is cleaned up whatever happens after this point: a repair
+	// where the family has one, so that the flag does not block the removal,
+	// and then the removal itself.
+	t.Cleanup(func() {
+		if hostHasPackageRepair(host) {
+			h.runOperation(host.ID, map[string]any{
+				"action": "packages.repair", "reason": labBrokenReason + " (cleanup)",
+				"payload": map[string]any{"package_repair": map[string]any{}},
+			}, 10*time.Minute)
+		}
+		if state := h.removeLabPackage(t, host); state != "" && state != "succeeded" {
+			t.Logf("cleanup: the removal of %s ended in state %s", labBrokenPackage, state)
+		}
+	})
+
+	// The installation. The maintainer script is what fails, so the manager
+	// has to download and unpack the package first.
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "packages.install", "reason": labBrokenReason,
+		"payload": map[string]any{"package_change": map[string]any{
+			"packages": []string{labBrokenPackage},
+		}},
+	}, 10*time.Minute)
+	if len(attempts) == 0 {
+		t.Fatalf("the installation ended in state %s without an attempt", job.State)
+	}
+	last := h.lastPackageAttempt(job.ID)
+	if last.unknownToRepositories() {
+		t.Skipf("the lab repository does not carry %s; run Vagrant/lab-broken-package.sh (%s)",
+			labBrokenPackage, last.Message)
+	}
+
+	if expect.scriptletDefect {
+		// The manager finished: the job succeeds, and the defect is named
+		// in the report rather than hidden in the output.
+		if job.State != "succeeded" {
+			t.Fatalf("the installation ended in state %s, expected succeeded with a scriptlet defect: %s",
+				job.State, last.Message)
+		}
+		if last.Detail == nil || last.Detail.Kind != "package_apply" {
+			t.Fatalf("no transaction report on the attempt: %+v", last.Detail)
+		}
+		if !containsName(last.Detail.ScriptletErrors, labBrokenPackage) {
+			t.Errorf("scriptlet errors = %v, expected %s named", last.Detail.ScriptletErrors, labBrokenPackage)
+		}
+	} else {
+		// The failure is typed: the job fails, and the code is the one the
+		// adapters give a transaction that ran and broke.
+		if job.State != "failed" {
+			t.Fatalf("the installation ended in state %s, expected failed: %s", job.State, last.Message)
+		}
+		if last.ErrorCode != "transaction_failed" {
+			t.Fatalf("error code = %q, expected transaction_failed: %s", last.ErrorCode, last.Message)
+		}
+		if last.Detail == nil || last.Detail.Kind != "package_apply" {
+			t.Fatalf("no transaction report on the failed attempt: %+v", last.Detail)
+		}
+		// The report has to say what went wrong: the output tail names the
+		// maintainer script.
+		if len(last.Detail.Output) == 0 {
+			t.Error("the transaction report carries no output of the manager")
+		}
+	}
+
+	// What needs attention, family by family.
+	named := containsName(last.Detail.PackagesNeedingAttention, labBrokenPackage)
+	if named != expect.attentionNamed {
+		t.Errorf("packages needing attention = %v, expected %s named: %v",
+			last.Detail.PackagesNeedingAttention, labBrokenPackage, expect.attentionNamed)
+	}
+	if last.Detail.PackageDatabaseBroken != expect.databaseBroken {
+		t.Errorf("the report says package_database_broken = %v, expected %v",
+			last.Detail.PackageDatabaseBroken, expect.databaseBroken)
+	}
+
+	// The host flag follows the report, and the dashboard counts the host
+	// where the flag is raised.
+	if broken := h.hostPackageDatabaseBroken(host.ID); broken != expect.databaseBroken {
+		t.Errorf("host package_database_broken = %v after the failed transaction, expected %v",
+			broken, expect.databaseBroken)
+	}
+	if expect.databaseBroken {
+		if after := h.packageDatabaseBrokenCounter(); after < counterBefore+1 {
+			t.Errorf("the dashboard counts %d hosts with a broken package database, expected at least %d",
+				after, counterBefore+1)
+		}
+	}
+
+	if hostHasPackageRepair(host) {
+		// The repair finishes the configuration. On Debian that is exactly
+		// what the maintainer script needs: it fails the first time and
+		// passes the second.
+		repair, repairAttempts := h.runOperation(host.ID, map[string]any{
+			"action": "packages.repair", "reason": labBrokenReason,
+			"payload": map[string]any{"package_repair": map[string]any{}},
+		}, 10*time.Minute)
+		if repair.State != "succeeded" {
+			t.Fatalf("the repair ended in state %s: %s", repair.State, lastMessage(repairAttempts))
+		}
+		repaired := h.lastPackageAttempt(repair.ID)
+		if repaired.Detail == nil || repaired.Detail.Kind != "package_repair" {
+			t.Fatalf("no repair report: %+v", repaired.Detail)
+		}
+		if len(repaired.Detail.StillBlocked) > 0 {
+			t.Errorf("after the repair the host still has blocked packages: %+v", repaired.Detail.StillBlocked)
+		}
+	} else {
+		// A family without a repair says so when it is ordered, not after
+		// the job is delivered.
+		h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{"action": "packages.repair", "reason": labBrokenReason,
+				"payload": map[string]any{"package_repair": map[string]any{}}},
+			nil, http.StatusConflict)
+	}
+
+	// After the repair - or without one, where the family keeps the package
+	// installed and the database sound - the host reports no attention
+	// packages and the flag is down.
+	if h.hostPackageDatabaseBroken(host.ID) {
+		t.Error("the host still has package_database_broken raised")
+	}
+	if after := h.packageDatabaseBrokenCounter(); after > counterBefore {
+		t.Errorf("the dashboard still counts %d hosts with a broken package database, expected at most %d",
+			after, counterBefore)
+	}
+	if blocked := h.blockedPackages(t, host.ID); len(blocked) > 0 {
+		t.Errorf("the plan still names blocked packages: %v", blocked)
+	}
+
+	// The package goes away the way the operator removes any package: with
+	// an approved set. The lab is left the way it was found.
+	switch state := h.removeLabPackage(t, host); state {
+	case "succeeded":
+	case "":
+		t.Fatalf("%s is not installed although the transaction ran; the removal plan found nothing", labBrokenPackage)
+	default:
+		t.Fatalf("the removal of %s ended in state %s", labBrokenPackage, state)
+	}
+	if h.hostPackageDatabaseBroken(host.ID) {
+		t.Error("the removal left package_database_broken raised")
+	}
+}
+
+// packageAttempt is the last attempt of a package job with the fields the
+// scenario reads. The shared attemptView keeps the common fields; the
+// attention list, the manager output and the repair report are read here.
+type packageAttempt struct {
+	Number    int    `json:"attempt_number"`
+	Status    string `json:"status"`
+	ErrorCode string `json:"error_code"`
+	Message   string `json:"message"`
+	Detail    *struct {
+		Kind                     string   `json:"kind"`
+		Manager                  string   `json:"manager"`
+		PackageDatabaseBroken    bool     `json:"package_database_broken"`
+		PackagesNeedingAttention []string `json:"packages_needing_attention"`
+		ScriptletErrors          []string `json:"scriptlet_errors"`
+		Output                   []string `json:"output"`
+		Removals                 []string `json:"removals"`
+		Blocked                  []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"blocked"`
+		StillBlocked []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"still_blocked"`
+	} `json:"detail"`
+}
+
+// lastPackageAttempt returns the last attempt of a job with its package detail.
+func (h *harness) lastPackageAttempt(jobID string) packageAttempt {
+	h.t.Helper()
+	var result struct {
+		Items []packageAttempt `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &result)
+	if len(result.Items) == 0 {
+		h.t.Fatalf("job %s has no attempts", jobID)
+	}
+	return result.Items[len(result.Items)-1]
+}
+
+// unknownToRepositories recognises the answer "there is no such package"
+// of every manager: apt's "Unable to locate package", dnf's "No match for
+// argument" and "Unable to find a match", pacman's "target not found".
+func (a packageAttempt) unknownToRepositories() bool {
+	text := strings.ToLower(a.Message)
+	if a.Detail != nil {
+		text += "\n" + strings.ToLower(strings.Join(a.Detail.Output, "\n"))
+	}
+	for _, phrase := range []string{
+		"unable to locate package", "no match for argument", "unable to find a match",
+		"target not found", "no package " + labBrokenPackage + " available",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// hostPackageDatabaseBroken reads the host flag from the host detail.
+func (h *harness) hostPackageDatabaseBroken(hostID string) bool {
+	h.t.Helper()
+	var host struct {
+		PackageDatabaseBroken bool `json:"package_database_broken"`
+	}
+	h.get("/api/v1/hosts/"+hostID, &host)
+	return host.PackageDatabaseBroken
+}
+
+// packageDatabaseBrokenCounter reads the dashboard counter of hosts with a
+// broken package database.
+func (h *harness) packageDatabaseBrokenCounter() int {
+	h.t.Helper()
+	var summary struct {
+		PackageDatabaseBroken int `json:"package_database_broken"`
+	}
+	h.get("/api/v1/fleet/summary", &summary)
+	return summary.PackageDatabaseBroken
+}
+
+// hostHasPackageRepair says whether any package adapter of the host reports
+// the repair feature. An adapter silent about the feature is taken at its
+// word only when it says yes: the refusal of the panel is what the test
+// checks otherwise.
+func hostHasPackageRepair(host hostView) bool {
+	for _, adapter := range []string{"packages.apt", "packages.dnf", "packages.pacman"} {
+		if capabilityFeature(host, adapter, "repair") {
+			return true
+		}
+	}
+	return false
+}
+
+// blockedPackages orders a plan without a refresh and returns the names of
+// the packages it reports as blocked.
+func (h *harness) blockedPackages(t *testing.T, hostID string) []string {
+	t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "packages.plan", "reason": labBrokenReason,
+		"payload": planPayload(false),
+	}, 5*time.Minute)
+	if job.State != "succeeded" {
+		// A host that cannot plan cannot say what blocks it either; that is
+		// a different property of the family and is not judged here.
+		t.Logf("the plan ended in state %s: %s", job.State, lastMessage(attempts))
+		return nil
+	}
+	last := h.lastPackageAttempt(job.ID)
+	if last.Detail == nil {
+		return nil
+	}
+	names := make([]string, 0, len(last.Detail.Blocked))
+	for _, pkg := range last.Detail.Blocked {
+		names = append(names, pkg.Name)
+	}
+	return names
+}
+
+// removeLabPackage removes the lab package with an approved set: the removal
+// plan gives the set, the removal names it, and two people approve. It
+// returns the final state of the removal, or an empty string when the
+// package was not installed and there was nothing to remove.
+func (h *harness) removeLabPackage(t *testing.T, host hostView) string {
+	t.Helper()
+	plan, planAttempts := h.runOperation(host.ID, map[string]any{
+		"action": "packages.plan", "reason": labBrokenReason,
+		"payload": map[string]any{"package_plan": map[string]any{
+			"mode": "remove", "only_packages": []string{labBrokenPackage},
+		}},
+	}, 5*time.Minute)
+	if plan.State != "succeeded" {
+		t.Logf("the removal plan of %s ended in state %s: %s", labBrokenPackage, plan.State, lastMessage(planAttempts))
+		return plan.State
+	}
+	removals := h.lastPackageAttempt(plan.ID).Detail
+	if removals == nil || len(removals.Removals) == 0 {
+		return ""
+	}
+
+	removal := h.createOperation(host.ID, map[string]any{
+		"action": "packages.remove", "reason": labBrokenReason,
+		"target_confirmation": host.Hostname,
+		"payload": map[string]any{"package_change": map[string]any{
+			"packages": []string{labBrokenPackage}, "expected_removals": removals.Removals,
+		}},
+	})
+	state := h.approve(removal.ID, removal.PayloadHash)
+	if state.State == "awaiting_approval" {
+		second := h.withToken(h.createPrincipal(uniqueSubject("second-person-broken-package"),
+			[]map[string]string{{"role": "approver", "site": host.Site, "environment": host.Environment}}))
+		second.approve(removal.ID, removal.PayloadHash)
+	}
+	return h.awaitTerminal(removal.ID, 10*time.Minute).State
+}
+
+func containsName(names []string, wanted string) bool {
+	for _, name := range names {
+		if name == wanted {
+			return true
+		}
+	}
+	return false
 }

@@ -73,9 +73,22 @@ type Sample struct {
 	UptimeSeconds   uint64
 	Filesystems     []Filesystem
 	Interfaces      []Interface
+	// The agent's own footprint, as it read it from /proc/self. Nil is a
+	// value the agent could not read - or an agent too old to send one -
+	// and is stored as null, never as zero: the release gate reads these,
+	// and a zero would let a host it never measured pass.
+	AgentRSSBytes   *uint64
+	AgentCPUPercent *float64
+	AgentGoroutines *uint32
+	AgentOpenFDs    *uint32
+	// HelperRSSBytes is present only while the root helper runs; it sleeps
+	// between orders.
+	HelperRSSBytes *uint64
 	// The maxima exist only on a rollup: a raw sample is its own maximum.
-	CPUPercentMax *float64
-	MemoryUsedMax *uint64
+	CPUPercentMax      *float64
+	MemoryUsedMax      *uint64
+	AgentRSSBytesMax   *uint64
+	AgentCPUPercentMax *float64
 }
 
 // Options configures the store.
@@ -123,13 +136,18 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) error 
 	if _, err := tx.Exec(ctx, `
 		insert into host_metrics (host_id, at, cpu_percent, load1, load5, load15,
 		    memory_total, memory_used, memory_available, swap_total, swap_used,
-		    uptime_seconds, filesystems, interfaces)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb)
+		    uptime_seconds, filesystems, interfaces,
+		    agent_rss_bytes, agent_cpu_percent, agent_goroutines, agent_open_fds, helper_rss_bytes)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
+		        $15, $16, $17, $18, $19)
 		on conflict (host_id, at) do nothing`,
 		hostID, sample.At, sample.CPUPercent, sample.Load1, sample.Load5, sample.Load15,
 		int64(sample.MemoryTotal), int64(sample.MemoryUsed), int64(sample.MemoryAvailable),
 		int64(sample.SwapTotal), int64(sample.SwapUsed), int64(sample.UptimeSeconds),
-		filesystems, interfaces); err != nil {
+		filesystems, interfaces,
+		nullableUint64(sample.AgentRSSBytes), sample.AgentCPUPercent,
+		nullableUint32(sample.AgentGoroutines), nullableUint32(sample.AgentOpenFDs),
+		nullableUint64(sample.HelperRSSBytes)); err != nil {
 		return err
 	}
 	// The host row carries the moment of the newest sample; an old sample
@@ -140,6 +158,24 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) error 
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// nullableUint64 and nullableUint32 pass an absent value to the database
+// as null in the signed types the columns have.
+func nullableUint64(value *uint64) *int64 {
+	if value == nil {
+		return nil
+	}
+	signed := int64(*value)
+	return &signed
+}
+
+func nullableUint32(value *uint32) *int32 {
+	if value == nil {
+		return nil
+	}
+	signed := int32(*value)
+	return &signed
 }
 
 func orEmptyFilesystems(list []Filesystem) []Filesystem {
@@ -214,7 +250,9 @@ func (s *Store) Rollup(ctx context.Context) error {
 		insert into host_metrics_15m (host_id, at, cpu_percent, cpu_percent_max,
 		    load1, load5, load15, memory_total, memory_used, memory_used_max,
 		    memory_available, swap_total, swap_used, uptime_seconds,
-		    filesystems, interfaces, samples)
+		    filesystems, interfaces, samples,
+		    agent_rss_bytes, agent_rss_bytes_max, agent_cpu_percent, agent_cpu_percent_max,
+		    agent_goroutines, agent_open_fds, helper_rss_bytes)
 		select host_id, bucket,
 		       avg(cpu_percent), max(cpu_percent),
 		       avg(load1), avg(load5), avg(load15),
@@ -223,7 +261,14 @@ func (s *Store) Rollup(ctx context.Context) error {
 		       (array_agg(uptime_seconds order by at desc))[1],
 		       (array_agg(filesystems order by at desc))[1],
 		       (array_agg(interfaces order by at desc))[1],
-		       count(*)
+		       count(*),
+		       -- The footprint averages skip the samples without one, so a
+		       -- quarter with a single reading keeps that reading rather
+		       -- than a mean dragged towards zero by the unknowns.
+		       avg(agent_rss_bytes)::bigint, max(agent_rss_bytes),
+		       avg(agent_cpu_percent), max(agent_cpu_percent),
+		       avg(agent_goroutines)::integer, avg(agent_open_fds)::integer,
+		       avg(helper_rss_bytes)::bigint
 		from bucketed
 		group by host_id, bucket
 		on conflict (host_id, at) do update set
@@ -235,7 +280,14 @@ func (s *Store) Rollup(ctx context.Context) error {
 		    swap_total = excluded.swap_total, swap_used = excluded.swap_used,
 		    uptime_seconds = excluded.uptime_seconds,
 		    filesystems = excluded.filesystems, interfaces = excluded.interfaces,
-		    samples = excluded.samples`,
+		    samples = excluded.samples,
+		    agent_rss_bytes = excluded.agent_rss_bytes,
+		    agent_rss_bytes_max = excluded.agent_rss_bytes_max,
+		    agent_cpu_percent = excluded.agent_cpu_percent,
+		    agent_cpu_percent_max = excluded.agent_cpu_percent_max,
+		    agent_goroutines = excluded.agent_goroutines,
+		    agent_open_fds = excluded.agent_open_fds,
+		    helper_rss_bytes = excluded.helper_rss_bytes`,
 		s.options.RawRetention.Seconds())
 	return err
 }
@@ -325,9 +377,17 @@ type Point struct {
 	UptimeSeconds   uint64            `json:"uptime_seconds"`
 	Filesystems     []FilesystemPoint `json:"filesystems"`
 	Interfaces      []InterfacePoint  `json:"interfaces"`
+	// The agent's own footprint; absent where the agent did not report it.
+	AgentRSSBytes   *uint64  `json:"agent_rss_bytes,omitempty"`
+	AgentCPUPercent *float64 `json:"agent_cpu_percent,omitempty"`
+	AgentGoroutines *uint32  `json:"agent_goroutines,omitempty"`
+	AgentOpenFDs    *uint32  `json:"agent_open_fds,omitempty"`
+	HelperRSSBytes  *uint64  `json:"helper_rss_bytes,omitempty"`
 	// The maxima of a rolled-up point; absent on a raw one.
-	CPUPercentMax *float64 `json:"cpu_percent_max,omitempty"`
-	MemoryUsedMax *uint64  `json:"memory_used_max,omitempty"`
+	CPUPercentMax      *float64 `json:"cpu_percent_max,omitempty"`
+	MemoryUsedMax      *uint64  `json:"memory_used_max,omitempty"`
+	AgentRSSBytesMax   *uint64  `json:"agent_rss_bytes_max,omitempty"`
+	AgentCPUPercentMax *float64 `json:"agent_cpu_percent_max,omitempty"`
 }
 
 // Series is the chart data of one host over a range.
@@ -381,7 +441,8 @@ func (s *Store) samples(ctx context.Context, hostID string, window time.Duration
 	query := `
 		select at, cpu_percent, load1, load5, load15, memory_total, memory_used,
 		       memory_available, swap_total, swap_used, uptime_seconds,
-		       filesystems, interfaces
+		       filesystems, interfaces,
+		       agent_rss_bytes, agent_cpu_percent, agent_goroutines, agent_open_fds, helper_rss_bytes
 		from host_metrics
 		where host_id = $1
 		  and ($2::double precision <= 0 or at >= now() - make_interval(secs => $2::double precision))
@@ -400,9 +461,11 @@ func (s *Store) samples(ctx context.Context, hostID string, window time.Duration
 		var sample Sample
 		var cpu, load1, load5, load15 float32
 		var memoryTotal, memoryUsed, memoryAvailable, swapTotal, swapUsed, uptime int64
+		var fp footprintColumns
 		if err := rows.Scan(&sample.At, &cpu, &load1, &load5, &load15,
 			&memoryTotal, &memoryUsed, &memoryAvailable, &swapTotal, &swapUsed, &uptime,
-			&sample.Filesystems, &sample.Interfaces); err != nil {
+			&sample.Filesystems, &sample.Interfaces,
+			&fp.rss, &fp.cpu, &fp.goroutines, &fp.openFDs, &fp.helperRSS); err != nil {
 			return nil, err
 		}
 		sample.CPUPercent, sample.Load1, sample.Load5, sample.Load15 =
@@ -411,6 +474,7 @@ func (s *Store) samples(ctx context.Context, hostID string, window time.Duration
 			uint64(memoryTotal), uint64(memoryUsed), uint64(memoryAvailable)
 		sample.SwapTotal, sample.SwapUsed, sample.UptimeSeconds =
 			uint64(swapTotal), uint64(swapUsed), uint64(uptime)
+		fp.into(&sample)
 		list = append(list, sample)
 	}
 	if err := rows.Err(); err != nil {
@@ -420,13 +484,58 @@ func (s *Store) samples(ctx context.Context, hostID string, window time.Duration
 	return list, nil
 }
 
+// footprintColumns is the footprint as the database holds it: signed
+// types, null for an unknown value.
+type footprintColumns struct {
+	rss, helperRSS, rssMax *int64
+	cpu, cpuMax            *float32
+	goroutines, openFDs    *int32
+}
+
+// into copies the columns onto the sample, keeping null as nil.
+func (fp footprintColumns) into(sample *Sample) {
+	sample.AgentRSSBytes = unsignedOf(fp.rss)
+	sample.HelperRSSBytes = unsignedOf(fp.helperRSS)
+	sample.AgentRSSBytesMax = unsignedOf(fp.rssMax)
+	sample.AgentCPUPercent = float64Of(fp.cpu)
+	sample.AgentCPUPercentMax = float64Of(fp.cpuMax)
+	sample.AgentGoroutines = unsigned32Of(fp.goroutines)
+	sample.AgentOpenFDs = unsigned32Of(fp.openFDs)
+}
+
+func unsignedOf(value *int64) *uint64 {
+	if value == nil {
+		return nil
+	}
+	unsigned := uint64(*value)
+	return &unsigned
+}
+
+func unsigned32Of(value *int32) *uint32 {
+	if value == nil {
+		return nil
+	}
+	unsigned := uint32(*value)
+	return &unsigned
+}
+
+func float64Of(value *float32) *float64 {
+	if value == nil {
+		return nil
+	}
+	wide := float64(*value)
+	return &wide
+}
+
 // rollups reads the quarter-hour rollups of a host within the window,
 // oldest first.
 func (s *Store) rollups(ctx context.Context, hostID string, window time.Duration) ([]Sample, error) {
 	rows, err := s.pool.Query(ctx, `
 		select at, cpu_percent, cpu_percent_max, load1, load5, load15, memory_total,
 		       memory_used, memory_used_max, memory_available, swap_total, swap_used,
-		       uptime_seconds, filesystems, interfaces
+		       uptime_seconds, filesystems, interfaces,
+		       agent_rss_bytes, agent_rss_bytes_max, agent_cpu_percent, agent_cpu_percent_max,
+		       agent_goroutines, agent_open_fds, helper_rss_bytes
 		from host_metrics_15m
 		where host_id = $1 and at >= now() - make_interval(secs => $2)
 		order by at`, hostID, window.Seconds())
@@ -439,9 +548,11 @@ func (s *Store) rollups(ctx context.Context, hostID string, window time.Duration
 		var sample Sample
 		var cpu, cpuMax, load1, load5, load15 float32
 		var memoryTotal, memoryUsed, memoryUsedMax, memoryAvailable, swapTotal, swapUsed, uptime int64
+		var fp footprintColumns
 		if err := rows.Scan(&sample.At, &cpu, &cpuMax, &load1, &load5, &load15,
 			&memoryTotal, &memoryUsed, &memoryUsedMax, &memoryAvailable, &swapTotal, &swapUsed,
-			&uptime, &sample.Filesystems, &sample.Interfaces); err != nil {
+			&uptime, &sample.Filesystems, &sample.Interfaces,
+			&fp.rss, &fp.rssMax, &fp.cpu, &fp.cpuMax, &fp.goroutines, &fp.openFDs, &fp.helperRSS); err != nil {
 			return nil, err
 		}
 		sample.CPUPercent, sample.Load1, sample.Load5, sample.Load15 =
@@ -452,6 +563,7 @@ func (s *Store) rollups(ctx context.Context, hostID string, window time.Duration
 			uint64(swapTotal), uint64(swapUsed), uint64(uptime)
 		cpuMax64, memoryUsedMax64 := float64(cpuMax), uint64(memoryUsedMax)
 		sample.CPUPercentMax, sample.MemoryUsedMax = &cpuMax64, &memoryUsedMax64
+		fp.into(&sample)
 		list = append(list, sample)
 	}
 	return list, rows.Err()
@@ -487,7 +599,11 @@ func toPoints(samples []Sample) []Point {
 			UptimeSeconds: sample.UptimeSeconds,
 			Filesystems:   make([]FilesystemPoint, 0, len(sample.Filesystems)),
 			Interfaces:    []InterfacePoint{},
-			CPUPercentMax: sample.CPUPercentMax, MemoryUsedMax: sample.MemoryUsedMax,
+			AgentRSSBytes: sample.AgentRSSBytes, AgentCPUPercent: sample.AgentCPUPercent,
+			AgentGoroutines: sample.AgentGoroutines, AgentOpenFDs: sample.AgentOpenFDs,
+			HelperRSSBytes: sample.HelperRSSBytes,
+			CPUPercentMax:  sample.CPUPercentMax, MemoryUsedMax: sample.MemoryUsedMax,
+			AgentRSSBytesMax: sample.AgentRSSBytesMax, AgentCPUPercentMax: sample.AgentCPUPercentMax,
 		}
 		for _, fs := range sample.Filesystems {
 			point.Filesystems = append(point.Filesystems, FilesystemPoint{

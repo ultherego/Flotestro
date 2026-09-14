@@ -9,12 +9,14 @@ import (
 func TestMeasureComputesEveryMetric(t *testing.T) {
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	sampledAt := now.Add(-30 * time.Second)
+	agentRSS, agentCPU := uint64(300<<20), 12.5
 	host := hostState{
 		ID: "h1", Cores: 4, LastSampleAt: &sampledAt,
 		Latest: &Sample{
 			At: sampledAt, CPUPercent: 93.5, Load1: 6,
 			MemoryTotal: 1000, MemoryUsed: 960, SwapTotal: 200, SwapUsed: 50,
 			UptimeSeconds: 120,
+			AgentRSSBytes: &agentRSS, AgentCPUPercent: &agentCPU,
 			Filesystems: []Filesystem{
 				{Mount: "/", TotalBytes: 100, UsedBytes: 40, InodesTotal: 10, InodesUsed: 9},
 				{Mount: "/var", TotalBytes: 100, UsedBytes: 98, InodesTotal: 10, InodesUsed: 1},
@@ -35,6 +37,8 @@ func TestMeasureComputesEveryMetric(t *testing.T) {
 		{MetricInodesUsedPercent, 90, "/: inodes_used_percent 90%"},
 		{MetricHostOffline, 0.5, "no sample for 0 min"},
 		{MetricUptimeSeconds, 120, "uptime 2m"},
+		{MetricAgentRSSBytes, 300 << 20, "agent rss 300 MiB"},
+		{MetricAgentCPUPercent, 12.5, "agent_cpu_percent 12.5%"},
 	}
 	for _, c := range cases {
 		rule := Rule{Metric: c.metric, Operator: "gt", Threshold: 1}
@@ -75,6 +79,16 @@ func TestMeasureSaysUnknownRatherThanZero(t *testing.T) {
 		},
 		"filesystems without a measurable mount": {
 			Rule{Metric: MetricFilesystemUsedPercent, Operator: "gt"},
+			hostState{LastSampleAt: &now, Latest: &Sample{At: now}},
+		},
+		// An agent that sent no footprint - too old, or a procfs it could
+		// not read - is not an agent using nothing.
+		"agent memory the agent did not report": {
+			Rule{Metric: MetricAgentRSSBytes, Operator: "lt"},
+			hostState{LastSampleAt: &now, Latest: &Sample{At: now}},
+		},
+		"agent cpu the agent did not report": {
+			Rule{Metric: MetricAgentCPUPercent, Operator: "lt"},
 			hostState{LastSampleAt: &now, Latest: &Sample{At: now}},
 		},
 	}

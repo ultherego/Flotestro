@@ -3,12 +3,13 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type Collection } from "../lib/api";
 import type {
-  Alert, AlertRule, AlertRuleInput, AlertSeverity, AlertState, FleetMonitoring as FleetView,
+  Alert, AlertRule, AlertRuleInput, AlertSeverity, AlertState, FleetFootprint, FleetMonitoring as FleetView,
   RuleCatalogue, RuleOperator, RuleSelector, Silence, Whoami,
 } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { StatusBar } from "../components/widgets";
+import { bytes } from "../lib/format";
 import { t as translate, useT } from "../i18n";
 
 /* ---------------------------------------------------------------------- */
@@ -28,6 +29,8 @@ const METRIC_LABELS: Record<string, string> = {
   inodes_used_percent: "inodes used, percent (any mount)",
   host_offline: "minutes without a sample",
   uptime_seconds: "uptime, seconds",
+  agent_rss_bytes: "agent resident memory, bytes",
+  agent_cpu_percent: "agent CPU, percent of one core",
 };
 
 export function metricLabel(metric: string): string {
@@ -47,9 +50,10 @@ export function duration(seconds: number): string {
   return `${whole}s`;
 }
 
-/** A value of a metric with its unit: a percent, a load, a count of minutes, an uptime. */
+/** A value of a metric with its unit: a percent, a load, a count of minutes, an uptime, a size. */
 export function metricValue(metric: string, value: number): string {
   if (metric.endsWith("_percent")) return `${roundTo(value, 1)}%`;
+  if (metric.endsWith("_bytes")) return bytes(value);
   if (metric === "uptime_seconds") return duration(value);
   if (metric === "host_offline") return translate("{n} min", { n: roundTo(value, 0) });
   return String(roundTo(value, 2));
@@ -221,6 +225,8 @@ export function FleetMonitoring() {
             <Stat label={t("Enabled rules")} value={data ? data.rules : "—"} hint={data ? <>{t("as of")} <Time value={data.generated_at} /></> : undefined} />
           </StatGrid>
         </Card>
+
+        <AgentFootprintCard footprint={data?.agent_footprint} loaded={data !== undefined} />
 
         {message && (
           <div className="span-12">
@@ -408,6 +414,66 @@ export function FleetMonitoring() {
         </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * What the agents cost the hosts they run on: the release gate of the
+ * agent asks for its memory and CPU on a real fleet, and this is where the
+ * fleet answers. The median says what an agent costs, the maximum where
+ * one is out of line, and the list names the hosts over the budget so a
+ * leak is a host to look at rather than a number to wonder about. A fleet
+ * where no agent reports its footprint yet shows dashes, not zeros.
+ */
+function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint; loaded: boolean }) {
+  const t = useT();
+  const measured = footprint?.hosts_measured ?? 0;
+  const over = footprint?.over_budget ?? [];
+  const size = (value?: number) => (value === undefined ? "—" : bytes(value));
+  const share = (value?: number) => (value === undefined ? "—" : `${Math.round(value * 10) / 10}%`);
+  const budget = footprint
+    ? t("budget {rss} and {cpu}% of one core", { rss: bytes(footprint.rss_budget_bytes), cpu: footprint.cpu_budget_percent })
+    : undefined;
+  const overRSS = footprint?.rss_bytes_max !== undefined && footprint.rss_bytes_max > footprint.rss_budget_bytes;
+  const overCPU = footprint?.cpu_percent_max !== undefined && footprint.cpu_percent_max > footprint.cpu_budget_percent;
+  return (
+    <Card
+      className="span-12"
+      title={t("Agent footprint")}
+      description={t("Memory and CPU of the agent itself, from the newest sample of every reporting host; the hosts over the budget are named.")}
+      actions={budget && <span className="source">{budget}</span>}
+    >
+      <StatGrid compact>
+        <Stat label={t("Hosts measured")} value={footprint ? measured : "—"} hint={t("reporting hosts whose agent sends its footprint")} />
+        <Stat label={t("Median RSS")} value={size(footprint?.rss_bytes_median)} hint={t("what an agent costs")} />
+        <Stat label={t("Max RSS")} value={size(footprint?.rss_bytes_max)} tone={overRSS ? "warn" : undefined} hint={t("the heaviest agent")} />
+        <Stat label={t("Median CPU")} value={share(footprint?.cpu_percent_median)} hint={t("of one core, last minute")} />
+        <Stat label={t("Max CPU")} value={share(footprint?.cpu_percent_max)} tone={overCPU ? "warn" : undefined} hint={t("the busiest agent")} />
+        <Stat label={t("Helper RSS, max")} value={size(footprint?.helper_rss_bytes_max)} hint={t("only while a helper is running")} />
+      </StatGrid>
+      {!loaded ? (
+        <Empty>{t("Loading…")}</Empty>
+      ) : !footprint || measured === 0 ? (
+        <Empty>{t("No agent has sent its footprint yet; an older agent does not.")}</Empty>
+      ) : over.length === 0 ? (
+        <Empty>{t("Every measured agent is within the budget.")}</Empty>
+      ) : (
+        <table>
+          <thead>
+            <tr><th>{t("Host")}</th><th className="num">{t("Agent RSS")}</th><th className="num">{t("Agent CPU")}</th></tr>
+          </thead>
+          <tbody>
+            {over.map((host) => (
+              <tr key={host.host_id}>
+                <td><Link to={`/hosts/${host.host_id}/monitoring`}>{host.hostname || host.host_id.slice(0, 8)}</Link></td>
+                <td className="num">{host.agent_rss_bytes === undefined ? <span className="source">—</span> : bytes(host.agent_rss_bytes)}</td>
+                <td className="num">{host.agent_cpu_percent === undefined ? <span className="source">—</span> : share(host.agent_cpu_percent)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
   );
 }
 

@@ -599,6 +599,66 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason strin
 	return tx.Commit(ctx)
 }
 
+// RenewAttemptLease moves the lease of an open attempt forward on a sign of
+// life from the host: a progress report or a preview line. The lease is the
+// only thing the scheduler judges a silent attempt by, so an attempt that
+// talks must not run out of it. The lease is never shortened: an extension
+// behind the current deadline changes nothing.
+//
+// It returns whether an open lease was there to renew. A closed attempt -
+// settled, reclaimed or superseded - keeps its state: the report is late,
+// and lateness is not a reason to reopen anything.
+func (s *Store) RenewAttemptLease(ctx context.Context, attemptID, hostID string,
+	extension time.Duration) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		update job_attempts a
+		   set lease_expires_at = greatest(a.lease_expires_at, now() + make_interval(secs => $3))
+		  from jobs j
+		 where a.id = $1
+		   and j.id = a.job_id
+		   and j.host_id = $2::uuid
+		   and a.finished_at is null
+		   and a.lease_expires_at is not null
+		   and j.state in ('leased', 'dispatched', 'running')`,
+		attemptID, hostID, extension.Seconds())
+	if err != nil {
+		return false, fmt.Errorf("renewing the lease of the attempt: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// AttemptStatusLeaseExpired is the status of an attempt the scheduler gave
+// up on: its lease ran out with no result, and the job went back to the
+// queue.
+const AttemptStatusLeaseExpired = "lease_expired"
+
+// AttemptStatusSuperseded is the status of an open attempt closed by the
+// result of an earlier attempt of the same job: the panel had given the
+// earlier one up, the host had not, and its result settled the job. The
+// newer attempt did no work and reports nothing of its own.
+const AttemptStatusSuperseded = "superseded_by_result"
+
+// lateResultDisposition says what a result does to an attempt that already
+// has a status, by that status.
+//
+// An attempt the scheduler gave up on (lease_expired) is the ordinary case
+// of a host that outlasted its lease: the result is recorded, and the
+// attempt the redelivery opened is superseded by it. An attempt closed as
+// superseded gets nothing: the agent delivers the same result under both
+// attempts, the copy carries nothing the job does not have, and the row
+// says why the attempt exists. Every other status - none, or a result -
+// is recorded as before and supersedes nothing.
+func lateResultDisposition(previousStatus string) (record, supersedes bool) {
+	switch previousStatus {
+	case AttemptStatusSuperseded:
+		return false, false
+	case AttemptStatusLeaseExpired:
+		return true, true
+	default:
+		return true, false
+	}
+}
+
 // Result describes the result reported by the agent.
 type Result struct {
 	Status          string
@@ -616,9 +676,14 @@ type Result struct {
 }
 
 // RecordResult records the result of an attempt and moves the task to a final
-// state. It returns whether the result was accepted: a late result after a
-// lost lease is kept for diagnostics but does not overwrite a newer
-// decision.
+// state. It returns whether the result was accepted: a result that arrives
+// after the job was settled or canceled is kept for diagnostics but does not
+// overwrite the decision.
+//
+// A result on an attempt the scheduler gave up on (lease_expired) is not
+// late in that sense: the host was carrying the operation the whole time,
+// and the job is still open. It settles the job, and the newer attempt the
+// redelivery opened - which did no work - is closed as superseded by it.
 func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	result Result, jobState State) (accepted bool, err error) {
 	tx, err := s.pool.Begin(ctx)
@@ -636,6 +701,18 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 			return false, ErrNotFound
 		}
 		return false, err
+	}
+	var previousStatus string
+	if err := tx.QueryRow(ctx, `select coalesce(status, '') from job_attempts where id = $1 for update`,
+		attemptID).Scan(&previousStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		return false, err
+	}
+	record, supersedes := lateResultDisposition(previousStatus)
+	if !record {
+		return false, tx.Commit(ctx)
 	}
 	// The agent is asked to bound its output, but the bound is the task's
 	// and holds here whatever the agent sent: an agent that ignores it must
@@ -675,6 +752,21 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	}
 	if err := currentState.Validate(jobState); err != nil {
 		return false, tx.Commit(ctx)
+	}
+
+	// The attempt was given up on, the job was delivered again, and the
+	// result of the first delivery is here: the redelivered attempt has
+	// nothing left to wait for. It is closed with the job, so that no lease
+	// of a settled job is left for the scheduler to reclaim.
+	if supersedes {
+		if _, err := tx.Exec(ctx, `
+			update job_attempts
+			   set finished_at = now(), status = $3, lease_expires_at = null,
+			       message = 'the result arrived on the earlier attempt after its lease had expired'
+			 where job_id = $1 and id <> $2 and finished_at is null`,
+			jobID, attemptID, AttemptStatusSuperseded); err != nil {
+			return false, err
+		}
 	}
 
 	if _, err := tx.Exec(ctx, `
@@ -1104,22 +1196,23 @@ func nullableJSON(value json.RawMessage) any {
 	return []byte(value)
 }
 
-// AttemptOwner returns the task an attempt belongs to. The agent sends the
-// result back with the attempt identifier, so the gateway has to find the
-// job.
-func (s *Store) AttemptOwner(ctx context.Context, attemptID, hostID string) (jobID, action string, err error) {
+// AttemptOwner returns the task an attempt belongs to, together with the
+// status the attempt has right now. The agent sends the result back with
+// the attempt identifier, so the gateway has to find the job; the status
+// tells it whether the scheduler had given the attempt up already.
+func (s *Store) AttemptOwner(ctx context.Context, attemptID, hostID string) (jobID, action, status string, err error) {
 	// The attempt must belong to the host that reports it: a host that
 	// learned another host's attempt identifier must not settle that
 	// host's operation. The identity comes from the certificate, never
 	// from the message.
 	err = s.pool.QueryRow(ctx, `
-		select a.job_id, j.action_type
+		select a.job_id, j.action_type, coalesce(a.status, '')
 		  from job_attempts a join jobs j on j.id = a.job_id
-		 where a.id = $1 and j.host_id = $2::uuid`, attemptID, hostID).Scan(&jobID, &action)
+		 where a.id = $1 and j.host_id = $2::uuid`, attemptID, hostID).Scan(&jobID, &action, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", ErrNotFound
+		return "", "", "", ErrNotFound
 	}
-	return jobID, action, err
+	return jobID, action, status, err
 }
 
 // LastAttempt returns the identifier of the operation's last attempt. An

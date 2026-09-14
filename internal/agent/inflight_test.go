@@ -303,11 +303,13 @@ func TestAReadLeavesNoMarker(t *testing.T) {
 	}
 }
 
-// TestARedeliveryDuringTheOperationWaitsInsteadOfJudging guards the other
+// TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused guards the other
 // reading of a marker: while the first delivery is still inside the helper,
-// the marker means "in progress here", and the task is told to come back -
-// neither run again nor declared unknown.
-func TestARedeliveryDuringTheOperationWaitsInsteadOfJudging(t *testing.T) {
+// the marker means "in progress here". The redelivered attempt is answered
+// with a progress report that names the running attempt - neither run
+// again, nor declared unknown, nor refused, because a refusal would make
+// the panel fail a job the host is carrying out.
+func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	dir := t.TempDir()
 	journal, err := NewIdempotencyJournal(dir, time.Hour)
 	if err != nil {
@@ -321,6 +323,8 @@ func TestARedeliveryDuringTheOperationWaitsInsteadOfJudging(t *testing.T) {
 		return accepted(request)
 	})
 	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	var reports []*agentv1.TaskProgress
+	executor.progress = func(p *agentv1.TaskProgress) { reports = append(reports, p) }
 
 	first := make(chan *agentv1.TaskResult, 1)
 	go func() {
@@ -333,28 +337,149 @@ func TestARedeliveryDuringTheOperationWaitsInsteadOfJudging(t *testing.T) {
 	}
 
 	second := executor.Execute(context.Background(), restartEnvelope("task-2", "key-1"))
-	if second.GetStatus() != agentv1.TaskResult_STATUS_REJECTED || second.GetErrorCode() != RejectResourceBusy {
+	if second.GetErrorCode() != StatusInProgress || second.GetStatus() != agentv1.TaskResult_STATUS_UNSPECIFIED {
 		t.Errorf("the redelivery: status=%s code=%q", second.GetStatus(), second.GetErrorCode())
 	}
 	if second.GetTaskId() != "task-2" {
-		t.Errorf("the refusal does not point at the attempt: %q", second.GetTaskId())
+		t.Errorf("the placeholder does not point at the attempt: %q", second.GetTaskId())
+	}
+	if len(reports) != 1 {
+		t.Fatalf("the redelivery produced %d progress reports, expected one", len(reports))
+	}
+	ack := reports[0]
+	if ack.GetTaskId() != "task-2" || ack.GetStage() != StageInProgress || ack.GetPreviousTaskId() != "task-1" {
+		t.Errorf("the acknowledgement: task=%q stage=%q previous=%q",
+			ack.GetTaskId(), ack.GetStage(), ack.GetPreviousTaskId())
+	}
+	if !strings.Contains(ack.GetMessage(), "still under way") || !strings.Contains(ack.GetMessage(), "started ") {
+		t.Errorf("the acknowledgement does not say the operation runs and since when: %q", ack.GetMessage())
+	}
+	if fake.calls.Load() != 1 {
+		t.Errorf("the helper was called %d times before the first delivery ended", fake.calls.Load())
 	}
 
 	close(release)
+	var result *agentv1.TaskResult
 	select {
-	case result := <-first:
+	case result = <-first:
 		if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
 			t.Errorf("the first delivery: %s (%s)", result.GetStatus(), result.GetErrorCode())
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the first delivery did not finish")
 	}
+
+	// The result is owed to both attempts: the one that did the work, and
+	// the newest one the panel delivered while it ran. The copy is a replay
+	// of the same result under the other identifier.
+	copied := executor.RedeliveredCopy(result)
+	if copied == nil {
+		t.Fatal("no copy of the result for the redelivered attempt")
+	}
+	if copied.GetTaskId() != "task-2" || !copied.GetReplayed() ||
+		copied.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED ||
+		copied.GetIdempotencyKey() != "key-1" {
+		t.Errorf("the copy: task=%q replayed=%v status=%s key=%q",
+			copied.GetTaskId(), copied.GetReplayed(), copied.GetStatus(), copied.GetIdempotencyKey())
+	}
+	if result.GetTaskId() != "task-1" || result.GetReplayed() {
+		t.Errorf("the original was changed by the copy: task=%q replayed=%v",
+			result.GetTaskId(), result.GetReplayed())
+	}
+	if executor.RedeliveredCopy(result) != nil {
+		t.Error("the copy is owed once, not on every call")
+	}
+
+	// A delivery after the end is an ordinary replay from the journal.
 	third := executor.Execute(context.Background(), restartEnvelope("task-3", "key-1"))
 	if !third.GetReplayed() || third.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
 		t.Errorf("the third delivery: replayed=%v status=%s", third.GetReplayed(), third.GetStatus())
 	}
+	if executor.RedeliveredCopy(third) != nil {
+		t.Error("a replay owes no copy: nothing ran while it was answered")
+	}
 	if fake.calls.Load() != 1 {
 		t.Errorf("the helper was called %d times", fake.calls.Load())
+	}
+	if files := inFlightFiles(t, dir); len(files) != 0 {
+		t.Errorf("marker files left behind: %v", files)
+	}
+}
+
+// TestTheNewestRedeliveredAttemptGetsTheResult guards what the agent
+// remembers when the panel gives up more than once during one operation:
+// each reclaim closes the previous attempt on the panel, so only the newest
+// one is still open there, and only it is owed the copy. The check that
+// sits in front of the locks of the session records the attempt the same
+// way as Execute does.
+func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	_, client := startFakeHelper(t, func(request *helperv1.HelperRequest) *helperv1.HelperResponse {
+		close(entered)
+		<-release
+		return accepted(request)
+	})
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	var reports []*agentv1.TaskProgress
+	executor.progress = func(p *agentv1.TaskProgress) { reports = append(reports, p) }
+
+	// Nothing runs yet: the session treats the delivery as an ordinary one.
+	if executor.Redelivered(restartEnvelope("task-1", "key-1")) {
+		t.Fatal("a first delivery was taken for a redelivery")
+	}
+	first := make(chan *agentv1.TaskResult, 1)
+	go func() {
+		first <- executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first delivery did not reach the helper")
+	}
+
+	if !executor.Redelivered(restartEnvelope("task-2", "key-1")) {
+		t.Fatal("the second delivery was not recognised as a redelivery")
+	}
+	if !executor.Redelivered(restartEnvelope("task-3", "key-1")) {
+		t.Fatal("the third delivery was not recognised as a redelivery")
+	}
+	// The attempt that started the operation is not a redelivery of itself,
+	// and a stray repeat of it must not become the "newest attempt".
+	if !executor.Redelivered(restartEnvelope("task-1", "key-1")) {
+		t.Fatal("a repeat of the running attempt was not recognised as such")
+	}
+	if len(reports) != 3 {
+		t.Fatalf("%d acknowledgements, expected one per redelivery", len(reports))
+	}
+	for _, ack := range reports {
+		if ack.GetStage() != StageInProgress || ack.GetPreviousTaskId() != "task-1" {
+			t.Errorf("acknowledgement %q: stage=%q previous=%q", ack.GetTaskId(), ack.GetStage(), ack.GetPreviousTaskId())
+		}
+	}
+	// Another key running at the same time is not touched by the bookkeeping.
+	if executor.Redelivered(restartEnvelope("task-9", "key-other")) {
+		t.Error("a delivery of another key was taken for a redelivery")
+	}
+
+	close(release)
+	var result *agentv1.TaskResult
+	select {
+	case result = <-first:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first delivery did not finish")
+	}
+	copied := executor.RedeliveredCopy(result)
+	if copied == nil || copied.GetTaskId() != "task-3" {
+		t.Fatalf("the copy goes to %v, expected the newest attempt task-3", copied.GetTaskId())
+	}
+	if executor.Redelivered(restartEnvelope("task-4", "key-1")) {
+		t.Error("a delivery after the end was taken for a redelivery; it is a replay from the journal")
 	}
 }
 

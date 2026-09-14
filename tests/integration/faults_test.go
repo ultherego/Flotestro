@@ -227,25 +227,26 @@ func TestThePanelRestartsWhileAJobRuns(t *testing.T) {
 // A drop, not a reject: a WAN that goes away answers nothing, and the point
 // is to see what the product does when nobody tells it the link is gone.
 type linkCut struct {
-	t *testing.T
+	t   *testing.T
+	nft string
 }
 
-func cutLink(t *testing.T, hostIP, port string) *linkCut {
+func cutLink(t *testing.T, nft, hostIP, port string) *linkCut {
 	t.Helper()
 	// A table left by an interrupted run would make "add table" fail, so it
 	// goes first, and its absence is not an error.
-	_ = exec.Command("nft", "delete", "table", "inet", nftTable).Run()
+	_ = exec.Command(nft, "delete", "table", "inet", nftTable).Run()
 	commands := [][]string{
 		{"add", "table", "inet", nftTable},
 		{"add", "chain", "inet", nftTable, "input", "{ type filter hook input priority 0; policy accept; }"},
 		{"add", "rule", "inet", nftTable, "input", "ip", "saddr", hostIP, "tcp", "dport", port, "drop"},
 	}
-	cut := &linkCut{t: t}
+	cut := &linkCut{t: t, nft: nft}
 	// The cleanup is registered before the first command: whichever of them
 	// fails, the table must not outlive the test.
 	t.Cleanup(cut.restore)
 	for _, args := range commands {
-		if output, err := exec.Command("nft", args...).CombinedOutput(); err != nil {
+		if output, err := exec.Command(nft, args...).CombinedOutput(); err != nil {
 			t.Fatalf("nft %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 		}
 	}
@@ -255,7 +256,7 @@ func cutLink(t *testing.T, hostIP, port string) *linkCut {
 // restore removes the table. It is safe to call twice: the second call
 // finds nothing and that is the wanted state.
 func (c *linkCut) restore() {
-	output, err := exec.Command("nft", "delete", "table", "inet", nftTable).CombinedOutput()
+	output, err := exec.Command(c.nft, "delete", "table", "inet", nftTable).CombinedOutput()
 	if err != nil && !strings.Contains(string(output), "No such file or directory") {
 		c.t.Errorf("the nft table %s was not removed: %v: %s", nftTable, err, strings.TrimSpace(string(output)))
 	}
@@ -280,7 +281,8 @@ func (c *linkCut) restore() {
 // accepts both and says which one it saw.
 func TestAResultSurvivesALinkCut(t *testing.T) {
 	controlPlaneUnit(t)
-	if _, err := exec.LookPath("nft"); err != nil {
+	nft := nftPath()
+	if nft == "" {
 		t.Skip("nft is not available on this machine")
 	}
 	h := newHarness(t)
@@ -319,7 +321,7 @@ func TestAResultSurvivesALinkCut(t *testing.T) {
 	}
 	h.awaitJobState(job.ID, 60*time.Second, "dispatched", "running")
 
-	cut := cutLink(t, hostIP, port)
+	cut := cutLink(t, nft, hostIP, port)
 	time.Sleep(linkCutDuration)
 	cut.restore()
 
@@ -438,4 +440,18 @@ func TestAnExpiredLeaseIsReclaimedByTheScheduler(t *testing.T) {
 	if last.UnitStateAfter.MainPID != pidAfterFirst {
 		t.Fatalf("the mutation was repeated: PID %d -> %d", pidAfterFirst, last.UnitStateAfter.MainPID)
 	}
+}
+
+// nftPath finds the nft binary. The test runner's PATH is a minimal one
+// that omits the sbin directories, where distributions keep nft.
+func nftPath() string {
+	if path, err := exec.LookPath("nft"); err == nil {
+		return path
+	}
+	for _, candidate := range []string{"/usr/sbin/nft", "/sbin/nft"} {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return ""
 }

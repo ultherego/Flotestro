@@ -199,6 +199,13 @@ func sampleFromProto(sample *agentv1.MetricsSample) monitoring.Sample {
 		UptimeSeconds:   sample.GetUptimeSeconds(),
 		Filesystems:     make([]monitoring.Filesystem, 0, len(sample.GetFilesystems())),
 		Interfaces:      make([]monitoring.Interface, 0, len(sample.GetInterfaces())),
+		// The agent's own footprint: optional on the wire, absent when the
+		// agent could not read it - an absent number is not a zero.
+		AgentRSSBytes:   sample.AgentRssBytes,
+		AgentCPUPercent: sample.AgentCpuPercent,
+		AgentGoroutines: sample.AgentGoroutines,
+		AgentOpenFDs:    sample.AgentOpenFds,
+		HelperRSSBytes:  sample.HelperRssBytes,
 	}
 	for _, fs := range sample.GetFilesystems() {
 		stored.Filesystems = append(stored.Filesystems, monitoring.Filesystem{
@@ -491,12 +498,15 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		// The live view of a log goes straight to the screen of the operator
 		// and is not recorded. An error of the broadcast must not tear down the
 		// session of the agent.
+		lines := payload.TaskLogLines
+		jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId(), hostID)
+		if jobID == "" {
+			return nil
+		}
+		// A preview that still sends lines is an attempt that is alive, the
+		// same as one that reports progress.
+		s.keepAttemptAlive(ctx, lines.GetTaskId(), hostID)
 		if s.events != nil {
-			lines := payload.TaskLogLines
-			jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId(), hostID)
-			if jobID == "" {
-				return nil
-			}
 			if err := s.events.PublishLog(ctx, events.Event{
 				JobID: jobID, CampaignID: campaignID,
 				Log: &events.LogLines{
@@ -514,16 +524,30 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		// recorded: it is transient by design, and what lasts is the result. An
 		// error of the broadcast must not tear down the session of the agent -
 		// a lost view is a smaller harm than an interrupted operation.
+		progress := payload.TaskProgress
+		// The agent knows the identifier of the attempt, and the operator
+		// looks at the operation. The translation is remembered, because
+		// progress reports several times a second while the assignment of
+		// an attempt to an operation does not change.
+		jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId(), hostID)
+		if jobID == "" {
+			return nil
+		}
+		// An attempt that reports is alive. Its lease is what the scheduler
+		// gives up on when nothing arrives, so the report moves the lease
+		// forward - otherwise a package transaction longer than the lease
+		// is reclaimed and redelivered while the host is still carrying it.
+		s.keepAttemptAlive(ctx, progress.GetTaskId(), hostID)
+		if progress.GetStage() == stageInProgress {
+			// The agent answered a redelivery: the panel gave the attempt
+			// before this one up, and the host is still on the operation.
+			// The result will come under both identifiers; nothing to do
+			// but note it, so that the two attempts read as one execution.
+			s.log.Info("the host is still carrying the operation the redelivered attempt asks for",
+				"host_id", hostID, "job_id", jobID, "attempt_id", progress.GetTaskId(),
+				"previous_attempt_id", progress.GetPreviousTaskId())
+		}
 		if s.events != nil {
-			progress := payload.TaskProgress
-			// The agent knows the identifier of the attempt, and the operator
-			// looks at the operation. The translation is remembered, because
-			// progress reports several times a second while the assignment of
-			// an attempt to an operation does not change.
-			jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId(), hostID)
-			if jobID == "" {
-				return nil
-			}
 			if err := s.events.PublishProgress(ctx, events.Event{
 				JobID:      jobID,
 				CampaignID: campaignID,
@@ -594,11 +618,71 @@ type attemptContextEntry struct {
 	jobID      string
 	campaignID string
 	hostID     string
+	// leaseRenewedAt is when the lease of the attempt was last moved
+	// forward on a sign of life. Zero means not yet in this gateway.
+	leaseRenewedAt time.Time
 }
 
 // maxRememberedAttempts limits the memory of the attempt -> operation
 // translations.
 const maxRememberedAttempts = 4096
+
+// stageInProgress is the stage of the progress report an agent answers a
+// redelivery with (TaskProgress.stage in agent.proto): the attempt before
+// this one is still running on the host, and this attempt waits on it.
+const stageInProgress = "in_progress"
+
+// progressLeaseExtension is how far a sign of life moves the lease of an
+// attempt: as far as the delivery did (the scheduler's lease is five
+// minutes, cmd/control-plane/main.go). The lease is never shortened by it.
+const progressLeaseExtension = 5 * time.Minute
+
+// leaseRenewalInterval spaces the renewals of one attempt. A package
+// transaction reports several times a second, and the lease is minutes
+// long: one write every half minute keeps it alive with room to spare
+// against the housekeeping pass that reclaims it, which runs as often.
+const leaseRenewalInterval = 30 * time.Second
+
+// keepAttemptAlive moves the lease of an attempt forward on a report from
+// the host, at most once per leaseRenewalInterval. The attempt has to be
+// known to attemptContext already: an unknown one belongs to nobody and
+// nothing of it is kept alive.
+func (s *AgentService) keepAttemptAlive(ctx context.Context, attemptID, hostID string) {
+	if !s.leaseRenewalDue(attemptID, hostID, time.Now()) {
+		return
+	}
+	renewed, err := s.jobs.RenewAttemptLease(ctx, attemptID, hostID, progressLeaseExtension)
+	if err != nil {
+		s.log.Warn("the lease of a reporting attempt was not renewed",
+			"host_id", hostID, "attempt_id", attemptID, "err", err)
+		return
+	}
+	if !renewed {
+		// A closed attempt keeps reporting for a moment after the panel
+		// gave up on it or settled it; that is the case the renewal
+		// exists to prevent, not one to be alarmed by.
+		s.log.Debug("a report for an attempt without an open lease",
+			"host_id", hostID, "attempt_id", attemptID)
+	}
+}
+
+// leaseRenewalDue says whether the attempt's lease is to be renewed now and,
+// when it is, stamps the time so that the next report within the interval
+// does not write again.
+func (s *AgentService) leaseRenewalDue(attemptID, hostID string, now time.Time) bool {
+	s.attemptsMu.Lock()
+	defer s.attemptsMu.Unlock()
+	entry, known := s.attempts[attemptID]
+	if !known || entry.hostID != hostID {
+		return false
+	}
+	if !entry.leaseRenewedAt.IsZero() && now.Sub(entry.leaseRenewedAt) < leaseRenewalInterval {
+		return false
+	}
+	entry.leaseRenewedAt = now
+	s.attempts[attemptID] = entry
+	return true
+}
 
 // recordTaskResult writes the result reported by the agent and moves the job
 // into a final state. The result always reaches the attempt; whether it
@@ -606,7 +690,7 @@ const maxRememberedAttempts = 4096
 func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	result *agentv1.TaskResult) error {
 	attemptID := result.GetTaskId()
-	jobID, action, err := s.jobs.AttemptOwner(ctx, attemptID, hostID)
+	jobID, action, attemptStatus, err := s.jobs.AttemptOwner(ctx, attemptID, hostID)
 	if err != nil {
 		if errors.Is(err, jobs.ErrNotFound) {
 			// Either the attempt never existed or it belongs to another
@@ -624,6 +708,18 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	s.attemptsMu.Lock()
 	delete(s.attempts, attemptID)
 	s.attemptsMu.Unlock()
+
+	// The agent delivers the result of an operation the panel redelivered
+	// under both attempts, the one that did the work first. By the time the
+	// copy arrives the job is settled from the original and this attempt is
+	// closed as superseded; the copy carries the same result, and writing
+	// it again would repeat everything a result writes - a backup run, a
+	// package list - for one execution.
+	if attemptStatus == jobs.AttemptStatusSuperseded {
+		s.log.Info("the copy of the result for the superseded attempt changes nothing",
+			"job_id", jobID, "attempt_id", attemptID, "status", result.GetStatus().String())
+		return nil
+	}
 
 	// The desired state of a file is written after a successful operation
 	// rather than at the ordering: the panel must not claim it manages a file
@@ -960,6 +1056,10 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 	if state != jobs.StateSucceeded {
 		outcome = audit.OutcomeFailure
 	}
+	// A result on an attempt the scheduler had given up on is the host
+	// finishing what it was carrying all along; the trail says so, because
+	// the attempt rows alone read as a lease that ran out.
+	afterLeaseExpiry := attemptStatus == jobs.AttemptStatusLeaseExpired
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: hostID,
 		Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: outcome,
@@ -967,19 +1067,27 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 			"attempt_id": attemptID, "status": statusName,
 			"exit_code": result.GetExitCode(), "error_code": result.GetErrorCode(),
 			"replayed": result.GetReplayed(), "applied": accepted,
+			"after_lease_expiry": afterLeaseExpiry,
 		},
 	})
 
 	if !accepted {
-		// A late result is kept in the attempt for diagnostics but does not take
-		// back a decision made in the meantime.
+		// A result after a settlement, a cancellation or an expiry is kept in
+		// the attempt for diagnostics but does not take back the decision. A
+		// result on an attempt whose lease ran out is not that case: the job
+		// was still open, and the store settled it from this result and
+		// closed the redelivered attempt as superseded - unless the job had
+		// only just gone back to the queue, in which case the redelivery
+		// answers from the agent's journal.
 		s.log.Warn("the result did not change the state of the job",
-			"job_id", jobID, "attempt_id", attemptID, "status", statusName)
+			"job_id", jobID, "attempt_id", attemptID, "status", statusName,
+			"after_lease_expiry", afterLeaseExpiry)
 		return nil
 	}
 	s.log.Info("the result of the job was written",
 		"job_id", jobID, "host_id", hostID, "status", statusName,
-		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed())
+		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed(),
+		"after_lease_expiry", afterLeaseExpiry)
 	return nil
 }
 
@@ -1674,6 +1782,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"packages_needing_attention": apply.GetPackagesNeedingAttention(),
 			"self_repair":                apply.GetSelfRepair(),
 			"output":                     apply.GetOutput(),
+			"scriptlet_errors":           apply.GetScriptletErrors(),
 		})
 		if err != nil {
 			return nil
@@ -2011,13 +2120,41 @@ func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Ses
 	})
 }
 
+// newerSessionOpen says whether the host has a session of a higher epoch
+// that is still open. A failed read counts as "no": marking a connected
+// host offline for a heartbeat is the smaller mistake than leaving a gone
+// host online.
+func (s *AgentService) newerSessionOpen(ctx context.Context, session *Session) bool {
+	var open bool
+	err := s.pool.QueryRow(ctx, `
+		select exists (select 1 from agent_sessions
+		               where host_id = $1 and epoch > $2 and ended_at is null)`,
+		session.HostID, session.Epoch).Scan(&open)
+	if err != nil {
+		s.log.Error("the newer sessions of the host were not read", "host_id", session.HostID, "err", err)
+		return false
+	}
+	return open
+}
+
 func (s *AgentService) closeSession(ctx context.Context, session *Session, hostID string) {
-	const query = `update agent_sessions set ended_at = now(), end_reason = $2 where id = $1`
-	if _, err := s.pool.Exec(ctx, query, session.ID, "stream_closed"); err != nil {
+	// A session the panel ended keeps the reason it was ended with; one
+	// the agent closed, or the link dropped, is a closed stream.
+	reason := session.CloseReason()
+	if reason == "" {
+		reason = "stream_closed"
+	}
+	const query = `update agent_sessions set ended_at = now(), end_reason = $2
+		where id = $1 and ended_at is null`
+	if _, err := s.pool.Exec(ctx, query, session.ID, reason); err != nil {
 		s.log.Error("the session was not closed", "session_id", session.ID, "err", err)
 	}
 	// A host is offline only when it has not managed to open a newer session.
-	if _, active := s.registry.Get(hostID); !active {
+	// The registry alone does not settle that: a superseding session ends
+	// this one before it registers itself, so for a moment the registry is
+	// empty although the host is connected - the row of the newer session,
+	// written before this one was ended, is what says the host stayed.
+	if _, active := s.registry.Get(hostID); !active && !s.newerSessionOpen(ctx, session) {
 		if err := s.hosts.MarkDisconnected(ctx, hostID); err != nil {
 			s.log.Error("the host was not marked as offline", "host_id", hostID, "err", err)
 		}

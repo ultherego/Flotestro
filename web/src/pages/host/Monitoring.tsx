@@ -150,6 +150,15 @@ export function Monitoring() {
     { name: t("Memory used"), tone: "accent", values: points.map((point) => point.memory_used) },
     { name: t("Swap used"), tone: "warn", values: points.map((point) => point.swap_used), line: true },
   ];
+  // The agent's own cost, drawn like the host's: a gap where the agent
+  // did not report the value, never a zero. The helper is a second line
+  // that exists only while it runs.
+  const agentMemorySeries: AreaSeries[] = [
+    { name: t("Agent RSS"), tone: "accent", values: points.map((point) => point.agent_rss_bytes) },
+    { name: t("Helper RSS"), tone: "info", values: points.map((point) => point.helper_rss_bytes), line: true },
+  ];
+  const agentCPUSeries: AreaSeries[] = [{ name: t("Agent CPU"), tone: "accent", values: points.map((point) => point.agent_cpu_percent) }];
+  const agentReported = points.some((point) => point.agent_rss_bytes !== undefined || point.agent_cpu_percent !== undefined);
   const networkSeries: AreaSeries[] = link ? [
     { name: t("{name} received", { name: link.name }), tone: "info", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
     { name: t("{name} sent", { name: link.name }), tone: "accent", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.tx_bytes_per_second), line: true },
@@ -279,6 +288,53 @@ export function Monitoring() {
               <ChartLegend items={networkSeries.map((item) => ({ name: item.name, tone: item.tone }))} />
             </>
           ))}
+        </Section>
+
+        {/* The agent measured by itself: what it costs the host it watches.
+            The release gate reads the same numbers off the fleet. */}
+        <Section
+          title={t("Agent")}
+          description={t("The agent's own footprint: resident memory, with the helper's while it runs, and CPU as a share of one core.")}
+          tools={latest && latest.agent_rss_bytes !== undefined && (
+            <span className="hm-mono">{t("now {value}", { value: bytes(latest.agent_rss_bytes) })}</span>
+          )}
+          span={6}
+          flush={blank !== null || !agentReported}
+        >
+          {blank ?? (!agentReported ? (
+            <Empty>{t("The agent does not report its footprint; an older agent does not.")}</Empty>
+          ) : (
+            <>
+              <AreaChart times={times} series={agentMemorySeries} format={bytes} label={label} peak={rollup ? points.map((point) => point.agent_rss_bytes_max) : undefined} />
+              <ChartLegend items={[
+                ...agentMemorySeries.map((item) => ({ name: item.name, tone: item.tone })),
+                ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
+              ]} />
+              <AreaChart times={times} series={agentCPUSeries} height={110} format={(value) => `${Math.round(value * 10) / 10}%`} label={label} peak={rollup ? points.map((point) => point.agent_cpu_percent_max) : undefined} />
+              <ChartLegend items={[
+                { name: t("Agent CPU, percent of one core"), tone: "accent" },
+                ...(rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
+              ]} />
+            </>
+          ))}
+        </Section>
+
+        <Section title={t("Agent facts")} description={t("As of the last sample.")} span={6}>
+          <Facts>
+            <Fact label={t("Agent RSS")}>{latest?.agent_rss_bytes !== undefined ? bytes(latest.agent_rss_bytes) : <Unknown />}</Fact>
+            <Fact label={t("Agent CPU")}>{latest?.agent_cpu_percent !== undefined ? `${Math.round(latest.agent_cpu_percent * 10) / 10}%` : <Unknown />}</Fact>
+            <Fact label={t("Goroutines")}>{latest?.agent_goroutines !== undefined ? latest.agent_goroutines : <Unknown />}</Fact>
+            <Fact label={t("Open descriptors")}>{latest?.agent_open_fds !== undefined ? latest.agent_open_fds : <Unknown />}</Fact>
+            {/* The helper sleeps between orders, so most samples carry
+                nothing for it; an absent value is also what an agent
+                that could not read its PID sends, so the two are not told
+                apart here. */}
+            <Fact label={t("Helper RSS")}>
+              {latest?.helper_rss_bytes !== undefined
+                ? bytes(latest.helper_rss_bytes)
+                : <span className="source">{t("not running, or not measured")}</span>}
+            </Fact>
+          </Facts>
         </Section>
 
         <Section title={t("Filesystems")} description={t("As of the last sample.")} span={4} flush>

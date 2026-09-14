@@ -393,6 +393,15 @@ function TypedResult({ detail }: { detail: Record<string, any> }) {
           {t("{n} packages applied", { n: detail.applied?.length ?? 0 })}
           {detail.reboot_required && `, ${t("reboot required")}`}
           {detail.package_database_broken && `, ${t("PACKAGE DATABASE NEEDS REPAIR")}`}
+          {(detail.packages_needing_attention?.length ?? 0) > 0 &&
+            `, ${t("needing attention: {names}", { names: detail.packages_needing_attention.join(", ") })}`}
+          {/* rpm keeps a package whose %post failed: the transaction is a
+              success with a defect, and the defect is named here. */}
+          {(detail.scriptlet_errors?.length ?? 0) > 0 && (
+            <span className="warning">
+              {", "}{t("maintainer script failed: {names}", { names: detail.scriptlet_errors.join(", ") })}
+            </span>
+          )}
         </div>
       );
     case "domain_enroll":

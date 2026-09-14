@@ -2904,8 +2904,23 @@ type MetricsSample struct {
 	UptimeSeconds   uint64                 `protobuf:"varint,11,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
 	Filesystems     []*FilesystemSample    `protobuf:"bytes,12,rep,name=filesystems,proto3" json:"filesystems,omitempty"`
 	Interfaces      []*InterfaceSample     `protobuf:"bytes,13,rep,name=interfaces,proto3" json:"interfaces,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// The agent's own footprint on the host. The release gate of the agent
+	// measures its cost in memory and CPU on the running fleet, and a rule
+	// watches for a leak; both read what the agent knows about itself from
+	// /proc/self. Every field is optional: a value the agent could not read
+	// is not sent, and the panel keeps it unknown rather than zero.
+	AgentRssBytes *uint64 `protobuf:"varint,14,opt,name=agent_rss_bytes,json=agentRssBytes,proto3,oneof" json:"agent_rss_bytes,omitempty"`
+	// Busy time of the agent process over the interval since the previous
+	// sample, as a percentage of one core.
+	AgentCpuPercent *float64 `protobuf:"fixed64,15,opt,name=agent_cpu_percent,json=agentCpuPercent,proto3,oneof" json:"agent_cpu_percent,omitempty"`
+	AgentGoroutines *uint32  `protobuf:"varint,16,opt,name=agent_goroutines,json=agentGoroutines,proto3,oneof" json:"agent_goroutines,omitempty"`
+	AgentOpenFds    *uint32  `protobuf:"varint,17,opt,name=agent_open_fds,json=agentOpenFds,proto3,oneof" json:"agent_open_fds,omitempty"`
+	// The resident memory of the root helper. Present only while the helper
+	// runs: it is activated by the socket and exits after an idle period, so
+	// most samples of a host at rest carry nothing here.
+	HelperRssBytes *uint64 `protobuf:"varint,18,opt,name=helper_rss_bytes,json=helperRssBytes,proto3,oneof" json:"helper_rss_bytes,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MetricsSample) Reset() {
@@ -3027,6 +3042,41 @@ func (x *MetricsSample) GetInterfaces() []*InterfaceSample {
 		return x.Interfaces
 	}
 	return nil
+}
+
+func (x *MetricsSample) GetAgentRssBytes() uint64 {
+	if x != nil && x.AgentRssBytes != nil {
+		return *x.AgentRssBytes
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetAgentCpuPercent() float64 {
+	if x != nil && x.AgentCpuPercent != nil {
+		return *x.AgentCpuPercent
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetAgentGoroutines() uint32 {
+	if x != nil && x.AgentGoroutines != nil {
+		return *x.AgentGoroutines
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetAgentOpenFds() uint32 {
+	if x != nil && x.AgentOpenFds != nil {
+		return *x.AgentOpenFds
+	}
+	return 0
+}
+
+func (x *MetricsSample) GetHelperRssBytes() uint64 {
+	if x != nil && x.HelperRssBytes != nil {
+		return *x.HelperRssBytes
+	}
+	return 0
 }
 
 // FilesystemSample is the usage of one mounted real filesystem. Pseudo
@@ -6596,9 +6646,24 @@ type TaskProgress struct {
 	// means undetermined progress.
 	Percent *uint32 `protobuf:"varint,6,opt,name=percent,proto3,oneof" json:"percent,omitempty"`
 	// What is happening right now, e.g. "Upgrading nfs-utils".
-	Message       string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Message string `protobuf:"bytes,7,opt,name=message,proto3" json:"message,omitempty"`
+	// Stage names what kind of report this is, when that matters more than
+	// the step. Empty is an ordinary progress line of a running operation.
+	//
+	// "in_progress" is the answer to a redelivered task: the panel gave up
+	// on the attempt that started the operation (its lease ran out) and sent
+	// the same idempotency key again, while this agent is still carrying it
+	// out. Nothing is repeated and nothing is refused: the report says the
+	// attempt is alive, and the result follows under both attempt
+	// identifiers when the operation ends.
+	Stage string `protobuf:"bytes,8,opt,name=stage,proto3" json:"stage,omitempty"`
+	// The identifier of the attempt that started the operation, given with
+	// the "in_progress" stage. task_id is the redelivered attempt; this is
+	// the one whose execution it is waiting on, so that the panel sees the
+	// two attempts as one execution rather than as a repeat.
+	PreviousTaskId string `protobuf:"bytes,9,opt,name=previous_task_id,json=previousTaskId,proto3" json:"previous_task_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *TaskProgress) Reset() {
@@ -6676,6 +6741,20 @@ func (x *TaskProgress) GetPercent() uint32 {
 func (x *TaskProgress) GetMessage() string {
 	if x != nil {
 		return x.Message
+	}
+	return ""
+}
+
+func (x *TaskProgress) GetStage() string {
+	if x != nil {
+		return x.Stage
+	}
+	return ""
+}
+
+func (x *TaskProgress) GetPreviousTaskId() string {
+	if x != nil {
+		return x.PreviousTaskId
 	}
 	return ""
 }
@@ -7944,9 +8023,15 @@ type PackageApplyResult struct {
 	// The tail of the tool output on failure. One sentence says something
 	// failed; the context says why, and logging into the host after every
 	// failed transaction is what the panel is to spare.
-	Output        []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Output []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
+	// Packages whose maintainer scriptlet failed inside a transaction that
+	// the manager still counts as done. rpm treats a failed %post as
+	// non-fatal: the files are on disk, the database lists the package, and
+	// only the script did not do its part. The transaction is a success with
+	// a defect, and the defect is named rather than hidden in the output.
+	ScriptletErrors []string `protobuf:"bytes,9,rep,name=scriptlet_errors,json=scriptletErrors,proto3" json:"scriptlet_errors,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PackageApplyResult) Reset() {
@@ -8031,6 +8116,13 @@ func (x *PackageApplyResult) GetSelfRepair() []string {
 func (x *PackageApplyResult) GetOutput() []string {
 	if x != nil {
 		return x.Output
+	}
+	return nil
+}
+
+func (x *PackageApplyResult) GetScriptletErrors() []string {
+	if x != nil {
+		return x.ScriptletErrors
 	}
 	return nil
 }
@@ -13451,7 +13543,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\r_failed_unitsB\x12\n" +
 	"\x10_reboot_requiredB\x12\n" +
 	"\x10_pending_updatesB\x1b\n" +
-	"\x19_pending_security_updates\"\xfb\x03\n" +
+	"\x19_pending_security_updates\"\xca\x06\n" +
 	"\rMetricsSample\x12&\n" +
 	"\x0fsampled_at_unix\x18\x01 \x01(\x03R\rsampledAtUnix\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x01R\n" +
@@ -13471,7 +13563,17 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\vfilesystems\x18\f \x03(\v2$.flotestro.agent.v1.FilesystemSampleR\vfilesystems\x12C\n" +
 	"\n" +
 	"interfaces\x18\r \x03(\v2#.flotestro.agent.v1.InterfaceSampleR\n" +
-	"interfaces\"\xdc\x01\n" +
+	"interfaces\x12+\n" +
+	"\x0fagent_rss_bytes\x18\x0e \x01(\x04H\x00R\ragentRssBytes\x88\x01\x01\x12/\n" +
+	"\x11agent_cpu_percent\x18\x0f \x01(\x01H\x01R\x0fagentCpuPercent\x88\x01\x01\x12.\n" +
+	"\x10agent_goroutines\x18\x10 \x01(\rH\x02R\x0fagentGoroutines\x88\x01\x01\x12)\n" +
+	"\x0eagent_open_fds\x18\x11 \x01(\rH\x03R\fagentOpenFds\x88\x01\x01\x12-\n" +
+	"\x10helper_rss_bytes\x18\x12 \x01(\x04H\x04R\x0ehelperRssBytes\x88\x01\x01B\x12\n" +
+	"\x10_agent_rss_bytesB\x14\n" +
+	"\x12_agent_cpu_percentB\x13\n" +
+	"\x11_agent_goroutinesB\x11\n" +
+	"\x0f_agent_open_fdsB\x13\n" +
+	"\x11_helper_rss_bytes\"\xdc\x01\n" +
 	"\x10FilesystemSample\x12\x14\n" +
 	"\x05mount\x18\x01 \x01(\tR\x05mount\x12\x16\n" +
 	"\x06device\x18\x02 \x01(\tR\x06device\x12\x16\n" +
@@ -13794,7 +13896,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\fTaskLogLines\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05lines\x18\x02 \x03(\tR\x05lines\x12\x18\n" +
-	"\adropped\x18\x03 \x01(\rR\adropped\"\xc4\x01\n" +
+	"\adropped\x18\x03 \x01(\rR\adropped\"\x84\x02\n" +
 	"\fTaskProgress\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05chunk\x18\x02 \x01(\fR\x05chunk\x12\x16\n" +
@@ -13802,7 +13904,9 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x04step\x18\x04 \x01(\rR\x04step\x12\x14\n" +
 	"\x05total\x18\x05 \x01(\rR\x05total\x12\x1d\n" +
 	"\apercent\x18\x06 \x01(\rH\x00R\apercent\x88\x01\x01\x12\x18\n" +
-	"\amessage\x18\a \x01(\tR\amessageB\n" +
+	"\amessage\x18\a \x01(\tR\amessage\x12\x14\n" +
+	"\x05stage\x18\b \x01(\tR\x05stage\x12(\n" +
+	"\x10previous_task_id\x18\t \x01(\tR\x0epreviousTaskIdB\n" +
 	"\n" +
 	"\b_percent\"\x9e\x1a\n" +
 	"\n" +
@@ -13934,7 +14038,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x1f\n" +
 	"\banswered\x18\x03 \x01(\bH\x00R\banswered\x88\x01\x01B\v\n" +
-	"\t_answered\"\xfd\x02\n" +
+	"\t_answered\"\xa8\x03\n" +
 	"\x12PackageApplyResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12;\n" +
 	"\aapplied\x18\x02 \x03(\v2!.flotestro.agent.v1.PackageChangeR\aapplied\x12'\n" +
@@ -13944,7 +14048,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\x12\x1f\n" +
 	"\vself_repair\x18\a \x03(\tR\n" +
 	"selfRepair\x12\x16\n" +
-	"\x06output\x18\b \x03(\tR\x06output\"\f\n" +
+	"\x06output\x18\b \x03(\tR\x06output\x12)\n" +
+	"\x10scriptlet_errors\x18\t \x03(\tR\x0fscriptletErrors\"\f\n" +
 	"\n" +
 	"DockerRead\"\x93\x01\n" +
 	"\x10ReadDockerEvents\x12#\n" +
@@ -14947,6 +15052,7 @@ func file_flotestro_agent_v1_agent_proto_init() {
 	}
 	file_flotestro_agent_v1_agent_proto_msgTypes[18].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[21].OneofWrappers = []any{}
+	file_flotestro_agent_v1_agent_proto_msgTypes[22].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[29].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[30].OneofWrappers = []any{}
 	file_flotestro_agent_v1_agent_proto_msgTypes[31].OneofWrappers = []any{}

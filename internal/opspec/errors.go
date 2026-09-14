@@ -163,7 +163,7 @@ var errorGuides = []ErrorGuide{
 
 	// Execution on the host.
 	{Code: "resource_busy", Stage: "agent", Retry: RetryAutomatic,
-		Meaning: "Another operation holds the resource on the host.",
+		Meaning: "Another operation holds the resource on the host. The same operation delivered again is not refused: the host reports it as still in progress.",
 		Action:  "Look at the blocker; the operation waits until its deadline.", CountsAsFailure: true},
 	{Code: "precondition_failed", Stage: "helper", Retry: RetryAfterReplan,
 		Meaning: "The host checked the plan against its state just before the change and refused.",
@@ -189,6 +189,9 @@ var errorGuides = []ErrorGuide{
 	{Code: "lease_expired", Stage: "reconcile", Retry: RetryReadState,
 		Meaning: "No result arrived within the lease; the outcome on the host is unknown.",
 		Action:  "Read the state of the host; do not repeat a destructive step blind.", CountsAsFailure: true},
+	{Code: "superseded_by_result", Stage: "reconcile", Retry: RetryNever,
+		Meaning: "The host finished the earlier attempt after its lease had expired; the job was settled from that result and this attempt did no work.",
+		Action:  "Nothing to repeat; read the result of the job. The operation outlasted its lease once - give it a longer time limit if it is a regular one."},
 	{Code: "timeout", Stage: "agent", Retry: RetryReadState,
 		Meaning: "The operation exceeded its time limit on the host.",
 		Action:  "Read the state of the host before repeating.", CountsAsFailure: true},

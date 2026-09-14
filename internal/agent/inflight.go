@@ -45,39 +45,113 @@ type PackageStateProbe func(ctx context.Context) *agentv1.PackageApplyResult
 // result to replay and no restart to report, and the marker on disk must not
 // make it look like one. The set is the difference between "still running
 // here" and "left behind by a process that is gone".
+//
+// The set also remembers, per key, the newest attempt the panel delivered
+// while the operation ran. The panel gave up on the attempt that started
+// it, so the result has to reach the attempt the panel still holds as well
+// - otherwise the work ends on the host and the job never closes.
 type runningKeys struct {
 	mu   sync.Mutex
-	keys map[string]struct{}
+	keys map[string]*execution
+	// followUps holds, by the attempt that finished, the attempt its result
+	// is also owed to. The entry lives between the release of the key and
+	// the moment the session sends the result: the copy goes out after the
+	// original, so that the panel settles the job from the attempt that did
+	// the work and closes the other as superseded.
+	followUps map[string]string
+}
+
+// execution is one operation under way: the attempt that started it and
+// the newest attempt delivered for the same key since.
+type execution struct {
+	taskID    string
+	startedAt time.Time
+	latest    string
 }
 
 func newRunningKeys() *runningKeys {
-	return &runningKeys{keys: map[string]struct{}{}}
+	return &runningKeys{keys: map[string]*execution{}, followUps: map[string]string{}}
 }
 
 // claim takes the key for the duration of one Execute. An empty key is not
 // tracked: it cannot be redelivered under the same name either.
-func (r *runningKeys) claim(key string) bool {
+//
+// A key that is busy is not taken; the delivery is recorded as a redelivery
+// instead, and what comes back describes the execution it has to wait on.
+func (r *runningKeys) claim(key, taskID string, started time.Time) (execution, bool) {
 	// A nil set belongs to an executor assembled by hand in a test; it has
 	// no session to redeliver anything.
 	if r == nil || key == "" {
-		return true
+		return execution{}, true
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, busy := r.keys[key]; busy {
-		return false
+	if current, busy := r.keys[key]; busy {
+		current.note(taskID)
+		return *current, false
 	}
-	r.keys[key] = struct{}{}
-	return true
+	r.keys[key] = &execution{taskID: taskID, startedAt: started}
+	return execution{}, true
 }
 
+// redeliver records a delivery of a key that is running and returns the
+// execution it waits on. False means nothing runs under the key: the
+// delivery is an ordinary one and goes through Execute.
+func (r *runningKeys) redeliver(key, taskID string) (execution, bool) {
+	if r == nil || key == "" {
+		return execution{}, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	current, busy := r.keys[key]
+	if !busy {
+		return execution{}, false
+	}
+	current.note(taskID)
+	return *current, true
+}
+
+// note remembers the newest attempt delivered for the execution. The
+// attempt that started it is not a redelivery of itself, and the panel
+// holds at most one open attempt per job, so only the newest is kept.
+func (x *execution) note(taskID string) {
+	if taskID != "" && taskID != x.taskID {
+		x.latest = taskID
+	}
+}
+
+// release ends the execution of a key. When the panel redelivered the key
+// meanwhile, the newest attempt is owed the result too; it is kept under
+// the finished attempt until the session collects it.
 func (r *runningKeys) release(key string) {
 	if r == nil || key == "" {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	current, busy := r.keys[key]
+	if !busy {
+		return
+	}
 	delete(r.keys, key)
+	if current.latest != "" {
+		r.followUps[current.taskID] = current.latest
+	}
+}
+
+// followUp takes the attempt owed a copy of the result of the given
+// attempt. Empty means nobody: no redelivery arrived while it ran.
+func (r *runningKeys) followUp(taskID string) string {
+	if r == nil {
+		return ""
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latest, owed := r.followUps[taskID]
+	if owed {
+		delete(r.followUps, taskID)
+	}
+	return latest
 }
 
 // markInFlight writes the marker for a mutation about to start. A read is

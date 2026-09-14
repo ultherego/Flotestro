@@ -174,8 +174,11 @@ type fleetMonitoringView struct {
 	HostsReporting int `json:"hosts_reporting"`
 	HostsSilent    int `json:"hosts_silent"`
 	// Rules counts the enabled rules.
-	Rules       int       `json:"rules"`
-	GeneratedAt time.Time `json:"generated_at"`
+	Rules int `json:"rules"`
+	// AgentFootprint is what the agents cost the reporting hosts: the
+	// release gate's question, answered on the fleet that runs.
+	AgentFootprint monitoring.FleetFootprint `json:"agent_footprint"`
+	GeneratedAt    time.Time                 `json:"generated_at"`
 }
 
 // handleFleetMonitoring returns the firing alerts of the visible fleet.
@@ -222,6 +225,10 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 		condition = "true"
 	}
 	if view.HostsReporting, view.HostsSilent, err = s.monitoring.Reporting(ctx, condition, args); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if view.AgentFootprint, err = s.monitoring.FleetFootprint(ctx, condition, args); err != nil {
 		s.fail(w, err)
 		return
 	}
@@ -278,9 +285,10 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": rules, "count": len(rules),
-		// The vocabulary of a rule, so the form does not carry a copy.
-		"metrics": monitoring.Metrics, "operators": monitoring.Operators,
-		"severities": monitoring.Severities,
+		// The vocabulary of a rule, so the form does not carry a copy; the
+		// catalogue adds the unit and a description to each metric name.
+		"metrics": monitoring.Metrics, "catalogue": monitoring.Catalogue,
+		"operators": monitoring.Operators, "severities": monitoring.Severities,
 	})
 }
 

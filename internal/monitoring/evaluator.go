@@ -278,6 +278,21 @@ func measure(rule Rule, host hostState, now time.Time) (value float64, detail st
 		value := float64(sample.UptimeSeconds)
 		return value, fmt.Sprintf("uptime %s (%s %s %s)", formatDuration(value),
 			rule.Metric, symbol(rule.Operator), formatDuration(rule.Threshold)), true
+	case MetricAgentRSSBytes:
+		// An agent that did not report its footprint - too old, or a
+		// procfs it could not read - is not an agent using no memory.
+		if sample.AgentRSSBytes == nil {
+			return 0, "", false
+		}
+		value := float64(*sample.AgentRSSBytes)
+		return value, fmt.Sprintf("agent rss %s (%s %s %s)", formatBytes(value),
+			rule.Metric, symbol(rule.Operator), formatBytes(rule.Threshold)), true
+	case MetricAgentCPUPercent:
+		if sample.AgentCPUPercent == nil {
+			return 0, "", false
+		}
+		value := *sample.AgentCPUPercent
+		return value, describe(value, "%"), true
 	}
 	return 0, "", false
 }
@@ -326,6 +341,18 @@ func formatValue(value float64) string {
 	return fmt.Sprintf("%.1f", value)
 }
 
+// formatBytes renders a size in the binary unit that fits, as the panel
+// does.
+func formatBytes(value float64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	unit := 0
+	for value >= 1024 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	return fmt.Sprintf("%s %s", formatValue(value), units[unit])
+}
+
 // formatDuration renders seconds as the largest whole unit that fits.
 func formatDuration(seconds float64) string {
 	d := time.Duration(seconds) * time.Second
@@ -351,11 +378,12 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 		                 where i.host_id = h.id
 		                 order by i.observed_at desc limit 1), 0),
 		       m.at, m.cpu_percent, m.load1, m.memory_total, m.memory_used,
-		       m.swap_total, m.swap_used, m.uptime_seconds, m.filesystems
+		       m.swap_total, m.swap_used, m.uptime_seconds, m.filesystems,
+		       m.agent_rss_bytes, m.agent_cpu_percent
 		from hosts h
 		left join lateral (
 		    select at, cpu_percent, load1, memory_total, memory_used, swap_total, swap_used,
-		           uptime_seconds, filesystems
+		           uptime_seconds, filesystems, agent_rss_bytes, agent_cpu_percent
 		    from host_metrics where host_id = h.id
 		    order by at desc limit 1
 		) m on true
@@ -371,9 +399,11 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 		var cpu, load1 *float32
 		var memoryTotal, memoryUsed, swapTotal, swapUsed, uptime *int64
 		var filesystems []Filesystem
+		var agentRSS *int64
+		var agentCPU *float32
 		if err := rows.Scan(&host.ID, &host.Hostname, &host.Site, &host.Environment, &host.OSFamily,
 			&host.LastSampleAt, &host.Cores, &at, &cpu, &load1, &memoryTotal, &memoryUsed,
-			&swapTotal, &swapUsed, &uptime, &filesystems); err != nil {
+			&swapTotal, &swapUsed, &uptime, &filesystems, &agentRSS, &agentCPU); err != nil {
 			return nil, err
 		}
 		if at != nil {
@@ -382,6 +412,7 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 				MemoryTotal: uint64(*memoryTotal), MemoryUsed: uint64(*memoryUsed),
 				SwapTotal: uint64(*swapTotal), SwapUsed: uint64(*swapUsed),
 				UptimeSeconds: uint64(*uptime), Filesystems: filesystems,
+				AgentRSSBytes: unsignedOf(agentRSS), AgentCPUPercent: float64Of(agentCPU),
 			}
 		}
 		hosts = append(hosts, host)

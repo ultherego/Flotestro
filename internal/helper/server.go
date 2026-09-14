@@ -521,6 +521,7 @@ func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
 		PackagesNeedingAttention: apply.PackagesNeedingAttention,
 		SelfRepair:               apply.SelfRepair,
 		Output:                   apply.Output,
+		ScriptletErrors:          apply.ScriptletErrors,
 	}
 }
 

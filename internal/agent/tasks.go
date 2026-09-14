@@ -29,6 +29,17 @@ import (
 // a new Hello.
 const StatusAfterReplacement = "agent_upgrade_in_flight"
 
+// StatusInProgress marks the answer to a redelivery of an operation this
+// process is still carrying out. The answer went out already, as a progress
+// report with the stage StageInProgress, and a result with this code is
+// not to be sent: a result is final, and the operation has not ended.
+const StatusInProgress = "operation_in_progress"
+
+// StageInProgress is the stage of the progress report that answers such a
+// redelivery. The panel reads it as "the attempt is alive": it renews the
+// lease instead of giving up on the attempt a second time.
+const StageInProgress = "in_progress"
+
 // Stable refusal codes. They are part of the contract and do not depend on the
 // language.
 const (
@@ -94,8 +105,8 @@ type TaskExecutor struct {
 	// was not told, and the rename preflight says so rather than guessing.
 	hostID string
 	// running holds the keys of the tasks inside Execute right now, so that a
-	// redelivery of a task still in progress is told to wait rather than
-	// judged by the marker it left on disk.
+	// redelivery of a task still in progress is acknowledged as alive rather
+	// than judged by the marker it left on disk.
 	running *runningKeys
 	// packageState reads what the package adapter can say cheaply about the
 	// host. It fills the answer for a package operation whose outcome is
@@ -137,17 +148,15 @@ func (e *TaskExecutor) SetReadOnlyMode(readOnly bool) {
 func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	taskID := task.GetTaskId()
 	idempotencyKey := task.GetIdempotencyKey()
+	started := time.Now().UTC()
 
 	// A delivery of a task this process is still working on has neither a
-	// result to replay nor a restart to report. It is told to wait: the
-	// first delivery stores the result when it ends, and the next delivery
-	// replays it.
-	if !e.running.claim(idempotencyKey) {
-		result := rejected(agentv1.TaskResult_STATUS_REJECTED, RejectResourceBusy,
-			"the same operation is still running in the agent; its result is stored when it ends")
-		result.TaskId = taskID
-		result.IdempotencyKey = idempotencyKey
-		return result
+	// result to replay nor a restart to report, and it is not a failure
+	// either: the work is under way. The panel is told so, the attempt is
+	// remembered, and the result reaches it when the operation ends.
+	if current, claimed := e.running.claim(idempotencyKey, taskID, started); !claimed {
+		e.acknowledgeRunning(task, current)
+		return inProgress(task)
 	}
 	defer e.running.release(idempotencyKey)
 
@@ -177,7 +186,6 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		return result
 	}
 
-	started := time.Now().UTC()
 	settled := false
 	defer func() {
 		if settled {
@@ -195,6 +203,81 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	e.settle(task, result, started)
 	settled = true
 	return result
+}
+
+// Redelivered answers a delivery of a key this process is still executing,
+// before the session queues the task behind the locks and the budget of the
+// host. False means nothing runs under the key and the delivery is an
+// ordinary one.
+//
+// The check has to sit in front of the locks: a redelivered package upgrade
+// claims the package lock its own first delivery holds, and the wait for it
+// would end in a refusal naming the operation as its own blocker.
+func (e *TaskExecutor) Redelivered(task *agentv1.TaskEnvelope) bool {
+	current, running := e.running.redeliver(task.GetIdempotencyKey(), task.GetTaskId())
+	if !running {
+		return false
+	}
+	e.acknowledgeRunning(task, current)
+	return true
+}
+
+// acknowledgeRunning reports a redelivered attempt as alive. The report is
+// a progress event, not a result: the operation has no outcome yet, and a
+// rejection would make the panel fail a job the host is carrying out.
+func (e *TaskExecutor) acknowledgeRunning(task *agentv1.TaskEnvelope, current execution) {
+	e.log.Info("a redelivery of an operation still under way; the attempt is answered as in progress",
+		"task_id", task.GetTaskId(), "previous_task_id", current.taskID,
+		"idempotency_key", task.GetIdempotencyKey(),
+		"started_at", current.startedAt.Format(time.RFC3339))
+	if e.progress == nil {
+		return
+	}
+	e.progress(&agentv1.TaskProgress{
+		TaskId:         task.GetTaskId(),
+		Stage:          StageInProgress,
+		Message:        fmt.Sprintf("the operation is still under way on this host; started %s", current.startedAt.Format(time.RFC3339)),
+		PreviousTaskId: current.taskID,
+	})
+}
+
+// inProgress is the placeholder Execute returns for an acknowledged
+// redelivery. It is not sent: the acknowledgement already went out as
+// progress, and the result of the attempt is the one of the execution it
+// waits on.
+func inProgress(task *agentv1.TaskEnvelope) *agentv1.TaskResult {
+	return &agentv1.TaskResult{
+		TaskId:         task.GetTaskId(),
+		IdempotencyKey: task.GetIdempotencyKey(),
+		Status:         agentv1.TaskResult_STATUS_UNSPECIFIED,
+		ErrorCode:      StatusInProgress,
+		Message:        "the operation is still under way; the attempt was acknowledged as in progress",
+	}
+}
+
+// RedeliveredCopy returns the copy of a final result owed to the attempt
+// the panel redelivered while the result was being computed, addressed to
+// that attempt. Nil means no redelivery arrived. The copy is a replay: the
+// execution belongs to the original attempt, and the journal is what
+// answers the other.
+//
+// The session sends the copy after the original, so that the panel settles
+// the job from the attempt that did the work and closes the redelivered one
+// as superseded rather than the other way round.
+func (e *TaskExecutor) RedeliveredCopy(result *agentv1.TaskResult) *agentv1.TaskResult {
+	// An agent without an executor - the simulator - runs nothing, so it
+	// owes nothing.
+	if e == nil {
+		return nil
+	}
+	latest := e.running.followUp(result.GetTaskId())
+	if latest == "" {
+		return nil
+	}
+	copied := cloneResult(result)
+	copied.TaskId = latest
+	copied.Replayed = true
+	return copied
 }
 
 // settle stamps the result with the attempt and the times and stores it in

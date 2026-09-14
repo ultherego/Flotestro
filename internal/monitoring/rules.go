@@ -20,7 +20,8 @@ var ErrNotFound = errors.New("not found")
 
 // The metrics a rule may watch. Every one of them is computed from a sample
 // of the host, except host_offline, which is computed from the absence of
-// samples.
+// samples. The two agent_ metrics are the agent's own footprint: what the
+// agent costs the host, as it read from /proc/self.
 const (
 	MetricCPUPercent            = "cpu_percent"
 	MetricLoad1PerCore          = "load1_per_core"
@@ -30,14 +31,44 @@ const (
 	MetricInodesUsedPercent     = "inodes_used_percent"
 	MetricHostOffline           = "host_offline"
 	MetricUptimeSeconds         = "uptime_seconds"
+	MetricAgentRSSBytes         = "agent_rss_bytes"
+	MetricAgentCPUPercent       = "agent_cpu_percent"
 )
 
-// Metrics lists the metrics a rule may watch, in the order the panel shows
-// them.
-var Metrics = []string{
-	MetricCPUPercent, MetricLoad1PerCore, MetricMemoryUsedPercent, MetricSwapUsedPercent,
-	MetricFilesystemUsedPercent, MetricInodesUsedPercent, MetricHostOffline, MetricUptimeSeconds,
+// MetricInfo describes one metric of the catalogue: its unit, as the
+// panel formats a threshold and a value, and what it measures.
+type MetricInfo struct {
+	Name string `json:"name"`
+	// Unit is percent, bytes, seconds, minutes, count or ratio.
+	Unit        string `json:"unit"`
+	Description string `json:"description"`
 }
+
+// Catalogue lists the metrics a rule may watch with their units, in the
+// order the panel shows them. The sample fields the agent reports but no
+// rule watches - goroutines, descriptors, the helper's memory - are on the
+// host page and not here: they are read next to a chart, not alarmed on.
+var Catalogue = []MetricInfo{
+	{MetricCPUPercent, "percent", "busy time of the host across all cores"},
+	{MetricLoad1PerCore, "ratio", "load average over one minute divided by the core count"},
+	{MetricMemoryUsedPercent, "percent", "memory used of the total"},
+	{MetricSwapUsedPercent, "percent", "swap used of the total; unknown on a host without swap"},
+	{MetricFilesystemUsedPercent, "percent", "the fullest real filesystem"},
+	{MetricInodesUsedPercent, "percent", "the fullest inode table of a real filesystem"},
+	{MetricHostOffline, "minutes", "minutes since the last sample"},
+	{MetricUptimeSeconds, "seconds", "time since the host booted"},
+	{MetricAgentRSSBytes, "bytes", "resident memory of the agent process"},
+	{MetricAgentCPUPercent, "percent", "busy time of the agent process as a share of one core"},
+}
+
+// Metrics lists the names of the catalogue, in the same order.
+var Metrics = func() []string {
+	names := make([]string, 0, len(Catalogue))
+	for _, metric := range Catalogue {
+		names = append(names, metric.Name)
+	}
+	return names
+}()
 
 // Operators lists the comparisons a rule may make.
 var Operators = []string{"gt", "lt", "gte", "lte"}

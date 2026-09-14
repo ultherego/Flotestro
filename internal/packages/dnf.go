@@ -265,6 +265,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	after := d.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)
+	apply.ScriptletErrors = scriptletFailures(result.Stdout + "\n" + result.Stderr)
 	apply.RebootRequired = d.rebootRequired(ctx)
 
 	if !result.Ran || result.ExitCode != 0 {
@@ -574,6 +575,7 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	after := d.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)
+	apply.ScriptletErrors = scriptletFailures(result.Stdout + "\n" + result.Stderr)
 	apply.RebootRequired = d.rebootRequired(ctx)
 	if !result.Ran || result.ExitCode != 0 {
 		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
@@ -614,6 +616,7 @@ func (d *DNF) Remove(ctx context.Context, options Options, expected []string) (A
 	after := d.installedVersions(ctx)
 	apply.Applied = diffVersions(before, after)
 	apply.DatabaseBroken = d.DatabaseBroken(ctx)
+	apply.ScriptletErrors = scriptletFailures(result.Stdout + "\n" + result.Stderr)
 	if !result.Ran || result.ExitCode != 0 {
 		apply.Output = tailLines(result.Stderr, result.Stdout, maxResultLines)
 		return apply, fmt.Errorf("dnf remove: %s", result.Reason())
@@ -764,4 +767,47 @@ func DNFUnresolvable(output string) string {
 		reasons = reasons[:3]
 	}
 	return strings.Join(reasons, " / ")
+}
+
+// scriptletFailures reads the packages whose scriptlet failed out of the
+// output of a transaction dnf finished. dnf5 prints "Non-critical error in
+// %post scriptlet: name-0:1.0-1.noarch", dnf4 "Error in POSTIN scriptlet in
+// rpm package name"; rpm itself adds "%post(name-1.0-1.noarch) scriptlet
+// failed". The package name is what is kept: the version is in the applied
+// changes already.
+func scriptletFailures(output string) []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), ">>>"))
+		var nevra string
+		switch {
+		case strings.Contains(line, "error in %") && strings.Contains(line, "scriptlet:"):
+			_, nevra, _ = strings.Cut(line, "scriptlet:")
+		case strings.Contains(line, "scriptlet in rpm package"):
+			_, nevra, _ = strings.Cut(line, "scriptlet in rpm package")
+		default:
+			continue
+		}
+		name := packageNameOfNEVRA(strings.TrimSpace(nevra))
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// packageNameOfNEVRA cuts the name out of "name-[epoch:]version-release.arch"
+// - the name is everything before the last two dashes, and a name alone is
+// returned as it is.
+func packageNameOfNEVRA(nevra string) string {
+	nevra = strings.TrimSpace(strings.Fields(nevra + " ")[0])
+	parts := strings.Split(nevra, "-")
+	if len(parts) < 3 {
+		return nevra
+	}
+	// The release carries the architecture ("1.noarch"); the version may
+	// carry an epoch ("0:1.0"). Both are behind the name.
+	return strings.Join(parts[:len(parts)-2], "-")
 }

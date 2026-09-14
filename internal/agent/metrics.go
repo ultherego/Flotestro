@@ -62,15 +62,21 @@ type Sampler struct {
 	Now func() time.Time
 	// Statfs answers the usage of a mount. The default asks the kernel.
 	Statfs func(mount string) (FilesystemUsage, error)
+	// HelperPID names the process of the root helper, when it runs. The
+	// default asks systemd; nil means the helper is never measured.
+	HelperPID func(ctx context.Context) (int, bool)
 
 	// previous is the CPU counter snapshot the next sample is measured
 	// against.
 	previous *cpuCounters
+	// previousProcess is the agent's own CPU snapshot, measured the same
+	// way.
+	previousProcess *processCPU
 }
 
 // NewSampler returns a sampler reading the real host.
 func NewSampler() *Sampler {
-	return &Sampler{ProcRoot: "/proc", Now: time.Now, Statfs: statfsUsage}
+	return &Sampler{ProcRoot: "/proc", Now: time.Now, Statfs: statfsUsage, HelperPID: helperMainPID}
 }
 
 // Run sends a sample every interval until the context ends.
@@ -86,13 +92,16 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 	if _, err := s.readCPU(); err != nil {
 		log.Debug("the CPU counters were not primed", "err", err)
 	}
+	// The agent's own counter is primed for the same reason; without it the
+	// first sample would carry no CPU figure for the agent at all.
+	s.readProcessCPU(filepath.Join(s.ProcRoot, "self", "stat"))
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-time.After(interval + time.Duration(rand.Int64N(int64(metricsJitter)))):
 		}
-		sample, err := s.Sample()
+		sample, err := s.SampleContext(ctx)
 		if err != nil {
 			// A host without a readable procfs is not a reason to end the
 			// session: the panel then shows the host without metrics, and the
@@ -110,6 +119,11 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 // Sample reads one set of counters. The CPU percentage covers the time since
 // the previous call; on the first call it covers the time since boot.
 func (s *Sampler) Sample() (*agentv1.MetricsSample, error) {
+	return s.SampleContext(context.Background())
+}
+
+// SampleContext is Sample with the context the helper lookup runs under.
+func (s *Sampler) SampleContext(ctx context.Context) (*agentv1.MetricsSample, error) {
 	now := s.Now()
 	sample := &agentv1.MetricsSample{SampledAtUnix: now.Unix()}
 
@@ -133,6 +147,14 @@ func (s *Sampler) Sample() (*agentv1.MetricsSample, error) {
 	// CPU and memory are still worth reporting.
 	sample.Filesystems = s.readFilesystems()
 	sample.Interfaces = s.readInterfaces()
+	// The agent's own footprint rides along; a value it could not read
+	// stays unset, so the panel shows it unknown rather than zero.
+	fp := s.footprint(ctx)
+	sample.AgentRssBytes = fp.RSSBytes
+	sample.AgentCpuPercent = fp.CPUPercent
+	sample.AgentGoroutines = fp.Goroutines
+	sample.AgentOpenFds = fp.OpenFDs
+	sample.HelperRssBytes = fp.HelperRSSBytes
 	return sample, nil
 }
 

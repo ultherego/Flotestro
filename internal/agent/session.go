@@ -459,6 +459,15 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					}
 					defer final.finish(task.GetTaskId())
 
+					// A redelivery of an operation this process is still carrying
+					// out is answered before the locks: its own first delivery
+					// holds them, and a wait would end in a refusal naming the
+					// operation as its own blocker. The answer is a progress
+					// report; the result follows when the operation ends.
+					if opts.Executor != nil && opts.Executor.Redelivered(task) {
+						return
+					}
+
 					// The resources first, the budget slot second: a task waiting
 					// for a busy resource has no reason to hold a slot that would
 					// be useful to an operation without a collision.
@@ -504,6 +513,12 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 							"task_id", task.GetTaskId(), "description", result.GetMessage())
 						return
 					}
+					// An acknowledged redelivery has no result of its own: the
+					// answer went out as progress, and the result belongs to the
+					// execution it waits on.
+					if result.GetErrorCode() == StatusInProgress {
+						return
+					}
 					opts.Log.Info("the task finished",
 						"task_id", task.GetTaskId(), "status", result.GetStatus(),
 						"error_code", result.GetErrorCode(), "replayed", result.GetReplayed())
@@ -512,6 +527,20 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					}); err != nil {
 						opts.Log.Error("the result of the task was not sent back",
 							"task_id", task.GetTaskId(), "err", err)
+					}
+					// The panel may have given up on this attempt while the
+					// operation ran and delivered the key again; that attempt is
+					// owed the same result, after the original, so that the job
+					// is settled from the attempt that did the work.
+					if copied := opts.Executor.RedeliveredCopy(result); copied != nil {
+						opts.Log.Info("the result is delivered to the redelivered attempt as well",
+							"task_id", copied.GetTaskId(), "previous_task_id", task.GetTaskId())
+						if err := send(&agentv1.AgentMessage{
+							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: copied},
+						}); err != nil {
+							opts.Log.Error("the result of the task was not sent back",
+								"task_id", copied.GetTaskId(), "err", err)
+						}
 					}
 				}()
 

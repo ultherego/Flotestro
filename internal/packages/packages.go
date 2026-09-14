@@ -178,6 +178,12 @@ type Apply struct {
 	// retry. A silent repair would be worse than none: the operator has to
 	// know the host was touched in a way they did not order.
 	SelfRepair []string `json:"self_repair,omitempty"`
+	// ScriptletErrors names the packages whose maintainer scriptlet failed
+	// in a transaction the manager still finished. rpm treats a failed
+	// %post as non-fatal - the package is installed, the script did not do
+	// its part - so the transaction is a success with a defect, and the
+	// defect is named here instead of being buried in the output.
+	ScriptletErrors []string `json:"scriptlet_errors,omitempty"`
 	// Output is the tail of the output of the tool on a failure. One sentence
 	// describing the error is enough to know something failed; to know why one
 	// sometimes has to see the context - and logging into the host after every

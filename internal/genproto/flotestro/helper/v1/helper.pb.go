@@ -7840,9 +7840,15 @@ type PackageActionResult struct {
 	// than ordered.
 	SelfRepair []string `protobuf:"bytes,7,rep,name=self_repair,json=selfRepair,proto3" json:"self_repair,omitempty"`
 	// The tail of the tool output on failure.
-	Output        []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Output []string `protobuf:"bytes,8,rep,name=output,proto3" json:"output,omitempty"`
+	// Packages whose maintainer scriptlet failed inside a transaction that
+	// the manager still counts as done. rpm treats a failed %post as
+	// non-fatal: the files are on disk, the database lists the package, and
+	// only the script did not do its part. The transaction is a success with
+	// a defect, and the defect is named rather than hidden in the output.
+	ScriptletErrors []string `protobuf:"bytes,9,rep,name=scriptlet_errors,json=scriptletErrors,proto3" json:"scriptlet_errors,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PackageActionResult) Reset() {
@@ -7927,6 +7933,13 @@ func (x *PackageActionResult) GetSelfRepair() []string {
 func (x *PackageActionResult) GetOutput() []string {
 	if x != nil {
 		return x.Output
+	}
+	return nil
+}
+
+func (x *PackageActionResult) GetScriptletErrors() []string {
+	if x != nil {
+		return x.ScriptletErrors
 	}
 	return nil
 }
@@ -9152,7 +9165,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x12_cache_credentialsB&\n" +
 	"$_offline_credentials_expiration_daysB\x1e\n" +
 	"\x1c_entry_cache_timeout_secondsB!\n" +
-	"\x1f_krb5_store_password_if_offline\"\x86\x03\n" +
+	"\x1f_krb5_store_password_if_offline\"\xb1\x03\n" +
 	"\x13PackageActionResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12C\n" +
 	"\aapplied\x18\x02 \x03(\v2).flotestro.helper.v1.PackageVersionChangeR\aapplied\x12'\n" +
@@ -9162,7 +9175,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x1apackages_needing_attention\x18\x06 \x03(\tR\x18packagesNeedingAttention\x12\x1f\n" +
 	"\vself_repair\x18\a \x03(\tR\n" +
 	"selfRepair\x12\x16\n" +
-	"\x06output\x18\b \x03(\tR\x06output\"W\n" +
+	"\x06output\x18\b \x03(\tR\x06output\x12)\n" +
+	"\x10scriptlet_errors\x18\t \x03(\tR\x0fscriptletErrors\"W\n" +
 	"\x14PackageRepairRequest\x12?\n" +
 	"\aanswers\x18\x01 \x03(\v2%.flotestro.helper.v1.DebconfSelectionR\aanswers\"r\n" +
 	"\x10DebconfSelection\x12\x18\n" +

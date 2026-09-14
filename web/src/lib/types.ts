@@ -832,8 +832,17 @@ export type MetricPoint = {
   uptime_seconds: number;
   filesystems?: FilesystemSample[];
   interfaces?: InterfaceSample[];
+  /** The agent's own footprint; absent where the agent did not report it, never zero. */
+  agent_rss_bytes?: number;
+  agent_cpu_percent?: number;
+  agent_goroutines?: number;
+  agent_open_fds?: number;
+  /** Present only while the root helper runs; it sleeps between orders. */
+  helper_rss_bytes?: number;
   cpu_percent_max?: number;
   memory_used_max?: number;
+  agent_rss_bytes_max?: number;
+  agent_cpu_percent_max?: number;
 };
 
 export type HostMetrics = {
@@ -921,11 +930,19 @@ export type AlertRuleInput = {
   enabled: boolean;
 };
 
+/** One metric a rule may watch: its unit decides how a threshold reads. */
+export type MetricInfo = {
+  name: string;
+  unit: "percent" | "bytes" | "seconds" | "minutes" | "count" | "ratio";
+  description: string;
+};
+
 /** The rules with the vocabulary the server accepts, so a form offers only what it takes. */
 export type RuleCatalogue = {
   items: AlertRule[];
   count: number;
   metrics: string[];
+  catalogue?: MetricInfo[];
   operators: string[];
   severities: string[];
 };
@@ -940,12 +957,37 @@ export type HostMonitoring = {
   rules_matching: number;
 };
 
+/** A host whose agent is over the footprint budget, with the readings that put it there. */
+export type FootprintHost = {
+  host_id: string;
+  hostname: string;
+  agent_rss_bytes?: number;
+  agent_cpu_percent?: number;
+};
+
+/**
+ * What the agents cost the reporting hosts, from the newest sample of each.
+ * A missing figure means no host reported it: an older agent sends none.
+ */
+export type FleetFootprint = {
+  hosts_measured: number;
+  rss_bytes_max?: number;
+  rss_bytes_median?: number;
+  cpu_percent_max?: number;
+  cpu_percent_median?: number;
+  helper_rss_bytes_max?: number;
+  rss_budget_bytes: number;
+  cpu_budget_percent: number;
+  over_budget: FootprintHost[];
+};
+
 export type FleetMonitoring = {
   firing: Alert[];
   counts: { critical: number; warning: number; info: number; silenced: number; pending: number };
   hosts_reporting: number;
   hosts_silent: number;
   rules: number;
+  agent_footprint?: FleetFootprint;
   generated_at: string;
 };
 

@@ -306,6 +306,22 @@ message MetricsSample {
   uint64 uptime_seconds = 11;
   repeated FilesystemSample filesystems = 12;
   repeated InterfaceSample interfaces = 13;
+
+  // The agent's own footprint on the host. The release gate of the agent
+  // measures its cost in memory and CPU on the running fleet, and a rule
+  // watches for a leak; both read what the agent knows about itself from
+  // /proc/self. Every field is optional: a value the agent could not read
+  // is not sent, and the panel keeps it unknown rather than zero.
+  optional uint64 agent_rss_bytes = 14;
+  // Busy time of the agent process over the interval since the previous
+  // sample, as a percentage of one core.
+  optional double agent_cpu_percent = 15;
+  optional uint32 agent_goroutines = 16;
+  optional uint32 agent_open_fds = 17;
+  // The resident memory of the root helper. Present only while the helper
+  // runs: it is activated by the socket and exits after an idle period, so
+  // most samples of a host at rest carry nothing here.
+  optional uint64 helper_rss_bytes = 18;
 }
 
 // FilesystemSample is the usage of one mounted real filesystem. Pseudo
@@ -905,6 +921,21 @@ message TaskProgress {
   optional uint32 percent = 6;
   // What is happening right now, e.g. "Upgrading nfs-utils".
   string message = 7;
+  // Stage names what kind of report this is, when that matters more than
+  // the step. Empty is an ordinary progress line of a running operation.
+  //
+  // "in_progress" is the answer to a redelivered task: the panel gave up
+  // on the attempt that started the operation (its lease ran out) and sent
+  // the same idempotency key again, while this agent is still carrying it
+  // out. Nothing is repeated and nothing is refused: the report says the
+  // attempt is alive, and the result follows under both attempt
+  // identifiers when the operation ends.
+  string stage = 8;
+  // The identifier of the attempt that started the operation, given with
+  // the "in_progress" stage. task_id is the redelivered attempt; this is
+  // the one whose execution it is waiting on, so that the panel sees the
+  // two attempts as one execution rather than as a repeat.
+  string previous_task_id = 9;
 }
 
 message TaskResult {
@@ -1136,6 +1167,12 @@ message PackageApplyResult {
   // failed; the context says why, and logging into the host after every
   // failed transaction is what the panel is to spare.
   repeated string output = 8;
+  // Packages whose maintainer scriptlet failed inside a transaction that
+  // the manager still counts as done. rpm treats a failed %post as
+  // non-fatal: the files are on disk, the database lists the package, and
+  // only the script did not do its part. The transaction is a success with
+  // a defect, and the defect is named rather than hidden in the output.
+  repeated string scriptlet_errors = 9;
 }
 
 
