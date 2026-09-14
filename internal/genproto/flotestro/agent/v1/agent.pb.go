@@ -6722,6 +6722,29 @@ type TaskProgress struct {
 	// Stage names what kind of report this is, when that matters more than
 	// the step. Empty is an ordinary progress line of a running operation.
 	//
+	// The acknowledgement of a task travels as stages of the same message,
+	// in this order, each sent at most once per attempt:
+	//
+	// "accepted" - the agent holds the task and will carry it out: the
+	// envelope passed the checks that refuse a task without touching the
+	// host (expiry, preconditions, capability, the plan hash), and the task
+	// is about to queue for the resources of the host. It is the answer the
+	// panel's dispatch lease waits for; an envelope that gets no "accepted"
+	// went into a dead stream and is delivered again. Nothing on the host
+	// has changed yet.
+	//
+	// "awaiting_lock" - the task waits for a resource another task of this
+	// host holds. message names the blocker, e.g. "units held by task <id>
+	// (schedule.run_now)". Repeated at most every ten seconds while the wait
+	// lasts; the wait itself ends with "started" or with a resource_busy
+	// result.
+	//
+	// "started" - the claims are taken and the operation is starting on the
+	// host this instant: for a mutation the in-flight marker is in the
+	// journal and the module is about to run. claims lists the resources
+	// held. From here on the outcome is the host's, and a lost session means
+	// an unknown outcome, not a task to repeat.
+	//
 	// "in_progress" is the answer to a redelivered task: the panel gave up
 	// on the attempt that started the operation (its lease ran out) and sent
 	// the same idempotency key again, while this agent is still carrying it
@@ -6734,8 +6757,14 @@ type TaskProgress struct {
 	// the one whose execution it is waiting on, so that the panel sees the
 	// two attempts as one execution rather than as a repeat.
 	PreviousTaskId string `protobuf:"bytes,9,opt,name=previous_task_id,json=previousTaskId,proto3" json:"previous_task_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The resources the task holds, given with the "started" stage: the
+	// lock classes of the operation registry ("packages", "units", ...),
+	// "host" for a restart, "file:<path>" for a file. Empty for a read,
+	// which takes nothing. The panel shows them next to a host that others
+	// wait on.
+	Claims        []string `protobuf:"bytes,10,rep,name=claims,proto3" json:"claims,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TaskProgress) Reset() {
@@ -6829,6 +6858,13 @@ func (x *TaskProgress) GetPreviousTaskId() string {
 		return x.PreviousTaskId
 	}
 	return ""
+}
+
+func (x *TaskProgress) GetClaims() []string {
+	if x != nil {
+		return x.Claims
+	}
+	return nil
 }
 
 type TaskResult struct {
@@ -13972,7 +14008,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\fTaskLogLines\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05lines\x18\x02 \x03(\tR\x05lines\x12\x18\n" +
-	"\adropped\x18\x03 \x01(\rR\adropped\"\x84\x02\n" +
+	"\adropped\x18\x03 \x01(\rR\adropped\"\x9c\x02\n" +
 	"\fTaskProgress\x12\x17\n" +
 	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12\x14\n" +
 	"\x05chunk\x18\x02 \x01(\fR\x05chunk\x12\x16\n" +
@@ -13982,7 +14018,9 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\apercent\x18\x06 \x01(\rH\x00R\apercent\x88\x01\x01\x12\x18\n" +
 	"\amessage\x18\a \x01(\tR\amessage\x12\x14\n" +
 	"\x05stage\x18\b \x01(\tR\x05stage\x12(\n" +
-	"\x10previous_task_id\x18\t \x01(\tR\x0epreviousTaskIdB\n" +
+	"\x10previous_task_id\x18\t \x01(\tR\x0epreviousTaskId\x12\x16\n" +
+	"\x06claims\x18\n" +
+	" \x03(\tR\x06claimsB\n" +
 	"\n" +
 	"\b_percent\"\x9e\x1a\n" +
 	"\n" +

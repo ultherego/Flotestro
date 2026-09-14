@@ -8,6 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -846,6 +848,14 @@ type ListFilter struct {
 	// Maintenance keeps the hosts inside a maintenance window (true) or
 	// outside one (false). Nil does not narrow.
 	Maintenance *bool
+	// RebootRequired keeps the hosts that need a reboot (true) or the ones
+	// that reported they do not (false). A host that has not said either
+	// way is in neither list: unknown is not "no".
+	RebootRequired *bool
+	// SecurityUpdates keeps the hosts with a security update waiting
+	// (true) or with a count of none (false); unknown counts are left out
+	// of both, for the same reason.
+	SecurityUpdates *bool
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
@@ -924,6 +934,18 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 			conditions = append(conditions, "h.maintenance_until > now()")
 		} else {
 			conditions = append(conditions, "(h.maintenance_until is null or h.maintenance_until <= now())")
+		}
+	}
+	if f.RebootRequired != nil {
+		// The column is null for a host that has not reported: a plain
+		// comparison leaves it out of both answers, which is the point.
+		conditions = append(conditions, fmt.Sprintf("h.reboot_required = %t", *f.RebootRequired))
+	}
+	if f.SecurityUpdates != nil {
+		if *f.SecurityUpdates {
+			conditions = append(conditions, "h.pending_security_updates > 0")
+		} else {
+			conditions = append(conditions, "h.pending_security_updates = 0")
 		}
 	}
 	if f.Capability != "" {
@@ -1498,4 +1520,153 @@ func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Hos
 		return nil, ErrNotFound
 	}
 	return s.Get(ctx, hostID)
+}
+
+// MaxOwnerLength bounds the owner of a host. The owner is a name or a team
+// the operator types, not a paragraph; a longer value is a note in the
+// wrong field.
+const MaxOwnerLength = 128
+
+// ErrInvalidOwner means an owner the panel does not accept; the message
+// says what is wrong with it.
+var ErrInvalidOwner = errors.New("invalid owner")
+
+// NormalizeOwner checks an owner. An empty owner is allowed and means
+// nobody: clearing the field is how a host is handed back to the pool.
+// Control characters are refused, because the owner is printed in tables
+// and in the trail, where a line break would forge a second row.
+func NormalizeOwner(owner string) (string, error) {
+	owner = strings.TrimSpace(owner)
+	if len(owner) > MaxOwnerLength {
+		return "", fmt.Errorf("%w: longer than %d characters", ErrInvalidOwner, MaxOwnerLength)
+	}
+	for _, r := range owner {
+		if r < ' ' || r == 0x7f {
+			return "", fmt.Errorf("%w: control characters are not allowed", ErrInvalidOwner)
+		}
+	}
+	return owner, nil
+}
+
+// SetOwner records who answers for a host. An empty owner clears the field.
+func (s *Store) SetOwner(ctx context.Context, hostID, owner string) (*Host, error) {
+	normalized, err := NormalizeOwner(owner)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`update hosts set owner = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("setting the owner: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// ErrInvalidAddress means a management address that is neither an IP
+// address nor a host name.
+var ErrInvalidAddress = errors.New("invalid management address")
+
+// hostnamePattern is an RFC 1123 name: lower-case labels of letters,
+// digits and inner hyphens, joined by dots.
+var hostnamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
+
+// NormalizeManagementAddress checks an address an operator types by hand.
+// An IP address comes back in its canonical spelling and a name in lower
+// case, so the same address typed twice is stored once. An empty address
+// is allowed: it is the request to forget the manual value.
+func NormalizeManagementAddress(address string) (string, error) {
+	address = strings.TrimSpace(address)
+	if address == "" {
+		return "", nil
+	}
+	if ip := net.ParseIP(address); ip != nil {
+		return ip.String(), nil
+	}
+	name := strings.ToLower(strings.TrimSuffix(address, "."))
+	if len(name) > 253 || !hostnamePattern.MatchString(name) {
+		return "", fmt.Errorf("%w: %q is neither an IP address nor a host name", ErrInvalidAddress, address)
+	}
+	return name, nil
+}
+
+// SetManualManagementAddress records the address an operator chose for
+// reaching the host. The source is then 'manual', which the observations
+// of the gateway and of the agent do not overwrite: the operator said how
+// this host is reached, and a connection from behind NAT knows less than
+// they do. An empty address takes the manual value away - only that one:
+// an observed address is a fact and stays - so the next session or agent
+// report fills the field again.
+func (s *Store) SetManualManagementAddress(ctx context.Context, hostID, address string) (*Host, error) {
+	normalized, err := NormalizeManagementAddress(address)
+	if err != nil {
+		return nil, err
+	}
+	var (
+		query string
+		args  []any
+	)
+	if normalized == "" {
+		query = `
+			update hosts
+			   set management_address = case when management_address_source = 'manual'
+			                                 then null else management_address end,
+			       management_address_source = case when management_address_source = 'manual'
+			                                        then null else management_address_source end,
+			       management_address_observed_at = case when management_address_source = 'manual'
+			                                             then null else management_address_observed_at end,
+			       updated_at = now()
+			 where id = $1`
+		args = []any{hostID}
+	} else {
+		query = `
+			update hosts
+			   set management_address             = $2,
+			       management_address_source       = 'manual',
+			       management_address_observed_at  = now(),
+			       updated_at                      = now()
+			 where id = $1`
+		args = []any{hostID, normalized}
+	}
+	tag, err := s.pool.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("setting the management address: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// ApplyEnrollmentFacts records what the installation order said about the
+// host: its owner and its tags. The order is written by the operator who
+// knows the machine before it exists in the panel, so the facts land in the
+// same transaction as the host row. The tags are added to the ones already
+// there and the owner is set only when the order names one: a token can
+// bring a known machine back, and what an operator recorded about it
+// meanwhile is not the token's to erase.
+func (s *Store) ApplyEnrollmentFacts(ctx context.Context, tx pgx.Tx, hostID, owner string, tags []string) error {
+	if owner == "" && len(tags) == 0 {
+		return nil
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	const query = `
+		update hosts
+		   set owner      = coalesce(nullif($2, ''), owner),
+		       tags       = (select coalesce(array_agg(distinct tag order by tag), '{}')
+		                       from unnest(tags || $3::text[]) as tag),
+		       updated_at = now()
+		 where id = $1::uuid`
+	tag, err := tx.Exec(ctx, query, hostID, owner, tags)
+	if err != nil {
+		return fmt.Errorf("applying the facts of the order: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

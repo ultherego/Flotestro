@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
@@ -17,6 +17,13 @@ const CAPABILITIES = [
   "schedules", "network", "dns", "firewall", "storage", "sshd", "kernel", "files.managed",
 ];
 
+/** What each origin of a management address means, for the chip's tooltip. */
+const ADDRESS_SOURCES: Record<string, string> = {
+  session: "address seen by the control plane on its end of the connection",
+  agent: "address reported by the host itself; it connects through a relay",
+  manual: "address set manually by an operator",
+};
+
 /**
  * The host list with filters executed on the server side. The panel never
  * fetches the whole fleet into the browser memory to filter it: the search,
@@ -31,6 +38,10 @@ export function Hosts() {
     staleTime: 5 * 60 * 1000,
   });
   const canAdd = (permissions.data?.permissions ?? []).includes("host.enroll.create");
+  // The bulk workspace is where a selection goes; whoever cannot read
+  // campaigns has no such workspace and sees no checkboxes.
+  const canSelect = (permissions.data?.permissions ?? []).includes("campaign.read");
+  const navigate = useNavigate();
   // A tile on the dashboard links here with a filter already set; the
   // address only seeds the filters, the operator changes them freely.
   const [initial] = useSearchParams();
@@ -44,6 +55,18 @@ export function Hosts() {
   const [maintenance, setMaintenance] = useState(initial.get("maintenance") ?? "");
   const [capability, setCapability] = useState(initial.get("capability") ?? "");
   const [channel, setChannel] = useState(initial.get("channel") ?? "");
+  // The "needs attention" filters: a host that must be rebooted, a host
+  // with a security update waiting, a host of one directory domain. The
+  // dashboard tiles link here with them set.
+  const [rebootRequired, setRebootRequired] = useState(initial.get("reboot_required") ?? "");
+  const [securityUpdates, setSecurityUpdates] = useState(initial.get("security_updates") ?? "");
+  const [identityDomain, setIdentityDomain] = useState(initial.get("identity_domain") ?? "");
+  // The rows ticked for the bulk workspace. The selection is by
+  // identifier, so it survives a refresh of the list and a page loaded
+  // later; a filter change drops it, because the rows it named are gone
+  // from view and a hidden selection would order a campaign on hosts the
+  // operator no longer sees.
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   // The refusal filter has no control of its own: the dashboard's
   // expired-certificates tile links here with it set, and the address is
   // the only way in. Clearing the connection state clears it too, so the
@@ -69,6 +92,7 @@ export function Hosts() {
   const settledSearch = useDebounced(search.trim());
   const settledOwner = useDebounced(owner.trim());
   const settledTags = useDebounced(tags.trim());
+  const settledDomain = useDebounced(identityDomain.trim());
 
   const params = new URLSearchParams();
   if (settledSearch) params.set("q", settledSearch);
@@ -82,11 +106,18 @@ export function Hosts() {
   if (capability) params.set("capability", capability);
   if (channel) params.set("channel", channel);
   if (refusal) params.set("connection_refusal", refusal);
+  if (rebootRequired) params.set("reboot_required", rebootRequired);
+  if (securityUpdates) params.set("security_updates", securityUpdates);
+  if (settledDomain) params.set("identity_domain", settledDomain);
   for (const tag of settledTags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
   params.set("limit", String(LIST_PAGE));
+  const filterKey = params.toString();
+  useEffect(() => {
+    setSelected(new Set());
+  }, [filterKey]);
 
   const hosts = useInfiniteQuery({
-    queryKey: ["hosts", params.toString()],
+    queryKey: ["hosts", filterKey],
     queryFn: ({ pageParam }) => {
       const page = new URLSearchParams(params);
       if (pageParam) page.set("cursor", pageParam);
@@ -121,6 +152,23 @@ export function Hosts() {
   // The meter measures each host against the busiest one on the list; a
   // host whose count is unknown does not set the scale.
   const mostUpdates = Math.max(0, ...rows.map((host) => host.pending_updates ?? 0));
+
+  const toggle = (id: string, on: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (on) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+  // The header box ticks what is loaded, not what matches: a page not yet
+  // fetched has hosts nobody has seen, and a campaign must not reach them
+  // from a box that looked like "all".
+  const allLoadedSelected = rows.length > 0 && rows.every((host) => selected.has(host.id));
+  const openInBulk = () => {
+    const address = new URLSearchParams();
+    for (const id of selected) address.append("host_id", id);
+    navigate(`/bulk?${address}`);
+  };
 
   return (
     <>
@@ -196,6 +244,22 @@ export function Hosts() {
               <option value="">{t("channel: any")}</option>
               {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
+            <select value={rebootRequired} onChange={(e) => setRebootRequired(e.target.value)} data-testid="filter-reboot">
+              <option value="">{t("reboot: any")}</option>
+              <option value="true">{t("reboot required")}</option>
+              <option value="false">{t("no reboot required")}</option>
+            </select>
+            <select value={securityUpdates} onChange={(e) => setSecurityUpdates(e.target.value)} data-testid="filter-security">
+              <option value="">{t("security updates: any")}</option>
+              <option value="true">{t("security updates waiting")}</option>
+              <option value="false">{t("no security updates")}</option>
+            </select>
+            <input
+              placeholder={t("domain, e.g. corp.example")}
+              title={t("the directory domain the host is joined to")}
+              value={identityDomain}
+              onChange={(e) => setIdentityDomain(e.target.value)}
+            />
           </Toolbar>
           {refusal && (
             <p className="source">
@@ -214,7 +278,18 @@ export function Hosts() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Host")}</th><th>{t("State")}</th><th>{t("System")}</th><th>{t("Site")}</th>
+                  {canSelect && (
+                    <th style={{ width: 28 }}>
+                      <input
+                        type="checkbox"
+                        aria-label={t("select every loaded host")}
+                        checked={allLoadedSelected}
+                        onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((host) => host.id)) : new Set())}
+                      />
+                    </th>
+                  )}
+                  <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Management address")}</th><th>{t("Owner")}</th>
+                  <th>{t("System")}</th><th>{t("Site")}</th>
                   <th>{t("Environment")}</th><th>{t("Domain")}</th><th>{t("Updates")}</th>
                   <th className="num">{t("Failed units")}</th><th>{t("Reboot")}</th><th>{t("Last seen")}</th>
                 </tr>
@@ -222,15 +297,21 @@ export function Hosts() {
               <tbody>
                 {rows.map((host) => (
                   <tr key={host.id}>
-                    {/* The name and, under it, the management address - not
-                        just any first address of the host. Undetermined is
-                        shown as undetermined. */}
+                    {canSelect && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          aria-label={t("select {host}", { host: host.hostname })}
+                          checked={selected.has(host.id)}
+                          onChange={(e) => toggle(host.id, e.target.checked)}
+                        />
+                      </td>
+                    )}
+                    {/* The name and, under it, the tags. The address has a
+                        column of its own, with its origin. */}
                     <td>
                       <div className="fp-host-cell">
                         <Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link>
-                        {host.management_address
-                          ? <span className="fp-host-address" title={t("source: {source}", { source: host.management_address_source ?? "" })}>{host.management_address}</span>
-                          : <span><span className="badge unknown">{t("unknown")}</span></span>}
                         {/* The tags as chips; a chip narrows the list to
                             its tag, so a role is one click from "every
                             host with this role". */}
@@ -266,10 +347,37 @@ export function Hosts() {
                         </div>
                       )}
                     </td>
+                    {/* The management address - not just any first address
+                        of the host - with where it came from: what the panel
+                        saw, what the host declared, or what an operator set.
+                        Undetermined is shown as undetermined. */}
+                    <td data-testid="host-address">
+                      {host.management_address ? (
+                        <span className="fp-host-cell">
+                          <span className="fp-host-address">{host.management_address}</span>
+                          <span>
+                            <span className="badge" title={t(ADDRESS_SOURCES[host.management_address_source ?? ""] ?? "address source")}>
+                              {host.management_address_source}
+                            </span>
+                          </span>
+                        </span>
+                      ) : <span className="badge unknown">{t("unknown")}</span>}
+                    </td>
+                    {/* The owner as recorded; a click narrows the list to
+                        their hosts, like a tag chip does. */}
+                    <td data-testid="host-owner">
+                      {host.owner
+                        ? <button type="button" className="link" onClick={() => setOwner(host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
+                        : <span className="source">—</span>}
+                    </td>
                     <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
                     <td>{host.site}</td>
                     <td>{host.environment}</td>
-                    <td>{host.identity.enrolled ? host.identity.domain : <span className="badge">{t("not in domain")}</span>}</td>
+                    <td>
+                      {host.identity.enrolled
+                        ? <button type="button" className="link" onClick={() => setIdentityDomain(host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
+                        : <span className="badge">{t("not in domain")}</span>}
+                    </td>
                     {/* The bar is the host's share of the busiest host on the
                         list; the security part is named, because it is the
                         part that cannot wait. An unknown count stays a badge,
@@ -306,6 +414,25 @@ export function Hosts() {
                 {t("Load more ({n} left)", { n: total - rows.length })}
               </button>
             </p>
+          )}
+          {/* The selection travels to the bulk workspace as its target list.
+              The bar sticks to the bottom of the view, so a selection made
+              two hundred rows up is one click away without scrolling back. */}
+          {selected.size > 0 && (
+            <div
+              data-testid="selection-bar"
+              style={{
+                position: "sticky", bottom: 0, zIndex: 4,
+                display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                padding: "10px 16px", background: "var(--bg-panel)", borderTop: "1px solid var(--border)",
+              }}
+            >
+              <span>{t("{n} selected", { n: selected.size })}</span>
+              <button type="button" className="primary" onClick={openInBulk}>
+                {t("Open in Bulk workspace ({n})", { n: selected.size })}
+              </button>
+              <button type="button" className="secondary" onClick={() => setSelected(new Set())}>{t("Clear selection")}</button>
+            </div>
           )}
         </Card>
 

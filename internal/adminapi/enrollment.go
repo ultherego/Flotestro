@@ -36,9 +36,15 @@ type enrollmentRequestBody struct {
 	// RelayID confines the order to one site: the token works only through
 	// this relay. Empty means no route restriction - and stays so for
 	// installations without relays.
-	RelayID    string `json:"relay_id"`
-	MaxUses    int    `json:"max_uses"`
-	TTLMinutes int    `json:"ttl_minutes"`
+	RelayID string `json:"relay_id"`
+	// Owner and Tags are what the operator already knows about the
+	// machine; they go onto the host the moment it enrolls. The tags are
+	// checked like host tags, so a token cannot put a shape on a host the
+	// tag editor would refuse.
+	Owner      string   `json:"owner"`
+	Tags       []string `json:"tags"`
+	MaxUses    int      `json:"max_uses"`
+	TTLMinutes int      `json:"ttl_minutes"`
 	// Reason is the purpose of an order that requires fresh authentication:
 	// production, a batch token or a relay. The description stands in for
 	// it when it says enough.
@@ -73,6 +79,29 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 			"identity recovery is requested on the host itself")
 		return
 	}
+	// The facts for the host are checked here, where the order is placed:
+	// an order that fails at enrollment time would fail in the middle of
+	// the night, on the machine, with nobody to read the reason.
+	owner, err := hosts.NormalizeOwner(req.Owner)
+	if errors.Is(err, hosts.ErrInvalidOwner) {
+		problem(w, http.StatusBadRequest, "invalid_owner", err.Error())
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	req.Owner = owner
+	tags, err := hosts.NormalizeTags(req.Tags)
+	if errors.Is(err, hosts.ErrInvalidTags) {
+		problem(w, http.StatusBadRequest, "invalid_tags", err.Error())
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	req.Tags = tags
 	// Enrollment opens the way to root on the machine through the helper.
 	// An order for production, a token good for many machines or a relay
 	// requires fresh authentication, like any change of that weight.
@@ -113,6 +142,7 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 			"site": order.Site, "environment": order.Environment,
 			"kind": order.Kind, "purpose": order.Purpose,
 			"relay_id": order.RelayID,
+			"owner":    order.Owner, "tags": order.Tags,
 			"max_uses": order.MaxUses, "expires_at": order.ExpiresAt,
 		}, stepUpEvidence),
 	})
@@ -151,7 +181,7 @@ func (s *Server) createOrder(r *http.Request, req enrollmentRequestBody, actor,
 		Description: req.Description, Site: req.Site, Environment: req.Environment,
 		Kind: req.Kind, Purpose: req.Purpose,
 		ExpectedMachineID: req.ExpectedMachineID, ExpectedHostID: hostID,
-		RelayID: req.RelayID,
+		RelayID: req.RelayID, Owner: req.Owner, Tags: req.Tags,
 		MaxUses: req.MaxUses, TTL: ttl, CreatedBy: actor,
 		IdempotencyKey: idempotencyKeyOf(r, ""),
 	})

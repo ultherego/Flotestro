@@ -91,3 +91,11 @@ func TestTheHashSchemeFollowsTheAgentVersion(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyANewAgentAcknowledgesTasks(t *testing.T) {
+	for version, want := range map[string]bool{"0.46.0": false, "0.47.0": true, "1.2.0-1": true, "": false} {
+		if got := AcknowledgesTasks(version); got != want {
+			t.Errorf("AcknowledgesTasks(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

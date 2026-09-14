@@ -144,3 +144,32 @@ func TestCapacityAndUsageAreSeparateSeries(t *testing.T) {
 		}
 	}
 }
+
+// TestTheLifecycleCountersAreExposed guards the names of the lifecycle
+// document: a reconnect and a renewal are counted at the point of the event
+// by the gateway, and the collector renders them with the labels the
+// document names - never a host name, which would grow with the fleet.
+func TestTheLifecycleCountersAreExposed(t *testing.T) {
+	AgentReconnect.Inc("debian")
+	AgentRenewal.Inc("renewed")
+	AgentRenewal.Inc("refused")
+
+	text := string(NewCollector(nil, nil, nil, "panel").Gather(context.Background()))
+	for _, line := range []string{
+		"# TYPE flotestro_agent_reconnect_total counter",
+		`flotestro_agent_reconnect_total{host_family="debian"} 1`,
+		"# TYPE flotestro_agent_renewal_total counter",
+		`flotestro_agent_renewal_total{outcome="refused"} 1`,
+		`flotestro_agent_renewal_total{outcome="renewed"} 1`,
+	} {
+		if !strings.Contains(text, line+"\n") {
+			t.Errorf("missing line %q in:\n%s", line, text)
+		}
+	}
+	// The relay buffers come from the heartbeats the panel keeps; a
+	// collector without that source, or without a database to name the
+	// relays, says nothing about them rather than reporting empty buffers.
+	if strings.Contains(text, "flotestro_relay_buffer") {
+		t.Errorf("relay buffer metrics appeared without a relay source:\n%s", text)
+	}
+}

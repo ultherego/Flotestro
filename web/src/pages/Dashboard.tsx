@@ -77,6 +77,7 @@ export function Dashboard() {
     s?.reboot_required, s?.with_failed_units, s?.package_database_broken, s?.sssd_offline,
     s?.failed_jobs_24h, s?.pending_enrollment_requests, s?.agents_behind_latest,
     s?.agent_certificates_expiring, s?.agent_certificates_expired, s?.degraded_relays,
+    s?.relays_buffer_high, s?.duplicate_identities_24h, s?.enrollment_refusals_1h, s?.agents_unsupported,
   ].reduce<number>((sum, value) => sum + (value ?? 0), 0);
 
   return (
@@ -155,7 +156,24 @@ export function Dashboard() {
               <Stat label={t("Agent certificates expired")} value={s.agent_certificates_expired} hint={t("needs identity recovery")} tone={errorAbove(s.agent_certificates_expired)} to="/hosts?connection_refusal=certificate_expired" />
             )}
             {s?.degraded_relays !== undefined && (
-              <Stat label={t("Degraded relays")} value={s.degraded_relays} hint={t("missed renewal")} tone={errorAbove(s.degraded_relays)} />
+              <Stat label={t("Degraded relays")} value={s.degraded_relays} hint={t("missed renewal")} tone={errorAbove(s.degraded_relays)} to="/relays" />
+            )}
+            {/* The lifecycle document's alarms that no host sample can
+                carry: a relay filling up, a cloned identity, a burst of
+                refused enrollments, an agent the panel cannot talk to.
+                Each is a counter over the trail or the heartbeats, and
+                each leads where the detail is. */}
+            {s?.relays_buffer_high !== undefined && (
+              <Stat label={t("Relay buffers high")} value={s.relays_buffer_high} hint={t("at least 70 % full")} tone={warnAbove(s.relays_buffer_high)} to="/relays" />
+            )}
+            {s?.duplicate_identities_24h !== undefined && (
+              <Stat label={t("Duplicate identities, 24 h")} value={s.duplicate_identities_24h} hint={t("a cloned machine or image")} tone={errorAbove(s.duplicate_identities_24h)} to="/audit?action=security.duplicate_identity" />
+            )}
+            {s?.enrollment_refusals_1h !== undefined && (
+              <Stat label={t("Enrollment refusals, 1 h")} value={s.enrollment_refusals_1h} hint={t("a burst is a leaked token")} tone={warnAbove(s.enrollment_refusals_1h)} to="/audit?action=host.enroll&outcome=denied" />
+            )}
+            {s?.agents_unsupported !== undefined && (
+              <Stat label={t("Agents unsupported")} value={s.agents_unsupported} hint={t("a protocol this panel does not speak")} tone={errorAbove(s.agents_unsupported)} to="/hosts" />
             )}
             <Stat label={t("Active sessions")} value={s?.active_sessions} />
           </StatGrid>

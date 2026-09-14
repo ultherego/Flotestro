@@ -133,11 +133,16 @@ type Request struct {
 	ExpectedMachineID string `json:"expected_machine_id,omitempty"`
 	ExpectedHostID    string `json:"expected_host_id,omitempty"`
 	// RelayID limits the route of the request to one relay.
-	RelayID        string `json:"relay_id,omitempty"`
-	MaxUses        int    `json:"max_uses"`
-	Uses           int    `json:"uses"`
-	Status         string `json:"status"`
-	EnrolledHostID string `json:"enrolled_host_id,omitempty"`
+	RelayID string `json:"relay_id,omitempty"`
+	// Owner and Tags are what the operator already knows about the machine
+	// when ordering its installation; they land on the host the moment it
+	// enrolls, so a new host is never an untagged host of nobody.
+	Owner          string   `json:"owner,omitempty"`
+	Tags           []string `json:"tags"`
+	MaxUses        int      `json:"max_uses"`
+	Uses           int      `json:"uses"`
+	Status         string   `json:"status"`
+	EnrolledHostID string   `json:"enrolled_host_id,omitempty"`
 
 	ExpiresAt time.Time  `json:"expires_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
@@ -161,6 +166,9 @@ type Scope struct {
 	// bound to a relay will not work outside its site, and a token without
 	// such a binding works as before.
 	RelayID string
+	// Owner and Tags are applied to the host that enrolls with the request.
+	Owner string
+	Tags  []string
 }
 
 // Replay is the record of an attempt that has already succeeded.
@@ -211,7 +219,11 @@ type CreateInput struct {
 	// RelayID closes the request within one site. A token taken outside it
 	// registers nothing: the centre checks which relay signed the request
 	// with its own mTLS channel.
-	RelayID   string
+	RelayID string
+	// Owner and Tags go onto the host at enrollment. The tags are checked
+	// by the caller the way host tags are; the store records what it gets.
+	Owner     string
+	Tags      []string
 	MaxUses   int
 	TTL       time.Duration
 	CreatedBy string
@@ -268,12 +280,17 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 	value := TokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	hash := hashToken(value)
 
+	// The tag list is always a list in the answer, as it is on a host.
+	tags := input.Tags
+	if tags == nil {
+		tags = []string{}
+	}
 	request := &Request{
 		ID: uuid.NewString(), Value: value, Description: input.Description,
 		Site: input.Site, Environment: input.Environment,
 		Kind: kind, Purpose: purpose,
 		ExpectedMachineID: input.ExpectedMachineID, ExpectedHostID: input.ExpectedHostID,
-		RelayID: input.RelayID,
+		RelayID: input.RelayID, Owner: input.Owner, Tags: tags,
 		MaxUses: maxUses, Status: StatusPending,
 		ExpiresAt: time.Now().Add(ttl), CreatedBy: input.CreatedBy,
 	}
@@ -281,15 +298,16 @@ func (s *Store) Create(ctx context.Context, input CreateInput) (*Request, error)
 		insert into enrollment_requests
 			(id, token_hash, description, site, environment, kind, purpose,
 			 expected_machine_id, expected_host_id, relay_id, max_uses, expires_at, created_by,
-			 idempotency_key)
+			 idempotency_key, owner, tags)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid, nullif($10, '')::uuid, $11, $12, $13,
-			nullif($14, ''))
+			nullif($14, ''), nullif($15, ''), $16::text[])
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing
 		returning created_at, updated_at`
 	err := s.pool.QueryRow(ctx, query, request.ID, hash[:], nullable(input.Description),
 		input.Site, input.Environment, kind, purpose,
 		nullable(input.ExpectedMachineID), nullable(input.ExpectedHostID),
-		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy, input.IdempotencyKey).
+		input.RelayID, maxUses, request.ExpiresAt, input.CreatedBy, input.IdempotencyKey,
+		input.Owner, tags).
 		Scan(&request.CreatedAt, &request.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) && input.IdempotencyKey != "" {
 		// The key was used before: the earlier order is the answer. Its
@@ -364,7 +382,7 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 	const query = `
 		select id, site, environment, kind, purpose,
 		       coalesce(expected_machine_id, ''), coalesce(expected_host_id::text, ''),
-		       coalesce(relay_id::text, ''),
+		       coalesce(relay_id::text, ''), coalesce(owner, ''), tags,
 		       max_uses, uses, expires_at, revoked_at
 		from enrollment_requests
 		where token_hash = $1
@@ -379,6 +397,7 @@ func (s *Store) Redeem(ctx context.Context, tx pgx.Tx, input AttemptInput) (Outc
 	err := tx.QueryRow(ctx, query, hash[:]).
 		Scan(&scope.TokenID, &scope.Site, &scope.Environment, &scope.Kind, &scope.Purpose,
 			&scope.ExpectedMachineID, &scope.ExpectedHostID, &scope.RelayID,
+			&scope.Owner, &scope.Tags,
 			&maxUses, &uses, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Outcome{}, &Denial{Code: DenialTokenUnknown}
@@ -570,7 +589,7 @@ func (s *Store) List(ctx context.Context) ([]Request, error) {
 const requestColumns = `
 	select id, coalesce(description, ''), site, environment, kind, purpose,
 	       coalesce(expected_machine_id, ''), coalesce(expected_host_id::text, ''),
-	       coalesce(relay_id::text, ''),
+	       coalesce(relay_id::text, ''), coalesce(owner, ''), tags,
 	       max_uses, uses, status, coalesce(enrolled_host_id::text, ''),
 	       expires_at, revoked_at, created_by, created_at, updated_at
 	from enrollment_requests`
@@ -583,10 +602,14 @@ type scanner interface {
 func scanRequest(row scanner) (*Request, error) {
 	var z Request
 	if err := row.Scan(&z.ID, &z.Description, &z.Site, &z.Environment, &z.Kind, &z.Purpose,
-		&z.ExpectedMachineID, &z.ExpectedHostID, &z.RelayID, &z.MaxUses, &z.Uses, &z.Status,
+		&z.ExpectedMachineID, &z.ExpectedHostID, &z.RelayID, &z.Owner, &z.Tags,
+		&z.MaxUses, &z.Uses, &z.Status,
 		&z.EnrolledHostID, &z.ExpiresAt, &z.RevokedAt, &z.CreatedBy,
 		&z.CreatedAt, &z.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if z.Tags == nil {
+		z.Tags = []string{}
 	}
 	// The status "pending" past the deadline is untrue: the token no longer works.
 	if z.Status == StatusPending && time.Now().After(z.ExpiresAt) {

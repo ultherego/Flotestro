@@ -25,7 +25,13 @@ import (
 // locks on the agent's side will not let a plan enter a package transaction
 // that is under way anyway.
 func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Target) error {
-	action := opspec.PlanningAction(opspec.ActionType(campaign.ActionType))
+	change := opspec.ActionType(campaign.ActionType)
+	// A plan that comes with the order needs no host: the panel splits the
+	// order and records every host's part as its plan.
+	if opspec.PanelPlanned(change) {
+		return o.planFromOrder(ctx, campaign, targets)
+	}
+	action := opspec.PlanningAction(change)
 	if action == "" {
 		// The campaign should never have come into being; stopping is the
 		// only honest answer, because there is nothing to compute the plan
@@ -77,6 +83,78 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 				}
 			}
 		}
+	}
+
+	if settled < len(targets) {
+		return nil
+	}
+	return o.finishPlanning(ctx, campaign, targets)
+}
+
+// planFromOrder runs the planning phase of a campaign whose per-host plans
+// come with the order: a rename carries a mapping of host to new name, and
+// the plan of a host is its own entry.
+//
+// No task reaches a host here, and an offline host is planned all the same:
+// its name is in the order, not on the machine, and the offline policy
+// takes over at execution. A host the mapping does not name ends here as
+// ineligible with a reason - silence in the mapping is not consent to a
+// default. Every plan is recorded with its own digest and enters the plan
+// set, so the consent covers the split the operator will read, host by
+// host, rather than the mapping as one blob.
+func (o *Orchestrator) planFromOrder(ctx context.Context, campaign Campaign, targets []Target) error {
+	mapping, err := opspec.ParseHostnameMapping(campaign.Payload)
+	if err != nil {
+		// The order was validated when the campaign came into being, so this
+		// is a payload that changed underneath it; there is nothing to split.
+		return o.pauseOnThreshold(ctx, campaign,
+			"the order carries no usable mapping: "+err.Error(), 0, 0)
+	}
+	var shared opspec.Payload
+	if len(campaign.Payload) > 0 {
+		if err := json.Unmarshal(campaign.Payload, &shared); err != nil {
+			return err
+		}
+	}
+
+	settled := 0
+	for i := range targets {
+		target := &targets[i]
+		if target.State.Finished() {
+			settled++
+			continue
+		}
+		switch target.State {
+		case TargetPending, TargetQueuedOffline:
+		default:
+			continue
+		}
+		own, reason := mapping.PayloadFor(target.HostID, shared)
+		if reason != "" {
+			o.finishTarget(ctx, campaign, target, TargetIneligible, reason,
+				"the order names no new hostname for this host")
+			settled++
+			continue
+		}
+		plan, err := json.Marshal(map[string]any{
+			"plan": map[string]any{"hostname": own.Hostname.Hostname, "source": "order"},
+		})
+		if err != nil {
+			return err
+		}
+		// The plan step is opened and closed here without a task: the strip
+		// shows a plan, and the plan says where the name came from.
+		if err := o.startStep(ctx, target, stepStart{
+			Key: StepPlan, State: TargetPlanning,
+			Note: "the name comes with the order",
+		}); err != nil {
+			return err
+		}
+		if err := o.acceptPlan(ctx, campaign, target, ContentFingerprint(plan), plan,
+			"named "+own.Hostname.Hostname+" by the order"); err != nil {
+			return err
+		}
+		settled++
 	}
 
 	if settled < len(targets) {
@@ -563,8 +641,36 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 			manifest.PlanDigest = hash
 			payload.Compose = &manifest
 		}
+
+	case opspec.ActionSystemHostnameSet:
+		// A rename binds to the name recorded in this host's plan: the
+		// shared payload carries no name, and the one the approver read for
+		// this host is the only one that may reach it. A plan without a
+		// name gives the host no name at all, and the host refuses the
+		// empty order rather than keeping a placeholder.
+		own := opspec.HostnamePayload{Hostname: orderedHostname(plan)}
+		if payload.Hostname != nil {
+			own.Pretty = payload.Hostname.Pretty
+		}
+		payload.Hostname = &own
 	}
 	return payload
+}
+
+// orderedHostname takes the name the order gave this host out of its plan.
+func orderedHostname(plan json.RawMessage) string {
+	if len(plan) == 0 {
+		return ""
+	}
+	var parsed struct {
+		Plan struct {
+			Hostname string `json:"hostname"`
+		} `json:"plan"`
+	}
+	if err := json.Unmarshal(plan, &parsed); err != nil {
+		return ""
+	}
+	return parsed.Plan.Hostname
 }
 
 // foundContentFingerprint takes from the plan the digest of the file the host

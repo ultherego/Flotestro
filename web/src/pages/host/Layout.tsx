@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import { Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
@@ -32,16 +31,8 @@ export function HostLayout() {
   const data = host.data;
   const segment = location.pathname.split("/")[3] || DEFAULT_MODULE;
 
-  // The tab title carries the operation target. An operator with several
-  // open tabs recognises the machine by the title before looking at it.
-  useEffect(() => {
-    if (!data) return;
-    const address = data.management_address ? ` ${data.management_address}` : "";
-    document.title = `${data.hostname}${address} · ${segment} · Flotestro`;
-    return () => {
-      document.title = "Flotestro";
-    };
-  }, [data, segment]);
+  // The tab title is set by the context bar, which knows the host and the
+  // module by name; nothing here, or it would win over it.
 
   if (host.error) return <ErrorBox error={host.error} />;
   if (!data) return <Empty>{t("Loading…")}</Empty>;

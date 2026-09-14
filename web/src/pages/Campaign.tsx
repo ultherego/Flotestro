@@ -639,7 +639,22 @@ export function Campaign() {
                       {t("steps")}
                     </button>
                   </td>
-                  <td><JobState state={target.state} /></td>
+                  {/* A host that has not started says what it waits on: the
+                      lock another task of the host holds, as the agent named
+                      it. Without it a running host that does nothing looks
+                      like a lost one. */}
+                  <td>
+                    <JobState state={target.state} />
+                    {target.blocker && (
+                      <div
+                        className="source"
+                        title={target.blocker}
+                        style={{ maxWidth: "28ch", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}
+                      >
+                        {t("Blocker")}: {target.blocker}
+                      </div>
+                    )}
+                  </td>
                   {/* The progress belongs to the operation currently running
                       on this host. A host waiting for its wave has nothing to
                       show. */}

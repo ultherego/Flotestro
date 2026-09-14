@@ -219,3 +219,83 @@ func TestTheRepairPayloadHashesTheSameAsInThePanel(t *testing.T) {
 		t.Fatalf("the plan hash diverges: panel %x, agent %x", expected, atTheAgent)
 	}
 }
+
+// TestAWaitingTaskNamesItsBlocker guards what the panel shows under a host
+// that has not started: the wait is reported the moment the task finds
+// the resource busy, the report names the resource and the task holding
+// it, and a task that finds its resources free reports no wait at all.
+func TestAWaitingTaskNamesItsBlocker(t *testing.T) {
+	l := newLocks()
+	ctx := context.Background()
+
+	var free []string
+	release, reason := l.acquireReporting(ctx, "task-1", "unit.restart", []string{"units"},
+		func(blocker string) { free = append(free, blocker) })
+	if release == nil {
+		t.Fatalf("the first task did not get the resource: %s", reason)
+	}
+	if len(free) != 0 {
+		t.Errorf("a task that got its resource at once reported a wait: %v", free)
+	}
+
+	reported := make(chan string, 8)
+	entered := make(chan struct{})
+	go func() {
+		release, _ := l.acquireReporting(ctx, "task-2", "unit.stop", []string{"units"},
+			func(blocker string) { reported <- blocker })
+		if release != nil {
+			release()
+		}
+		close(entered)
+	}()
+
+	select {
+	case blocker := <-reported:
+		if blocker != "units held by task task-1 (unit.restart)" {
+			t.Errorf("the blocker is described as %q", blocker)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the wait was not reported when the resource was found busy")
+	}
+	select {
+	case <-entered:
+		t.Fatal("the second task entered a busy resource")
+	case <-time.After(50 * time.Millisecond):
+	}
+	// One report per ten seconds: a release that changes nothing for the
+	// waiter does not produce a second one right away.
+	if len(reported) != 0 {
+		t.Errorf("%d extra reports within the interval", len(reported))
+	}
+
+	release()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the second task did not start after the resource was released")
+	}
+}
+
+// TestAWaitThatEndsIsRefusedWithTheHolder: the bounded wait of a task ends
+// with a refusal naming what held it, and the refusal text is the one the
+// result carries - distinct from the wait report.
+func TestAWaitThatEndsIsRefusedWithTheHolder(t *testing.T) {
+	l := newLocks()
+	release, _ := l.acquire(context.Background(), "task-1", "unit.restart", []string{"units"})
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	var waits int
+	got, reason := l.acquireReporting(ctx, "task-2", "unit.stop", []string{"units"},
+		func(string) { waits++ })
+	if got != nil {
+		t.Fatal("the second task got a busy resource")
+	}
+	if waits != 1 {
+		t.Errorf("%d wait reports for a wait shorter than the interval, expected one", waits)
+	}
+	if !strings.Contains(reason, "units") || !strings.Contains(reason, "task-1") || !strings.Contains(reason, "unit.restart") {
+		t.Errorf("the refusal does not name the holder: %q", reason)
+	}
+}

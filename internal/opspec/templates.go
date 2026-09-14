@@ -59,6 +59,14 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 
 	case ActionPackageHoldSet:
 		return pkgs(true), true
+	case ActionRepositorySet:
+		// A source is trusted by its key, and only the supplier has it: the
+		// placeholder cannot pass, the same way certificate material cannot.
+		return Payload{Repository: &RepositoryPayload{
+			ID: "example", Name: "Example packages", URL: "https://packages.example.test/stable",
+			Enabled: true,
+			GPGKey:  "-----BEGIN PGP PUBLIC KEY BLOCK-----\nREPLACE WITH THE SIGNING KEY OF THE SOURCE\n-----END PGP PUBLIC KEY BLOCK-----\n",
+		}}, true
 	case ActionPackageInstall:
 		return pkgs(false), true
 	case ActionPackageUpgrade:
@@ -172,6 +180,10 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 func TemplateNeedsMaterial(action ActionType) bool {
 	switch action {
 	case ActionCertificateDeploy, ActionCertificateTrustEnsure:
+		return true
+	case ActionRepositorySet:
+		// The signing key of a package source is material of the same kind:
+		// without it the host would take root-running scripts on trust.
 		return true
 	}
 	return false

@@ -55,6 +55,70 @@ test.describe("host list", () => {
     await search.fill("");
     await expect(rows).toHaveCount(Math.min(hosts.length, 100));
   });
+
+  test("the reboot filter keeps the hosts the server says need one", async ({ page, request }) => {
+    // The server is the reference: the list must show exactly the hosts
+    // the API answers with for the same filter, not what a first page
+    // happens to carry.
+    const response = await request.get("/api/v1/hosts?limit=200&reboot_required=true");
+    expect(response.ok(), `GET /api/v1/hosts?reboot_required=true answered ${response.status()}`).toBeTruthy();
+    const needing = ((await response.json()) as { items: Host[] }).items;
+
+    const table = await openHostList(page);
+    const rows = table.locator("tbody tr");
+    await page.getByTestId("filter-reboot").selectOption("true");
+    if (needing.length === 0) {
+      await expect(page.getByText("No host matches the filters.")).toBeVisible();
+    } else {
+      await expect(rows).toHaveCount(Math.min(needing.length, 100));
+      for (const host of needing.slice(0, 50)) {
+        await expect(table.getByRole("link", { name: host.hostname, exact: true })).toBeVisible();
+      }
+    }
+    // The count in the toolbar follows the filter, like the rows do.
+    await expect(page.getByText(new RegExp(`^${needing.length} hosts$`))).toBeVisible();
+
+    await page.getByTestId("filter-reboot").selectOption("");
+    await expect(rows).toHaveCount(Math.min(hosts.length, 100));
+  });
+
+  test("the owner and the management address stand in their own columns", async ({ page }) => {
+    const table = await openHostList(page);
+    await expect(table.getByRole("columnheader", { name: "Owner" })).toBeVisible();
+    await expect(table.getByRole("columnheader", { name: "Management address" })).toBeVisible();
+    const row = table.locator("tbody tr").first();
+    const address = row.getByTestId("host-address");
+    // An address comes with its origin as a chip; a missing one says so.
+    await expect(address.locator(".badge").first()).toBeVisible();
+    const chip = (await address.locator(".badge").first().textContent())?.trim() ?? "";
+    expect(["session", "agent", "manual", "unknown"]).toContain(chip);
+  });
+
+  test("ticked hosts open the bulk workspace as its targets", async ({ page, request }) => {
+    const { errors } = watchErrors(page);
+    // The checkboxes exist for whoever can read campaigns; without that
+    // right there is no workspace to open and the test has nothing to do.
+    const whoami = await request.get("/api/v1/whoami");
+    const permissions = ((await whoami.json()) as { permissions: string[] }).permissions;
+    test.skip(!permissions.includes("campaign.read"), "the token cannot read campaigns; no selection is offered");
+
+    const table = await openHostList(page);
+    const chosen = hosts.slice(0, 2);
+    for (const host of chosen) {
+      await table.getByRole("checkbox", { name: `select ${host.hostname}` }).check();
+    }
+    const bar = page.getByTestId("selection-bar");
+    await expect(bar).toBeVisible();
+    await expect(bar).toContainText(`${chosen.length} selected`);
+    await bar.getByRole("button", { name: `Open in Bulk workspace (${chosen.length})` }).click();
+
+    // The workspace opens on those hosts by identifier, and says so.
+    await expect(page).toHaveURL(/\/bulk\?/);
+    const url = new URL(page.url());
+    expect(url.searchParams.getAll("host_id")).toEqual(chosen.map((host) => host.id));
+    await expect(page.locator(".page-header").getByRole("heading", { name: "Bulk Workspace" })).toBeVisible();
+    await expectHealthy(page, errors);
+  });
 });
 
 test.describe("host workspace", () => {

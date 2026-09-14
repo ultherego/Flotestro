@@ -40,6 +40,29 @@ const StatusInProgress = "operation_in_progress"
 // lease instead of giving up on the attempt a second time.
 const StageInProgress = "in_progress"
 
+// The stages of the acknowledgement of a task (TaskProgress.stage in
+// agent.proto). They are progress reports, not results: an acknowledgement
+// says where the task stands on the host, and the outcome is still to come.
+const (
+	// StageAccepted says the agent holds the task and will carry it out:
+	// the checks that refuse a task without touching the host are behind,
+	// and the task queues for the resources of the host. It is the answer
+	// the panel's short dispatch lease waits for.
+	StageAccepted = "accepted"
+	// StageAwaitingLock says the task waits for a resource another task of
+	// this host holds; the message names the blocker.
+	StageAwaitingLock = "awaiting_lock"
+	// StageStarted says the claims are taken and the operation is starting
+	// this instant. The panel moves the job to running on it.
+	StageStarted = "started"
+)
+
+// StatusAbandoned marks a task whose wait for the resources of the host
+// ended with the session. Nothing ran, so there is no result to send or to
+// remember: the panel's lease runs out and the task is delivered again to
+// the next session.
+const StatusAbandoned = "session_ended"
+
 // Stable refusal codes. They are part of the contract and do not depend on the
 // language.
 const (
@@ -84,6 +107,15 @@ type TaskExecutor struct {
 	// Nil means there is no session - progress without a receiver is not
 	// collected.
 	progress func(*agentv1.TaskProgress)
+	// admit waits for the resources of the host a task needs - the locks of
+	// its claims first, a budget slot second - and returns the function that
+	// gives them back. A reason instead of a release means the wait ended
+	// without them; nil and no reason mean the session ended. waiting is
+	// told about a wait for a busy lock, with the blocker. Nil means
+	// nothing to wait for: an executor assembled by hand in a test, or one
+	// without a session.
+	admit func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+		waiting func(blocker string)) (release func(), reason string)
 	// logLines passes on the journal preview. Nil means there is no session, and
 	// then the preview is not started at all: the host is not to work for
 	// nobody.
@@ -200,9 +232,35 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		}
 	}()
 	result := e.run(ctx, task, started)
-	e.settle(task, result, started)
+	switch result.GetErrorCode() {
+	case RejectResourceBusy, StatusAbandoned:
+		// The task never reached the host: it waited for a resource and
+		// the wait ended, with a refusal or with the session. A refusal is
+		// an answer to this delivery and not to the next one - the resource
+		// may be free by then - so neither is remembered as the result of
+		// the key.
+		result.TaskId = task.GetTaskId()
+		result.IdempotencyKey = idempotencyKey
+	default:
+		e.settle(task, result, started)
+	}
 	settled = true
 	return result
+}
+
+// reportStage sends one stage of the acknowledgement of a task. It goes
+// through the progress path: a send that fails is logged and the task goes
+// on, the same as for a lost progress line.
+func (e *TaskExecutor) reportStage(task *agentv1.TaskEnvelope, stage, message string, claims []string) {
+	if e.progress == nil {
+		return
+	}
+	e.progress(&agentv1.TaskProgress{
+		TaskId:  task.GetTaskId(),
+		Stage:   stage,
+		Message: message,
+		Claims:  claims,
+	})
 }
 
 // Redelivered answers a delivery of a key this process is still executing,
@@ -338,15 +396,45 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	}
 
 	// Every check that can refuse the task without touching the host is
-	// behind us. From here on the host may change, so the journal has to say
-	// so before the helper is asked: an agent that dies past this point and
-	// comes back without the marker would carry the change out again.
+	// behind us: the task is accepted. The panel hears it before the wait
+	// for the resources of the host, because the wait is what the short
+	// dispatch lease must not mistake for an envelope lost in a dead
+	// stream - a task queued behind a package transaction is on the host,
+	// not lost.
+	claims := taskClaims(task)
+	e.reportStage(task, StageAccepted, "", nil)
+	if e.admit != nil {
+		release, reason := e.admit(ctx, task, claims, func(blocker string) {
+			e.log.Info("the task waits for a resource of the host",
+				"task_id", task.GetTaskId(), "blocker", blocker)
+			e.reportStage(task, StageAwaitingLock, blocker, nil)
+		})
+		if reason != "" {
+			// A refusal naming the blocking task is an answer; silence
+			// until the end of the time limit of the operation is not.
+			e.log.Info("the task was refused by a resource lock",
+				"task_id", task.GetTaskId(), "reason", reason)
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectResourceBusy, reason)
+		}
+		if release == nil {
+			return rejected(agentv1.TaskResult_STATUS_UNSPECIFIED, StatusAbandoned,
+				"the session ended while the task waited for the resources of the host")
+		}
+		defer release()
+	}
+
+	// From here on the host may change, so the journal has to say so before
+	// the helper is asked: an agent that dies past this point and comes back
+	// without the marker would carry the change out again.
 	if err := e.markInFlight(task, action, payload, now); err != nil {
 		// Not knowing is allowed; a silent second execution is not. A host
 		// whose journal cannot take the marker performs no mutation.
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 			"the in-flight marker was not written to the journal: "+err.Error())
 	}
+	// The marker is down and the claims are held: the operation starts this
+	// instant, and the panel counts the host as running from here.
+	e.reportStage(task, StageStarted, "", claims)
 
 	switch action {
 	case opspec.ActionReadJournal:

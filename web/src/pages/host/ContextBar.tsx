@@ -6,6 +6,7 @@ import { refusalName, type Host, type Job, type Whoami } from "../../lib/types";
 import { relativeTime } from "../../lib/format";
 import { Time, ConnectionState } from "../../components/ui";
 import { module as findModule } from "./modules";
+import { hostTitle, useDocumentTitle } from "../../lib/title";
 import { useT } from "../../i18n";
 
 /**
@@ -23,6 +24,11 @@ export function ContextBar({ host, segment, campaign }: {
   campaign?: string | null;
 }) {
   const t = useT();
+  // The tab carries the machine and the module: the bar is the one place
+  // that knows both, whichever screen is open under it. The module goes by
+  // its name in the registry, in the operator's language.
+  const moduleName = findModule(segment)?.name;
+  useDocumentTitle(hostTitle(host, moduleName ? t(moduleName) : segment));
   return (
     <div className="host-header">
       {campaign && (

@@ -1,6 +1,10 @@
 package opspec
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 // TestAMissingDeclarationMeansRefusal guards the rule that protects the fleet
 // from the panel's own registry: adding an operation must not by itself open
@@ -177,5 +181,134 @@ func TestWithdrawingAnAuthorityNeedsTheWholeFleet(t *testing.T) {
 	}
 	if FullCoverageReason(ActionPackageUpgrade) != "" {
 		t.Error("a package upgrade requires the whole fleet")
+	}
+}
+
+// TestAPackageSourceIsTheSameDeclarationEverywhere guards the row of the
+// packages chapter: a source is an address, a key and a consent, and those
+// mean the same on every host - there is no diff to plan, so the campaign
+// runs it as one payload, fifty hosts a wave.
+func TestAPackageSourceIsTheSameDeclarationEverywhere(t *testing.T) {
+	if mode := ActionRepositorySet.CampaignMode(); mode != CampaignSamePayload {
+		t.Fatalf("a package source has the mode %q", mode)
+	}
+	if !ExecutableMode(ActionRepositorySet) {
+		t.Error("a package source is not executable in bulk")
+	}
+	if wave, _ := CampaignPace(ActionRepositorySet); wave != 50 {
+		t.Errorf("a package source starts with a wave of %d, the document says 50", wave)
+	}
+	// A source without its key must not pass as a template: the placeholder
+	// is refused the way placeholder certificate material is.
+	if !TemplateNeedsMaterial(ActionRepositorySet) {
+		t.Error("the template of a package source passes without the signing key")
+	}
+	if wave, concurrent := CampaignPace(ActionUnitRestart); wave != 10 || concurrent != 5 {
+		t.Errorf("an operation without a row of its own paces at %d/%d, expected the general 10/5", wave, concurrent)
+	}
+}
+
+// TestAnInventoryRefreshFansOutAndIsNotACampaign guards the row of the
+// overview chapter: a refresh changes nothing and needs no approval, so it
+// goes the way of the reads - up to the document's wave of two hundred
+// hosts - and never the way of a campaign.
+func TestAnInventoryRefreshFansOutAndIsNotACampaign(t *testing.T) {
+	if limit := ActionInventoryRefresh.FanOutLimit(); limit != 200 {
+		t.Fatalf("a refresh fans out to %d hosts, the document says 200", limit)
+	}
+	if reason := FanOutRefusal(ActionInventoryRefresh); reason != "" {
+		t.Errorf("a refresh is refused as a fan-out: %s", reason)
+	}
+	if mode := ActionInventoryRefresh.CampaignMode(); mode != CampaignNone {
+		t.Errorf("a refresh has the bulk mode %q; a read is not a campaign", mode)
+	}
+}
+
+// TestARenameSplitsTheMappingPerHost guards the mechanism of the system
+// chapter: a rename in bulk carries a map of host to new name, every host
+// gets its own name and nothing else, and a host the map does not name is
+// ineligible with a reason rather than renamed to a default.
+func TestARenameSplitsTheMappingPerHost(t *testing.T) {
+	if !PanelPlanned(ActionSystemHostnameSet) {
+		t.Fatal("a rename is not planned from the order")
+	}
+	if PanelPlanned(ActionUnitRestart) {
+		t.Fatal("restarting a unit is planned from the order")
+	}
+	// A plan split from the order has no host planner, and the engine opens
+	// its planning phase on a host planner alone: the rename stays refused
+	// in bulk until the engine and the campaign API learn the split, rather
+	// than jumping to execution with no name per host.
+	if PlanningAction(ActionSystemHostnameSet) != "" {
+		t.Errorf("a rename names a host planner %q", PlanningAction(ActionSystemHostnameSet))
+	}
+	if ExecutableMode(ActionSystemHostnameSet) {
+		t.Error("a rename allowed in bulk although the engine has no panel-side planning phase")
+	}
+	if !CampaignPlans(ActionSystemHostnameSet) || CampaignPlans(ActionUnitRestart) {
+		t.Error("CampaignPlans does not follow the panel-side plan")
+	}
+	order := json.RawMessage(`{"hostname": {"pretty": "Web node", "mapping": {
+		"host-a": "web-a.example.test", "host-b": "web-b.example.test"}}}`)
+	mapping, err := ParseHostnameMapping(order)
+	if err != nil {
+		t.Fatalf("a valid mapping is refused: %v", err)
+	}
+	if got := mapping.HostIDs(); strings.Join(got, ",") != "host-a,host-b" {
+		t.Errorf("the mapping names %v", got)
+	}
+	// The shared part of the order carries no name; the campaign validation
+	// still passes it, because the names live in the mapping.
+	var shared Payload
+	if err := json.Unmarshal(order, &shared); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateCampaignRequest(ActionSystemHostnameSet, shared); err != nil {
+		t.Errorf("the shared part of a rename order is refused: %v", err)
+	}
+	if err := ValidateCampaignMapping(ActionSystemHostnameSet, order); err != nil {
+		t.Errorf("the mapping of a rename order is refused: %v", err)
+	}
+	if err := Validate(ActionSystemHostnameSet, shared); err == nil {
+		t.Error("a single-host order without a name passes")
+	}
+
+	own, reason := mapping.PayloadFor("host-a", shared)
+	if reason != "" {
+		t.Fatalf("host-a is ineligible: %s", reason)
+	}
+	if own.Hostname == nil || own.Hostname.Hostname != "web-a.example.test" || own.Hostname.Pretty != "Web node" {
+		t.Errorf("host-a gets the payload %+v", own.Hostname)
+	}
+	if err := Validate(ActionSystemHostnameSet, own); err != nil {
+		t.Errorf("the payload split for host-a does not validate: %v", err)
+	}
+	other, _ := mapping.PayloadFor("host-b", shared)
+	if other.Hostname.Hostname != "web-b.example.test" {
+		t.Errorf("host-b gets the name %q", other.Hostname.Hostname)
+	}
+	if _, reason := mapping.PayloadFor("host-c", shared); reason != ReasonNoHostnameForHost {
+		t.Errorf("a host outside the mapping gets the reason %q", reason)
+	}
+
+	// Refusals: no mapping at all, an invalid name, and one name on two
+	// hosts - each named before any host is resolved.
+	for name, raw := range map[string]string{
+		"no mapping":     `{"hostname": {"hostname": "shared.example.test"}}`,
+		"empty mapping":  `{"hostname": {"mapping": {}}}`,
+		"invalid name":   `{"hostname": {"mapping": {"host-a": "not a name!"}}}`,
+		"duplicate name": `{"hostname": {"mapping": {"host-a": "web.example.test", "host-b": "web.example.test"}}}`,
+		"empty host id":  `{"hostname": {"mapping": {" ": "web.example.test"}}}`,
+	} {
+		if _, err := ParseHostnameMapping(json.RawMessage(raw)); err == nil {
+			t.Errorf("%s: the mapping passes", name)
+		}
+	}
+	// An operation without a panel-side plan has no mapping to check.
+	if err := ValidateCampaignMapping(ActionUnitRestart, json.RawMessage(`{"unit": {"unit": "a.service"}}`)); err != nil {
+		t.Errorf("a unit restart is checked for a mapping: %v", err)
+	}
+	if wave, concurrent := CampaignPace(ActionSystemHostnameSet); wave != 10 || concurrent != 2 {
+		t.Errorf("a rename paces at %d/%d, the document says 10 a wave and 2 at a time", wave, concurrent)
 	}
 }

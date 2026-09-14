@@ -583,6 +583,12 @@ type Target struct {
 	// when its reboot began, and the wait for the host is counted from
 	// there. Absent from reads that do not need it.
 	StateSince *time.Time `json:"state_since,omitempty"`
+	// Blocker says what the host's task waits on while it has not started:
+	// the resource lock and the task holding it, as the agent named them.
+	// It follows the wait reason of the job (jobs.LockBlocker) and is
+	// empty once the operation starts, or when the host waits on nothing
+	// the panel knows of.
+	Blocker string `json:"blocker,omitempty"`
 }
 
 // Report summarises the course of a campaign.

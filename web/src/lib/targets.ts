@@ -3,9 +3,17 @@ import { api } from "./api";
 import type { CampaignTarget } from "./types";
 import { OPERATIONS_INTERVAL } from "./stream";
 
+/**
+ * A target as the targets endpoint returns it: the campaign target and,
+ * while the host's operation waits on its host, the resource lock it
+ * waits on as the agent named it ("units held by task <id>
+ * (schedule.run_now)"). Empty once the operation starts.
+ */
+export type TargetRow = CampaignTarget & { blocker?: string };
+
 /** One page of a campaign's targets, in the order of the rollout. */
 export type TargetPage = {
-  items: CampaignTarget[];
+  items: TargetRow[];
   count: number;
   /** How many targets match the filter across every page. */
   total: number;
@@ -44,7 +52,7 @@ export function useTargets(campaignID: string, filter: TargetFilter) {
 }
 
 /** The rows loaded so far, in one list. */
-export function loadedTargets(data?: { pages: TargetPage[] }): CampaignTarget[] {
+export function loadedTargets(data?: { pages: TargetPage[] }): TargetRow[] {
   return data?.pages.flatMap((page) => page.items) ?? [];
 }
 

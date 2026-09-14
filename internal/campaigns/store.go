@@ -975,7 +975,7 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		       t.state, t.job_id, t.plan_job_id, t.reboot_job_id, t.health_job_id,
 		       coalesce(t.boot_id_before, ''),
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at,
-		       t.state_since
+		       t.state_since, t.blocker
 		from campaign_targets t
 		left join hosts h on h.id = t.host_id ` + where + `
 		order by t.wave, t.position`
@@ -995,7 +995,7 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		var t Target
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
 			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
-			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince); err != nil {
+			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince, &t.Blocker); err != nil {
 			return page, err
 		}
 		page.Items = append(page.Items, t)

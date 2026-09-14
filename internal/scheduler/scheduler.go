@@ -251,7 +251,13 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 		return
 	}
 
-	if err := s.store.MarkDispatched(ctx, item.Job.ID, item.AttemptID, sessionID); err != nil {
+	// The dispatch lease is short only for an agent that will acknowledge
+	// the task; an older one keeps the execution lease from the start.
+	lease := s.options.LeaseDuration
+	if session, ok := s.registry.Get(item.Job.HostID); ok && buildinfo.AcknowledgesTasks(session.AgentVersion) {
+		lease = jobs.DispatchLease
+	}
+	if err := s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, sessionID, lease); err != nil {
 		s.log.Error("the delivery was not recorded", "job_id", item.Job.ID, "err", err)
 		metrics.JobDispatch.Inc("unrecorded", s.options.GatewayID)
 		return

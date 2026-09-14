@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
@@ -9,6 +9,7 @@ import { bytes, relativeTime } from "../../lib/format";
 import {
   RECOVERABLE_REFUSALS, refusalName,
   type DecommissionOutcome, type EnrollmentOrder, type Host, type HostTimelineItem, type HostTimelineKind, type HostTimelinePage, type Job,
+  type Whoami,
 } from "../../lib/types";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
@@ -34,6 +35,16 @@ export function Overview() {
   const host = useHost();
   const module = useModule<SystemState>(host.id, "system");
   const hardware = module.data?.payload?.hardware;
+  // The owner and the address are facts recorded in the panel, edited in
+  // place by whoever may write the host's tags: the same right, because
+  // they are the same kind of thing - what the panel knows, not what the
+  // host reports.
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const canEditFacts = (whoami.data?.permissions ?? []).includes("host.tag.write");
 
   // A host that has not reported its adapters has an unknown registry,
   // not an empty one: the bar shows dashes until the first report.
@@ -79,10 +90,35 @@ export function Overview() {
             <Fact label={t("Hostname")}><span className="hm-mono">{host.hostname}</span></Fact>
             <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
             <Fact label={t("Architecture")}>{host.architecture || "—"}</Fact>
+            <Fact label={t("Owner")}>
+              <HostFact
+                host={host}
+                editable={canEditFacts}
+                value={host.owner ?? ""}
+                shown={host.owner ? <span>{host.owner}</span> : <span className="badge unknown">{t("nobody")}</span>}
+                label={t("Owner")}
+                help={t("Who answers for the host; empty hands it back to nobody.")}
+                placeholder={t("platform team")}
+                path="owner"
+                field="owner"
+                testID="owner"
+              />
+            </Fact>
             <Fact label={t("Management address")}>
-              {host.management_address
-                ? <span className="hm-mono">{host.management_address} ({host.management_address_source})</span>
-                : <span className="badge unknown">{t("unknown")}</span>}
+              <HostFact
+                host={host}
+                editable={canEditFacts}
+                value={host.management_address_source === "manual" ? host.management_address ?? "" : ""}
+                shown={host.management_address
+                  ? <span className="hm-mono">{host.management_address} <span className="badge" title={t(addressSourceMeaning(host.management_address_source))}>{host.management_address_source}</span></span>
+                  : <span className="badge unknown">{t("unknown")}</span>}
+                label={t("Management address")}
+                help={t("An IP address or a host name the panel reaches the host at. It replaces what the connection shows; empty forgets it and the observed address returns.")}
+                placeholder="10.0.0.5"
+                path="management-address"
+                field="address"
+                testID="management-address"
+              />
             </Fact>
             <Fact label={t("Lifecycle state")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
             <Fact label={t("Reboot required")}><OptionalFlag value={host.reboot_required} /></Fact>
@@ -150,6 +186,127 @@ export function Overview() {
         </Section>
       </Widgets>
     </ModulePage>
+  );
+}
+
+/** What each origin of the management address means, for the badge. */
+function addressSourceMeaning(source: string | undefined): string {
+  switch (source) {
+    case "session": return "address seen by the control plane on its end of the connection";
+    case "agent": return "address reported by the host itself; it connects through a relay";
+    case "manual": return "address set manually by an operator";
+    default: return "address source";
+  }
+}
+
+/**
+ * A hand-recorded fact of the host, shown with an editor in place.
+ *
+ * The write goes back with the entity tag of the host read when the
+ * editor opened, so a correction made by somebody else in the meantime is
+ * refused with a message rather than overwritten; the operator reads the
+ * host again and decides with the newer value in front of them. The
+ * reason is optional and kept in the trail.
+ */
+function HostFact({ host, editable, value, shown, label, help, placeholder, path, field, testID }: {
+  host: Host;
+  editable: boolean;
+  /** The value the editor starts from. */
+  value: string;
+  /** The fact as the card shows it when nobody is editing. */
+  shown: ReactNode;
+  label: string;
+  help: string;
+  placeholder: string;
+  /** The last segment of the PUT address under /api/v1/hosts/{id}/. */
+  path: "owner" | "management-address";
+  /** The name of the value in the request body. */
+  field: "owner" | "address";
+  testID: string;
+}) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [reason, setReason] = useState("");
+  const [etag, setEtag] = useState("");
+  const [message, setMessage] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Host>(`/api/v1/hosts/${host.id}/${path}`, { [field]: draft.trim(), reason: reason.trim() },
+        { headers: etag ? { "If-Match": etag } : {} }),
+    onSuccess: () => {
+      setEditing(false);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 412) {
+        setMessage(t("Somebody changed this host since you opened the editor; close it and open it again to see the current value."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const open = async () => {
+    setDraft(value);
+    setReason("");
+    setMessage("");
+    setEditing(true);
+    // The tag comes with a fresh read, not from the cached host: the cache
+    // may be a heartbeat old, and the tag must name what the editor shows.
+    try {
+      const fresh = await api.getWithMeta<Host>(`/api/v1/hosts/${host.id}`);
+      setEtag(fresh.etag);
+    } catch {
+      // Without a tag the write goes unconditional, as a script would;
+      // the server still records who changed what.
+      setEtag("");
+    }
+  };
+
+  if (!editing) {
+    return (
+      <span data-testid={`fact-${testID}`}>
+        {shown}
+        {editable && (
+          <>
+            {" "}
+            <button type="button" className="link" onClick={open}>{t("edit")}</button>
+          </>
+        )}
+      </span>
+    );
+  }
+  return (
+    <Form>
+      <Fields>
+        <Field label={label} help={help}>
+          <input
+            value={draft}
+            placeholder={placeholder}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save.mutate();
+              if (e.key === "Escape") setEditing(false);
+            }}
+            autoFocus
+            data-testid={`edit-${testID}`}
+          />
+        </Field>
+        <Field label={t("Reason")} help={t("Optional; kept in the audit trail.")}>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("change ticket, handover")} />
+        </Field>
+      </Fields>
+      <FormActions>
+        <button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? t("saving…") : t("Save")}</button>
+        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+      </FormActions>
+      <Message text={message} error />
+    </Form>
   );
 }
 

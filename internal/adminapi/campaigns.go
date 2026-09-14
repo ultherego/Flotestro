@@ -274,6 +274,10 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		stepUpEvidence = evidence
 	}
 
+	// The pace an operation is carried at when the order names none: the
+	// registry knows which operations the document paces differently.
+	paceWave, paceConcurrent := opspec.CampaignPace(action)
+
 	spec := campaigns.Spec{
 		Name:       request.Name,
 		ActionType: string(action),
@@ -283,8 +287,8 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		// The concurrency is bounded whatever the request says: budgets are
 		// the safety net of the fleet, and an installation without them
 		// must not be one request away from restarting everything at once.
-		WaveSize:                 min(valueOr(request.WaveSize, 10), maxWaveSize),
-		MaxConcurrent:            min(valueOr(request.MaxConcurrent, 5), maxCampaignConcurrency),
+		WaveSize:                 min(valueOr(request.WaveSize, paceWave), maxWaveSize),
+		MaxConcurrent:            min(valueOr(request.MaxConcurrent, paceConcurrent), maxCampaignConcurrency),
 		FailureThresholdPercent:  valueOrDefault(request.FailureThresholdPercent, 20),
 		FailureThresholdAbsolute: valueOr(request.FailureThresholdAbsolute, 0),
 		MaintenanceStart:         request.MaintenanceStart,

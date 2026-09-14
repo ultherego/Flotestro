@@ -18,6 +18,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	backupstore "github.com/ultherego/flotestro/internal/backup"
 	"github.com/ultherego/flotestro/internal/budgets"
+	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	certificatestore "github.com/ultherego/flotestro/internal/certificates"
 	"github.com/ultherego/flotestro/internal/config"
@@ -272,6 +273,11 @@ func (s *Server) Routes() http.Handler {
 	// The release channel is a policy like a tag: which agent releases the
 	// host sees first.
 	s.route(mux, "PUT /api/v1/hosts/{id}/channel", s.handleSetHostChannel)
+	// The owner and the manual management address are facts the operator
+	// records about the host, like a tag; they share its permission and
+	// carry an entity tag, because two people correct the same host.
+	s.route(mux, "PUT /api/v1/hosts/{id}/owner", s.handleSetHostOwner)
+	s.route(mux, "PUT /api/v1/hosts/{id}/management-address", s.handleSetHostManagementAddress)
 	// Host groups: a saved answer to "which hosts", either a fixed member
 	// list or a selector resolved when read. A campaign names a group in
 	// its selector instead of repeating the list.
@@ -541,12 +547,38 @@ type FleetSummary struct {
 	// environment, so the counter exists only for the global view - a
 	// narrowed scope cannot say which relays are its own.
 	DegradedRelays *int `json:"degraded_relays,omitempty"`
+	// RelaysBufferHigh counts the relays whose buffer of results waiting
+	// for the centre is at least RelayBufferHighPercent full, by their
+	// latest heartbeat: a site about to lose results. Global view only,
+	// like DegradedRelays, and missing while no relay has reported since
+	// the panel started - a relay that said nothing has an unknown buffer,
+	// not an empty one.
+	RelaysBufferHigh *int `json:"relays_buffer_high,omitempty"`
+	// DuplicateIdentities24h counts the sessions the gateway opened in the
+	// last day while the same identity was alive on a different boot - a
+	// cloned machine or a golden image with the identity left in.
+	DuplicateIdentities24h *int `json:"duplicate_identities_24h,omitempty"`
+	// EnrollmentRefusals1h counts the enrollments the gateway turned away
+	// in the last hour: a burst is a token leaked or an installer pointed
+	// at the wrong panel, not a normal rate of typos.
+	EnrollmentRefusals1h *int `json:"enrollment_refusals_1h,omitempty"`
+	// AgentsUnsupported counts the visible hosts whose reported agent
+	// version speaks a protocol this panel does not: newer than the panel,
+	// or older than any release with a known protocol. A host that reports
+	// no version, or one that is not a version, is unknown and stays out.
+	AgentsUnsupported *int `json:"agents_unsupported,omitempty"`
 	// AlertsFiring counts the firing alerts on the visible hosts that no
 	// silence covers, and AlertsCritical those of them that are critical.
 	// A silenced alert already has an operator's decision behind it.
 	AlertsFiring   int `json:"alerts_firing"`
 	AlertsCritical int `json:"alerts_critical"`
 }
+
+// RelayBufferHighPercent is the fill of a relay's buffer the dashboard
+// counts as high. The lifecycle document alerts at seventy percent: the
+// buffer still holds, and the operator still has time to find out why the
+// link to the centre is not draining it.
+const RelayBufferHighPercent = 70
 
 // CertificateWarningDays is the window of the expiring-certificates tile.
 //
@@ -698,7 +730,97 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		summary.DegradedRelays = &degraded
+
+		// The buffer figures live in the heartbeats the registry keeps in
+		// memory, so the relays are listed and each is asked for its latest
+		// report. Zero here is a measured zero: at least one relay reported
+		// and none is high. No relay reporting at all leaves the counter out.
+		if s.relays != nil {
+			listed, err := s.relays.List(ctx)
+			if err != nil {
+				s.fail(w, err)
+				return
+			}
+			reported, high := 0, 0
+			for _, relay := range listed {
+				if relay.RevokedAt != nil {
+					continue
+				}
+				heartbeat, ok := s.relays.LastHeartbeat(relay.ID)
+				if !ok || heartbeat.BufferMaxBytes <= 0 {
+					continue
+				}
+				reported++
+				if heartbeat.BufferBytes*100 >= heartbeat.BufferMaxBytes*RelayBufferHighPercent {
+					high++
+				}
+			}
+			if reported > 0 {
+				summary.RelaysBufferHigh = &high
+			}
+		}
 	}
+
+	// The security events of the lifecycle document that the built-in
+	// monitoring cannot watch, because they are not a sample of any host:
+	// a duplicate identity is the gateway's finding, and an enrollment
+	// refusal has no host yet. Both are read from the audit trail, where
+	// the gateway writes them, over the whole fleet: neither has a scope an
+	// operator's view could be narrowed to, so they are shown to whoever
+	// may read the trail and left out for the rest.
+	if principal.Can(authz.PermAuditRead, authz.GlobalScope) {
+		var duplicates, refusals int
+		err = s.pool.QueryRow(ctx, `
+			select count(*) filter (where action = 'security.duplicate_identity'
+			                          and occurred_at >= now() - interval '24 hours'),
+			       count(*) filter (where action in ('host.enroll', 'relay.enroll') and outcome = 'denied'
+			                          and occurred_at >= now() - interval '1 hour')
+			from audit_events
+			where occurred_at >= now() - interval '24 hours'
+			  and action in ('security.duplicate_identity', 'host.enroll', 'relay.enroll')`).
+			Scan(&duplicates, &refusals)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		summary.DuplicateIdentities24h = &duplicates
+		summary.EnrollmentRefusals1h = &refusals
+	}
+
+	// The protocol table lives in the binary, not in the database, so the
+	// versions are grouped in the database and judged here. Only versions
+	// that parse are fetched: an agent that reports no version, or a word
+	// in its place, is unknown rather than unsupported.
+	unsupported := 0
+	versions, err := s.pool.Query(ctx, `
+		select h.agent_version, count(*)
+		from hosts h
+		where h.lifecycle_state <> 'retired'
+		  and h.agent_version ~ '^v?\d+(\.\d+)*'
+		  and `+visible+`
+		group by 1`, args...)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	for versions.Next() {
+		var version string
+		var count int
+		if err := versions.Scan(&version, &count); err != nil {
+			versions.Close()
+			s.fail(w, err)
+			return
+		}
+		if buildinfo.CheckProtocol(version) != nil {
+			unsupported += count
+		}
+	}
+	versions.Close()
+	if err := versions.Err(); err != nil {
+		s.fail(w, err)
+		return
+	}
+	summary.AgentsUnsupported = &unsupported
 
 	// The firing alerts of the visible hosts, without the silenced ones: a
 	// silence is a decision already taken, and the dashboard counts what
@@ -748,6 +870,7 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Search:          strings.TrimSpace(query.Get("q")),
 		LifecycleState:  query.Get("lifecycle_state"),
 		Owner:           query.Get("owner"),
+		IdentityDomain:  query.Get("identity_domain"),
 		Capability:      query.Get("capability"),
 		// The refusal code narrows to the hosts the gateway last turned
 		// away for that reason - the dashboard's expired-certificates
@@ -783,6 +906,24 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.Maintenance = &inWindow
 	}
+	// The two "needs attention" filters: a dashboard tile counts the hosts
+	// that need a reboot or carry a security update, and leads here.
+	if value := query.Get("reboot_required"); value != "" {
+		required, err := strconv.ParseBool(value)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "reboot_required must be true or false")
+			return
+		}
+		filter.RebootRequired = &required
+	}
+	if value := query.Get("security_updates"); value != "" {
+		waiting, err := strconv.ParseBool(value)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "security_updates must be true or false")
+			return
+		}
+		filter.SecurityUpdates = &waiting
+	}
 	cursor, err := hosts.ParseCursor(query.Get("cursor"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
@@ -817,6 +958,9 @@ func (s *Server) handleGetHost(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermHostRead, scope, "host", hostID); !ok {
 		return
 	}
+	// The tag names the version of the hand-recorded facts, so an editor
+	// of the owner or the address writes back on what they read.
+	setETag(w, hostFactsTag(host))
 	writeJSON(w, http.StatusOK, host)
 }
 

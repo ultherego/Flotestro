@@ -323,8 +323,42 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		cachedFacts = fresh
 		factsMu.Unlock()
 	}
+	// The slots are counted separately for every resource class: a long package
+	// read must not take the whole pool and stop the operations that last
+	// milliseconds.
+	slots := newBudget(opts.MaxConcurrentTasks)
+	// The resource locks are a second layer next to the budget: the budget says
+	// how many tasks the host can carry, and the locks - which of them cannot
+	// run side by side.
+	resources := newLocks()
+
 	if opts.Executor != nil {
 		opts.Executor.facts = currentFacts
+		// The executor asks for the resources of the host after the checks
+		// that refuse a task without touching it and after telling the
+		// panel the task is accepted. The resources first, the budget slot
+		// second: a task waiting for a busy resource has no reason to hold
+		// a slot that would be useful to an operation without a collision.
+		opts.Executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope,
+			claims []string, waiting func(blocker string)) (func(), string) {
+			releaseResources, reason := acquireResources(ctx, resources, task, claims, waiting)
+			if releaseResources == nil {
+				return nil, reason
+			}
+			releaseSlot := slots.acquire(ctx, taskClass(task))
+			if releaseSlot == nil {
+				releaseResources()
+				return nil, ""
+			}
+			if len(claims) > 0 {
+				opts.Log.Info("the resources were taken", "task_id", task.GetTaskId(),
+					"claims", strings.Join(claims, ","))
+			}
+			return func() {
+				releaseSlot()
+				releaseResources()
+			}, ""
+		}
 		// The progress travels in the same stream as the results. A send error is
 		// not escalated: losing the preview must not interrupt an operation in
 		// progress. The journal preview travels in the same stream as the results.
@@ -369,15 +403,6 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			}
 		}
 	}
-
-	// The slots are counted separately for every resource class: a long package
-	// read must not take the whole pool and stop the operations that last
-	// milliseconds.
-	slots := newBudget(opts.MaxConcurrentTasks)
-	// The resource locks are a second layer next to the budget: the budget says
-	// how many tasks the host can carry, and the locks - which of them cannot
-	// run side by side.
-	resources := newLocks()
 
 	receiveErr := make(chan error, 1)
 	reportError := func(err error) {
@@ -468,42 +493,18 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 						return
 					}
 
-					// The resources first, the budget slot second: a task waiting
-					// for a busy resource has no reason to hold a slot that would
-					// be useful to an operation without a collision.
-					claims := taskClaims(task)
-					releaseResources, reason := acquireResources(sessionCtx, resources, task, claims)
-					if reason != "" {
-						// A refusal naming the blocking task is an answer; silence
-						// until the end of the time limit of the operation is not.
-						refusal := rejected(agentv1.TaskResult_STATUS_REJECTED,
-							RejectResourceBusy, reason)
-						refusal.TaskId = task.GetTaskId()
-						opts.Log.Info("the task was refused by a resource lock",
-							"task_id", task.GetTaskId(), "reason", reason)
-						if err := send(&agentv1.AgentMessage{
-							Payload: &agentv1.AgentMessage_TaskResult{TaskResult: refusal},
-						}); err != nil {
-							opts.Log.Error("the refusal of the task was not sent back",
-								"task_id", task.GetTaskId(), "err", err)
-						}
-						return
-					}
-					if releaseResources == nil {
-						return
-					}
-					defer releaseResources()
-
-					releaseSlot := slots.acquire(sessionCtx, taskClass(task))
-					if releaseSlot == nil {
-						return
-					}
-					defer releaseSlot()
-					if len(claims) > 0 {
-						opts.Log.Info("the resources were taken", "task_id", task.GetTaskId(),
-							"claims", strings.Join(claims, ","))
-					}
+					// The locks and the budget slot are taken inside the
+					// executor, behind the checks that refuse a task without
+					// touching the host and behind the acknowledgement: the
+					// panel is to hear "accepted" before the task queues for a
+					// busy resource, and "started" once it holds it.
 					result := executeTask(sessionCtx, opts.Executor, task, opts.Log)
+					// A wait for the resources that ended with the session has
+					// nobody left to answer to; the panel's lease runs out and
+					// the task comes back to the next session.
+					if result.GetErrorCode() == StatusAbandoned {
+						return
+					}
 					// An agent replacement has no result to send back: the process
 					// that performed it is being replaced right now, and whether it
 					// worked is decided by the return of the host with the new

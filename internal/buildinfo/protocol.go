@@ -140,3 +140,21 @@ func PayloadHashSchemeFor(version string) int {
 	}
 	return scheme
 }
+
+// ackSince is the first release whose agent acknowledges a task
+// ("accepted", "started") before carrying it. The panel keeps the short
+// dispatch lease for such an agent; an older one gets the execution lease
+// from the start, since its silence says nothing.
+const ackSince = "0.47.0"
+
+// AcknowledgesTasks says whether an agent of the given version sends the
+// acceptance of a task. A version that cannot be read is taken as an old
+// one: the longer lease is the safe mistake.
+func AcknowledgesTasks(version string) bool {
+	target, err := parseVersion(version)
+	if err != nil {
+		return false
+	}
+	since, _ := parseVersion(ackSince)
+	return compareVersions(target, since) >= 0
+}

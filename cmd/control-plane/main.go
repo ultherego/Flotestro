@@ -132,6 +132,11 @@ func run() error {
 		"the base address of the signed package repository the installation instructions point the hosts at")
 	groupsClaim := flag.String("oidc-groups-claim",
 		config.Env("FLOTESTRO_OIDC_GROUPS_CLAIM", "groups"), "the field of the token with the list of groups")
+	// Off by default: it needs a Keycloak realm and a service account with
+	// the realm management roles, and the local denial holds without it.
+	oidcAdminLogout := flag.Bool("oidc-admin-logout",
+		config.Env("FLOTESTRO_OIDC_ADMIN_LOGOUT", "") == "true",
+		"end a disabled user's sessions at the identity provider through the Keycloak admin API")
 	// The name of the variable has to match the configuration file the
 	// installation gets in the package: a divergence meant that a filled in
 	// FLOTESTRO_IPA_URL enabled nothing while the panel said nothing about
@@ -361,6 +366,7 @@ func run() error {
 			ClientSecret: *clientSecret,
 			RedirectURL:  strings.TrimSuffix(*publicURL, "/") + "/auth/callback",
 			GroupsClaim:  *groupsClaim,
+			AdminLogout:  *oidcAdminLogout,
 		})
 		if err != nil {
 			return fmt.Errorf("the identity provider: %w", err)
@@ -399,8 +405,14 @@ func run() error {
 	if directory != nil && *directoryWrite {
 		// The executor of directory changes runs next to the scheduler of host
 		// jobs: a change in the directory is not an operation on a host.
-		go identity.NewExecutor(changeStore, directory, authzStore, recorder,
-			log, 3*time.Second).Run(ctx)
+		executor := identity.NewExecutor(changeStore, directory, authzStore, recorder,
+			log, 3*time.Second)
+		// A disable ends the provider's sessions too when the installation
+		// turned that on; a nil provider must not become a non-nil interface.
+		if identityProvider != nil && *oidcAdminLogout {
+			executor.WithProviderLogout(identityProvider)
+		}
+		go executor.Run(ctx)
 	}
 
 	// A membership taken away in Keycloak or FreeIPA behind the panel's back
@@ -549,8 +561,11 @@ func run() error {
 			StepUpRefuseTokens:     *stepUpTokens == "refuse",
 			// The metric of the validity of the CA is to show the signing CA,
 			// after an exchange as well, so it reads the whole trust set.
+			// The relay buffers come from the heartbeats the registry keeps in
+			// memory; without the source the collector says nothing about
+			// them rather than reporting empty buffers.
 			Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
-				WithAuthorities(trust.Authorities),
+				WithAuthorities(trust.Authorities).WithRelays(relayStore),
 			Trust: trust,
 		})
 	panelServer.SetEvents(eventBus)

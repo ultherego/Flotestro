@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relays"
 )
 
 // SessionCounter gives the number of active agent sessions of this instance.
@@ -35,19 +36,35 @@ type CertificateSource interface {
 	NotAfter() time.Time
 }
 
+// RelayHeartbeats gives the latest report of a relay about itself. The
+// reports live in memory next to the relay registry: they describe the
+// present, and a relay that has not reported since the panel started has
+// no buffer figure - not a zero one.
+type RelayHeartbeats interface {
+	LastHeartbeat(id string) (relays.Heartbeat, bool)
+}
+
 type Collector struct {
 	pool     *pgxpool.Pool
 	sessions SessionCounter
 	ca       CertificateSource
 	// authorities describes the whole trust set, if the installation manages one.
 	authorities func() []pki.Authority
-	gateway     string
-	started     time.Time
+	// relays gives the buffer reports of the relays, if the panel keeps them.
+	relays  RelayHeartbeats
+	gateway string
+	started time.Time
 }
 
 // WithAuthorities adds metrics for every CA in the trust set.
 func (c *Collector) WithAuthorities(source func() []pki.Authority) *Collector {
 	c.authorities = source
+	return c
+}
+
+// WithRelays adds the buffer metrics of the relays from their heartbeats.
+func (c *Collector) WithRelays(source RelayHeartbeats) *Collector {
+	c.relays = source
 	return c
 }
 
@@ -378,7 +395,68 @@ func (c *Collector) lifecycleMetrics(ctx context.Context) []metric {
 			samples: labelled("state", grouped),
 		})
 	}
+	result = append(result, c.relayBufferMetrics(ctx)...)
 	return result
+}
+
+// relayBufferMetrics show the results waiting on every relay for the link
+// to the centre, and what the relay has already thrown away.
+//
+// A relay filling its buffer is a site about to lose results, and it looks
+// from the outside exactly like a relay with nothing to say: the state
+// gauge above calls both "active". The figures come from the heartbeat
+// each relay sends every minute and the panel keeps in memory; a relay
+// that has not reported since the panel started has no sample here, so a
+// missing series means "not measured" and never "empty". The relay name is
+// the label: relays are a handful per site, not a fleet.
+func (c *Collector) relayBufferMetrics(ctx context.Context) []metric {
+	if c.relays == nil {
+		return nil
+	}
+	rows, err := c.pool.Query(ctx, `select id, name from relays where revoked_at is null order by name`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var used, capacity, dropped []sample
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil
+		}
+		heartbeat, ok := c.relays.LastHeartbeat(id)
+		if !ok {
+			continue
+		}
+		labels := map[string]string{"relay": name}
+		used = append(used, sample{labels: labels, value: float64(heartbeat.BufferBytes)})
+		capacity = append(capacity, sample{labels: labels, value: float64(heartbeat.BufferMaxBytes)})
+		dropped = append(dropped, sample{labels: labels, value: float64(heartbeat.BufferDropped)})
+	}
+	if rows.Err() != nil || len(used) == 0 {
+		return nil
+	}
+	return []metric{
+		{
+			name: "flotestro_relay_buffer_bytes", kind: "gauge",
+			help:    "Results waiting on the relay for the link to the centre, in bytes, by relay.",
+			samples: used,
+		},
+		{
+			name: "flotestro_relay_buffer_max_bytes", kind: "gauge",
+			help:    "The buffer the relay was given, in bytes, by relay; the fill ratio is the two divided.",
+			samples: capacity,
+		},
+		{
+			// The relay counts the drops since its start; the panel renders
+			// the number as the relay reports it, so a relay restart resets
+			// the series the way a process restart resets any counter.
+			name: "flotestro_relay_buffer_dropped_total", kind: "counter",
+			help:    "Results the relay threw away because its buffer was full, since the relay started, by relay.",
+			samples: dropped,
+		},
+	}
 }
 
 // campaignMetrics show the machinery of a fleet-wide change: the campaigns

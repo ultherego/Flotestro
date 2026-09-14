@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
@@ -55,17 +56,20 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate was revoked"))
 	case status.HostID != hostID:
 		s.denied(ctx, hostID, "identity_mismatch")
+		metrics.AgentRenewal.Inc("refused")
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("the identity does not match the certificate"))
 	case !hosts.Active(status.LifecycleState):
 		// Renewing the certificate of a host in quarantine or withdrawn would
 		// extend exactly the trust that has been taken back.
 		s.denied(ctx, hostID, "lifecycle_"+status.LifecycleState)
+		metrics.AgentRenewal.Inc("refused")
 		return nil, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("the host is in the state %s", status.LifecycleState))
 	}
 
 	issued, err := s.certIssuer.SignHost(ctx, req.Msg.GetCsrPem(), hostID)
 	if err != nil {
+		metrics.AgentRenewal.Inc("failed")
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: hostID,
 			Action: "host.certificate.renew", TargetType: "host", TargetID: hostID,
@@ -111,6 +115,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	metrics.AgentRenewal.Inc("renewed")
 	s.log.Info("the certificate of the host was renewed",
 		"host_id", hostID, "serial", issued.Serial, "not_after", issued.NotAfter)
 

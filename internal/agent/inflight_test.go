@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/helper"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // fakeHelper answers requests over a unix socket the way the real helper
@@ -78,6 +80,46 @@ func restartEnvelope(taskID, key string) *agentv1.TaskEnvelope {
 	task := unitEnvelope(taskID, "cron.service")
 	task.IdempotencyKey = key
 	return task
+}
+
+// progressLog records the reports an executor sends, from whichever
+// goroutine sends them: the acknowledgement of a task goes out on the
+// goroutine of its delivery while the test reads on its own.
+type progressLog struct {
+	mu      sync.Mutex
+	reports []*agentv1.TaskProgress
+}
+
+func (l *progressLog) record(p *agentv1.TaskProgress) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.reports = append(l.reports, p)
+}
+
+// withStage returns the reports of one stage, in the order they were sent.
+func (l *progressLog) withStage(stage string) []*agentv1.TaskProgress {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var matching []*agentv1.TaskProgress
+	for _, p := range l.reports {
+		if p.GetStage() == stage {
+			matching = append(matching, p)
+		}
+	}
+	return matching
+}
+
+// stagesOf lists the stages reported for one attempt, in order.
+func (l *progressLog) stagesOf(taskID string) []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var stages []string
+	for _, p := range l.reports {
+		if p.GetTaskId() == taskID {
+			stages = append(stages, p.GetStage())
+		}
+	}
+	return stages
 }
 
 func inFlightFiles(t *testing.T, dir string) []string {
@@ -323,8 +365,8 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 		return accepted(request)
 	})
 	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
-	var reports []*agentv1.TaskProgress
-	executor.progress = func(p *agentv1.TaskProgress) { reports = append(reports, p) }
+	var reports progressLog
+	executor.progress = reports.record
 
 	first := make(chan *agentv1.TaskResult, 1)
 	go func() {
@@ -343,10 +385,13 @@ func TestARedeliveryDuringTheOperationIsAcknowledgedNotRefused(t *testing.T) {
 	if second.GetTaskId() != "task-2" {
 		t.Errorf("the placeholder does not point at the attempt: %q", second.GetTaskId())
 	}
-	if len(reports) != 1 {
-		t.Fatalf("the redelivery produced %d progress reports, expected one", len(reports))
+	// The redelivered attempt is acknowledged as in progress and nothing
+	// else: it is neither accepted nor started on its own, the execution
+	// it waits on was.
+	if stages := reports.stagesOf("task-2"); len(stages) != 1 || stages[0] != StageInProgress {
+		t.Fatalf("the redelivery produced the stages %v, expected one in_progress", stages)
 	}
-	ack := reports[0]
+	ack := reports.withStage(StageInProgress)[0]
 	if ack.GetTaskId() != "task-2" || ack.GetStage() != StageInProgress || ack.GetPreviousTaskId() != "task-1" {
 		t.Errorf("the acknowledgement: task=%q stage=%q previous=%q",
 			ack.GetTaskId(), ack.GetStage(), ack.GetPreviousTaskId())
@@ -426,8 +471,8 @@ func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 		return accepted(request)
 	})
 	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
-	var reports []*agentv1.TaskProgress
-	executor.progress = func(p *agentv1.TaskProgress) { reports = append(reports, p) }
+	var reports progressLog
+	executor.progress = reports.record
 
 	// Nothing runs yet: the session treats the delivery as an ordinary one.
 	if executor.Redelivered(restartEnvelope("task-1", "key-1")) {
@@ -454,12 +499,13 @@ func TestTheNewestRedeliveredAttemptGetsTheResult(t *testing.T) {
 	if !executor.Redelivered(restartEnvelope("task-1", "key-1")) {
 		t.Fatal("a repeat of the running attempt was not recognised as such")
 	}
-	if len(reports) != 3 {
-		t.Fatalf("%d acknowledgements, expected one per redelivery", len(reports))
+	acks := reports.withStage(StageInProgress)
+	if len(acks) != 3 {
+		t.Fatalf("%d acknowledgements, expected one per redelivery", len(acks))
 	}
-	for _, ack := range reports {
-		if ack.GetStage() != StageInProgress || ack.GetPreviousTaskId() != "task-1" {
-			t.Errorf("acknowledgement %q: stage=%q previous=%q", ack.GetTaskId(), ack.GetStage(), ack.GetPreviousTaskId())
+	for _, ack := range acks {
+		if ack.GetPreviousTaskId() != "task-1" {
+			t.Errorf("acknowledgement %q: previous=%q", ack.GetTaskId(), ack.GetPreviousTaskId())
 		}
 	}
 	// Another key running at the same time is not touched by the bookkeeping.
@@ -521,5 +567,184 @@ func TestTheJournalKeepsMarkersApartFromResults(t *testing.T) {
 	}
 	if err := journal.MarkInFlight(InFlight{TaskID: "t"}); err == nil {
 		t.Error("a marker without a key was accepted")
+	}
+}
+
+// TestATaskIsAcceptedThenStartedAroundTheModuleCall guards the order the
+// panel's leases rest on: "accepted" goes out before the task queues for
+// the resources of the host, "started" once it holds them and the marker
+// is down - at the moment the helper acts both have been sent - and the
+// result is the only thing that follows.
+func TestATaskIsAcceptedThenStartedAroundTheModuleCall(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reports progressLog
+	var atTheHelper []string
+	_, client := startFakeHelper(t, func(request *helperv1.HelperRequest) *helperv1.HelperResponse {
+		atTheHelper = reports.stagesOf("task-1")
+		return accepted(request)
+	})
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor.progress = reports.record
+
+	var admitted []string
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+		waiting func(string)) (func(), string) {
+		// The acknowledgement precedes the wait for the resources: a task
+		// queued behind a busy lock is on the host, not lost.
+		admitted = reports.stagesOf(task.GetTaskId())
+		return func() {}, ""
+	}
+
+	result := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatalf("status = %s (%s: %s)", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
+	}
+	if len(admitted) != 1 || admitted[0] != StageAccepted {
+		t.Errorf("at the wait for the resources the stages were %v, expected accepted alone", admitted)
+	}
+	if len(atTheHelper) != 2 || atTheHelper[0] != StageAccepted || atTheHelper[1] != StageStarted {
+		t.Errorf("at the helper call the stages were %v, expected accepted then started", atTheHelper)
+	}
+	if after := reports.stagesOf("task-1"); len(after) != 2 {
+		t.Errorf("the stages after the result are %v; nothing follows started but the result", after)
+	}
+	started := reports.withStage(StageStarted)
+	if len(started) != 1 || len(started[0].GetClaims()) != 1 || started[0].GetClaims()[0] != opspec.LockUnits {
+		t.Errorf("started does not name the claims held: %+v", started)
+	}
+}
+
+// TestAReadIsAcceptedAndStartedWithoutClaims: a read takes no resource and
+// leaves no marker, and still tells the panel where it stands - the
+// dispatch lease of a read is as short as any other.
+func TestAReadIsAcceptedAndStartedWithoutClaims(t *testing.T) {
+	journal, err := NewIdempotencyJournal(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reports progressLog
+	_, client := startFakeHelper(t, accepted)
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	executor.progress = reports.record
+
+	task := &agentv1.TaskEnvelope{
+		TaskId: "read-1", IdempotencyKey: "read-key",
+		Action: &agentv1.TaskEnvelope_ReadUnitStatus{ReadUnitStatus: &agentv1.ReadUnitStatus{}},
+	}
+	if result := executor.Execute(context.Background(), task); result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatalf("status = %s (%s)", result.GetStatus(), result.GetMessage())
+	}
+	stages := reports.stagesOf("read-1")
+	if len(stages) != 2 || stages[0] != StageAccepted || stages[1] != StageStarted {
+		t.Fatalf("the stages of a read were %v, expected accepted then started", stages)
+	}
+	if claims := reports.withStage(StageStarted)[0].GetClaims(); len(claims) != 0 {
+		t.Errorf("a read reports the claims %v; it takes none", claims)
+	}
+}
+
+// TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted: the executor
+// passes the blocker the locks name on to the panel as an awaiting_lock
+// report, after accepted and before started, so that the host is shown as
+// waiting and on what.
+func TestAWaitForABusyLockIsReportedBetweenAcceptedAndStarted(t *testing.T) {
+	journal, err := NewIdempotencyJournal(t.TempDir(), time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, client := startFakeHelper(t, accepted)
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	var reports progressLog
+	executor.progress = reports.record
+
+	resources := newLocks()
+	releaseHolder, _ := resources.acquire(context.Background(), "holder", "schedule.run_now", []string{opspec.LockUnits})
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+		waiting func(string)) (func(), string) {
+		return acquireResources(ctx, resources, task, claims, waiting)
+	}
+
+	done := make(chan *agentv1.TaskResult, 1)
+	go func() {
+		done <- executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(reports.withStage(StageAwaitingLock)) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("no awaiting_lock report while the lock was held; stages: %v", reports.stagesOf("task-1"))
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	waiting := reports.withStage(StageAwaitingLock)[0]
+	if !strings.Contains(waiting.GetMessage(), "units held by task holder") ||
+		!strings.Contains(waiting.GetMessage(), "schedule.run_now") {
+		t.Errorf("the blocker is not named: %q", waiting.GetMessage())
+	}
+	if stages := reports.stagesOf("task-1"); len(stages) != 2 || stages[0] != StageAccepted {
+		t.Errorf("the stages while waiting were %v, expected accepted then awaiting_lock", stages)
+	}
+
+	releaseHolder()
+	select {
+	case result := <-done:
+		if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+			t.Fatalf("status = %s (%s: %s)", result.GetStatus(), result.GetErrorCode(), result.GetMessage())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the task did not run after the lock was released")
+	}
+	stages := reports.stagesOf("task-1")
+	if len(stages) != 3 || stages[2] != StageStarted {
+		t.Errorf("the stages were %v, expected accepted, awaiting_lock, started", stages)
+	}
+}
+
+// TestARefusalByTheLockIsNotRemembered: a task that did not get its
+// resource is refused for this delivery, not for the key. The next
+// delivery of the same key finds the resource free and runs - it must not
+// be answered with the old refusal from the journal.
+func TestARefusalByTheLockIsNotRemembered(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake, client := startFakeHelper(t, accepted)
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+	busy := true
+	executor.admit = func(ctx context.Context, task *agentv1.TaskEnvelope, claims []string,
+		waiting func(string)) (func(), string) {
+		if busy {
+			return nil, "the resource units is busy with the operation unit.stop (task other)"
+		}
+		return func() {}, ""
+	}
+
+	refused := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	if refused.GetStatus() != agentv1.TaskResult_STATUS_REJECTED || refused.GetErrorCode() != RejectResourceBusy {
+		t.Fatalf("the refusal: status=%s code=%q", refused.GetStatus(), refused.GetErrorCode())
+	}
+	if refused.GetTaskId() != "task-1" || refused.GetIdempotencyKey() != "key-1" {
+		t.Errorf("the refusal is not addressed: task=%q key=%q", refused.GetTaskId(), refused.GetIdempotencyKey())
+	}
+	if journal.Lookup("key-1") != nil {
+		t.Fatal("the refusal by the lock was stored as the result of the key")
+	}
+	if files := inFlightFiles(t, dir); len(files) != 0 {
+		t.Errorf("a task refused before the host was touched left a marker: %v", files)
+	}
+	if fake.calls.Load() != 0 {
+		t.Errorf("the helper was called %d times for a refused task", fake.calls.Load())
+	}
+
+	busy = false
+	second := executor.Execute(context.Background(), restartEnvelope("task-2", "key-1"))
+	if second.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED || second.GetReplayed() {
+		t.Errorf("the second delivery: status=%s replayed=%v code=%q",
+			second.GetStatus(), second.GetReplayed(), second.GetErrorCode())
 	}
 }

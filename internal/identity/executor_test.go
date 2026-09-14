@@ -112,3 +112,48 @@ func TestAFailedListingFailsTheRevocationPhase(t *testing.T) {
 		t.Fatalf("phase = %s, expected failed", phase.Status)
 	}
 }
+
+// fakeLogoutProvider stands in for the identity provider's admin logout: it
+// remembers whom it was asked to log out and answers what the test set.
+type fakeLogoutProvider struct {
+	loggedOut []string
+	err       error
+}
+
+func (f *fakeLogoutProvider) LogoutSubject(_ context.Context, subject string) error {
+	f.loggedOut = append(f.loggedOut, subject)
+	return f.err
+}
+
+func TestADisableEndsTheProviderSessionsAndNeverFailsOnThem(t *testing.T) {
+	// The provider answers: the phase says so, and the result carries
+	// provider_sessions_ended for the auditor.
+	provider := &fakeLogoutProvider{}
+	executor := &Executor{provider: provider}
+	phase, ended := executor.endProviderSessions(context.Background(), "alice")
+	if phase.Status != "succeeded" || !ended.Ended || ended.Reason != "" {
+		t.Fatalf("phase = %s (%s), outcome = %+v", phase.Status, phase.Message, ended)
+	}
+	if len(provider.loggedOut) != 1 || provider.loggedOut[0] != "alice" {
+		t.Fatalf("the provider was asked to log out %v", provider.loggedOut)
+	}
+
+	// The provider refuses or is unreachable: the disable holds on the
+	// local marker, so the phase is skipped with the reason rather than
+	// failed - a failed phase would call the whole disable partially
+	// applied, and it is not.
+	refusing := &Executor{provider: &fakeLogoutProvider{err: errors.New("the admin API answered 403 Forbidden")}}
+	phase, ended = refusing.endProviderSessions(context.Background(), "alice")
+	if phase.Status != "skipped" || ended.Ended || !strings.Contains(ended.Reason, "403") {
+		t.Fatalf("phase = %s (%s), outcome = %+v", phase.Status, phase.Message, ended)
+	}
+	if state := StateFor([]Phase{{Status: "succeeded"}, phase}); state != StateSucceeded {
+		t.Fatalf("a skipped provider logout made the change %s", state)
+	}
+
+	// No provider configured at all: the same skip, with that reason.
+	phase, ended = (&Executor{}).endProviderSessions(context.Background(), "alice")
+	if phase.Status != "skipped" || ended.Ended || ended.Reason == "" {
+		t.Fatalf("phase = %s (%s), outcome = %+v", phase.Status, phase.Message, ended)
+	}
+}

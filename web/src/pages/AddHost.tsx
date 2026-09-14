@@ -108,6 +108,11 @@ export function AddHost() {
   const [site, setSite] = useState("default");
   const [environment, setEnvironment] = useState("unassigned");
   const [reason, setReason] = useState("");
+  // What the operator already knows about the machine: it goes onto the
+  // host the moment it enrolls, so a host that appears at night appears
+  // as somebody's and inside the campaigns its tags select.
+  const [owner, setOwner] = useState("");
+  const [tags, setTags] = useState("");
   const [maxUses, setMaxUses] = useState(1);
   const [minutes, setMinutes] = useState(15);
   const [route, setRoute] = useState<"direct" | "relay">("direct");
@@ -201,6 +206,8 @@ export function AddHost() {
     kind,
     purpose: kind === "relay" ? "relay" : "new",
     relay_id: kind === "agent" && route === "relay" ? relayId : "",
+    owner: owner.trim(),
+    tags: tags.split(/\s+/).map((tag) => tag.trim()).filter(Boolean),
     max_uses: maxUses,
     ttl_minutes: minutes,
     reason,
@@ -361,6 +368,16 @@ export function AddHost() {
             </Field>
             <Field label={t("Environment")}>
               <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+            </Field>
+            {/* The owner and the tags are optional here and editable on
+                the host later; given now, the host needs no second visit
+                once it appears. The tags have the shape the tag editor
+                accepts, and the server refuses the order otherwise. */}
+            <Field label={t("Owner")} hint={t("Who answers for the host; a person or a team. Optional.")}>
+              <input value={owner} onChange={(e) => setOwner(e.target.value)} placeholder={t("platform team")} maxLength={128} />
+            </Field>
+            <Field label={t("Tags")} hint={t("Separated by spaces, key or key=value; added to the host at enrollment. Optional.")}>
+              <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="role=web tier=gold" />
             </Field>
             {/* A batch token admits several machines; the reason it asks
                 for is the same one the audit trail keeps. */}

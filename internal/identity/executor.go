@@ -19,11 +19,20 @@ type SessionRevoker interface {
 	ListPrincipals(ctx context.Context) ([]authz.Principal, error)
 }
 
+// ProviderLogout ends the sessions a user holds at the identity provider.
+// The panel's own sessions end locally; without this the provider would go
+// on logging the user into every other application behind it until its
+// session ran out - the lag the architecture document warns about.
+type ProviderLogout interface {
+	LogoutSubject(ctx context.Context, subject string) error
+}
+
 // Executor carries out approved directory changes phase by phase.
 type Executor struct {
 	store     *Store
 	directory *freeipa.Client
 	sessions  SessionRevoker
+	provider  ProviderLogout
 	audit     *audit.Recorder
 	log       *slog.Logger
 	interval  time.Duration
@@ -36,6 +45,13 @@ func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoke
 	}
 	return &Executor{store: store, directory: directory, sessions: sessions,
 		audit: recorder, log: log, interval: interval}
+}
+
+// WithProviderLogout makes a disable end the user's sessions at the identity
+// provider as well. Without it the local denial stands alone.
+func (e *Executor) WithProviderLogout(provider ProviderLogout) *Executor {
+	e.provider = provider
+	return e
 }
 
 // Run carries out the approved changes until the context is closed.
@@ -179,6 +195,17 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 		phase = startPhase("revoking the panel sessions")
 		result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was locked"))
 		phases = append(phases, finishPhase(phase, err, result.String()))
+
+		// The provider's sessions go after the panel's own: the local denial
+		// is what cuts the user off, and this closes the window in which
+		// the provider would still log them into other applications. It
+		// never fails the change - a provider that is off, unreachable or
+		// does not know the user is recorded as such, and the disable
+		// stands on the local marker and the directory.
+		phase, ended := e.endProviderSessions(ctx, ref.UID)
+		phases = append(phases, phase)
+		result.ProviderSessionsEnded = &ended.Ended
+		result.ProviderReason = ended.Reason
 		revoked = &result
 	}
 
@@ -203,6 +230,40 @@ type sessionRevocation struct {
 	Sessions int64 `json:"sessions_revoked"`
 	// WithoutPrincipal names the users who never logged into the panel.
 	WithoutPrincipal []string `json:"without_principal"`
+	// ProviderSessionsEnded says whether the identity provider ended the
+	// user's sessions too; nil for a change that does not ask it to. False
+	// comes with ProviderReason, because "not ended" has several causes
+	// and only one of them is a fault.
+	ProviderSessionsEnded *bool  `json:"provider_sessions_ended,omitempty"`
+	ProviderReason        string `json:"provider_reason,omitempty"`
+}
+
+// providerLogout is the outcome of asking the identity provider to end a
+// user's sessions.
+type providerLogout struct {
+	Ended  bool
+	Reason string
+}
+
+// endProviderSessions asks the identity provider to end the user's sessions,
+// as one phase that cannot fail the change.
+//
+// The phase is skipped rather than failed when the sessions were not ended:
+// the disable already holds on the local marker and the directory, and a
+// provider that is not configured for it, does not know the user, or is
+// unreachable is a fact recorded in the result - not a reason to call the
+// disable partially applied. The reason names which of those it was.
+func (e *Executor) endProviderSessions(ctx context.Context, uid string) (Phase, providerLogout) {
+	phase := startPhase("ending the sessions at the identity provider")
+	if e.provider == nil {
+		outcome := providerLogout{Reason: "no identity provider is configured"}
+		return skipPhase(phase, outcome.Reason), outcome
+	}
+	if err := e.provider.LogoutSubject(ctx, uid); err != nil {
+		outcome := providerLogout{Reason: err.Error()}
+		return skipPhase(phase, "provider sessions not ended: "+outcome.Reason), outcome
+	}
+	return finishPhase(phase, nil, "provider sessions ended for "+uid), providerLogout{Ended: true}
 }
 
 // String renders the outcome as the message of a phase.
@@ -340,6 +401,15 @@ func (e *Executor) finish(ctx context.Context, change Change, state State,
 		// without_principal means there was nothing to end.
 		detail["sessions_revoked"] = revoked.Sessions
 		detail["without_principal"] = revoked.WithoutPrincipal
+		// Whether the provider ended its sessions too, and if not, why: an
+		// auditor reading a disable wants to know how long the user could
+		// still reach the other applications.
+		if revoked.ProviderSessionsEnded != nil {
+			detail["provider_sessions_ended"] = *revoked.ProviderSessionsEnded
+			if revoked.ProviderReason != "" {
+				detail["provider_reason"] = revoked.ProviderReason
+			}
+		}
 	}
 	e.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "identity-executor",
@@ -359,6 +429,15 @@ func (e *Executor) finish(ctx context.Context, change Change, state State,
 
 func startPhase(name string) Phase {
 	return Phase{Name: name, StartedAt: time.Now().UTC()}
+}
+
+// skipPhase closes a phase that was not carried out, with the reason. A
+// skipped phase counts for neither success nor failure of the change.
+func skipPhase(phase Phase, message string) Phase {
+	phase.FinishedAt = time.Now().UTC()
+	phase.Status = "skipped"
+	phase.Message = message
+	return phase
 }
 
 func finishPhase(phase Phase, err error, message string) Phase {

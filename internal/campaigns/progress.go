@@ -49,6 +49,12 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 	if err != nil {
 		return err
 	}
+	// The host stays running for as long as its job is open - dispatched,
+	// waiting on a lock, or running on the agent's word - and shows what
+	// it waits on meanwhile.
+	if err := o.followBlocker(ctx, target, job); err != nil {
+		return err
+	}
 	if !jobs.State(job.State).Terminal() {
 		return nil
 	}
@@ -140,6 +146,26 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 
 	o.log.Info("the campaign orders a reboot of a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", rebootJobID)
+	return nil
+}
+
+// followBlocker copies onto the target what the host's job waits on: the
+// lock the agent named, while the job waits for it, and nothing once the
+// wait is over - the operation started, or the job settled. The write
+// happens only when the text changes: the orchestrator passes every few
+// seconds, and a host waiting a minute must not be rewritten every pass to
+// say the same thing.
+func (o *Orchestrator) followBlocker(ctx context.Context, target *Target, job *jobs.Job) error {
+	blocker, _ := jobs.LockBlocker(job.WaitReason)
+	if blocker == target.Blocker {
+		return nil
+	}
+	if _, err := o.store.Pool().Exec(ctx,
+		`update campaign_targets set blocker = $2 where id = $1 and blocker <> $2`,
+		target.ID, blocker); err != nil {
+		return fmt.Errorf("recording the blocker of the target: %w", err)
+	}
+	target.Blocker = blocker
 	return nil
 }
 

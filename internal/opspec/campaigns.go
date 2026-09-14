@@ -1,8 +1,12 @@
 package opspec
 
 import (
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
+
+	"github.com/ultherego/flotestro/internal/modules/hostname"
 )
 
 // campaignModes is the registry of bulk-operation modes.
@@ -48,6 +52,11 @@ var campaignModes = map[ActionType]CampaignMode{
 
 	// A package version hold is a declaration about a name, not about a diff.
 	ActionPackageHoldSet: CampaignSamePayload,
+	// A package source is the same declaration on every host: the address,
+	// the key and the consent to trust it. The host refreshes its metadata
+	// and reports the key's fingerprint on its own; there is no diff to plan,
+	// so the same payload means the same thing everywhere.
+	ActionRepositorySet: CampaignSamePayload,
 
 	// An agent replacement: the target version means the same on every host,
 	// and the verification is the host's own - the job is settled by the
@@ -103,6 +112,15 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionTimeConfigApply:        CampaignPerHostPlan,
 	ActionComposeDeploy:          CampaignPerHostPlan,
 	ActionKernelModuleBlacklist:  CampaignPerHostPlan,
+	// A rename (system.hostname.set) is a per-host plan of the other kind:
+	// the diff is not read from the host but comes with the order, as a
+	// mapping of host to new name, and the panel splits it host by host
+	// (HostnameMapping, PanelPlanned). Its row is CampaignPerHostPlan and is
+	// not here yet: the campaign API refuses every operation whose target
+	// name is typed by hand, and a rename is one - the mapping is that
+	// typing, host by host, but the gate has to learn it before the row
+	// opens the operation. The same payload would give every host the same
+	// name, which is the one thing a rename must never do.
 
 	// Operations with their own state machine. A reboot is settled by the
 	// host coming back with a new boot ID, not by the command being sent.
@@ -232,6 +250,134 @@ func PlanningAction(action ActionType) ActionType {
 	return ""
 }
 
+// PanelPlanned says whether the per-host plan of an operation is computed in
+// the panel from the order itself rather than read from the host.
+//
+// A rename is the case: no read on the host can say which name the operator
+// intends for it, so the order carries a mapping and the plan of a host is
+// its own entry. Such a plan still goes through the plan set and the
+// approval fingerprint - the consent covers the split, not the mapping as a
+// blob - but no planning task ever reaches a host.
+func PanelPlanned(action ActionType) bool {
+	return action == ActionSystemHostnameSet
+}
+
+// CampaignPlans says whether a campaign of this operation has a planning
+// phase at all: a read on every host, or a split of the order in the panel.
+func CampaignPlans(action ActionType) bool {
+	return PlanningAction(action) != "" || PanelPlanned(action)
+}
+
+// HostnameMapping is the per-host part of a rename ordered in bulk: the new
+// name of every host, by host identifier.
+type HostnameMapping map[string]string
+
+// ReasonNoHostnameForHost is the ineligibility code of a target the mapping
+// does not name. A host without an entry gets no name at all rather than a
+// shared one: silence in the mapping is not consent to a default.
+const ReasonNoHostnameForHost = "no_hostname_for_host"
+
+// ParseHostnameMapping reads the mapping out of a campaign payload.
+//
+// The mapping travels under the hostname key next to the shared fields
+// ({"hostname": {"pretty": ..., "mapping": {"<host_id>": "<fqdn>"}}}), and
+// the typed payload does not carry it: HostnamePayload describes one host,
+// and a single-host order must not be able to smuggle a mapping in. An
+// order without a mapping, or with a name the host would refuse, or with
+// the same name for two hosts, is refused here - before any host is
+// resolved, because the mapping is the whole intent of the campaign.
+func ParseHostnameMapping(raw json.RawMessage) (HostnameMapping, error) {
+	var order struct {
+		Hostname struct {
+			Mapping map[string]string `json:"mapping"`
+		} `json:"hostname"`
+	}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &order); err != nil {
+			return nil, fmt.Errorf("the payload is not valid JSON")
+		}
+	}
+	mapping := HostnameMapping(order.Hostname.Mapping)
+	if len(mapping) == 0 {
+		return nil, fmt.Errorf("a rename in bulk names every host's new name in hostname.mapping; " +
+			"there is no shared name")
+	}
+	seen := map[string]string{}
+	for hostID, name := range mapping {
+		if strings.TrimSpace(hostID) == "" {
+			return nil, fmt.Errorf("the mapping names an empty host identifier")
+		}
+		if err := hostname.Validate(name); err != nil {
+			return nil, fmt.Errorf("the name for the host %s: %w", hostID, err)
+		}
+		// The same name on two hosts is not a typo the hosts sort out
+		// between themselves: DNS, Kerberos and the other hosts would see
+		// two machines claiming one identity.
+		key := strings.ToLower(name)
+		if other, taken := seen[key]; taken {
+			return nil, fmt.Errorf("the name %s is given to both %s and %s", name, other, hostID)
+		}
+		seen[key] = hostID
+	}
+	return mapping, nil
+}
+
+// ValidateCampaignMapping checks the per-host part of a campaign order for
+// the operations that carry one. An operation without a panel-side plan
+// has nothing to check here.
+func ValidateCampaignMapping(action ActionType, raw json.RawMessage) error {
+	if !PanelPlanned(action) {
+		return nil
+	}
+	_, err := ParseHostnameMapping(raw)
+	return err
+}
+
+// PayloadFor materialises the payload of one host from the shared fields of
+// the order and the host's own entry.
+//
+// The second value is the ineligibility code when the mapping has no entry
+// for the host; an empty code means a payload the host may run.
+func (m HostnameMapping) PayloadFor(hostID string, shared Payload) (Payload, string) {
+	name, ok := m[hostID]
+	if !ok || name == "" {
+		return Payload{}, ReasonNoHostnameForHost
+	}
+	own := HostnamePayload{Hostname: name}
+	if shared.Hostname != nil {
+		own.Pretty = shared.Hostname.Pretty
+	}
+	shared.Hostname = &own
+	return shared, ""
+}
+
+// HostIDs lists the hosts the mapping names, in a fixed order.
+func (m HostnameMapping) HostIDs() []string {
+	ids := make([]string, 0, len(m))
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// CampaignPace gives the wave size and the concurrency a campaign of the
+// operation starts with when the order names neither.
+//
+// The numbers follow the module chapters of the multitasking document: a
+// package source on fifty hosts a wave, a rename on ten with two at a time.
+// An operation without a row of its own gets the general default, and the
+// order may always narrow both; the API ceilings still bound them.
+func CampaignPace(action ActionType) (waveSize, maxConcurrent int) {
+	switch action {
+	case ActionRepositorySet:
+		return 50, 5
+	case ActionSystemHostnameSet:
+		return 10, 2
+	}
+	return 10, 5
+}
+
 // CampaignExclusionReason names the operations that must not run in bulk, and
 // says why.
 //
@@ -314,7 +460,10 @@ func ExecutableMode(action ActionType) bool {
 	case CampaignPerHostPlan:
 		// A per-host plan needs something to come from. Without a planning
 		// operation the campaign would approve a change whose diff nobody
-		// computed.
+		// computed. A plan split from the order in the panel (PanelPlanned)
+		// is not executable yet either: the engine opens its planning phase
+		// on a host planner alone, and until it learns about a panel-side
+		// plan the campaign would jump to execution with no name per host.
 		return PlanningAction(action) != ""
 	case CampaignSpecialized:
 		// A reboot has its own phase in the engine: a new boot ID and a check
@@ -347,7 +496,29 @@ func ValidateCampaignRequest(action ActionType, payload Payload) error {
 	if PlanningAction(action) != "" {
 		payload = withPlanPlaceholder(payload)
 	}
+	if PanelPlanned(action) {
+		payload = withNamePlaceholder(payload)
+	}
 	return Validate(action, payload)
+}
+
+// PendingHostname is a marker standing in for the name a host gets from the
+// mapping. It travels to no host: the shared part of a rename order carries
+// no name, and the validation of that part still needs one to pass. The
+// mapping itself is checked by ValidateCampaignMapping.
+const PendingHostname = "pending-per-host-name"
+
+// withNamePlaceholder puts the marker where validation requires a name.
+func withNamePlaceholder(payload Payload) Payload {
+	var copied HostnamePayload
+	if payload.Hostname != nil {
+		copied = *payload.Hostname
+	}
+	if copied.Hostname == "" {
+		copied.Hostname = PendingHostname
+	}
+	payload.Hostname = &copied
+	return payload
 }
 
 // withPlanPlaceholder puts the marker where validation requires a digest.

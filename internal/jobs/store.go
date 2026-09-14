@@ -97,9 +97,10 @@ type Job struct {
 	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
 	CanceledBy         string          `json:"canceled_by,omitempty"`
 	CancelReason       string          `json:"cancel_reason,omitempty"`
-	// WaitReason says why a queued job has not been taken yet: the budget
-	// it waits for, as awaiting_budget:<key>. A job standing in the queue
-	// with no reason given looks like a forgotten job.
+	// WaitReason says why a job has not started yet: the budget a queued
+	// job waits for, as awaiting_budget:<key>, or the resource lock a
+	// delivered job waits for on its host, as awaiting_lock:<blocker>. A
+	// job standing still with no reason given looks like a forgotten job.
 	WaitReason string `json:"wait_reason,omitempty"`
 	// BudgetClass is the class the order stated; empty means it was left
 	// to the scheduler to derive.
@@ -131,8 +132,47 @@ type Attempt struct {
 	UnitStateAfter  json.RawMessage `json:"unit_state_after,omitempty"`
 	Detail          json.RawMessage `json:"detail,omitempty"`
 	DispatchedAt    *time.Time      `json:"dispatched_at,omitempty"`
-	FinishedAt      *time.Time      `json:"finished_at,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
+	// AcceptedAt is when the agent said it holds the task, and StartedAt
+	// when it said the operation is starting on the host. Both come from
+	// the agent's acknowledgement; an attempt without them was never heard
+	// from, which is not the same as one that started at the dispatch.
+	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
+	StartedAt  *time.Time `json:"started_at,omitempty"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+// DispatchLease is how long the panel waits for the agent to say it holds
+// a task after the envelope went out. It is much shorter than the
+// execution lease the scheduler gives at the take (five minutes,
+// cmd/control-plane/main.go): before the acknowledgement nothing runs on
+// the host, so an envelope sent into a stream that died a moment earlier
+// is safe to send again, and waiting five minutes to do so would leave a
+// campaign's host idle for that long. The acknowledgement moves the lease
+// back out to the execution lease. A minute leaves room for a slow host
+// and the housekeeping pass that reclaims expired leases every thirty
+// seconds.
+const DispatchLease = 60 * time.Second
+
+// WaitReasonLockPrefix marks a wait reason that names a resource lock of
+// the host, as awaiting_lock:<blocker>. The blocker text is the agent's:
+// the resource and the task holding it.
+const WaitReasonLockPrefix = "awaiting_lock:"
+
+// LockWaitReason renders the wait reason of a job whose task waits for a
+// resource of its host.
+func LockWaitReason(blocker string) string {
+	return WaitReasonLockPrefix + blocker
+}
+
+// LockBlocker reads the blocker back out of a wait reason. False means the
+// job was not waiting on a lock - it may have been waiting on nothing, or
+// on a budget, which is another prefix.
+func LockBlocker(reason string) (string, bool) {
+	if !strings.HasPrefix(reason, WaitReasonLockPrefix) {
+		return "", false
+	}
+	return strings.TrimPrefix(reason, WaitReasonLockPrefix), true
 }
 
 // Store provides access to the task tables.
@@ -550,8 +590,22 @@ func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 		  and campaign_id is null and fanout_id is null`))
 }
 
-// MarkDispatched records handing the task over to the agent.
+// MarkDispatched records handing the task over to the agent. The lease of
+// the attempt is cut down to the dispatch lease from here: the scheduler
+// gave the execution lease at the take, and until the agent acknowledges
+// the task nothing runs that the lease would have to outlast. A lease
+// already shorter than that stays as it is.
 func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID string) error {
+	return s.MarkDispatchedWithLease(ctx, jobID, attemptID, sessionID, DispatchLease)
+}
+
+// MarkDispatchedWithLease is MarkDispatched with the lease the caller
+// chose: the short dispatch lease for an agent that acknowledges a task,
+// the execution lease for one that never will - an agent from before the
+// acknowledgement would be reclaimed and redelivered every minute for the
+// length of every operation.
+func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, sessionID string,
+	lease time.Duration) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -563,12 +617,139 @@ func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID 
 		jobID, string(StateDispatched), string(StateLeased)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx,
-		`update job_attempts set dispatched_at = now(), session_id = $2 where id = $1`,
-		attemptID, nullableUUID(sessionID)); err != nil {
+	if _, err := tx.Exec(ctx, `
+		update job_attempts
+		   set dispatched_at = now(), session_id = $2,
+		       lease_expires_at = least(lease_expires_at, now() + make_interval(secs => $3))
+		 where id = $1`,
+		attemptID, nullableUUID(sessionID), lease.Seconds()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// AcceptAttempt records the agent's word that it holds the task: the
+// acceptance time goes on the attempt, once, and the lease moves out from
+// the dispatch lease to the execution lease given - never back. It returns
+// whether an open attempt of the host was there to accept; a closed one
+// keeps its state, the same as with a late progress report.
+//
+// The time from the hand-over to the acceptance is what the dispatch lease
+// is sized against, so it is measured here, on the first acceptance only.
+func (s *Store) AcceptAttempt(ctx context.Context, attemptID, hostID string,
+	executionLease time.Duration) (bool, error) {
+	var actionType string
+	var firstAck *float64
+	err := s.pool.QueryRow(ctx, `
+		update job_attempts a
+		   set accepted_at = coalesce(a.accepted_at, now()),
+		       lease_expires_at = greatest(a.lease_expires_at, now() + make_interval(secs => $3))
+		  from jobs j
+		 where a.id = $1
+		   and j.id = a.job_id
+		   and j.host_id = $2::uuid
+		   and a.finished_at is null
+		   and a.lease_expires_at is not null
+		   and j.state in ('dispatched', 'running')
+		returning j.action_type,
+		          case when a.accepted_at = now()
+		               then extract(epoch from now() - a.dispatched_at)::float8 end`,
+		attemptID, hostID, executionLease.Seconds()).Scan(&actionType, &firstAck)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("accepting the attempt: %w", err)
+	}
+	// A repeated acceptance - the agent sent it twice - measures nothing:
+	// the first one set the time, and now() is the same inside one
+	// statement, so the case above tells the two apart.
+	if firstAck != nil {
+		metrics.TaskAck.Observe(*firstAck, actionType)
+	}
+	return true, nil
+}
+
+// SetLockWait records why a delivered task has not started: it waits for a
+// resource of its host that another task holds. The reason is written on
+// the job as awaiting_lock:<blocker>, only while the job is dispatched -
+// a running job holds its resources - and only when the text changes,
+// since the agent repeats the report while the wait lasts.
+func (s *Store) SetLockWait(ctx context.Context, attemptID, hostID, blocker string) error {
+	reason := LockWaitReason(blocker)
+	_, err := s.pool.Exec(ctx, `
+		update jobs j
+		   set wait_reason = $3, updated_at = now()
+		  from job_attempts a
+		 where a.id = $1
+		   and j.id = a.job_id
+		   and j.host_id = $2::uuid
+		   and a.finished_at is null
+		   and j.state = 'dispatched'
+		   and j.wait_reason <> $3`,
+		attemptID, hostID, reason)
+	if err != nil {
+		return fmt.Errorf("recording the wait for the lock: %w", err)
+	}
+	return nil
+}
+
+// MarkRunning moves the job of an attempt from dispatched to running on
+// the agent's word that the operation started on the host, stamps the
+// start on the attempt and clears whatever the job was waiting on. It
+// returns whether the transition happened: a job already running - the
+// agent repeated itself - or settled meanwhile is left as it is.
+//
+// The time a task spent waiting for a lock is measured here, from the
+// acceptance to the start, for the attempts whose wait was reported.
+func (s *Store) MarkRunning(ctx context.Context, attemptID, hostID string) (bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var jobID, actionType, waitReason string
+	var lockWait *float64
+	err = tx.QueryRow(ctx, `
+		select j.id, j.action_type, j.wait_reason,
+		       extract(epoch from now() - a.accepted_at)::float8
+		  from job_attempts a join jobs j on j.id = a.job_id
+		 where a.id = $1
+		   and j.host_id = $2::uuid
+		   and a.finished_at is null
+		   and j.state = 'dispatched'
+		 for update of j`, attemptID, hostID).Scan(&jobID, &actionType, &waitReason, &lockWait)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("finding the attempt to start: %w", err)
+	}
+	if err := StateDispatched.Validate(StateRunning); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`update jobs set state = $2, wait_reason = '', updated_at = now() where id = $1`,
+		jobID, string(StateRunning)); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`update job_attempts set started_at = coalesce(started_at, now()) where id = $1`,
+		attemptID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	// Only a wait the agent reported counts: the gap between acceptance
+	// and start of a task that found its resources free is the budget slot
+	// and the checks, not a lock. An attempt never accepted has no gap to
+	// measure - a null here is "unknown", not zero.
+	if _, waited := LockBlocker(waitReason); waited && lockWait != nil {
+		metrics.ResourceLockWait.Observe(*lockWait, actionType)
+	}
+	return true, nil
 }
 
 // FailUndelivered settles a task that could not be assembled for delivery
@@ -798,9 +979,11 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		}
 	}
 
+	// A settled job waits on nothing: a task refused for a busy lock
+	// must not keep saying it waits for the lock.
 	if _, err := tx.Exec(ctx, `
 		update jobs set state = $2, result_status = $3, result_error_code = $4,
-		                result_message = $5, finished_at = now(), updated_at = now()
+		                result_message = $5, wait_reason = '', finished_at = now(), updated_at = now()
 		where id = $1`,
 		jobID, string(jobState), result.Status,
 		nullable(result.ErrorCode), nullable(result.Message)); err != nil {
@@ -866,7 +1049,7 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			where id in (select attempt_id from expired)
 			returning job_id
 		)
-		update jobs set state = 'queued', updated_at = now()
+		update jobs set state = 'queued', wait_reason = '', updated_at = now()
 		where id in (select job_id from closed)
 		returning id`
 	tx, err := s.pool.Begin(ctx)
@@ -1112,7 +1295,7 @@ func (s *Store) Attempts(ctx context.Context, jobID string) ([]Attempt, error) {
 		       coalesce(status, ''), exit_code, coalesce(error_code, ''), coalesce(message, ''),
 		       coalesce(stdout, ''), coalesce(stderr, ''), output_truncated, replayed,
 		       unit_state_before, unit_state_after, result_detail,
-		       dispatched_at, finished_at, created_at
+		       dispatched_at, accepted_at, started_at, finished_at, created_at
 		from job_attempts
 		where job_id = $1
 		order by attempt_number`
@@ -1129,7 +1312,7 @@ func (s *Store) Attempts(ctx context.Context, jobID string) ([]Attempt, error) {
 			&a.Status, &a.ExitCode, &a.ErrorCode, &a.Message,
 			&a.Stdout, &a.Stderr, &a.OutputTruncated, &a.Replayed,
 			&a.UnitStateBefore, &a.UnitStateAfter, &a.Detail,
-			&a.DispatchedAt, &a.FinishedAt, &a.CreatedAt); err != nil {
+			&a.DispatchedAt, &a.AcceptedAt, &a.StartedAt, &a.FinishedAt, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		attempts = append(attempts, a)

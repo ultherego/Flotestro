@@ -538,7 +538,24 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		// forward - otherwise a package transaction longer than the lease
 		// is reclaimed and redelivered while the host is still carrying it.
 		s.keepAttemptAlive(ctx, progress.GetTaskId(), hostID)
-		if progress.GetStage() == stageInProgress {
+		switch progress.GetStage() {
+		case stageAccepted:
+			// The agent holds the task: the dispatch lease has done its
+			// work, and the attempt gets the execution lease from here.
+			s.acceptAttempt(ctx, progress.GetTaskId(), hostID)
+		case stageAwaitingLock:
+			// The task waits on the host for a resource another task
+			// holds. The reason goes on the job, so that the panel shows
+			// why the host has not started rather than a silent attempt.
+			if err := s.jobs.SetLockWait(ctx, progress.GetTaskId(), hostID, progress.GetMessage()); err != nil {
+				s.log.Warn("the wait for the lock was not recorded",
+					"host_id", hostID, "attempt_id", progress.GetTaskId(), "err", err)
+			}
+		case stageStarted:
+			// The operation starts on the host this instant: the job is
+			// running from here, and whatever it waited on is behind it.
+			s.startAttempt(ctx, progress.GetTaskId(), hostID, progress.GetClaims())
+		case stageInProgress:
 			// The agent answered a redelivery: the panel gave the attempt
 			// before this one up, and the host is still on the operation.
 			// The result will come under both identifiers; nothing to do
@@ -546,6 +563,11 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 			s.log.Info("the host is still carrying the operation the redelivered attempt asks for",
 				"host_id", hostID, "job_id", jobID, "attempt_id", progress.GetTaskId(),
 				"previous_attempt_id", progress.GetPreviousTaskId())
+		}
+		if progress.GetStage() != "" && progress.GetMessage() == "" {
+			// An acknowledgement carries no progress of its own; the bar on
+			// the screen keeps whatever the operation last said.
+			return nil
 		}
 		if s.events != nil {
 			if err := s.events.PublishProgress(ctx, events.Event{
@@ -627,14 +649,24 @@ type attemptContextEntry struct {
 // translations.
 const maxRememberedAttempts = 4096
 
-// stageInProgress is the stage of the progress report an agent answers a
-// redelivery with (TaskProgress.stage in agent.proto): the attempt before
-// this one is still running on the host, and this attempt waits on it.
-const stageInProgress = "in_progress"
+// The stages of the acknowledgement of a task (TaskProgress.stage in
+// agent.proto). stageInProgress is the answer to a redelivery: the attempt
+// before this one is still running on the host, and this attempt waits on
+// it. The other three are the ordinary course of an attempt: the agent
+// holds the task, it waits for a resource of the host, it started.
+const (
+	stageAccepted     = "accepted"
+	stageAwaitingLock = "awaiting_lock"
+	stageStarted      = "started"
+	stageInProgress   = "in_progress"
+)
 
 // progressLeaseExtension is how far a sign of life moves the lease of an
 // attempt: as far as the delivery did (the scheduler's lease is five
 // minutes, cmd/control-plane/main.go). The lease is never shortened by it.
+// The acceptance of a task moves the lease out by the same length: the
+// delivery cut it down to the dispatch lease (internal/jobs DispatchLease),
+// which the acceptance is the answer to.
 const progressLeaseExtension = 5 * time.Minute
 
 // leaseRenewalInterval spaces the renewals of one attempt. A package
@@ -664,6 +696,47 @@ func (s *AgentService) keepAttemptAlive(ctx context.Context, attemptID, hostID s
 		s.log.Debug("a report for an attempt without an open lease",
 			"host_id", hostID, "attempt_id", attemptID)
 	}
+}
+
+// acceptAttempt records the agent's word that it holds the task: the
+// acceptance time on the attempt and the execution lease in place of the
+// dispatch lease. The pacing of keepAttemptAlive does not apply - the
+// acceptance comes once, and it is the one report the short lease waits
+// for.
+func (s *AgentService) acceptAttempt(ctx context.Context, attemptID, hostID string) {
+	accepted, err := s.jobs.AcceptAttempt(ctx, attemptID, hostID, progressLeaseExtension)
+	if err != nil {
+		s.log.Warn("the acceptance of the attempt was not recorded",
+			"host_id", hostID, "attempt_id", attemptID, "err", err)
+		return
+	}
+	if !accepted {
+		// The panel gave the attempt up before the acceptance arrived: the
+		// redelivery is on its way, and the agent will answer it as in
+		// progress. Nothing to reopen.
+		s.log.Info("an acceptance for an attempt without an open lease",
+			"host_id", hostID, "attempt_id", attemptID)
+	}
+}
+
+// startAttempt moves the job to running on the agent's word that the
+// operation started on the host.
+func (s *AgentService) startAttempt(ctx context.Context, attemptID, hostID string, claims []string) {
+	started, err := s.jobs.MarkRunning(ctx, attemptID, hostID)
+	if err != nil {
+		s.log.Warn("the start of the attempt was not recorded",
+			"host_id", hostID, "attempt_id", attemptID, "err", err)
+		return
+	}
+	if !started {
+		// A repeated report, or an attempt the panel closed meanwhile; the
+		// job keeps its state either way.
+		s.log.Debug("a start for an attempt that is not dispatched",
+			"host_id", hostID, "attempt_id", attemptID)
+		return
+	}
+	s.log.Info("the operation started on the host",
+		"host_id", hostID, "attempt_id", attemptID, "claims", strings.Join(claims, ","))
 }
 
 // leaseRenewalDue says whether the attempt's lease is to be renewed now and,
@@ -1966,6 +2039,26 @@ func managementAddress(remoteAddr, declared, relayID string) (address, source st
 // openSession records the session. relayID is empty for a direct connection;
 // filled in it says which relay attested the identity of the host - without it
 // the audit trail does not tell two different grounds of trust apart.
+// countReconnect counts a session that follows the host's previous one
+// closely: a link that dropped and came back, a restart of the agent, a
+// panel that went away. A host that was away for longer is a return, not a
+// reconnect - the difference is what the counter is for.
+func (s *AgentService) countReconnect(ctx context.Context, session *Session) {
+	var family string
+	err := s.pool.QueryRow(ctx, `
+		select coalesce(h.os_family, '')
+		from agent_sessions p join hosts h on h.id = p.host_id
+		where p.host_id = $1 and p.epoch < $2 and p.ended_at > now() - interval '10 minutes'
+		limit 1`, session.HostID, session.Epoch).Scan(&family)
+	if err != nil {
+		return
+	}
+	if family == "" {
+		family = "unknown"
+	}
+	metrics.AgentReconnect.Inc(family)
+}
+
 func (s *AgentService) openSession(ctx context.Context, session *Session,
 	fingerprint []byte, relayID string) error {
 	// The epoch number and the session row come into being in one transaction.
@@ -1985,6 +2078,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	}
 
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
+	s.countReconnect(ctx, session)
 
 	// The certificate that opened this session is the identity of the host
 	// from now on. The older ones still valid - the one a recovery replaced,

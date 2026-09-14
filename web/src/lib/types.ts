@@ -197,6 +197,13 @@ export type FleetSummary = {
   agent_certificates_expiring?: number;
   agent_certificates_expired?: number;
   degraded_relays?: number;
+  // The lifecycle document's panel-level alarms, as counters: a relay
+  // buffer at least 70 % full, the audit trail's duplicate identities and
+  // enrollment refusals, and agents on a protocol the panel does not speak.
+  relays_buffer_high?: number;
+  duplicate_identities_24h?: number;
+  enrollment_refusals_1h?: number;
+  agents_unsupported?: number;
 };
 
 /**
@@ -674,6 +681,10 @@ export type EnrollmentOrder = {
   kind: "agent" | "relay";
   purpose: "new" | "replace_identity" | "relay";
   relay_id?: string;
+  // What the operator knew about the machine when ordering: recorded on
+  // the host the moment it enrolls.
+  owner?: string;
+  tags?: string[];
   max_uses: number;
   uses: number;
   status: "pending" | "enrolled" | "expired" | "revoked" | "failed";

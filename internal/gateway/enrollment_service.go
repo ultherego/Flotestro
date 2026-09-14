@@ -244,6 +244,12 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 	}
+	// The owner and the tags of the order land with the host row: the
+	// operator wrote them when ordering the installation, so the host is
+	// somebody's and tagged from its first second in the fleet.
+	if err := s.hosts.ApplyEnrollmentFacts(ctx, tx, hostID, scope.Owner, scope.Tags); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
 	issued, err := s.certIssuer.SignHost(ctx, msg.GetCsrPem(), hostID)
 	if err != nil {

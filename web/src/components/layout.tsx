@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Icon, type IconName } from "./icons";
+import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /**
  * The layout primitives of a page: the header, the card, the stat tile,
@@ -35,6 +36,10 @@ export function PageHeader({
 }) {
   const location = useLocation();
   const mark = icon ?? iconForPath(location.pathname);
+  // The tab is named after the page. Only a plain title can name it: a
+  // title built from elements has no text a tab could show, and the tab
+  // then keeps what stood there.
+  useDocumentTitle(typeof title === "string" && title.trim() !== "" ? pageTitle(title) : undefined);
   return (
     <header className="page-header">
       <div className="page-header-row">

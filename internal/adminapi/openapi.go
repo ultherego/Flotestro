@@ -114,6 +114,23 @@ func (s *Server) openAPI() map[string]any {
 			"unknown when the holder is neither a job, a campaign target nor a fan-out.")
 	describe(schemas, "BudgetHolder", "tokens", "The weight of the lease.")
 	describe(schemas, "BudgetHolder", "since", "When the lease was first taken; renewals keep it.")
+	// The fleet summary grew additively as well: the attention counters
+	// of the lifecycle document are computed in the database, and a
+	// counter the server cannot answer honestly for the reader's view is
+	// left out rather than sent as zero.
+	register("FleetSummary", FleetSummary{})
+	describe(schemas, "FleetSummary", "relays_buffer_high",
+		"Relays whose buffer of results waiting for the centre is at least 70 % full by their latest heartbeat. "+
+			"Global view only; missing while no relay has reported since the panel started.")
+	describe(schemas, "FleetSummary", "duplicate_identities_24h",
+		"Sessions the gateway opened in the last day while the same identity was alive on a different boot "+
+			"(audit action security.duplicate_identity). Missing for a reader without the fleet-wide audit right.")
+	describe(schemas, "FleetSummary", "enrollment_refusals_1h",
+		"Enrollments the gateway turned away in the last hour (audit actions host.enroll and relay.enroll with "+
+			"the outcome denied). Missing for a reader without the fleet-wide audit right.")
+	describe(schemas, "FleetSummary", "agents_unsupported",
+		"Visible hosts whose reported agent version speaks a protocol this panel does not. A host that reports "+
+			"no version, or a word in its place, is unknown and not counted.")
 	schemas["Problem"] = map[string]any{
 		"type":        "object",
 		"description": "The error answer. The code is stable and meant for programs; the message is for people.",
@@ -268,7 +285,12 @@ var queryParameters = map[string][]queryParameter{
 		{"connection_state", "string", "online, offline, stale or unknown."},
 		{"lifecycle_state", "string", "active, quarantined, recovery, retiring or retired."},
 		{"owner", "string", ""},
+		{"identity_domain", "string", "The directory domain the host is joined to, as its identity module reports it."},
+		{"tag", "string", "A tag the host must carry; may repeat, and every listed tag has to be on the host."},
+		{"channel", "string", "The release channel the host follows: stable or beta."},
 		{"maintenance", "boolean", "true keeps the hosts inside a maintenance window now, false those outside one."},
+		{"reboot_required", "boolean", "true keeps the hosts that need a reboot, false the ones that reported none; a host that has not reported is in neither."},
+		{"security_updates", "boolean", "true keeps the hosts with a security update waiting, false the ones that reported none; an unknown count is in neither."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
 		{"connection_refusal", "string", "The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_<state>."},
 	}, pagingParameters...),
@@ -357,27 +379,32 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/hosts":                   pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":              ref("Host"),
-	"GET /api/v1/jobs":                    cursorCollection("Job"),
-	"GET /api/v1/jobs/{id}":               ref("Job"),
-	"POST /api/v1/jobs/{id}/approve":      ref("Job"),
-	"POST /api/v1/jobs/{id}/cancel":       ref("Job"),
-	"GET /api/v1/jobs/{id}/attempts":      collection("Attempt"),
-	"POST /api/v1/hosts/{id}/operations":  ref("Job"),
-	"GET /api/v1/campaigns":               collection("Campaign"),
-	"POST /api/v1/campaigns":              ref("Campaign"),
-	"GET /api/v1/campaigns/{id}":          ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/approve": ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/pause":   ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/resume":  ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/cancel":  ref("Campaign"),
-	"GET /api/v1/campaigns/{id}/targets":  pagedCollection("CampaignTarget"),
-	"GET /api/v1/campaigns/{id}/timeline": collection("TimelineEntry"),
-	"GET /api/v1/campaigns/{id}/steps":    cursorCollection("CampaignStep"),
-	"GET /api/v1/audit":                   cursorCollection("AuditEvent"),
-	"GET /api/v1/budgets":                 items("Budget"),
-	"GET /api/v1/hosts/{id}/audit":        collection("AuditEvent"),
+	"GET /api/v1/hosts":                         pagedCollection("Host"),
+	"GET /api/v1/hosts/{id}":                    ref("Host"),
+	"PUT /api/v1/hosts/{id}/tags":               ref("Host"),
+	"PUT /api/v1/hosts/{id}/channel":            ref("Host"),
+	"PUT /api/v1/hosts/{id}/owner":              ref("Host"),
+	"PUT /api/v1/hosts/{id}/management-address": ref("Host"),
+	"GET /api/v1/jobs":                          cursorCollection("Job"),
+	"GET /api/v1/jobs/{id}":                     ref("Job"),
+	"POST /api/v1/jobs/{id}/approve":            ref("Job"),
+	"POST /api/v1/jobs/{id}/cancel":             ref("Job"),
+	"GET /api/v1/jobs/{id}/attempts":            collection("Attempt"),
+	"POST /api/v1/hosts/{id}/operations":        ref("Job"),
+	"GET /api/v1/campaigns":                     collection("Campaign"),
+	"POST /api/v1/campaigns":                    ref("Campaign"),
+	"GET /api/v1/campaigns/{id}":                ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/approve":       ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/pause":         ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/resume":        ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/cancel":        ref("Campaign"),
+	"GET /api/v1/campaigns/{id}/targets":        pagedCollection("CampaignTarget"),
+	"GET /api/v1/campaigns/{id}/timeline":       collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":          cursorCollection("CampaignStep"),
+	"GET /api/v1/audit":                         cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                       items("Budget"),
+	"GET /api/v1/fleet/summary":                 ref("FleetSummary"),
+	"GET /api/v1/hosts/{id}/audit":              collection("AuditEvent"),
 }
 
 // items is a whole list answered at once, without a count: the budgets
@@ -408,6 +435,46 @@ func pagedCollection(name string) map[string]any {
 }
 
 var requestSchemas = map[string]map[string]any{
+	// The hand-recorded facts of a host. Both writes honour If-Match with
+	// the ETag of GET /api/v1/hosts/{id}, which names the version of the
+	// owner and the management address together.
+	"PUT /api/v1/hosts/{id}/owner": {
+		"type": "object",
+		"properties": map[string]any{
+			"owner":  map[string]any{"type": "string", "maxLength": hosts.MaxOwnerLength, "description": "Who answers for the host; empty clears it."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"owner"},
+	},
+	"PUT /api/v1/hosts/{id}/management-address": {
+		"type": "object",
+		"properties": map[string]any{
+			"address": map[string]any{"type": "string",
+				"description": "An IP address or a host name the operator reaches the host at; it is recorded with source 'manual' and observations no longer overwrite it. " +
+					"Empty forgets the manual address, and the next session or agent report fills the field again."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"address"},
+	},
+	"POST /api/v1/enrollment-requests": {
+		"type": "object",
+		"properties": map[string]any{
+			"description":         map[string]any{"type": "string"},
+			"site":                map[string]any{"type": "string", "description": "\"default\" when empty."},
+			"environment":         map[string]any{"type": "string", "description": "\"unassigned\" when empty."},
+			"kind":                map[string]any{"type": "string", "enum": []string{"agent", "relay"}},
+			"purpose":             map[string]any{"type": "string", "enum": []string{"new", "relay"}, "description": "Identity recovery is ordered on the host itself."},
+			"expected_machine_id": map[string]any{"type": "string"},
+			"relay_id":            map[string]any{"type": "string", "description": "Binds the token to one relay; empty means any route."},
+			"owner": map[string]any{"type": "string", "maxLength": hosts.MaxOwnerLength,
+				"description": "Recorded on the host the moment it enrolls."},
+			"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
+				"description": "Added to the host's tags at enrollment; the same shape as PUT /hosts/{id}/tags accepts."},
+			"max_uses":    map[string]any{"type": "integer"},
+			"ttl_minutes": map[string]any{"type": "integer"},
+			"reason":      map[string]any{"type": "string", "description": "Required for production, a batch token or a relay."},
+		},
+	},
 	"POST /api/v1/hosts/{id}/operations": {
 		"type": "object",
 		"properties": map[string]any{

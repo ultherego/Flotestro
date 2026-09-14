@@ -25,6 +25,13 @@ const HostClaim = "host"
 // do something with.
 const resourceWaitLimit = 2 * time.Minute
 
+// lockWaitReportInterval spaces the reports of a task waiting for a busy
+// resource. The first one goes out the moment the wait begins - the panel
+// is to show why the host has not started, not an attempt that went quiet
+// - and the later ones say the wait goes on. Every report is also a sign
+// of life for the attempt's lease, which is longer than this gap.
+const lockWaitReportInterval = 10 * time.Second
+
 // locks serialize the mutations on the resources of the host.
 //
 // The limit on the number of tasks (the budget) and a resource lock answer two
@@ -62,26 +69,48 @@ func newLocks() *locks {
 // returns nil and a reason naming the resource and the operation holding it.
 func (l *locks) acquire(ctx context.Context, task, operation string,
 	claims []string) (func(), string) {
+	return l.acquireReporting(ctx, task, operation, claims, nil)
+}
+
+// acquireReporting is acquire that tells the caller about the wait: waiting
+// is called with the blocker when the task first finds a resource busy and
+// then at most every lockWaitReportInterval for as long as the wait lasts.
+// The blocker named is the current one - a wait that outlives one holder
+// and runs into the next names the next.
+func (l *locks) acquireReporting(ctx context.Context, task, operation string,
+	claims []string, waiting func(blocker string)) (func(), string) {
 	if len(claims) == 0 {
 		return func() {}, ""
 	}
+	var lastReport time.Time
 	for {
 		l.mu.Lock()
-		if resource, who, collides := l.collision(claims); !collides {
+		resource, who, collides := l.collision(claims)
+		if !collides {
 			for _, claim := range claims {
 				l.held[claim] = holder{task: task, operation: operation}
 			}
 			l.mu.Unlock()
 			return func() { l.release(claims) }, ""
-		} else {
-			wait := l.change
-			l.mu.Unlock()
-			select {
-			case <-wait:
-			case <-ctx.Done():
-				return nil, describeCollision(resource, who)
-			}
 		}
+		wait := l.change
+		l.mu.Unlock()
+
+		if waiting != nil && (lastReport.IsZero() || time.Since(lastReport) >= lockWaitReportInterval) {
+			waiting(describeBlocker(resource, who))
+			lastReport = time.Now()
+		}
+		// The timer wakes the loop when nothing is released for a while, so
+		// that the wait is reported as going on rather than as vanished.
+		again := time.NewTimer(lockWaitReportInterval)
+		select {
+		case <-wait:
+		case <-again.C:
+		case <-ctx.Done():
+			again.Stop()
+			return nil, describeCollision(resource, who)
+		}
+		again.Stop()
 	}
 }
 
@@ -114,6 +143,20 @@ func (l *locks) release(claims []string) {
 	close(l.change)
 	l.change = make(chan struct{})
 	l.mu.Unlock()
+}
+
+// describeBlocker names what a waiting task waits on, in the form the panel
+// shows under the host: the resource and the task holding it. It is the
+// text of the awaiting_lock report, not of a refusal.
+func describeBlocker(resource string, who holder) string {
+	description := resource
+	if who.task != "" {
+		description += " held by task " + who.task
+	}
+	if who.operation != "" {
+		description += " (" + who.operation + ")"
+	}
+	return description
 }
 
 func describeCollision(resource string, who holder) string {
@@ -207,16 +250,17 @@ func operationName(task *agentv1.TaskEnvelope) string {
 // The limit is shorter than the limit of the operation: a task that has not got
 // its resource within two minutes is to come back with an answer instead of
 // staying silent until the end of its time. An empty reason together with nil
-// means the end of the session.
+// means the end of the session. The wait is reported through waiting, which
+// may be nil.
 func acquireResources(ctx context.Context, resources *locks, task *agentv1.TaskEnvelope,
-	claims []string) (func(), string) {
+	claims []string, waiting func(blocker string)) (func(), string) {
 	if len(claims) == 0 {
 		return func() {}, ""
 	}
-	waiting, cancel := context.WithTimeout(ctx, resourceWaitLimit)
+	bounded, cancel := context.WithTimeout(ctx, resourceWaitLimit)
 	defer cancel()
 
-	release, reason := resources.acquire(waiting, task.GetTaskId(), operationName(task), claims)
+	release, reason := resources.acquireReporting(bounded, task.GetTaskId(), operationName(task), claims, waiting)
 	if release != nil {
 		return release, ""
 	}

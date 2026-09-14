@@ -48,6 +48,15 @@ var fanOutLimits = map[ActionType]int{
 	ActionSysctlPlan:       50,
 	ActionFilePlan:         50,
 	ActionDomainPreflight:  50,
+
+	// An inventory refresh is a read whose answer lands in the inventory,
+	// not in a merged output, so the panel holds nothing per host: the
+	// ceiling is the wave of the overview chapter (two hundred), and the
+	// cost on the hosts is bounded by the agent's own rate limit and
+	// jitter. A refresh is not a campaign: it changes nothing, and the
+	// operator asking "how are things now" on a site must not need an
+	// approval to find out.
+	ActionInventoryRefresh: 200,
 }
 
 // FanOutLimit says how many hosts one diagnostic read may cover at once.

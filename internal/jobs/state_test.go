@@ -52,3 +52,45 @@ func TestValidateAllowsRepeatingTheSameState(t *testing.T) {
 		t.Fatal("a forbidden transition passed validation")
 	}
 }
+
+// TestRunningIsReachedFromDispatchedOnly: the agent's word that the
+// operation started moves a delivered job to running and nothing else
+// does - a job that was never handed over cannot start, and a running job
+// ends the way any executed job ends.
+func TestRunningIsReachedFromDispatchedOnly(t *testing.T) {
+	if !StateDispatched.CanTransition(StateRunning) {
+		t.Fatal("dispatched -> running is the start the agent reports and has to be allowed")
+	}
+	for _, from := range []State{StatePlanned, StateAwaitingApproval, StateQueued, StateLeased} {
+		if from.CanTransition(StateRunning) {
+			t.Errorf("%s -> running skips the hand-over", from)
+		}
+	}
+	for _, to := range []State{StateSucceeded, StateFailed, StateTimedOut, StateCanceled} {
+		if !StateRunning.CanTransition(to) {
+			t.Errorf("running -> %s has to be possible: that is how an executed job ends", to)
+		}
+	}
+	if StateRunning.CanTransition(StateDispatched) {
+		t.Error("a running job went back to dispatched")
+	}
+}
+
+// TestTheLockWaitReasonRoundTrips: the reason a delivered job waits with
+// names the blocker the agent reported, under its own prefix, so that a
+// budget wait and a lock wait are told apart by the prefix alone.
+func TestTheLockWaitReasonRoundTrips(t *testing.T) {
+	reason := LockWaitReason("units held by task 7c1e (schedule.run_now)")
+	if reason != "awaiting_lock:units held by task 7c1e (schedule.run_now)" {
+		t.Fatalf("reason = %q", reason)
+	}
+	blocker, waited := LockBlocker(reason)
+	if !waited || blocker != "units held by task 7c1e (schedule.run_now)" {
+		t.Errorf("blocker = %q, waited = %v", blocker, waited)
+	}
+	for _, other := range []string{"", "awaiting_budget:global:mutations"} {
+		if _, waited := LockBlocker(other); waited {
+			t.Errorf("%q was read as a lock wait", other)
+		}
+	}
+}

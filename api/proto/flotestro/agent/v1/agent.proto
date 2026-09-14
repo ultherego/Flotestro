@@ -934,6 +934,29 @@ message TaskProgress {
   // Stage names what kind of report this is, when that matters more than
   // the step. Empty is an ordinary progress line of a running operation.
   //
+  // The acknowledgement of a task travels as stages of the same message,
+  // in this order, each sent at most once per attempt:
+  //
+  // "accepted" - the agent holds the task and will carry it out: the
+  // envelope passed the checks that refuse a task without touching the
+  // host (expiry, preconditions, capability, the plan hash), and the task
+  // is about to queue for the resources of the host. It is the answer the
+  // panel's dispatch lease waits for; an envelope that gets no "accepted"
+  // went into a dead stream and is delivered again. Nothing on the host
+  // has changed yet.
+  //
+  // "awaiting_lock" - the task waits for a resource another task of this
+  // host holds. message names the blocker, e.g. "units held by task <id>
+  // (schedule.run_now)". Repeated at most every ten seconds while the wait
+  // lasts; the wait itself ends with "started" or with a resource_busy
+  // result.
+  //
+  // "started" - the claims are taken and the operation is starting on the
+  // host this instant: for a mutation the in-flight marker is in the
+  // journal and the module is about to run. claims lists the resources
+  // held. From here on the outcome is the host's, and a lost session means
+  // an unknown outcome, not a task to repeat.
+  //
   // "in_progress" is the answer to a redelivered task: the panel gave up
   // on the attempt that started the operation (its lease ran out) and sent
   // the same idempotency key again, while this agent is still carrying it
@@ -946,6 +969,12 @@ message TaskProgress {
   // the one whose execution it is waiting on, so that the panel sees the
   // two attempts as one execution rather than as a repeat.
   string previous_task_id = 9;
+  // The resources the task holds, given with the "started" stage: the
+  // lock classes of the operation registry ("packages", "units", ...),
+  // "host" for a restart, "file:<path>" for a file. Empty for a read,
+  // which takes nothing. The panel shows them next to a host that others
+  // wait on.
+  repeated string claims = 10;
 }
 
 message TaskResult {

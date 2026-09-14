@@ -20,6 +20,11 @@ import (
 // hour-long transaction.
 var DurationBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 1800, 3600}
 
+// AckBuckets covers an acknowledgement: a round trip on a healthy stream
+// is well under a second, and the dispatch lease is a minute, so the
+// buckets are dense below a second and end where the lease does.
+var AckBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60}
+
 // Registry keeps the instruments of one process.
 type Registry struct {
 	mu         sync.Mutex
@@ -215,4 +220,35 @@ var (
 	BudgetWait = Default.NewHistogram("flotestro_budget_wait_seconds",
 		"Wait for budget capacity that ended in a grant, by class and site.",
 		DurationBuckets, "class", "site")
+	// TaskAck measures the time from handing a task to the agent to the
+	// agent's word that it holds it. The dispatch lease (internal/jobs
+	// DispatchLease) is sized against this: an acknowledgement that takes
+	// longer than the lease means a redelivery of a task the host had.
+	TaskAck = Default.NewHistogram("flotestro_task_ack_seconds",
+		"Time from handing a task to the agent to its acceptance, by operation.",
+		AckBuckets, "action")
+	// ResourceLockWait measures how long a task waited on its host for a
+	// resource another task held, from the acceptance to the start. Only
+	// the waits the agent reported are counted.
+	ResourceLockWait = Default.NewHistogram("flotestro_resource_lock_wait_seconds",
+		"Time a task waited on its host for a resource held by another task, by operation.",
+		DurationBuckets, "action")
+
+	// AgentReconnect counts the sessions opened by a host whose previous
+	// session ended within the last ten minutes: a link that flaps or an
+	// agent that crashes, which the connection state alone never shows.
+	// The gateway increments it at session open (agent_service.go), once
+	// it has looked up when the host's last session ended; the family of
+	// the host is the label, because the fleet grows and a host name must
+	// not become a time series.
+	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
+		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
+		"host_family")
+	// AgentRenewal counts the certificate renewals by how they ended. The
+	// gateway increments it where the renewal is settled (renewal.go):
+	// renewed, refused, or failed - a refusal is the panel's decision, a
+	// failure is something that broke. A renewal that never arrives shows
+	// in the expiry gauges, not here.
+	AgentRenewal = Default.NewCounter("flotestro_agent_renewal_total",
+		"Agent certificate renewals, by outcome.", "outcome")
 )

@@ -3,6 +3,8 @@ package gateway
 import (
 	"testing"
 	"time"
+
+	"github.com/ultherego/flotestro/internal/jobs"
 )
 
 // TestASignOfLifeRenewsTheLeaseOncePerInterval guards the pacing of the
@@ -50,5 +52,36 @@ func TestTheRenewalOutpacesTheReclaim(t *testing.T) {
 	if progressLeaseExtension <= leaseRenewalInterval+housekeeping {
 		t.Fatalf("an extension of %s does not outlast a renewal pause of %s and a housekeeping pass of %s",
 			progressLeaseExtension, leaseRenewalInterval, housekeeping)
+	}
+}
+
+// TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease guards the
+// two ends of the short lease an envelope gets at the hand-over: it has to
+// outlast a housekeeping pass, or a healthy acknowledgement races the
+// reclaim; and it has to be shorter than the execution lease the
+// acceptance extends it to, or the extension changes nothing.
+func TestTheDispatchLeaseSitsBetweenTheReclaimAndTheExecutionLease(t *testing.T) {
+	const housekeeping = 30 * time.Second
+	if jobs.DispatchLease <= housekeeping {
+		t.Fatalf("a dispatch lease of %s does not outlast a housekeeping pass of %s",
+			jobs.DispatchLease, housekeeping)
+	}
+	if jobs.DispatchLease >= progressLeaseExtension {
+		t.Fatalf("a dispatch lease of %s is not shorter than the execution lease of %s",
+			jobs.DispatchLease, progressLeaseExtension)
+	}
+}
+
+// TestTheStagesMatchTheProtocol pins the stage names the gateway reads to
+// the ones agent.proto documents: a renamed constant on one side would
+// silently turn every acknowledgement into an ordinary progress line.
+func TestTheStagesMatchTheProtocol(t *testing.T) {
+	for name, want := range map[string]string{
+		stageAccepted: "accepted", stageAwaitingLock: "awaiting_lock",
+		stageStarted: "started", stageInProgress: "in_progress",
+	} {
+		if name != want {
+			t.Errorf("stage %q, expected %q", name, want)
+		}
 	}
 }
