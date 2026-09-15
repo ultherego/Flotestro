@@ -357,8 +357,10 @@ var queryParameters = map[string][]queryParameter{
 		{"host_id", "string", ""},
 		{"state", "string", ""},
 		{"action", "string", "The operation type."},
+		{"action_prefix", "string", "The beginning of an operation type; packages. keeps every package operation."},
 		{"actor", "string", "The identity that ordered the task."},
 		{"campaign_id", "string", ""},
+		{"fanout_id", "string", "The read fan-out that ordered the tasks."},
 		{"error_code", "string", "The result error code the task ended with."},
 		{"since", "string", "RFC 3339; tasks created at or after this moment."},
 		{"until", "string", "RFC 3339; tasks created before this moment."},
@@ -397,6 +399,13 @@ var queryParameters = map[string][]queryParameter{
 		{"host_id", "string", "Only the steps of this host."},
 		{"limit", "integer", "How many hosts one page covers: 200 by default, 1000 at most; a page is cut between hosts, never inside one."},
 		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+	},
+	"GET /api/v1/identity/users": {
+		{"preserved", "string", "\"true\" lists the accounts removed with their entry kept, apart from the live ones; a preserved account reaches no host and belongs to no group."},
+	},
+	"GET /api/v1/identity/changes": {
+		{"state", "string", "planned, awaiting_approval, running, succeeded, partially_applied, failed or canceled."},
+		{"limit", "integer", "The most changes to return: 50 by default, 200 at most."},
 	},
 	"GET /api/v1/monitoring/alerts": {
 		{"state", "string", "pending, firing or resolved."},
@@ -542,6 +551,34 @@ var requestSchemas = map[string]map[string]any{
 			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		},
 		"required": []string{"failure_domain"},
+	},
+	// A directory change: the plan is computed at once, the execution
+	// waits for a second person. The one-time value of a password reset
+	// never enters the change; the requester reads it once at /reveal.
+	"POST /api/v1/identity/changes": {
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{"type": "string", "enum": []string{
+				"identity.user.create", "identity.user.disable", "identity.user.enable", "identity.sshkeys.set",
+				"identity.user.expire", "identity.user.posix", "identity.user.preserve", "identity.user.password.reset",
+				"identity.group.members", "identity.hostgroup.members",
+				"identity.hbac.rule.ensure", "identity.hbac.rule.remove", "identity.sudo.rule.ensure", "identity.sudo.rule.remove",
+				"dns.record.ensure", "dns.record.remove",
+			}},
+			"payload": map[string]any{"type": "object", "description": "One field named after the change: user, reference {uid}, " +
+				"expiry {uid, principal_expires_at?, password_expires_at?: RFC 3339, \"\" clears}, posix {uid, uid_number?, gid_number?, shell?, home_directory?}, " +
+				"ssh_keys {uid, keys}, group {group, add?, remove?}, host_group {group, add?, remove?: FQDNs}, hbac_rule, sudo_rule or dns."},
+			"reason": map[string]any{"type": "string", "description": "Required for a change of access: at least 8 characters, kept in the audit trail with the fresh authentication."},
+		},
+		"required": []string{"action", "payload"},
+	},
+	"POST /api/v1/identity/changes/{id}/reveal": {
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": "Reading a one-time password is a change of access: the reason and the fresh authentication are recorded. " +
+				"The answer {uid, one_time_password, expires_on_first_login} comes once, to the person who ordered the reset; " +
+				"afterwards 410 secret_consumed, and 404 no_secret when nothing waits - the change has not run, failed, or the value went away with its deadline or a restart."},
+		},
 	},
 	"POST /api/v1/enrollment-requests": {
 		"type": "object",

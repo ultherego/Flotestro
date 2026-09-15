@@ -47,8 +47,18 @@ func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload)
 		return p.planUserAccess(ctx, payload.Reference.UID, true)
 	case ActionGroupMembers:
 		return p.planGroupMembers(ctx, payload.Group)
+	case ActionHostGroupMembers:
+		return p.planHostGroupMembers(ctx, payload.HostGroup)
 	case ActionSSHKeys:
 		return p.planSSHKeys(ctx, payload.SSHKeys)
+	case ActionUserExpire:
+		return p.planUserExpire(ctx, payload.Expiry)
+	case ActionUserPOSIX:
+		return p.planUserPOSIX(ctx, payload.POSIX)
+	case ActionUserPreserve:
+		return p.planUserPreserve(ctx, payload.Reference.UID)
+	case ActionUserPasswordReset:
+		return p.planPasswordReset(ctx, payload.Reference.UID)
 	case ActionDNSRecordEnsure:
 		return p.planRecord(ctx, payload.DNS, true)
 	case ActionDNSRecordRemove:

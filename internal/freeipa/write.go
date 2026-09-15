@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"time"
 )
 
 // Write operations are carried out only through explicitly supported
@@ -185,21 +187,8 @@ func (c *Client) ShowUser(ctx context.Context, uid string) (*User, error) {
 	if err := json.Unmarshal(result, &decoded); err != nil {
 		return nil, err
 	}
-	record := decoded.Result
-	return &User{
-		UID:                first(record, "uid"),
-		FirstName:          first(record, "givenname"),
-		LastName:           first(record, "sn"),
-		DisplayName:        first(record, "displayname"),
-		Email:              strings_(record, "mail"),
-		UIDNumber:          first(record, "uidnumber"),
-		GIDNumber:          first(record, "gidnumber"),
-		HomeDir:            first(record, "homedirectory"),
-		Shell:              first(record, "loginshell"),
-		Groups:             strings_(record, "memberof_group"),
-		Disabled:           boolean(record, "nsaccountlock"),
-		SSHKeyFingerprints: strings_(record, "sshpubkeyfp"),
-	}, nil
+	user := userFromRecord(decoded.Result, false)
+	return &user, nil
 }
 
 // invalidate clears the cache after a change in the directory, so that the
@@ -267,6 +256,203 @@ func (c *Client) EnsureHostWithOTP(ctx context.Context, fqdn string) (string, er
 	password := first(decoded.Result, "randompassword")
 	if password == "" {
 		return "", fmt.Errorf("the directory returned no single-use password for %s", fqdn)
+	}
+	c.invalidate()
+	return password, nil
+}
+
+// AddHostGroupMembers adds hosts to a host group. The rules reach a host
+// through its groups, so this is a change of access and goes through the
+// same plan and approval as a user group change.
+func (c *Client) AddHostGroupMembers(ctx context.Context, group string, hosts []string) error {
+	return c.changeHostGroupMembers(ctx, "hostgroup_add_member", group, hosts)
+}
+
+// RemoveHostGroupMembers removes hosts from a host group.
+func (c *Client) RemoveHostGroupMembers(ctx context.Context, group string, hosts []string) error {
+	return c.changeHostGroupMembers(ctx, "hostgroup_remove_member", group, hosts)
+}
+
+func (c *Client) changeHostGroupMembers(ctx context.Context, method, group string, hosts []string) error {
+	if !groupNamePattern.MatchString(group) {
+		return fmt.Errorf("invalid host group name %q", group)
+	}
+	if len(hosts) == 0 {
+		return fmt.Errorf("no hosts to change the membership of")
+	}
+	for _, host := range hosts {
+		if !hostNamePattern.MatchString(host) {
+			return fmt.Errorf("invalid host name %q", host)
+		}
+	}
+	result, err := c.call(ctx, method, []string{group}, map[string]any{"host": hosts})
+	if err != nil {
+		return fmt.Errorf("changing the membership of the host group %s: %w", group, err)
+	}
+	// A partial success comes back as a list of failures, not as an error,
+	// and must not pass as a success.
+	if problems := failedMembers(result); len(problems) > 0 {
+		return fmt.Errorf("some hosts were not changed: %s", strings.Join(problems, "; "))
+	}
+	c.invalidate()
+	return nil
+}
+
+// Expiry names the two Kerberos expirations of an account. A nil field is
+// left as it is; a pointer to the zero time clears the expiration, so that
+// "never expires" can be ordered as deliberately as a date.
+type Expiry struct {
+	PrincipalExpiresAt *time.Time
+	PasswordExpiresAt  *time.Time
+}
+
+// Empty says the change names nothing.
+func (e Expiry) Empty() bool {
+	return e.PrincipalExpiresAt == nil && e.PasswordExpiresAt == nil
+}
+
+// SetUserExpiry sets or clears the expirations of an account. The
+// principal expiration ends every Kerberos authentication of the account
+// at that moment; the password expiration makes the next login change the
+// password. Neither locks the account: a lock is a separate change with
+// its own plan.
+func (c *Client) SetUserExpiry(ctx context.Context, uid string, expiry Expiry) error {
+	if !userNamePattern.MatchString(uid) {
+		return fmt.Errorf("invalid account name %q", uid)
+	}
+	if expiry.Empty() {
+		return fmt.Errorf("the expiry change names no expiration")
+	}
+	options := map[string]any{}
+	if expiry.PrincipalExpiresAt != nil {
+		options["krbprincipalexpiration"] = expiryValue(*expiry.PrincipalExpiresAt)
+	}
+	if expiry.PasswordExpiresAt != nil {
+		options["krbpasswordexpiration"] = expiryValue(*expiry.PasswordExpiresAt)
+	}
+	if _, err := c.call(ctx, "user_mod", []string{uid}, options); err != nil && !isEmptyModification(err) {
+		return fmt.Errorf("changing the expiration of the account %s: %w", uid, err)
+	}
+	c.invalidate()
+	return nil
+}
+
+// expiryValue renders an expiration for the directory; the zero time
+// becomes null, which the directory reads as "remove the attribute".
+func expiryValue(at time.Time) any {
+	if at.IsZero() {
+		return nil
+	}
+	return GeneralizedTime(at)
+}
+
+// POSIXSpec names the POSIX attributes of an account to change. An empty
+// field is left as it is.
+type POSIXSpec struct {
+	UIDNumber string
+	GIDNumber string
+	Shell     string
+	HomeDir   string
+}
+
+// Validate checks the shape before anything goes to the directory.
+func (s POSIXSpec) Validate() error {
+	for name, value := range map[string]string{"uid number": s.UIDNumber, "gid number": s.GIDNumber} {
+		if value == "" {
+			continue
+		}
+		if !posixIDPattern.MatchString(value) {
+			return fmt.Errorf("invalid %s %q", name, value)
+		}
+	}
+	if s.Shell != "" && !absolutePathPattern.MatchString(s.Shell) {
+		return fmt.Errorf("the shell must be an absolute path, not %q", s.Shell)
+	}
+	if s.HomeDir != "" && !absolutePathPattern.MatchString(s.HomeDir) {
+		return fmt.Errorf("the home directory must be an absolute path, not %q", s.HomeDir)
+	}
+	if s.UIDNumber == "" && s.GIDNumber == "" && s.Shell == "" && s.HomeDir == "" {
+		return fmt.Errorf("the POSIX change names no attribute")
+	}
+	return nil
+}
+
+// The shapes of POSIX attributes: a number for the identifiers, an
+// absolute path for the shell and the home directory. The directory
+// validates too; this stops nonsense before the plan is even computed.
+var (
+	posixIDPattern      = regexp.MustCompile(`^[0-9]{1,10}$`)
+	absolutePathPattern = regexp.MustCompile(`^/[^\s]*$`)
+)
+
+// SetUserPOSIX changes the POSIX attributes of an account. A new UID or GID
+// number changes whom the files on every host belong to; the plan says so
+// before anybody approves it.
+func (c *Client) SetUserPOSIX(ctx context.Context, uid string, spec POSIXSpec) error {
+	if !userNamePattern.MatchString(uid) {
+		return fmt.Errorf("invalid account name %q", uid)
+	}
+	if err := spec.Validate(); err != nil {
+		return err
+	}
+	options := map[string]any{}
+	if spec.UIDNumber != "" {
+		options["uidnumber"] = spec.UIDNumber
+	}
+	if spec.GIDNumber != "" {
+		options["gidnumber"] = spec.GIDNumber
+	}
+	if spec.Shell != "" {
+		options["loginshell"] = spec.Shell
+	}
+	if spec.HomeDir != "" {
+		options["homedirectory"] = spec.HomeDir
+	}
+	if _, err := c.call(ctx, "user_mod", []string{uid}, options); err != nil && !isEmptyModification(err) {
+		return fmt.Errorf("changing the POSIX attributes of the account %s: %w", uid, err)
+	}
+	c.invalidate()
+	return nil
+}
+
+// PreserveUser removes an account while keeping its entry: the directory
+// moves it among the preserved accounts, where the UID and the history
+// stay and nothing can sign in as it. This is the only removal the adapter
+// carries out - a user_del without preserve is refused by the client
+// before any request is built.
+func (c *Client) PreserveUser(ctx context.Context, uid string) error {
+	if !userNamePattern.MatchString(uid) {
+		return fmt.Errorf("invalid account name %q", uid)
+	}
+	if _, err := c.call(ctx, "user_del", []string{uid}, map[string]any{"preserve": true}); err != nil {
+		return fmt.Errorf("preserving the account %s: %w", uid, err)
+	}
+	c.invalidate()
+	return nil
+}
+
+// ResetUserPassword asks the directory for a new password of the account.
+// The directory generates it and marks it expired, so the first login has
+// to change it. The value is returned to the caller once and is neither
+// kept nor logged here; a caller that stores it breaks the document's rule
+// that a secret is never in a job output.
+func (c *Client) ResetUserPassword(ctx context.Context, uid string) (string, error) {
+	if !userNamePattern.MatchString(uid) {
+		return "", fmt.Errorf("invalid account name %q", uid)
+	}
+	result, err := c.call(ctx, "user_mod", []string{uid}, map[string]any{"random": true})
+	if err != nil {
+		return "", fmt.Errorf("resetting the password of the account %s: %w", uid, err)
+	}
+	var decoded struct {
+		Result map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(result, &decoded); err != nil {
+		return "", err
+	}
+	password := first(decoded.Result, "randompassword")
+	if password == "" {
+		return "", fmt.Errorf("the directory returned no password for %s", uid)
 	}
 	c.invalidate()
 	return password, nil

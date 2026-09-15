@@ -111,8 +111,18 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 		phases, _ = e.setUserAccess(ctx, payload.Reference, true)
 	case ActionGroupMembers:
 		phases, revoked = e.changeGroupMembers(ctx, payload.Group)
+	case ActionHostGroupMembers:
+		phases = e.changeHostGroupMembers(ctx, payload.HostGroup)
 	case ActionSSHKeys:
 		phases = e.setSSHKeys(ctx, payload.SSHKeys)
+	case ActionUserExpire:
+		phases = e.setUserExpiry(ctx, payload.Expiry)
+	case ActionUserPOSIX:
+		phases = e.setUserPOSIX(ctx, payload.POSIX)
+	case ActionUserPreserve:
+		phases, revoked = e.preserveUser(ctx, payload.Reference)
+	case ActionUserPasswordReset:
+		phases = e.resetPassword(ctx, change, payload.Reference)
 	case ActionDNSRecordEnsure:
 		phases = e.writeRecord(ctx, payload.DNS, true)
 	case ActionDNSRecordRemove:
@@ -371,6 +381,94 @@ func (e *Executor) setSSHKeys(ctx context.Context, spec *SSHKeysPayload) []Phase
 	phase := startPhase("setting the SSH keys of the account " + spec.UID)
 	err := e.directory.SetUserSSHKeys(ctx, spec.UID, spec.Keys)
 	return []Phase{finishPhase(phase, err, "")}
+}
+
+// changeHostGroupMembers moves hosts in and out of a host group. No panel
+// session ends here: a host's group changes which rules reach it, and the
+// host's own SSSD picks that up; the users keep their panel scope.
+func (e *Executor) changeHostGroupMembers(ctx context.Context, spec *HostGroupPayload) []Phase {
+	var phases []Phase
+	if len(spec.Add) > 0 {
+		phase := startPhase("adding hosts to the host group " + spec.Group)
+		err := e.directory.AddHostGroupMembers(ctx, spec.Group, spec.Add)
+		phases = append(phases, finishPhase(phase, err, strings.Join(spec.Add, ", ")))
+	}
+	if len(spec.Remove) > 0 {
+		phase := startPhase("removing hosts from the host group " + spec.Group)
+		err := e.directory.RemoveHostGroupMembers(ctx, spec.Group, spec.Remove)
+		phases = append(phases, finishPhase(phase, err, strings.Join(spec.Remove, ", ")))
+	}
+	return phases
+}
+
+// setUserExpiry sets or clears the expirations of an account.
+func (e *Executor) setUserExpiry(ctx context.Context, spec *ExpiryPayload) []Phase {
+	phase := startPhase("changing the expiration of the account " + spec.UID)
+	expiry, err := spec.Spec()
+	if err != nil {
+		return []Phase{finishPhase(phase, err, "")}
+	}
+	err = e.directory.SetUserExpiry(ctx, spec.UID, expiry)
+	return []Phase{finishPhase(phase, err, strings.Join(append(
+		expiryStep("the Kerberos principal", expiry.PrincipalExpiresAt),
+		expiryStep("the password", expiry.PasswordExpiresAt)...), "; "))}
+}
+
+// setUserPOSIX changes the POSIX attributes of an account and reports
+// them as the directory holds them afterwards.
+func (e *Executor) setUserPOSIX(ctx context.Context, spec *POSIXPayload) []Phase {
+	phase := startPhase("changing the POSIX attributes of the account " + spec.UID)
+	if err := e.directory.SetUserPOSIX(ctx, spec.UID, spec.Spec()); err != nil {
+		return []Phase{finishPhase(phase, err, "")}
+	}
+	user, err := e.directory.ShowUser(ctx, spec.UID)
+	if err != nil {
+		// The write went through; a failed read-back is reported as such
+		// rather than as a failed change.
+		return []Phase{finishPhase(phase, nil, "changed; the account was not read back: "+err.Error())}
+	}
+	return []Phase{finishPhase(phase, nil, describeUser(user)+", shell "+user.Shell+", home "+user.HomeDir)}
+}
+
+// preserveUser removes an account while keeping its entry. The order is
+// the order of a disable, for the same reason: the local denial marker and
+// the revoked sessions first, so that no session outlives the account for
+// the time the directory takes.
+func (e *Executor) preserveUser(ctx context.Context, ref *ReferencePayload) ([]Phase, *sessionRevocation) {
+	var phases []Phase
+
+	phase := startPhase("the local denial marker")
+	count, err := e.store.SetLocalDeny(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was preserved"), true)
+	phases = append(phases, finishPhase(phase, err, describeCount("identities marked", count)))
+
+	phase = startPhase("revoking the panel sessions")
+	result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was preserved"))
+	phases = append(phases, finishPhase(phase, err, result.String()))
+
+	phase, ended := e.endProviderSessions(ctx, ref.UID)
+	phases = append(phases, phase)
+	result.ProviderSessionsEnded = &ended.Ended
+	result.ProviderReason = ended.Reason
+
+	phase = startPhase("preserving the account in the directory")
+	err = e.directory.PreserveUser(ctx, ref.UID)
+	phases = append(phases, finishPhase(phase, err, "the entry stays as a preserved account"))
+	return phases, &result
+}
+
+// resetPassword asks the directory for a new password and keeps it for
+// the requester alone, in memory. The phase message, the audit entry and
+// the log never carry the value: a secret in a job output is what the
+// document forbids.
+func (e *Executor) resetPassword(ctx context.Context, change Change, ref *ReferencePayload) []Phase {
+	phase := startPhase("resetting the password of the account " + ref.UID)
+	password, err := e.directory.ResetUserPassword(ctx, ref.UID)
+	if err != nil {
+		return []Phase{finishPhase(phase, err, "")}
+	}
+	e.store.KeepSecret(change.ID, change.CreatedBy, password)
+	return []Phase{finishPhase(phase, nil,
+		"a one-time password was issued; it expires on first login and waits for "+change.CreatedBy+" to read it once")}
 }
 
 // finish records the result and notes it in the audit trail.

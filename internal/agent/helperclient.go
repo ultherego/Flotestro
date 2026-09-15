@@ -75,6 +75,27 @@ func (c *HelperClient) CallWithProgress(ctx context.Context, request *helperv1.H
 			helper.BusyResource(response.GetMessage()) != "" {
 			response.ErrorCode = RejectResourceBusy
 		}
+		// A refusal at the helper's own check of the contract is the same
+		// answer whichever module asked: the helper did not understand the
+		// request and ran nothing. It travels under one code, with the
+		// helper's word kept in the message.
+		if !response.GetAccepted() && helperRefusedContract(response.GetErrorCode()) {
+			response.Message = response.GetErrorCode() + ": " + response.GetMessage()
+			response.ErrorCode = RejectHelperRejected
+		}
 		return &response, nil
 	}
+}
+
+// helperRefusedContract says whether a helper code is a refusal of the
+// request itself - its shape, its protocol version or its action - rather
+// than an outcome of the operation. Only those become helper_rejected; a
+// locked resource, a failed precondition or an exec failure keep their own
+// codes, because the operator does different things about each.
+func helperRefusedContract(code string) bool {
+	switch code {
+	case helper.ErrorMalformed, helper.ErrorUnsupportedVersion, helper.ErrorUnknownAction:
+		return true
+	}
+	return false
 }

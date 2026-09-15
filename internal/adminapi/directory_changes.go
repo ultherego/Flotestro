@@ -247,7 +247,8 @@ func (s *Server) handleCancelDirectoryChange(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleListDirectoryChanges(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "directory_change", ""); !ok {
+	principal, ok := s.authorize(w, r, authz.PermIdentityRead, authz.GlobalScope, "directory_change", "")
+	if !ok {
 		return
 	}
 	if s.changes == nil {
@@ -263,15 +264,96 @@ func (s *Server) handleListDirectoryChanges(w http.ResponseWriter, r *http.Reque
 	if items == nil {
 		items = []identity.Change{}
 	}
+	// Whether a one-time value waits is told to its requester alone.
+	for index := range items {
+		items[index].SecretAvailable = s.changes.SecretWaiting(items[index].ID, principal.Subject)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 }
 
 func (s *Server) handleGetDirectoryChange(w http.ResponseWriter, r *http.Request) {
-	change, _, ok := s.changeFor(w, r, authz.PermIdentityRead)
+	change, principal, ok := s.changeFor(w, r, authz.PermIdentityRead)
 	if !ok {
 		return
 	}
+	// Whether a one-time value waits is told to its requester alone; for
+	// anybody else the flag stays down, as if there were nothing.
+	change.SecretAvailable = s.changes.SecretWaiting(change.ID, principal.Subject)
 	writeJSON(w, http.StatusOK, change)
+}
+
+// handleRevealDirectoryChangeSecret hands the one-time value of a change -
+// the password the directory generated on a reset - to the person who
+// ordered the change, once. The value was never written anywhere: it waits
+// in the memory of the process that carried the change out, for a short
+// while, and this read consumes it. The audit trail records that it was
+// read and by whom, never what it was.
+func (s *Server) handleRevealDirectoryChangeSecret(w http.ResponseWriter, r *http.Request) {
+	change, principal, ok := s.changeFor(w, r, authz.PermIdentityUserWrite)
+	if !ok {
+		return
+	}
+	var request struct {
+		Reason string `json:"reason,omitempty"`
+	}
+	if r.ContentLength > 0 {
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request)
+	}
+	if change.CreatedBy != principal.Subject {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "directory_change.reveal", TargetType: "directory_change", TargetID: change.ID,
+			Outcome: audit.OutcomeDenied, Detail: map[string]any{"reason": "not_requester"},
+		})
+		problem(w, http.StatusForbidden, "not_requester",
+			"the one-time value of a change is read by the person who ordered it")
+		return
+	}
+	if identity.ActionType(change.ActionType) != identity.ActionUserPasswordReset {
+		problem(w, http.StatusNotFound, "no_secret", "this change has no one-time value")
+		return
+	}
+	// Reading a password is a change of access in its own right: it is
+	// taken with the same fresh authentication and reason as ordering it.
+	evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+		"directory_change.reveal", "directory_change", change.ID)
+	if !ok {
+		return
+	}
+
+	value, handedOut, consumed := s.changes.TakeSecret(change.ID, principal.Subject)
+	if consumed {
+		problem(w, http.StatusGone, "secret_consumed",
+			"the one-time value was already read; order a new reset for a new one")
+		return
+	}
+	if !handedOut {
+		problem(w, http.StatusNotFound, "no_secret",
+			"no one-time value waits for this change: it was not carried out yet, it failed, or the value went away with its deadline or a restart of the panel")
+		return
+	}
+
+	var payload identity.Payload
+	uid := ""
+	if err := json.Unmarshal(change.Payload, &payload); err == nil && payload.Reference != nil {
+		uid = payload.Reference.UID
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "directory_change.reveal", TargetType: "directory_change", TargetID: change.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"action_type": change.ActionType, "uid": uid,
+			"reason": strings.TrimSpace(request.Reason),
+		}, evidence),
+	})
+	// The value goes out once and is not cached anywhere on the way.
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{
+		"uid":                    uid,
+		"one_time_password":      value,
+		"expires_on_first_login": true,
+	})
 }
 
 // changeFor loads the change and checks the permission.

@@ -1136,10 +1136,14 @@ func validateJournalPayload(payload *JournalPayload) error {
 			return err
 		}
 	}
-	// The "since" value goes into a journalctl argument. It does not pass
-	// through a shell, but narrower validation is still cheaper than trust.
+	// The "since" and "until" values go into journalctl arguments. They do
+	// not pass through a shell, but narrower validation is still cheaper
+	// than trust.
 	if payload.Since != "" && !periodPattern.MatchString(payload.Since) {
 		return fmt.Errorf("invalid time range %q", payload.Since)
+	}
+	if payload.Until != "" && !periodPattern.MatchString(payload.Until) {
+		return fmt.Errorf("invalid time range %q", payload.Until)
 	}
 	// A cursor is what journalctl printed: a handful of key=value pairs
 	// separated by semicolons. Anything else is not a cursor.
@@ -1158,11 +1162,13 @@ var cursorPattern = regexp.MustCompile(`^[A-Za-z0-9=;:+/._-]{1,512}$`)
 const maxDetailUnits = 5
 
 // periodPattern allows the formats journalctl accepts: a timestamp, a
-// relative expression and keywords.
+// relative expression and keywords. A timestamp may say UTC: the panel
+// bounds a read to the window of a job, whose times it knows in UTC, and a
+// bare timestamp would be read in the host's own zone.
 var periodPattern = regexp.MustCompile(
 	`^(-?\d+ ?(s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days|w|week|weeks)( ago)?` +
 		`|yesterday|today|now` +
-		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?)?)$`)
+		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?( UTC)?)?)$`)
 
 // scheduleIdentifier repeats the pattern from the schedules module. The name
 // becomes the name of a file in /etc/cron.d, and cron skips files with a dot
@@ -1498,6 +1504,10 @@ type JournalPayload struct {
 	// MaxPriority follows syslog: 0 emerg ... 7 debug. Empty means no filter.
 	MaxPriority *uint32 `json:"max_priority,omitempty"`
 	Since       string  `json:"since,omitempty"`
+	// Until ends the read, in the same forms as Since. The Logs page sets
+	// both to the window of a job, so the lines are the ones written while
+	// the operation ran and a little after; a live view ignores it.
+	Until string `json:"until,omitempty"`
 	// FollowSeconds bounds the live view. Zero means the default limit; a
 	// stream without an upper bound would keep a process on the host
 	// forever, including when nobody is watching any more.

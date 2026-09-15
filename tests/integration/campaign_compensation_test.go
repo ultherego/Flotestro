@@ -46,7 +46,7 @@ func (h *harness) runFileCampaign(body map[string]any) campaignView {
 		h.t.Fatalf("the file campaign %s started from state %s", campaign.Name, campaign.State)
 	}
 	planned := h.awaitCampaign(campaign.ID,
-		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if planned.State != "awaiting_approval" {
 		h.t.Fatalf("planning of %s ended in state %s (%s)", campaign.Name, planned.State, planned.PauseReason)
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -402,6 +403,34 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
+	// A cancel that reaches an operation the host cannot stop is answered
+	// as such rather than recorded as done. Once the host has reported the
+	// start of an operation whose contract says impossible_after_start - a
+	// package transaction, a filesystem resize - the cancel is information
+	// only: the request goes on the trail and to the agent, which notes it,
+	// and the job stays running until the host reports the real result. A
+	// job marked cancelled here would meet that result as one for a job
+	// that no longer exists, and the screen would show a stopped transaction
+	// that ran to its end.
+	if operation == "cancel" {
+		if mode, refused := nonCancelable(current.State, opspec.ActionType(current.ActionType)); refused {
+			s.audit.Record(r.Context(), audit.Event{
+				ActorType: audit.ActorUser, ActorID: actor,
+				Action: "job.cancel", TargetType: "job", TargetID: jobID,
+				RequestID: requestIDOf(r), Outcome: audit.OutcomeDenied,
+				Detail: map[string]any{
+					"reason": "operation_non_cancelable", "cancel_mode": string(mode),
+					"host_id": current.HostID, "action_type": current.ActionType,
+					"state": string(current.State), "cancel_reason": request.Reason,
+				},
+			})
+			s.requestInterrupt(r.Context(), current)
+			problem(w, http.StatusConflict, "operation_non_cancelable",
+				"the operation is "+string(mode)+": the host has started it and it runs to its end; the request was recorded")
+			return
+		}
+	}
+
 	tx, err := s.jobs.Pool().Begin(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -488,6 +517,23 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	writeJSON(w, http.StatusOK, job)
 }
 
+// nonCancelable says whether a cancel can still do anything to the job:
+// it cannot once the host has reported the start of an operation whose
+// contract says impossible_after_start. Before the start every operation
+// is cancellable - the host has not touched anything - and an operation
+// with any other cancel mode is interrupted or checkpointed by the agent.
+func nonCancelable(state jobs.State, action opspec.ActionType) (opspec.CancelMode, bool) {
+	if state != jobs.StateRunning {
+		return "", false
+	}
+	mode := action.Contract().CancelMode
+	return mode, mode == opspec.CancelImpossibleAfterStart
+}
+
+// actionPrefixPattern bounds the action_prefix filter to what an operation
+// type is made of.
+var actionPrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
+
 // requiresSecondPerson says whether the environment requires approval by a
 // person other than the requester.
 func (s *Server) requiresSecondPerson(environment string) bool {
@@ -504,13 +550,21 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	// a host query for every job separately.
 	scopes := principal.ScopesFor(authz.PermJobRead)
 	filter := jobs.ListFilter{
-		HostID:     query.Get("host_id"),
-		State:      query.Get("state"),
-		Action:     query.Get("action"),
-		Actor:      query.Get("actor"),
-		CampaignID: query.Get("campaign_id"),
-		FanoutID:   query.Get("fanout_id"),
-		ErrorCode:  query.Get("error_code"),
+		HostID:       query.Get("host_id"),
+		State:        query.Get("state"),
+		Action:       query.Get("action"),
+		ActionPrefix: query.Get("action_prefix"),
+		Actor:        query.Get("actor"),
+		CampaignID:   query.Get("campaign_id"),
+		FanoutID:     query.Get("fanout_id"),
+		ErrorCode:    query.Get("error_code"),
+	}
+	// A family of operations is named by its prefix, packages. for the
+	// package history of a host; the prefix is an operation name cut short,
+	// so it takes the same characters and nothing that could be a pattern.
+	if filter.ActionPrefix != "" && !actionPrefixPattern.MatchString(filter.ActionPrefix) {
+		problem(w, http.StatusBadRequest, "invalid_filter", "action_prefix must be the beginning of an operation type, such as packages.")
+		return
 	}
 	if filter.CampaignID != "" {
 		if _, err := uuid.Parse(filter.CampaignID); err != nil {

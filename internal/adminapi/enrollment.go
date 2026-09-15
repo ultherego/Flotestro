@@ -17,6 +17,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/events"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/relays"
 )
@@ -145,6 +146,10 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 			"owner":    order.Owner, "tags": order.Tags,
 			"max_uses": order.MaxUses, "expires_at": order.ExpiresAt,
 		}, stepUpEvidence),
+	})
+	s.publishEnrollment(r.Context(), events.EnrollmentChange{
+		RequestID: order.ID, Change: events.EnrollmentCreated,
+		Site: order.Site, Environment: order.Environment, Kind: order.Kind,
 	})
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
 }
@@ -446,7 +451,15 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
-	err := s.tokens.Revoke(r.Context(), r.PathValue("id"))
+	// The order is read before it is revoked: the announcement of the
+	// revocation carries its placement, and the row says nothing else
+	// once it is gone from the screen.
+	order, err := s.tokens.Request(r.Context(), r.PathValue("id"))
+	if err != nil && !errors.Is(err, enrollment.ErrUnknownRequest) {
+		s.fail(w, err)
+		return
+	}
+	err = s.tokens.Revoke(r.Context(), r.PathValue("id"))
 	if errors.Is(err, enrollment.ErrUnknownRequest) {
 		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
 		return
@@ -460,6 +473,12 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		Action: "host.enrollment.revoke", TargetType: "enrollment_request",
 		TargetID: r.PathValue("id"), Outcome: audit.OutcomeSuccess,
 	})
+	if order != nil {
+		s.publishEnrollment(r.Context(), events.EnrollmentChange{
+			RequestID: order.ID, Change: events.EnrollmentRevoked,
+			Site: order.Site, Environment: order.Environment, Kind: order.Kind,
+		})
+	}
 	// A revoked recovery order may have been the only thing a host in
 	// recovery was waiting for; it comes back to active at once rather than
 	// at the next sweep.
@@ -593,6 +612,10 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			"reason":              reason, "revoke_old_immediately": req.RevokeOldImmediately,
 			"certificates_revoked": revoked, "state": state, "jobs_canceled": canceled,
 		}, evidence),
+	})
+	s.publishEnrollment(r.Context(), events.EnrollmentChange{
+		RequestID: order.ID, Change: events.EnrollmentCreated,
+		Site: order.Site, Environment: order.Environment, Kind: order.Kind, HostID: hostID,
 	})
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
 }

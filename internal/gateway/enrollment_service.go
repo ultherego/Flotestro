@@ -13,6 +13,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/enrollment"
+	"github.com/ultherego/flotestro/internal/events"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/issuer"
@@ -306,6 +307,14 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// The screen of the order is told in the same transaction: the
+	// notification leaves with the commit and never for a registration
+	// that was rolled back.
+	s.announce(ctx, tx, events.EnrollmentChange{
+		RequestID: scope.TokenID, Change: events.EnrollmentRedeemed,
+		Site: scope.Site, Environment: scope.Environment,
+		Kind: enrollment.KindAgent, HostID: hostID,
+	})
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -379,6 +388,11 @@ func (s *EnrollmentService) enrollRelay(ctx context.Context, tx pgx.Tx,
 	}); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	s.announce(ctx, tx, events.EnrollmentChange{
+		RequestID: scope.TokenID, Change: events.EnrollmentRedeemed,
+		Site: scope.Site, Environment: scope.Environment,
+		Kind: enrollment.KindRelay, HostID: relayID,
+	})
 	if err := tx.Commit(ctx); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -485,6 +499,31 @@ func (s *EnrollmentService) deny(ctx context.Context, msg *agentv1.EnrollRequest
 		event.TargetType, event.TargetID = "enrollment_request", requestID
 	}
 	s.audit.Record(ctx, event)
+	// The order's screen hears of the refusal at once. The announcement
+	// carries the placement of the order, read back for it: the stream
+	// lets it through by where the order places the host, and a refusal
+	// without a placement would reach only a global reader. An attempt
+	// that matched no order has no screen to reach.
+	if requestID == "" || s.hosts == nil {
+		return
+	}
+	change := events.EnrollmentChange{RequestID: requestID, Change: events.EnrollmentRefused, Code: code}
+	if order, err := s.tokens.Request(ctx, requestID); err == nil && order != nil {
+		change.Site, change.Environment, change.Kind = order.Site, order.Environment, order.Kind
+	}
+	s.announce(ctx, s.hosts.Pool(), change)
+}
+
+// announce tells the open screens that an order turned. The enrollment
+// door has no bus of its own: the notification goes through the database,
+// the same way every other event reaches every instance of the panel. A
+// notification that fails to leave is a log line; the screen polls the
+// order anyway and misses nothing but a moment.
+func (s *EnrollmentService) announce(ctx context.Context, through events.Notifier, change events.EnrollmentChange) {
+	if err := events.PublishEnrollment(ctx, through, change); err != nil {
+		s.log.Debug("the turn of an installation order was not announced",
+			"request_id", change.RequestID, "change", change.Change, "err", err)
+	}
 }
 
 // denialMessage puts a token refusal into words the operator can act on.

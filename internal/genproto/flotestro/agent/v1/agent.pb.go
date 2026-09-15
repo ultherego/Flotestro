@@ -5589,7 +5589,10 @@ type ReadJournal struct {
 	// AfterCursor starts the read right after a journal position: the unit
 	// detail view hands over the cursor of its last line so the Logs page
 	// continues where the detail ended.
-	AfterCursor   string `protobuf:"bytes,5,opt,name=after_cursor,json=afterCursor,proto3" json:"after_cursor,omitempty"`
+	AfterCursor string `protobuf:"bytes,5,opt,name=after_cursor,json=afterCursor,proto3" json:"after_cursor,omitempty"`
+	// Until ends the read, in the same forms as since; the Logs page bounds
+	// a read to the window of a job with both.
+	Until         string `protobuf:"bytes,6,opt,name=until,proto3" json:"until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5655,6 +5658,13 @@ func (x *ReadJournal) GetSince() string {
 func (x *ReadJournal) GetAfterCursor() string {
 	if x != nil {
 		return x.AfterCursor
+	}
+	return ""
+}
+
+func (x *ReadJournal) GetUntil() string {
+	if x != nil {
+		return x.Until
 	}
 	return ""
 }
@@ -13975,13 +13985,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x0eOPERATION_STOP\x10\x02\x12\x15\n" +
 	"\x11OPERATION_RESTART\x10\x03\x12\x14\n" +
 	"\x10OPERATION_RELOAD\x10\x04\x12\x1a\n" +
-	"\x16OPERATION_RESET_FAILED\x10\x05\"\xa9\x01\n" +
+	"\x16OPERATION_RESET_FAILED\x10\x05\"\xbf\x01\n" +
 	"\vReadJournal\x12\x12\n" +
 	"\x04unit\x18\x01 \x01(\tR\x04unit\x12\x14\n" +
 	"\x05lines\x18\x02 \x01(\rR\x05lines\x12&\n" +
 	"\fmax_priority\x18\x03 \x01(\rH\x00R\vmaxPriority\x88\x01\x01\x12\x14\n" +
 	"\x05since\x18\x04 \x01(\tR\x05since\x12!\n" +
-	"\fafter_cursor\x18\x05 \x01(\tR\vafterCursorB\x0f\n" +
+	"\fafter_cursor\x18\x05 \x01(\tR\vafterCursor\x12\x14\n" +
+	"\x05until\x18\x06 \x01(\tR\x05untilB\x0f\n" +
 	"\r_max_priority\"K\n" +
 	"\fSystemReboot\x12#\n" +
 	"\rdelay_seconds\x18\x01 \x01(\rR\fdelaySeconds\x12\x16\n" +

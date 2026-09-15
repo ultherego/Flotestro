@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "../../lib/api";
+import { Link } from "react-router-dom";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, loadedItems, type Collection, type Page } from "../../lib/api";
 import { awaitJob } from "../../lib/jobs";
-import { RELEASE_CHANNELS, type Host, type Job, type ReleaseChannel } from "../../lib/types";
-import { Empty } from "../../components/ui";
+import { RELEASE_CHANNELS, type Attempt, type Host, type Job, type ReleaseChannel } from "../../lib/types";
+import { Empty, ErrorCode, JobState, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
@@ -350,6 +351,8 @@ export function Packages() {
         onIntent={setSourceIntent}
       />
 
+      <TransactionHistory hostId={host.id} />
+
       {sourceIntent && (
         <TargetConfirmation
           host={host}
@@ -393,6 +396,113 @@ export function Packages() {
 }
 
 type SourceIntent = { label: string; description: string; payload: Record<string, unknown> };
+
+/** How many transactions one page of the history carries. */
+const HISTORY_PAGE = 20;
+
+/** The package operations that change the host; a plan or a listing applies nothing. */
+const APPLYING = ["packages.install", "packages.remove", "packages.upgrade", "packages.hold.set"];
+
+/**
+ * The transaction history of the host: every package operation ordered
+ * through the panel, newest first, with what it applied. It is the
+ * operation list narrowed to the package family, not a second record - a
+ * transaction the host ran by hand is not here, and the packages module
+ * above says what is installed now.
+ */
+function TransactionHistory({ hostId }: { hostId: string }) {
+  const t = useT();
+  const history = useInfiniteQuery({
+    queryKey: ["jobs", hostId, "packages"],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ host_id: hostId, action_prefix: "packages.", limit: String(HISTORY_PAGE) });
+      if (pageParam) params.set("cursor", pageParam);
+      return api.get<Page<Job>>(`/api/v1/jobs?${params}`);
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  });
+  const jobs = loadedItems(history.data);
+
+  return (
+    <Section
+      title={t("Transaction history")}
+      count={jobs.length}
+      description={t("The package operations ordered through the panel, newest first; a transaction run by hand on the host is not here.")}
+      flush
+    >
+      {history.error ? (
+        <Empty>{t("The history could not be read.")}</Empty>
+      ) : jobs.length === 0 ? (
+        <Empty>{history.isLoading ? t("Loading…") : t("No package operation has been ordered on this host.")}</Empty>
+      ) : (
+        <>
+          <Table>
+            <thead>
+              <tr>
+                <th>{t("When")}</th>
+                <th>{t("Operation")}</th>
+                <th>{t("Outcome")}</th>
+                <th>{t("Applied")}</th>
+                <th>{t("By")}</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((job) => (
+                <tr key={job.id}>
+                  <td><Time value={job.finished_at ?? job.created_at} /></td>
+                  <td className="hm-mono">{job.action_type.replace(/^packages\./, "")}</td>
+                  <td>
+                    <JobState state={job.state} />
+                    {job.result_error_code && <> <ErrorCode code={job.result_error_code} /></>}
+                  </td>
+                  <td>
+                    {APPLYING.includes(job.action_type) && job.state === "succeeded"
+                      ? <AppliedCount jobId={job.id} />
+                      : "—"}
+                  </td>
+                  <td>{job.created_by}</td>
+                  <td>
+                    <Link to={`/hosts/${hostId}/jobs`} className="mono" title={job.id}>{job.id.slice(0, 8)}</Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+          {history.hasNextPage && (
+            <Foot>
+              <button className="secondary" onClick={() => history.fetchNextPage()} disabled={history.isFetchingNextPage}>
+                {t("Load more")}
+              </button>
+            </Foot>
+          )}
+        </>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * How many packages a transaction applied, from the result of its last
+ * attempt. The count is not on the job row, so it is read per transaction
+ * once the row is on screen; a page of twenty is twenty small reads, kept
+ * by the query cache.
+ */
+function AppliedCount({ jobId }: { jobId: string }) {
+  const t = useT();
+  const attempts = useQuery({
+    queryKey: ["job-attempts", jobId],
+    queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${jobId}/attempts`),
+    staleTime: Infinity,
+  });
+  if (attempts.error) return <span className="badge unknown">{t("unknown")}</span>;
+  if (!attempts.data) return <>…</>;
+  const last = attempts.data.items[attempts.data.items.length - 1];
+  const applied = (last?.detail as { kind?: string; applied?: unknown[] } | undefined)?.applied;
+  if (!Array.isArray(applied)) return <span className="badge unknown">{t("unknown")}</span>;
+  return <>{t("{n} package(s)", { n: applied.length })}</>;
+}
 
 /**
  * Package sources.

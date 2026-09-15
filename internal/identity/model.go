@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/freeipa"
@@ -23,6 +24,16 @@ const (
 	ActionUserEnable   ActionType = "identity.user.enable"
 	ActionGroupMembers ActionType = "identity.group.members"
 	ActionSSHKeys      ActionType = "identity.sshkeys.set"
+	// The rest of the user lifecycle the document names: an expiration, the
+	// POSIX attributes, a removal that keeps the entry, and a password reset
+	// whose one-time value the requester reads once and nobody stores.
+	ActionUserExpire        ActionType = "identity.user.expire"
+	ActionUserPOSIX         ActionType = "identity.user.posix"
+	ActionUserPreserve      ActionType = "identity.user.preserve"
+	ActionUserPasswordReset ActionType = "identity.user.password.reset"
+	// Host group membership decides which access and sudo rules reach a
+	// host, so it goes the way of a user group change.
+	ActionHostGroupMembers ActionType = "identity.hostgroup.members"
 	// Directory DNS is a central change, just like an account: it concerns
 	// the whole network rather than one host and goes in one transaction
 	// through the directory connector - not through an agent.
@@ -69,11 +80,82 @@ func (s State) Terminal() bool {
 type Payload struct {
 	User      *UserPayload      `json:"user,omitempty"`
 	Group     *GroupPayload     `json:"group,omitempty"`
+	HostGroup *HostGroupPayload `json:"host_group,omitempty"`
 	SSHKeys   *SSHKeysPayload   `json:"ssh_keys,omitempty"`
 	Reference *ReferencePayload `json:"reference,omitempty"`
+	Expiry    *ExpiryPayload    `json:"expiry,omitempty"`
+	POSIX     *POSIXPayload     `json:"posix,omitempty"`
 	DNS       *DNSRecordPayload `json:"dns,omitempty"`
 	HBACRule  *HBACRulePayload  `json:"hbac_rule,omitempty"`
 	SudoRule  *SudoRulePayload  `json:"sudo_rule,omitempty"`
+}
+
+// HostGroupPayload describes a change of a host group's membership. The
+// members are hosts named by FQDN, as the directory knows them.
+type HostGroupPayload struct {
+	Group  string   `json:"group"`
+	Add    []string `json:"add,omitempty"`
+	Remove []string `json:"remove,omitempty"`
+}
+
+// ExpiryPayload sets or clears the Kerberos expirations of an account. A
+// field that is absent is left as it is; an empty string clears the
+// expiration, so that "never expires" is ordered as deliberately as a
+// date rather than by leaving something out.
+type ExpiryPayload struct {
+	UID                string  `json:"uid"`
+	PrincipalExpiresAt *string `json:"principal_expires_at,omitempty"`
+	PasswordExpiresAt  *string `json:"password_expires_at,omitempty"`
+}
+
+// Spec translates the payload into the adapter's declaration. The
+// validation has already checked the dates, so a parse failure here is
+// a defect rather than a request error.
+func (p ExpiryPayload) Spec() (freeipa.Expiry, error) {
+	var spec freeipa.Expiry
+	var err error
+	if spec.PrincipalExpiresAt, err = expiryTime(p.PrincipalExpiresAt); err != nil {
+		return spec, fmt.Errorf("principal_expires_at: %w", err)
+	}
+	if spec.PasswordExpiresAt, err = expiryTime(p.PasswordExpiresAt); err != nil {
+		return spec, fmt.Errorf("password_expires_at: %w", err)
+	}
+	return spec, nil
+}
+
+// expiryTime reads one expiration: nil stays nil, an empty string is the
+// zero time the adapter sends as a clear, and a date must be RFC 3339.
+func expiryTime(value *string) (*time.Time, error) {
+	if value == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(*value) == "" {
+		return &time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339, strings.TrimSpace(*value))
+	if err != nil {
+		return nil, fmt.Errorf("the expiration is not an RFC 3339 time")
+	}
+	parsed = parsed.UTC()
+	return &parsed, nil
+}
+
+// POSIXPayload edits the POSIX attributes of an account. An empty field
+// is left as it is.
+type POSIXPayload struct {
+	UID       string `json:"uid"`
+	UIDNumber string `json:"uid_number,omitempty"`
+	GIDNumber string `json:"gid_number,omitempty"`
+	Shell     string `json:"shell,omitempty"`
+	HomeDir   string `json:"home_directory,omitempty"`
+}
+
+// Spec translates the payload into the adapter's declaration.
+func (p POSIXPayload) Spec() freeipa.POSIXSpec {
+	return freeipa.POSIXSpec{
+		UIDNumber: strings.TrimSpace(p.UIDNumber), GIDNumber: strings.TrimSpace(p.GIDNumber),
+		Shell: strings.TrimSpace(p.Shell), HomeDir: strings.TrimSpace(p.HomeDir),
+	}
 }
 
 // HBACRulePayload declares an access rule as a whole. Removal names the
@@ -193,9 +275,28 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.User.UID == "" || payload.User.LastName == "" {
 			return fmt.Errorf("an account requires a name and a surname")
 		}
-	case ActionUserDisable, ActionUserEnable:
+	case ActionUserDisable, ActionUserEnable, ActionUserPreserve, ActionUserPasswordReset:
 		if payload.Reference == nil || payload.Reference.UID == "" {
 			return fmt.Errorf("the operation %s requires naming an account", action)
+		}
+	case ActionUserExpire:
+		if payload.Expiry == nil || payload.Expiry.UID == "" {
+			return fmt.Errorf("the operation %s requires naming an account", action)
+		}
+		if payload.Expiry.PrincipalExpiresAt == nil && payload.Expiry.PasswordExpiresAt == nil {
+			return fmt.Errorf("the expiry change names no expiration")
+		}
+		// The dates are checked with the same reader the executor uses: an
+		// unreadable date falls out at ordering time, not after the approval.
+		if _, err := payload.Expiry.Spec(); err != nil {
+			return err
+		}
+	case ActionUserPOSIX:
+		if payload.POSIX == nil || payload.POSIX.UID == "" {
+			return fmt.Errorf("the operation %s requires naming an account", action)
+		}
+		if err := payload.POSIX.Spec().Validate(); err != nil {
+			return err
 		}
 	case ActionGroupMembers:
 		if payload.Group == nil || payload.Group.Group == "" {
@@ -203,6 +304,20 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if len(payload.Group.Add) == 0 && len(payload.Group.Remove) == 0 {
 			return fmt.Errorf("the membership change is empty")
+		}
+	case ActionHostGroupMembers:
+		if payload.HostGroup == nil || payload.HostGroup.Group == "" {
+			return fmt.Errorf("the operation %s requires naming a host group", action)
+		}
+		if len(payload.HostGroup.Add) == 0 && len(payload.HostGroup.Remove) == 0 {
+			return fmt.Errorf("the membership change is empty")
+		}
+		for _, host := range append(append([]string{}, payload.HostGroup.Add...), payload.HostGroup.Remove...) {
+			// The directory knows hosts by FQDN; a short name would be
+			// refused by it after the approval, so it is refused here.
+			if !strings.Contains(host, ".") {
+				return fmt.Errorf("the host %q is not a fully qualified name", host)
+			}
 		}
 	case ActionSSHKeys:
 		if payload.SSHKeys == nil || payload.SSHKeys.UID == "" {
@@ -298,10 +413,15 @@ var ruleNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,64}$`)
 // Permission returns the permission required to order a change.
 func (a ActionType) Permission() string {
 	switch a {
-	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionSSHKeys:
+	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionSSHKeys,
+		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset:
 		return "identity.user.write"
 	case ActionGroupMembers:
 		return "identity.group.write"
+	case ActionHostGroupMembers:
+		// A host's groups decide which rules reach it: the same scope as
+		// the rules themselves.
+		return "identity.policy.write"
 	case ActionDNSRecordEnsure, ActionDNSRecordRemove:
 		return "dns.directory.write"
 	case ActionHBACTest:
@@ -319,6 +439,8 @@ func (a ActionType) Permission() string {
 func (a ActionType) ChangesAccess() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
+		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset,
+		ActionHostGroupMembers,
 		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		return true
 	default:
@@ -332,6 +454,8 @@ func (a ActionType) ChangesAccess() bool {
 func (a ActionType) Known() bool {
 	switch a {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
+		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset,
+		ActionHostGroupMembers,
 		ActionDNSRecordEnsure, ActionDNSRecordRemove,
 		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		return true
@@ -403,6 +527,11 @@ type Change struct {
 	StartedAt        *time.Time      `json:"started_at,omitempty"`
 	FinishedAt       *time.Time      `json:"finished_at,omitempty"`
 	CreatedAt        time.Time       `json:"created_at"`
+	// SecretAvailable says a one-time value of this change - the password
+	// of a reset - waits for its requester. It is not a column: the value
+	// lives in the memory of the process that carried the change out, and
+	// so does this flag.
+	SecretAvailable bool `json:"secret_available,omitempty"`
 }
 
 // StateFor decides the final state from the results of the phases.

@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { awaitJob } from "../../lib/jobs";
-import type { Job } from "../../lib/types";
+import type { Attempt, Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Widgets,
@@ -14,6 +14,49 @@ import { readsPrefill } from "../Reads";
 import { useT } from "../../i18n";
 
 type JournalResult = { lines?: string[]; truncated?: boolean };
+
+/**
+ * The window of a job on the host: from the delivery of its last attempt
+ * to its end plus a margin, in UTC, and the unit its payload names. The
+ * journal read bounded to it shows what the host wrote while the operation
+ * ran - the lines an operator reads after a failed restart.
+ */
+export type JobWindow = { since: string; until: string; unit?: string };
+
+/** The margin after the end of a job: a unit still logs a moment after the restart returned. */
+const WINDOW_MARGIN_SECONDS = 30;
+
+/**
+ * The window of a job from its record and its attempts. A job that has
+ * not been delivered has no window yet; a job still running is bounded
+ * by now plus the margin.
+ */
+export function jobWindow(job: Job | undefined, attempts: Attempt[] | undefined, now = Date.now()): JobWindow | null {
+  if (!job) return null;
+  const last = attempts?.length ? attempts[attempts.length - 1] : undefined;
+  const start = last?.dispatched_at ?? last?.created_at;
+  if (!start) return null;
+  const end = job.finished_at ?? last?.finished_at;
+  const until = end ? new Date(end).getTime() : now;
+  const payload = (job.payload ?? {}) as { unit?: { unit?: string }; journal?: { unit?: string } };
+  return {
+    since: utcStamp(new Date(start).getTime()),
+    until: utcStamp(until + WINDOW_MARGIN_SECONDS * 1000),
+    unit: payload.unit?.unit || payload.journal?.unit || undefined,
+  };
+}
+
+/**
+ * A moment as journalctl takes it, in UTC. The host reads a bare
+ * timestamp in its own zone, and the panel does not know that zone; the
+ * suffix settles it.
+ */
+export function utcStamp(millis: number): string {
+  const d = new Date(millis);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
+    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+}
 type FileResult = {
   path?: string;
   lines?: string[];
@@ -48,6 +91,9 @@ export function Logs() {
   const [cursor, setCursor] = useState(params.get("cursor") ?? "");
   const [priority, setPriority] = useState("");
   const [since, setSince] = useState("");
+  // A job bounds the read to its window on the host: the operations
+  // list links here with the job, and the operator may also paste one.
+  const [jobId, setJobId] = useState(params.get("job") ?? "");
   const [path, setPath] = useState("/var/log/syslog");
   const [lineCount, setLineCount] = useState(200);
   const [lines, setLines] = useState<string[] | null>(null);
@@ -55,6 +101,22 @@ export function Logs() {
   const [errorMessage, setErrorMessage] = useState("");
 
   const stream = useJournalPreview(preview, paused);
+
+  // The job and its attempts give the window; both are read once the
+  // identifier looks like one, so a half-typed identifier asks nothing.
+  const boundJob = jobId.trim().length >= 32 ? jobId.trim() : "";
+  const jobRecord = useQuery({
+    queryKey: ["job", boundJob],
+    queryFn: () => api.get<Job>(`/api/v1/jobs/${boundJob}`),
+    enabled: !!boundJob,
+  });
+  const jobAttempts = useQuery({
+    queryKey: ["job-attempts", boundJob],
+    queryFn: () => api.get<{ items: Attempt[] }>(`/api/v1/jobs/${boundJob}/attempts`),
+    enabled: !!boundJob,
+  });
+  const bounds = boundJob ? jobWindow(jobRecord.data, jobAttempts.data?.items) : null;
+  const windowUnit = unit || bounds?.unit || "";
 
   // The preview goes over the same stream as operation progress, so one
   // connection per tab is enough.
@@ -107,10 +169,13 @@ export function Logs() {
               action: "journal.read",
               payload: {
                 journal: {
-                  unit: unit || undefined,
+                  unit: windowUnit || undefined,
                   lines: lineCount,
                   max_priority: priority ? Number(priority) : undefined,
-                  since: since || undefined,
+                  // A job's window wins over a typed range: the read is
+                  // about that operation, and the range would widen it.
+                  since: bounds?.since ?? (since || undefined),
+                  until: bounds?.until,
                   after_cursor: cursor || undefined,
                 },
               },
@@ -187,6 +252,11 @@ export function Logs() {
             <span className="hm-mono">{source === "journal" ? unit || t("all units") : path}</span>
           </Fact>
           <Fact label={t("Limit")}>{preview ? t("5 minutes, 32 KiB/s") : t("{n} lines", { n: lineCount })}</Fact>
+          {bounds && (
+            <Fact label={t("Window")}>
+              <span className="hm-mono">{bounds.since} – {bounds.until}</span>
+            </Fact>
+          )}
           <Fact label={t("State")}>
             {preview
               ? <span className={paused ? "badge warn" : "badge ok"}>{paused ? t("paused") : t("live")}</span>
@@ -236,7 +306,43 @@ export function Logs() {
                 </select>
               </Field>
               <Field label={t("Since")}>
-                <input placeholder={t("since, e.g. -1h")} value={since} onChange={(e) => setSince(e.target.value)} />
+                <input
+                  placeholder={t("since, e.g. -1h")}
+                  value={bounds ? bounds.since : since}
+                  disabled={!!bounds}
+                  onChange={(e) => setSince(e.target.value)}
+                />
+              </Field>
+              {/* A job bounds the read to its window on the host: from the
+                  delivery of its last attempt to its end and a little after,
+                  and to the unit its payload names. The operations list
+                  links here with the job; an identifier can be pasted too. */}
+              <Field
+                label={t("Job")}
+                wide
+                help={boundJob
+                  ? jobRecord.error
+                    ? t("No such job, or it is out of your scope.")
+                    : bounds
+                      ? t("Bounded to the job {action} ({state}); the unit comes from the job unless typed above.", {
+                          action: jobRecord.data?.action_type ?? "", state: jobRecord.data?.state ?? "",
+                        })
+                      : jobRecord.data && jobAttempts.data
+                        ? t("The job has not been delivered to the host yet, so it has no window.")
+                        : t("Reading the job…")
+                  : t("Paste a job identifier to read what the host wrote while that operation ran.")}
+              >
+                <div className="operations">
+                  <input
+                    placeholder={t("job identifier (optional)")}
+                    value={jobId}
+                    onChange={(e) => setJobId(e.target.value)}
+                  />
+                  {jobId && <button className="secondary" onClick={() => setJobId("")}>{t("Clear")}</button>}
+                  {boundJob && jobRecord.data && (
+                    <Link to={`/hosts/${host.id}/jobs`}>{t("open the operations")}</Link>
+                  )}
+                </div>
               </Field>
               {/* A cursor is the position the unit detail ended at; the
                   read continues from there until the operator clears it. */}
@@ -316,10 +422,11 @@ export function Logs() {
                   source === "journal"
                     ? {
                         journal: {
-                          unit: unit || undefined,
+                          unit: windowUnit || undefined,
                           lines: lineCount,
                           max_priority: priority ? Number(priority) : undefined,
-                          since: since || undefined,
+                          since: bounds?.since ?? (since || undefined),
+                          until: bounds?.until,
                         },
                       }
                     : { logfile: { path, lines: lineCount } },

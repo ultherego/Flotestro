@@ -294,7 +294,14 @@ export type Attempt = {
   unit_state_before?: UnitState;
   unit_state_after?: UnitState;
   detail?: Record<string, unknown>;
+  // The delivery to the host, the agent's acknowledgement, the start it
+  // reported and the end: the window of the attempt on the host. An
+  // attempt never heard from has neither an acknowledgement nor a start.
+  dispatched_at?: string;
+  accepted_at?: string;
+  started_at?: string;
   finished_at?: string;
+  created_at: string;
 };
 
 /** The evidence of a consent: written once when a campaign is approved. */
@@ -452,9 +459,85 @@ export type DirectoryUser = {
   last_name?: string;
   email?: string[];
   uid_number?: string;
+  gid_number?: string;
+  home_directory?: string;
+  shell?: string;
   groups?: string[];
   disabled: boolean;
   ssh_key_fingerprints?: string[];
+  /** RFC3339; missing means the directory holds no expiration, not "never checked". */
+  password_expires_at?: string;
+  principal_expires_at?: string;
+  last_password_change?: string;
+  /** A soft-deleted account: the entry stays with its UID and its trail. */
+  preserved?: boolean;
+};
+
+/** A host entry of the directory; enrolled means it holds a host key. */
+export type DirectoryHost = {
+  fqdn: string;
+  description?: string;
+  enrolled: boolean;
+  /** The directory's generalized time, shown as it came. */
+  enrolled_at?: string;
+  member_of?: string[];
+  managed_by?: string[];
+};
+
+export type DirectoryHostGroup = {
+  name: string;
+  description?: string;
+  hosts?: string[];
+  host_groups?: string[];
+};
+
+/** A Kerberos service principal; has_keytab null means the directory did not say. */
+export type DirectoryService = {
+  principal: string;
+  service: string;
+  host: string;
+  has_keytab: boolean | null;
+  managed_by?: string[];
+  aliases?: string[];
+};
+
+/** The health of the directory connector, as the panel itself sees it. */
+export type IdentityConnector = {
+  principal: string;
+  keytab_readable: boolean;
+  keytab_detail?: string;
+  /** A keytab file carries no expiry date; only the key version and its stamp. */
+  keytab_entries: { principal: string; kvno: number; timestamp?: string }[];
+  last_success_at?: string | null;
+  last_error?: string;
+  last_error_at?: string | null;
+  cache_entries: number;
+  cache_oldest_at?: string | null;
+  cache_ttl_seconds: number;
+};
+
+export type IdentityOfflineHost = {
+  id: string;
+  hostname: string;
+  site?: string;
+  environment?: string;
+  checked_at?: string | null;
+  offline_verdict: OfflineVerdict;
+};
+
+export type IdentityStatus = {
+  configured: boolean;
+  reachable?: boolean;
+  principal?: string;
+  summary?: string;
+  error?: string;
+  detail?: string;
+  connector?: IdentityConnector;
+  hosts?: {
+    offline_from_directory: IdentityOfflineHost[];
+    offline_count: number;
+    by_verdict: Record<string, number>;
+  };
 };
 
 export type DirectoryGroup = {
@@ -521,6 +604,20 @@ export type DirectoryChange = {
   payload_hash?: string;
   requires_approval?: boolean;
   created_by?: string;
+  approved_by?: string;
+  result_message?: string;
+  phases?: { name: string; status: string; message?: string }[];
+  created_at?: string;
+  finished_at?: string | null;
+  /** True while the one-time password of a finished reset waits for its requester. */
+  secret_available?: boolean;
+};
+
+/** The one-time password of a reset, handed out exactly once to the requester. */
+export type RevealedSecret = {
+  uid: string;
+  one_time_password: string;
+  expires_on_first_login: boolean;
 };
 
 /** The directory's own verdict on one user, host and service. */

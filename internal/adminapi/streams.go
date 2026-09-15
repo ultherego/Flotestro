@@ -136,11 +136,18 @@ func (s *Server) handleFleetEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // scopeGate lets through only the events of operations from hosts visible
-// to this principal. The check runs in the connection goroutine, not in the
-// bus: querying the database while broadcasting would stall all receivers.
+// to this principal, and the turns of the installation orders placed where
+// the principal may read them. The check runs in the connection goroutine,
+// not in the bus: querying the database while broadcasting would stall all
+// receivers.
 func (s *Server) scopeGate(principal authz.Principal) func(context.Context, events.Event) bool {
 	visible := map[string]bool{}
 	return func(ctx context.Context, event events.Event) bool {
+		// An order carries its placement, so no query is needed to judge it.
+		if change := event.Enrollment; change != nil {
+			return principal.Can(authz.PermHostEnrollRead,
+				authz.Scope{Site: change.Site, Environment: change.Environment})
+		}
 		if event.JobID == "" {
 			return false
 		}
@@ -237,9 +244,26 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 				name = "log"
 			case event.Progress != nil:
 				name = "progress"
+			case event.Enrollment != nil:
+				name = "enrollment"
 			}
 			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data)
 			flusher.Flush()
 		}
+	}
+}
+
+// publishEnrollment tells the open screens that an installation order
+// turned: it was placed, or revoked. A panel without a bus has nobody to
+// tell, and a notification that fails to leave is a log line, not an error
+// of the order - the screen polls the order anyway and misses nothing but
+// a moment.
+func (s *Server) publishEnrollment(ctx context.Context, change events.EnrollmentChange) {
+	if s.events == nil {
+		return
+	}
+	if err := s.events.PublishEnrollment(ctx, change); err != nil {
+		s.log.Debug("the turn of an installation order was not announced",
+			"request_id", change.RequestID, "change", change.Change, "err", err)
 	}
 }

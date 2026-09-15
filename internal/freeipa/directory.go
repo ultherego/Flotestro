@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // User is a POSIX account in the directory. The panel stores neither
@@ -25,6 +26,61 @@ type User struct {
 	Disabled bool `json:"disabled"`
 	// SSHKeyFingerprints shows the keys without their content.
 	SSHKeyFingerprints []string `json:"ssh_key_fingerprints,omitempty"`
+	// The Kerberos side of the lifecycle. An expiration that is not set is
+	// nil, not a date: the directory then never expires the principal.
+	PrincipalExpiresAt *time.Time `json:"principal_expires_at,omitempty"`
+	PasswordExpiresAt  *time.Time `json:"password_expires_at,omitempty"`
+	LastPasswordChange *time.Time `json:"last_password_change,omitempty"`
+	// Preserved marks an account removed with its entry kept: the UID and
+	// the history stay, the account cannot sign in. Such accounts are
+	// listed apart from the live ones.
+	Preserved bool `json:"preserved,omitempty"`
+}
+
+// userFromRecord reads an account as the directory's find and show
+// commands describe it. The two commands share the shape, and one reader
+// keeps a field added for one of them from going missing in the other.
+func userFromRecord(record map[string]any, preserved bool) User {
+	return User{
+		UID:                first(record, "uid"),
+		FirstName:          first(record, "givenname"),
+		LastName:           first(record, "sn"),
+		DisplayName:        first(record, "displayname"),
+		Email:              strings_(record, "mail"),
+		UIDNumber:          first(record, "uidnumber"),
+		GIDNumber:          first(record, "gidnumber"),
+		HomeDir:            first(record, "homedirectory"),
+		Shell:              first(record, "loginshell"),
+		Groups:             strings_(record, "memberof_group"),
+		Disabled:           boolean(record, "nsaccountlock"),
+		SSHKeyFingerprints: strings_(record, "sshpubkeyfp"),
+		PrincipalExpiresAt: generalizedTime(first(record, "krbprincipalexpiration")),
+		PasswordExpiresAt:  generalizedTime(first(record, "krbpasswordexpiration")),
+		LastPasswordChange: generalizedTime(first(record, "krblastpwdchange")),
+		Preserved:          preserved,
+	}
+}
+
+// generalizedTime parses the LDAP time the directory returns, such as
+// 20261231235959Z. Anything else - including an empty value - is nil rather
+// than the zero time, because a missing expiration means "never", and the
+// zero time would read as the year one.
+func generalizedTime(value string) *time.Time {
+	if value == "" {
+		return nil
+	}
+	for _, layout := range []string{"20060102150405Z", time.RFC3339} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			parsed = parsed.UTC()
+			return &parsed
+		}
+	}
+	return nil
+}
+
+// GeneralizedTime formats a time the way the directory reads it.
+func GeneralizedTime(value time.Time) string {
+	return value.UTC().Format("20060102150405Z")
 }
 
 // Group is a POSIX group.
@@ -43,6 +99,24 @@ type Host struct {
 	Enrolled    bool     `json:"enrolled"`
 	EnrolledAt  string   `json:"enrolled_at,omitempty"`
 	MemberOf    []string `json:"member_of,omitempty"`
+	// ManagedBy names the hosts allowed to manage this entry's keytab and
+	// certificates; a host always manages itself.
+	ManagedBy []string `json:"managed_by,omitempty"`
+}
+
+// Service is a Kerberos service principal of a host, such as
+// HTTP/web1.example.test. The panel shows whether it has a keytab and who
+// manages it; the keytab itself never leaves the directory.
+type Service struct {
+	Principal string `json:"principal"`
+	// Service is the part before the slash, Host the part after it.
+	Service string `json:"service"`
+	Host    string `json:"host"`
+	// HasKeytab is nil when the directory did not say: the friendly view
+	// computes it, the raw one does not, and "unknown" must not read as "no".
+	HasKeytab *bool    `json:"has_keytab"`
+	ManagedBy []string `json:"managed_by,omitempty"`
+	Aliases   []string `json:"aliases,omitempty"`
 }
 
 // HBACRule describes an access rule for hosts and services.
@@ -118,23 +192,81 @@ func (c *Client) Users(ctx context.Context) ([]User, error) {
 		}
 		users := make([]User, 0, len(records))
 		for _, record := range records {
-			users = append(users, User{
-				UID:                first(record, "uid"),
-				FirstName:          first(record, "givenname"),
-				LastName:           first(record, "sn"),
-				DisplayName:        first(record, "displayname"),
-				Email:              strings_(record, "mail"),
-				UIDNumber:          first(record, "uidnumber"),
-				GIDNumber:          first(record, "gidnumber"),
-				HomeDir:            first(record, "homedirectory"),
-				Shell:              first(record, "loginshell"),
-				Groups:             strings_(record, "memberof_group"),
-				Disabled:           boolean(record, "nsaccountlock"),
-				SSHKeyFingerprints: strings_(record, "sshpubkeyfp"),
-			})
+			users = append(users, userFromRecord(record, false))
 		}
 		return users, nil
 	})
+}
+
+// PreservedUsers returns the accounts removed with their entry kept. The
+// directory lists them only when asked, and apart from the live accounts:
+// a preserved account cannot sign in, belongs to no group and must not be
+// counted among the users a rule reaches.
+func (c *Client) PreservedUsers(ctx context.Context) ([]User, error) {
+	return cached(ctx, c, "users-preserved", func() ([]User, error) {
+		records, err := c.findWith(ctx, "user_find", map[string]any{"preserved": true})
+		if err != nil {
+			return nil, err
+		}
+		users := make([]User, 0, len(records))
+		for _, record := range records {
+			users = append(users, userFromRecord(record, true))
+		}
+		return users, nil
+	})
+}
+
+// Services returns the Kerberos service principals of the hosts.
+func (c *Client) Services(ctx context.Context) ([]Service, error) {
+	return cached(ctx, c, "services", func() ([]Service, error) {
+		records, err := c.findRecords(ctx, "service_find")
+		if err != nil {
+			return nil, err
+		}
+		services := make([]Service, 0, len(records))
+		for _, record := range records {
+			principal := first(record, "krbcanonicalname")
+			aliases := strings_(record, "krbprincipalname")
+			if principal == "" && len(aliases) > 0 {
+				principal = aliases[0]
+			}
+			service, host := splitServicePrincipal(principal)
+			item := Service{
+				Principal: principal,
+				Service:   service,
+				Host:      host,
+				ManagedBy: strings_(record, "managedby_host"),
+			}
+			for _, alias := range aliases {
+				if alias != principal {
+					item.Aliases = append(item.Aliases, alias)
+				}
+			}
+			// has_keytab is computed by the directory in the friendly view;
+			// a krbLastPwdChange without it says the same thing. Neither
+			// present leaves the question open.
+			if lookup(record, "has_keytab") != nil {
+				flag := boolean(record, "has_keytab")
+				item.HasKeytab = &flag
+			} else if first(record, "krblastpwdchange") != "" {
+				flag := true
+				item.HasKeytab = &flag
+			}
+			services = append(services, item)
+		}
+		return services, nil
+	})
+}
+
+// splitServicePrincipal takes HTTP/web1.example.test@REALM apart into the
+// service and the host.
+func splitServicePrincipal(principal string) (string, string) {
+	name, _, _ := strings.Cut(principal, "@")
+	service, host, found := strings.Cut(name, "/")
+	if !found {
+		return name, ""
+	}
+	return service, host
 }
 
 // Groups returns the groups from the directory.
@@ -182,6 +314,7 @@ func (c *Client) Hosts(ctx context.Context) ([]Host, error) {
 				Enrolled:    enrolledAt != "",
 				EnrolledAt:  enrolledAt,
 				MemberOf:    hostGroupsFromDNs(strings_(record, "memberof")),
+				ManagedBy:   hostsFromDNs(strings_(record, "managedby")),
 			})
 		}
 		return hosts, nil
@@ -251,8 +384,18 @@ func (c *Client) findRecords(ctx context.Context, method string) ([]map[string]a
 	return c.find(ctx, method, false)
 }
 
+// findWith runs a search in the friendly view with extra options, such as
+// the flag that lists preserved accounts.
+func (c *Client) findWith(ctx context.Context, method string, extra map[string]any) ([]map[string]any, error) {
+	return c.findOptions(ctx, method, false, extra)
+}
+
 // find runs a search command and returns the directory's records.
 func (c *Client) find(ctx context.Context, method string, raw bool) ([]map[string]any, error) {
+	return c.findOptions(ctx, method, raw, nil)
+}
+
+func (c *Client) findOptions(ctx context.Context, method string, raw bool, extra map[string]any) ([]map[string]any, error) {
 	options := map[string]any{
 		"all": true,
 		// Zero means no limit on the server's side; the test directory is
@@ -261,6 +404,9 @@ func (c *Client) find(ctx context.Context, method string, raw bool) ([]map[strin
 	}
 	if raw {
 		options["raw"] = true
+	}
+	for key, value := range extra {
+		options[key] = value
 	}
 	result, err := c.call(ctx, method, []string{}, options)
 	if err != nil {
@@ -301,6 +447,22 @@ func hostGroupsFromDNs(dns []string) []string {
 	return groups
 }
 
+// hostsFromDNs takes host names out of full DNs. In raw mode managedby
+// arrives as fqdn=...,cn=computers,... rather than as names.
+func hostsFromDNs(dns []string) []string {
+	var hosts []string
+	for _, dn := range dns {
+		first, _, found := strings.Cut(dn, ",")
+		if !found {
+			continue
+		}
+		if name, ok := strings.CutPrefix(first, "fqdn="); ok {
+			hosts = append(hosts, name)
+		}
+	}
+	return hosts
+}
+
 // FreeIPA returns values as lists, even for single-valued fields.
 func first(record map[string]any, key string) string {
 	values := strings_(record, key)
@@ -336,10 +498,14 @@ func strings_(record map[string]any, key string) []string {
 				result = append(result, text)
 				continue
 			}
-			// The directory sometimes returns {"__base64__": ...} objects or numbers.
+			// The directory wraps binary values as {"__base64__": ...} and
+			// timestamps as {"__datetime__": ...}; both carry a string.
 			if nested, ok := item.(map[string]any); ok {
-				if text, ok := nested["__base64__"].(string); ok {
-					result = append(result, text)
+				for _, wrapper := range []string{"__base64__", "__datetime__"} {
+					if text, ok := nested[wrapper].(string); ok {
+						result = append(result, text)
+						break
+					}
 				}
 			}
 		}

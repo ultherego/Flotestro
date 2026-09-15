@@ -418,10 +418,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/settings", s.handleSettings)
 	// The identity directory in read-only mode.
 	s.route(mux, "GET /api/v1/identity/status", s.handleIdentityStatus)
-	s.route(mux, "GET /api/v1/identity/users", directoryHandler(s, "users",
-		func(s *Server, r *http.Request) ([]freeipa.User, error) {
-			return s.directory.Users(r.Context())
-		}))
+	s.route(mux, "GET /api/v1/identity/users", directoryHandler(s, "users", directoryUsers))
 	s.route(mux, "GET /api/v1/identity/groups", directoryHandler(s, "groups",
 		func(s *Server, r *http.Request) ([]freeipa.Group, error) {
 			return s.directory.Groups(r.Context())
@@ -444,6 +441,7 @@ func (s *Server) Routes() http.Handler {
 		func(s *Server, r *http.Request) ([]freeipa.HostGroup, error) {
 			return s.directory.HostGroups(r.Context())
 		}))
+	s.route(mux, "GET /api/v1/identity/services", directoryHandler(s, "services", directoryServices))
 	// The effective access: the directory's own simulation for a user and
 	// a host, and the projection of the rules onto one host.
 	s.route(mux, "POST /api/v1/identity/access/simulate", s.handleSimulateAccess)
@@ -471,6 +469,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/identity/changes/{id}", s.handleGetDirectoryChange)
 	s.route(mux, "POST /api/v1/identity/changes/{id}/approve", s.handleApproveDirectoryChange)
 	s.route(mux, "POST /api/v1/identity/changes/{id}/cancel", s.handleCancelDirectoryChange)
+	// The one-time value of a change - the password of a reset - read once
+	// by the requester and by nobody else.
+	s.route(mux, "POST /api/v1/identity/changes/{id}/reveal", s.handleRevealDirectoryChangeSecret)
 
 	s.route(mux, "GET /api/v1/group-mappings", s.handleListGroupMappings)
 	s.route(mux, "POST /api/v1/group-mappings", s.handleCreateGroupMapping)

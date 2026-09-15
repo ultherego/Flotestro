@@ -20,13 +20,15 @@ var (
 	ErrBlocked = errors.New("the plan holds conflicts and cannot be carried out")
 )
 
-// Store gives access to the directory change table.
+// Store gives access to the directory change table, and holds the one-time
+// values of changes that must not enter it.
 type Store struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	secrets *secretVault
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
+	return &Store{pool: pool, secrets: newSecretVault()}
 }
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }

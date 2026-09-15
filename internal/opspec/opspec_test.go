@@ -89,6 +89,29 @@ func TestValidateBoundsAJournalRead(t *testing.T) {
 	}
 }
 
+// A read bounded to the window of a job names both ends in UTC: the
+// panel knows the job's times in UTC, and a bare timestamp would be read
+// in the host's own zone. The ends take the same forms, and nothing that
+// is not a time.
+func TestAJournalReadTakesAWindowInUTC(t *testing.T) {
+	for _, window := range []JournalPayload{
+		{Lines: 100, Since: "2026-09-15 10:00:00 UTC", Until: "2026-09-15 10:05:30 UTC"},
+		{Lines: 100, Until: "-5m"},
+		{Lines: 100, Since: "yesterday", Until: "today"},
+		{Lines: 100, Until: "2026-09-15 10:05"},
+	} {
+		if err := Validate(ActionReadJournal, Payload{Journal: &window}); err != nil {
+			t.Errorf("%+v was refused: %v", window, err)
+		}
+	}
+	for _, bad := range []string{"2026-09-15T10:00:00Z", "10:00 UTC", "now; rm -rf /", "2026-09-15 10:00:00 CET"} {
+		window := JournalPayload{Lines: 100, Until: bad}
+		if err := Validate(ActionReadJournal, Payload{Journal: &window}); err == nil {
+			t.Errorf("until=%q passed validation", bad)
+		}
+	}
+}
+
 func TestMutatingOperationsAreDistinguished(t *testing.T) {
 	if ActionReadJournal.Mutating() {
 		t.Error("a journal read is not a mutation")

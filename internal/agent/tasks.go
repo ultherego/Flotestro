@@ -101,6 +101,13 @@ const (
 	// a transaction on its own, so the host may have changed; the agent that
 	// came back neither repeats the operation nor invents how it ended.
 	RejectOutcomeUnknown = "outcome_unknown"
+	// RejectHelperRejected marks a request the root helper refused at its
+	// own check of the contract, before running anything: a shape it does
+	// not read, a protocol it does not speak, an action it does not know.
+	// The helper's word travels in the message; the code says whose refusal
+	// it is, so the panel tells a helper that disagrees with the agent from
+	// an agent that does not know the operation.
+	RejectHelperRejected = "helper_rejected"
 )
 
 // TaskExecutor performs the tasks delivered by the control plane.
@@ -1505,6 +1512,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Unit:        request.GetUnit(),
 			Lines:       request.GetLines(),
 			Since:       request.GetSince(),
+			Until:       request.GetUntil(),
 			AfterCursor: request.GetAfterCursor(),
 		}
 		if request.MaxPriority != nil {

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
+import { useEnrollmentStream } from "../lib/stream";
 import type {
   EnrollmentOrder, EnrollmentStep, EnrollmentStepState, InstallationCommand,
   InstallationProfile, Relay, Whoami,
@@ -165,6 +166,13 @@ export function AddHost() {
     enabled: settledSite !== "" && settledEnvironment !== "",
   });
 
+  // The turns of the order come over the stream: the host redeeming the
+  // token, a refusal, a revocation. The poll stays as the fallback and
+  // slows down while the stream is open - the steps after the token (the
+  // session, the inventory) are gates the panel watches on its own, and
+  // they still come in with the poll.
+  const live = useEnrollmentStream(created?.id ?? null, [["enrollment-request", created?.id]]);
+
   // The installation progress refreshes itself as long as something can
   // still change: until the host is ready or the order is closed.
   const progress = useQuery({
@@ -173,9 +181,10 @@ export function AddHost() {
     enabled: !!created,
     refetchInterval: (query) => {
       const order = query.state.data;
-      if (!order) return 3000;
+      const pace = live.connected ? 10000 : 3000;
+      if (!order) return pace;
       if (hostReady(order)) return false;
-      return order.status === "pending" || order.status === "enrolled" ? 3000 : false;
+      return order.status === "pending" || order.status === "enrolled" ? pace : false;
     },
   });
   const state = progress.data ?? created;
@@ -710,6 +719,16 @@ export function AddHost() {
             ))}
             {!steps.length && <li className="source">{t("waiting for the host…")}</li>}
           </ul>
+          {/* Where the news comes from: the stream announces the host the
+              moment it redeems the token; without it the screen asks every
+              few seconds, which is slower but says the same. */}
+          {!ready && (
+            <p className="source">
+              {live.connected
+                ? t("Watching the order live; a refusal or the host's arrival shows at once.")
+                : t("Refreshing every few seconds.")}
+            </p>
+          )}
         </Card>
       )}
 

@@ -73,6 +73,129 @@ type Client struct {
 	// read and written by every caller of the client at once, so it goes
 	// under the same mutex as the cache.
 	logged bool
+	// The health of the connection, read from the calls themselves rather
+	// than from a probe of its own: the last time the directory answered,
+	// the last time it could not be reached, and the last command it
+	// refused. An operator reading "unreachable" wants to know since when.
+	lastSuccessAt time.Time
+	lastError     string
+	lastErrorAt   time.Time
+	lastRefusal   string
+	lastRefusalAt time.Time
+}
+
+func (c *Client) noteSuccess() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastSuccessAt = time.Now().UTC()
+}
+
+func (c *Client) noteFailure(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastError = err.Error()
+	c.lastErrorAt = time.Now().UTC()
+}
+
+func (c *Client) noteRefusal(message string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.lastRefusal = message
+	c.lastRefusalAt = time.Now().UTC()
+}
+
+// KeytabEntry describes one key of the connector's keytab, without the key.
+type KeytabEntry struct {
+	Principal string `json:"principal"`
+	KVNO      uint32 `json:"kvno"`
+	// Timestamp is when the key was written into the keytab. A keytab
+	// carries no expiry: the directory decides when a key stops working,
+	// and the file does not know it.
+	Timestamp *time.Time `json:"timestamp,omitempty"`
+}
+
+// Health is the state of the connector as the panel can know it without
+// asking the directory: the identity it uses, what its keytab holds, when
+// the directory last answered and last failed, and how old the cache is.
+type Health struct {
+	Principal string `json:"principal"`
+	// KeytabReadable says whether the keytab file was read at start; the
+	// entries come from that read. False comes with KeytabDetail.
+	KeytabReadable bool          `json:"keytab_readable"`
+	KeytabDetail   string        `json:"keytab_detail,omitempty"`
+	KeytabEntries  []KeytabEntry `json:"keytab_entries"`
+	LastSuccessAt  *time.Time    `json:"last_success_at,omitempty"`
+	LastError      string        `json:"last_error,omitempty"`
+	LastErrorAt    *time.Time    `json:"last_error_at,omitempty"`
+	// LastRefusal is the last command the directory refused, with its
+	// class: a refusal is an answer, not an outage, so it stands apart.
+	LastRefusal   string     `json:"last_refusal,omitempty"`
+	LastRefusalAt *time.Time `json:"last_refusal_at,omitempty"`
+	CacheEntries  int        `json:"cache_entries"`
+	// CacheOldestAt is when the oldest live entry was read from the
+	// directory; nil with no entries, because an empty cache has no age.
+	CacheOldestAt   *time.Time `json:"cache_oldest_at,omitempty"`
+	CacheTTLSeconds int        `json:"cache_ttl_seconds"`
+}
+
+// Health reports the connector's state. No call reaches the directory
+// here; the reachability check is a separate Ping, so a health view of a
+// directory that is down still comes back at once.
+func (c *Client) Health() Health {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	health := Health{
+		Principal:       c.config.Principal,
+		KeytabEntries:   []KeytabEntry{},
+		CacheEntries:    0,
+		CacheTTLSeconds: int(c.config.CacheTTL / time.Second),
+	}
+	if c.krbKeytab == nil || len(c.krbKeytab.Entries) == 0 {
+		health.KeytabDetail = "the keytab holds no entries or was not read"
+	} else {
+		health.KeytabReadable = true
+		for _, entry := range c.krbKeytab.Entries {
+			principal := strings.Join(entry.Principal.Components, "/")
+			if entry.Principal.Realm != "" {
+				principal += "@" + entry.Principal.Realm
+			}
+			item := KeytabEntry{Principal: principal, KVNO: entry.KVNO}
+			if item.KVNO == 0 {
+				item.KVNO = uint32(entry.KVNO8)
+			}
+			if !entry.Timestamp.IsZero() {
+				stamp := entry.Timestamp.UTC()
+				item.Timestamp = &stamp
+			}
+			health.KeytabEntries = append(health.KeytabEntries, item)
+		}
+	}
+	if !c.lastSuccessAt.IsZero() {
+		at := c.lastSuccessAt
+		health.LastSuccessAt = &at
+	}
+	if !c.lastErrorAt.IsZero() {
+		at := c.lastErrorAt
+		health.LastError = c.lastError
+		health.LastErrorAt = &at
+	}
+	if !c.lastRefusalAt.IsZero() {
+		at := c.lastRefusalAt
+		health.LastRefusal = c.lastRefusal
+		health.LastRefusalAt = &at
+	}
+	now := time.Now()
+	for _, entry := range c.cache {
+		if !now.Before(entry.expiresAt) {
+			continue
+		}
+		health.CacheEntries++
+		readAt := entry.expiresAt.Add(-c.config.CacheTTL).UTC()
+		if health.CacheOldestAt == nil || readAt.Before(*health.CacheOldestAt) {
+			health.CacheOldestAt = &readAt
+		}
+	}
+	return health
 }
 
 func (c *Client) isLogged() bool {
@@ -236,7 +359,7 @@ var errSessionExpired = errors.New("the directory refused the session")
 // call runs a directory command. The command name comes solely from the
 // list of explicitly supported commands, never from a user's request.
 func (c *Client) call(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
-	if !allowedMethod(method) {
+	if !allowedMethod(method) && !guardedMethod(method, options) {
 		return nil, fmt.Errorf("the command %q is not supported by the adapter", method)
 	}
 	if options == nil {
@@ -268,6 +391,7 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 	}
 	c.setLogged(false)
 	if err := c.login(ctx); err != nil {
+		c.noteFailure(err)
 		return nil, err
 	}
 	return c.post(ctx, payload)
@@ -276,6 +400,9 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, error) {
 	if !c.isLogged() {
 		if err := c.login(ctx); err != nil {
+			// A login that fails is the outage an operator asks about
+			// first: the keytab, the KDC or the directory itself.
+			c.noteFailure(err)
 			return nil, err
 		}
 	}
@@ -291,19 +418,24 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 
 	response, err := c.http.Do(request)
 	if err != nil {
+		c.noteFailure(fmt.Errorf("the query to the directory: %w", err))
 		return nil, fmt.Errorf("the query to the directory: %w", err)
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode == http.StatusUnauthorized {
+		// An expired session is the normal path, not a fault of the
+		// connector: the caller logs in again. It is not counted as an error.
 		return nil, fmt.Errorf("%w: 401", errSessionExpired)
 	}
 	if response.StatusCode != http.StatusOK {
+		c.noteFailure(fmt.Errorf("the directory: code %d", response.StatusCode))
 		return nil, fmt.Errorf("the directory: code %d", response.StatusCode)
 	}
 
 	var decoded rpcResponse
 	if err := json.NewDecoder(response.Body).Decode(&decoded); err != nil {
+		c.noteFailure(fmt.Errorf("the directory response: %w", err))
 		return nil, fmt.Errorf("the directory response: %w", err)
 	}
 	// FLOTESTRO_IPA_TRACE prints every exchange with the directory; for
@@ -313,8 +445,15 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 		fmt.Fprintf(os.Stderr, "ipa-trace request=%s\nipa-trace result=%s\n", truncateTrace(payload), truncateTrace(decoded.Result))
 	}
 	if decoded.Error != nil {
+		// A refused command is an answer of a reachable directory: the
+		// connector works, the request did not. The health view keeps the
+		// last refusal too, because an operator asking "why did the change
+		// fail" reads it there.
+		c.noteSuccess()
+		c.noteRefusal(decoded.Error.Name + ": " + decoded.Error.Message)
 		return nil, &DirectoryError{Name: decoded.Error.Name, Message: decoded.Error.Message}
 	}
+	c.noteSuccess()
 	return decoded.Result, nil
 }
 
@@ -343,6 +482,12 @@ var allowedMethods = map[string]bool{
 	"sudorule_find":  true,
 	"sudorule_show":  true,
 	"ping":           true,
+	// The Kerberos service principals of the hosts, read only: the panel
+	// shows which principal has a keytab and who manages it. The keytab
+	// itself never leaves the directory - there is no service_add,
+	// service_del or any command that issues or exports key material.
+	"service_find": true,
+	"service_show": true,
 	// hbactest is the directory's own simulation of an access rule: the
 	// verdict the host will apply, not a reconstruction by the panel.
 	"hbactest": true,
@@ -356,6 +501,12 @@ var allowedMethods = map[string]bool{
 	"user_enable":         true,
 	"group_add_member":    true,
 	"group_remove_member": true,
+	// Host group membership. An HBAC or sudo rule reaches a host through
+	// its host groups, so moving a host between groups changes who may sign
+	// in where; it is carried out like a user group change - plan, second
+	// person, execution - and never creates or deletes the group itself.
+	"hostgroup_add_member":    true,
+	"hostgroup_remove_member": true,
 	// The host entry and the one-time enrollment password. Deleting a host
 	// from the directory is not available here: it would cut off the
 	// administrators' access.
@@ -410,6 +561,30 @@ var allowedMethods = map[string]bool{
 }
 
 func allowedMethod(method string) bool { return allowedMethods[method] }
+
+// guardedMethods are the commands the adapter runs only with a fixed
+// option in the request, because the same command without it does
+// something the panel must never do. The one entry is user_del with
+// preserve: the directory then keeps the entry, its UID and its history as
+// a preserved account, which the document names as the default stage of a
+// removal. A plain user_del erases the account; it stays out of
+// allowedMethods, and this guard refuses it too - a second check, not a
+// way around the first.
+var guardedMethods = map[string]func(options map[string]any) bool{
+	"user_del": func(options map[string]any) bool {
+		preserve, _ := options["preserve"].(bool)
+		return preserve
+	},
+}
+
+// guardedMethod says whether the command may run with these options.
+func guardedMethod(method string, options map[string]any) bool {
+	guard, ok := guardedMethods[method]
+	if !ok || options == nil {
+		return false
+	}
+	return guard(options)
+}
 
 // splitPrincipal splits a principal into the name and the realm.
 func splitPrincipal(principal, defaultRealm string) (string, string) {

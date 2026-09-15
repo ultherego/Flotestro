@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/outbox"
@@ -25,11 +26,16 @@ import (
 //
 // The job and campaign channels are published by the database triggers, so
 // their names are bound to the migration that creates those triggers.
+//
+// The enrollment channel carries the turns of an installation order: the
+// screen that shows an order polls it otherwise, and a host that enrolls
+// in the night is seen the moment it does rather than at the next poll.
 const (
-	jobChannel      = "flotestro_jobs"
-	progressChannel = "flotestro_progress"
-	campaignChannel = "flotestro_campaigns"
-	logChannel      = "flotestro_logs"
+	jobChannel        = "flotestro_jobs"
+	progressChannel   = "flotestro_progress"
+	campaignChannel   = "flotestro_campaigns"
+	logChannel        = "flotestro_logs"
+	enrollmentChannel = "flotestro_enrollment"
 )
 
 // Event describes the change of the state of one operation or its progress.
@@ -47,7 +53,38 @@ type Event struct {
 	// published. It carries the identifiers only: a receiver reads the row
 	// from the table, so a missed notification loses nothing.
 	Outbox *OutboxRef `json:"outbox,omitempty"`
+	// Enrollment is filled in for a turn of an installation order. Like a
+	// job event it is a signal: the screen reads the order from the API,
+	// so what it shows is what is recorded.
+	Enrollment *EnrollmentChange `json:"enrollment,omitempty"`
 }
+
+// EnrollmentChange says what happened to an installation order.
+type EnrollmentChange struct {
+	RequestID string `json:"request_id"`
+	// Change is one of created, redeemed, refused, revoked. An order
+	// expires by the clock, not by an act, so an expiry is seen as a
+	// refusal of the host that came too late.
+	Change string `json:"change"`
+	// Site and Environment are where the order places the host; the
+	// stream lets the event through to whoever may read orders there,
+	// without a query per event.
+	Site        string `json:"site,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	// Kind is agent or relay. HostID is set once the order is redeemed;
+	// Code names a refusal.
+	Kind   string `json:"kind,omitempty"`
+	HostID string `json:"host_id,omitempty"`
+	Code   string `json:"code,omitempty"`
+}
+
+// The turns of an installation order.
+const (
+	EnrollmentCreated  = "created"
+	EnrollmentRedeemed = "redeemed"
+	EnrollmentRefused  = "refused"
+	EnrollmentRevoked  = "revoked"
+)
 
 // OutboxRef identifies a published event of the durable trail.
 type OutboxRef struct {
@@ -123,7 +160,7 @@ func (b *Bus) listen(ctx context.Context) error {
 	}
 	defer conn.Release()
 
-	for _, name := range []string{jobChannel, progressChannel, campaignChannel, logChannel, outbox.NotifyChannel} {
+	for _, name := range []string{jobChannel, progressChannel, campaignChannel, logChannel, enrollmentChannel, outbox.NotifyChannel} {
 		if _, err := conn.Exec(ctx, "listen "+name); err != nil {
 			return err
 		}
@@ -138,7 +175,7 @@ func (b *Bus) listen(ctx context.Context) error {
 			b.broadcast(parseProgress(notification.Payload))
 		case campaignChannel:
 			b.broadcast(parseTarget(notification.Payload))
-		case logChannel:
+		case logChannel, enrollmentChannel:
 			b.broadcast(parseProgress(notification.Payload))
 		case outbox.NotifyChannel:
 			if event, ok := parseOutbox(notification.Payload); ok {
@@ -222,6 +259,35 @@ func (b *Bus) PublishLog(ctx context.Context, event Event) error {
 	return err
 }
 
+// Notifier is what a notification is sent through: the pool, or the
+// transaction the change is made in - a notification sent inside a
+// transaction leaves with its commit and not at all on a rollback, so a
+// screen never hears of an enrollment that did not happen.
+type Notifier interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// PublishEnrollment broadcasts a turn of an installation order through the
+// given notifier. A package function rather than a method: the enrollment
+// door of the gateway has no bus, only its transaction, and the event is
+// no different for having come from there.
+func PublishEnrollment(ctx context.Context, through Notifier, change EnrollmentChange) error {
+	if change.RequestID == "" || through == nil {
+		return nil
+	}
+	payload, err := json.Marshal(Event{Enrollment: &change})
+	if err != nil {
+		return err
+	}
+	_, err = through.Exec(ctx, "select pg_notify($1, $2)", enrollmentChannel, string(payload))
+	return err
+}
+
+// PublishEnrollment broadcasts a turn of an installation order.
+func (b *Bus) PublishEnrollment(ctx context.Context, change EnrollmentChange) error {
+	return PublishEnrollment(ctx, b.pool, change)
+}
+
 // PublishProgress broadcasts the progress of an operation. The progress is not
 // recorded: it goes through a notification and disappears. A screen that has
 // just connected will see the next one - and that is enough, because the
@@ -280,6 +346,13 @@ func ForJob(jobID string) func(Event) bool {
 // ForOutbox filters the published rows of the durable trail.
 func ForOutbox() func(Event) bool {
 	return func(event Event) bool { return event.Outbox != nil }
+}
+
+// ForEnrollment filters the turns of one installation order.
+func ForEnrollment(requestID string) func(Event) bool {
+	return func(event Event) bool {
+		return event.Enrollment != nil && event.Enrollment.RequestID == requestID
+	}
 }
 
 // ForCampaign filters the events of the operations of one campaign.

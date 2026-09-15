@@ -18,7 +18,8 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 	}
 	for _, excluded := range []string{"capability_missing", "maintenance", "offline", "conflict", "quarantined",
 		"recovery", "retiring", "retired", "host_retiring",
-		"skipped_offline", "offline_deadline", "plan_changed_offline"} {
+		"skipped_offline", "offline_deadline", "plan_changed_offline",
+		"inventory_stale", "dispatch_ambiguous", "operation_non_cancelable"} {
 		guide, ok := ErrorGuideFor(excluded)
 		if !ok || guide.CountsAsFailure {
 			t.Errorf("%s counts as a failure of the change: %+v (%v)", excluded, guide, ok)
@@ -27,4 +28,57 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 	if _, ok := ErrorGuideFor("something_nobody_wrote"); ok {
 		t.Error("an unknown code got a guide")
 	}
+}
+
+// The campaigns document names a few conditions differently from the code
+// the panel reports. Each such name is in the guide, says which code it
+// stands for, and gives the same advice as that code - so an operator
+// reading the document and one reading a job land on one answer.
+func TestDocumentNamesAreAliasesOfReportedCodes(t *testing.T) {
+	for name, reported := range map[string]string{
+		"verification_failed":   "health_check_failed",
+		"connectivity_rollback": "rolled_back",
+		"target_limit_policy":   "selector_too_broad",
+	} {
+		alias, ok := ErrorGuideFor(name)
+		if !ok {
+			t.Errorf("the guide does not list %s", name)
+			continue
+		}
+		target, ok := ErrorGuideFor(reported)
+		if !ok {
+			t.Errorf("the guide does not list %s, which %s stands for", reported, name)
+			continue
+		}
+		if alias.Alias != reported {
+			t.Errorf("%s points at %q, want %q", name, alias.Alias, reported)
+		}
+		if alias.Stage != target.Stage || alias.Retry != target.Retry ||
+			alias.Action != target.Action || alias.CountsAsFailure != target.CountsAsFailure {
+			t.Errorf("%s gives other advice than %s:\n%+v\n%+v", name, reported, alias, target)
+		}
+		if target.Alias != "" {
+			t.Errorf("%s is itself an alias (%q); a reported code has none", reported, target.Alias)
+		}
+	}
+	// The codes the machinery reports under their own names carry no
+	// alias: a reported code pointing at another would send the panel in
+	// a circle.
+	for _, code := range []string{"helper_rejected", "operation_non_cancelable", "inventory_stale", "dispatch_ambiguous"} {
+		guide, ok := ErrorGuideFor(code)
+		if !ok || guide.Alias != "" {
+			t.Errorf("%s: %+v (%v)", code, guide, ok)
+		}
+	}
+}
+
+// An alias of a code the guide does not list is a mistake in the table
+// and fails at start, not at the first operator who asks.
+func TestAnAliasOfAnUnknownCodeIsRefused(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("an alias of a code nobody lists was accepted")
+		}
+	}()
+	withAliases(reportedGuides, []documentAlias{{code: "x", reportedAs: "something_nobody_wrote"}})
 }

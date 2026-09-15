@@ -32,7 +32,8 @@ const (
 type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
-	// admission, dispatch, agent, helper, verify, reconcile, approval.
+	// admission, dispatch, agent, helper, verify, reconcile, approval,
+	// cancel.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -42,6 +43,13 @@ type ErrorGuide struct {
 	// CountsAsFailure says whether the code raises the failure rate of a
 	// campaign. An excluded or skipped host is visible but not a failure.
 	CountsAsFailure bool `json:"counts_as_failure"`
+	// Alias is the code the panel really puts on a job or a target when
+	// this entry is one of the names the campaigns document uses for the
+	// same condition. The document's name stays searchable in the guide
+	// ("also reported as ..."), and a screen looking up a code from the
+	// document lands on the same advice as one looking up the reported
+	// code; a plain entry has no alias.
+	Alias string `json:"alias,omitempty"`
 }
 
 // ErrorGuides lists every code the campaign machinery, the agent and the
@@ -61,7 +69,58 @@ func ErrorGuideFor(code string) (ErrorGuide, bool) {
 	return ErrorGuide{}, false
 }
 
-var errorGuides = []ErrorGuide{
+// errorGuides is the guide as served: the codes the machinery reports,
+// followed by the names of the campaigns document that stand for one of
+// them. The aliases are derived at start from the entries they point at,
+// so the two can never say different things about the same condition.
+var errorGuides = withAliases(reportedGuides, documentAliases)
+
+// documentAlias is a name the campaigns document (chapter 51) gives a
+// condition the panel reports under another code. Meaning says, in the
+// document's terms, which reported codes it stands for; the stage, the
+// retry policy, the action and the failure count come from the reported
+// code.
+type documentAlias struct {
+	code, reportedAs, meaning string
+}
+
+var documentAliases = []documentAlias{
+	{code: "verification_failed", reportedAs: "health_check_failed",
+		meaning: "The post-change verification of the host failed: the panel reports it as health_check_failed for a failed check and as unit_unhealthy for a unit that is not active after the change."},
+	{code: "connectivity_rollback", reportedAs: "rolled_back",
+		meaning: "The host's connectivity watchdog undid the change on its own because the management channel did not come back; the panel reports it as rolled_back."},
+	{code: "target_limit_policy", reportedAs: "selector_too_broad",
+		meaning: "The selector names more hosts than the policy lets one campaign carry; the panel reports it as selector_too_broad."},
+}
+
+// withAliases appends the document's names to the guide. An alias whose
+// reported code is not in the guide is a mistake in this file and fails
+// at start rather than serving advice about nothing.
+func withAliases(guides []ErrorGuide, aliases []documentAlias) []ErrorGuide {
+	result := make([]ErrorGuide, 0, len(guides)+len(aliases))
+	result = append(result, guides...)
+	for _, alias := range aliases {
+		var target *ErrorGuide
+		for i := range guides {
+			if guides[i].Code == alias.reportedAs {
+				target = &guides[i]
+				break
+			}
+		}
+		if target == nil {
+			panic("opspec: the error code " + alias.code + " is an alias of " + alias.reportedAs + ", which the guide does not list")
+		}
+		result = append(result, ErrorGuide{
+			Code: alias.code, Alias: alias.reportedAs,
+			Stage: target.Stage, Retry: target.Retry,
+			Meaning: alias.meaning, Action: target.Action,
+			CountsAsFailure: target.CountsAsFailure,
+		})
+	}
+	return result
+}
+
+var reportedGuides = []ErrorGuide{
 	// Materialize and eligibility.
 	{Code: "campaign_mode_unsupported", Stage: "planning", Retry: RetryNever,
 		Meaning: "The operation has no bulk mode in the registry.",
@@ -81,6 +140,9 @@ var errorGuides = []ErrorGuide{
 	{Code: "capability_unknown", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The host has not reported its adapters yet.",
 		Action:  "Wait for the host to connect and report; not a failure."},
+	{Code: "inventory_stale", Stage: "preflight", Retry: RetryAfterChange,
+		Meaning: "The module a policy or a campaign judges the host from was read more than twice its cadence ago; a verdict on it would describe a host that has been silent, not the host as it is.",
+		Action:  "Refresh the named module - order its read, or find out why the host stopped reporting; until then the verdict is unknown. Not a failure."},
 	{Code: "maintenance", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The host is in a maintenance window and was skipped.",
 		Action:  "Run again after the window; not a failure."},
@@ -123,6 +185,9 @@ var errorGuides = []ErrorGuide{
 	{Code: "host_unavailable", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The host record could not be read when its turn came.",
 		Action:  "Check the host; it was skipped."},
+	{Code: "dispatch_ambiguous", Stage: "dispatch", Retry: RetryAutomatic,
+		Meaning: "When its turn came the host had a session open on more than one gateway, so the panel could not tell which one carries the task; it went back to the queue untouched.",
+		Action:  "Nothing; the next pass finds one session. If it repeats, read the agent journal on the host - it is reconnecting in a loop - and check that the gateways see the same database. Not a failure."},
 	{Code: "incomplete_coverage", Stage: "materialize", Retry: RetryAfterChange,
 		Meaning: "An operation that must reach the whole fleet has hosts it cannot reach.",
 		Action:  "Bring every host back or verify it, then order again."},
@@ -261,12 +326,18 @@ var errorGuides = []ErrorGuide{
 	{Code: "malformed_request", Stage: "helper", Retry: RetryNever,
 		Meaning: "The helper rejected the shape of the request.",
 		Action:  "The panel and the helper disagree on the contract; update both.", CountsAsFailure: true},
+	{Code: "helper_rejected", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The root helper refused the request at its final check of the host, before running anything; the message carries the helper's own word - malformed_request, unsupported_version or unknown_action.",
+		Action:  "The agent and the helper on the host disagree on the contract: bring both to the same release, then order again.", CountsAsFailure: true},
 	{Code: "expired", Stage: "dispatch", Retry: RetryNever,
 		Meaning: "The operation was not delivered within its time to live.",
 		Action:  "Order again once the host is reachable.", CountsAsFailure: true},
 	{Code: "canceled", Stage: "dispatch", Retry: RetryNever,
 		Meaning: "The operation was cancelled before it ran.",
 		Action:  "Nothing; order again if it is still wanted."},
+	{Code: "operation_non_cancelable", Stage: "cancel", Retry: RetryNever,
+		Meaning: "The cancel reached an operation whose contract says impossible_after_start - a package transaction, a filesystem resize - after the host reported it had started; the request was recorded, the operation runs to its end.",
+		Action:  "Nothing can stop it safely: let it drain and read its result. If the outcome is unwanted, order the compensating change the contract names."},
 	{Code: "rolled_back", Stage: "verify", Retry: RetryAfterReplan,
 		Meaning: "The host undid the change itself because the connectivity check failed.",
 		Action:  "Fix the plan; the host is on its previous configuration.", CountsAsFailure: true},

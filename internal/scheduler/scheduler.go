@@ -254,9 +254,79 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 	for _, jobID := range untaken(admitted, leased) {
 		s.admission.release(ctx, jobID)
 	}
+	// A host with a session open on more than one gateway is not served
+	// this pass: the registry of this gateway sees only its own session
+	// and cannot tell whether it is the one the agent is still on. The
+	// database can, and the check is one query for the whole batch.
+	ambiguous, err := s.ambiguousHosts(ctx, hostsOf(leased))
+	if err != nil {
+		// A failed check holds nobody: the tasks go out as before the
+		// check existed, and a stale session is caught by its lease.
+		s.log.Error("the open sessions of the hosts were not read", "err", err)
+		ambiguous = nil
+	}
 	for _, item := range leased {
+		if ambiguous[item.Job.HostID] {
+			s.holdAmbiguous(ctx, item)
+			continue
+		}
 		s.deliver(ctx, item)
 	}
+}
+
+// hostsOf lists the hosts of the leased tasks, each once.
+func hostsOf(leased []jobs.LeasedJob) []string {
+	seen := map[string]bool{}
+	hosts := make([]string, 0, len(leased))
+	for _, item := range leased {
+		if !seen[item.Job.HostID] {
+			seen[item.Job.HostID] = true
+			hosts = append(hosts, item.Job.HostID)
+		}
+	}
+	return hosts
+}
+
+// ambiguousHosts names the hosts among the given ones that have an open
+// session on more than one gateway right now. The gateway that took the
+// agent over closes the older rows a moment after opening its own, so the
+// answer is normally empty; a host that stays on the list is reconnecting
+// in a loop, or the gateways disagree about who serves it.
+func (s *Scheduler) ambiguousHosts(ctx context.Context, hostIDs []string) (map[string]bool, error) {
+	if len(hostIDs) == 0 || s.store == nil || s.store.Pool() == nil {
+		return nil, nil
+	}
+	rows, err := s.store.Pool().Query(ctx, `
+		select host_id::text from agent_sessions
+		where host_id = any($1::uuid[]) and ended_at is null
+		group by host_id
+		having count(distinct gateway_id) > 1`, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ambiguous := map[string]bool{}
+	for rows.Next() {
+		var hostID string
+		if err := rows.Scan(&hostID); err != nil {
+			return nil, err
+		}
+		ambiguous[hostID] = true
+	}
+	return ambiguous, rows.Err()
+}
+
+// holdAmbiguous puts a task back in the queue because its host cannot be
+// told apart between gateways. The attempt says why, under the code of the
+// campaigns document, and the next pass tries again: by then one session
+// has usually won.
+func (s *Scheduler) holdAmbiguous(ctx context.Context, item jobs.LeasedJob) {
+	s.log.Info("the task was held: the host has sessions on more than one gateway",
+		"job_id", item.Job.ID, "host_id", item.Job.HostID)
+	if err := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "dispatch_ambiguous"); err != nil {
+		s.log.Error("the held task was not returned to the queue", "job_id", item.Job.ID, "err", err)
+	}
+	metrics.JobDispatch.Inc("ambiguous", s.options.GatewayID)
 }
 
 func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
@@ -1178,6 +1248,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			Unit:        payload.Journal.Unit,
 			Lines:       payload.Journal.Lines,
 			Since:       payload.Journal.Since,
+			Until:       payload.Journal.Until,
 			AfterCursor: payload.Journal.AfterCursor,
 		}
 		if payload.Journal.MaxPriority != nil {

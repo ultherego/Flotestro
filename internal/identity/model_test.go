@@ -204,3 +204,91 @@ func TestRuleChangesAreAccessChangesWithThePolicyPermission(t *testing.T) {
 		t.Error("the simulation can be ordered as a change")
 	}
 }
+
+func TestLifecycleValidationNamesTheAccountAndTheChange(t *testing.T) {
+	past := "2020-01-01T00:00:00Z"
+	cleared := ""
+	rubbish := "next tuesday"
+	cases := map[string]struct {
+		action  ActionType
+		payload Payload
+		wantErr bool
+	}{
+		"expiry without a payload":    {ActionUserExpire, Payload{}, true},
+		"expiry naming no expiration": {ActionUserExpire, Payload{Expiry: &ExpiryPayload{UID: "jane"}}, true},
+		"expiry with an unreadable date": {ActionUserExpire, Payload{Expiry: &ExpiryPayload{UID: "jane",
+			PrincipalExpiresAt: &rubbish}}, true},
+		"expiry with a date":          {ActionUserExpire, Payload{Expiry: &ExpiryPayload{UID: "jane", PrincipalExpiresAt: &past}}, false},
+		"expiry that clears":          {ActionUserExpire, Payload{Expiry: &ExpiryPayload{UID: "jane", PasswordExpiresAt: &cleared}}, false},
+		"posix without a payload":     {ActionUserPOSIX, Payload{}, true},
+		"posix naming nothing":        {ActionUserPOSIX, Payload{POSIX: &POSIXPayload{UID: "jane"}}, true},
+		"posix with a relative shell": {ActionUserPOSIX, Payload{POSIX: &POSIXPayload{UID: "jane", Shell: "zsh"}}, true},
+		"posix with a shell":          {ActionUserPOSIX, Payload{POSIX: &POSIXPayload{UID: "jane", Shell: "/bin/zsh"}}, false},
+		"preserve without an account": {ActionUserPreserve, Payload{Reference: &ReferencePayload{}}, true},
+		"preserve":                    {ActionUserPreserve, Payload{Reference: &ReferencePayload{UID: "jane"}}, false},
+		"reset without an account":    {ActionUserPasswordReset, Payload{}, true},
+		"reset":                       {ActionUserPasswordReset, Payload{Reference: &ReferencePayload{UID: "jane"}}, false},
+		"host group without a name":   {ActionHostGroupMembers, Payload{HostGroup: &HostGroupPayload{Add: []string{"web1.example.test"}}}, true},
+		"host group naming nothing":   {ActionHostGroupMembers, Payload{HostGroup: &HostGroupPayload{Group: "web"}}, true},
+		"host group with a short name": {ActionHostGroupMembers, Payload{HostGroup: &HostGroupPayload{Group: "web",
+			Add: []string{"web1"}}}, true},
+		"host group with an fqdn": {ActionHostGroupMembers, Payload{HostGroup: &HostGroupPayload{Group: "web",
+			Remove: []string{"web1.example.test"}}}, false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			err := Validate(tc.action, tc.payload)
+			if tc.wantErr && err == nil {
+				t.Fatal("an invalid change passed validation")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("a valid change was rejected: %v", err)
+			}
+		})
+	}
+}
+
+func TestTheExpiryPayloadTellsAClearFromAnOmission(t *testing.T) {
+	cleared := ""
+	date := "2026-12-31T23:59:59+01:00"
+	spec, err := (ExpiryPayload{UID: "jane", PrincipalExpiresAt: &date, PasswordExpiresAt: &cleared}).Spec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A date is read in UTC, so the directory gets one spelling whatever
+	// the requester's zone.
+	if spec.PrincipalExpiresAt == nil || spec.PrincipalExpiresAt.Hour() != 22 {
+		t.Fatalf("the date was read as %v", spec.PrincipalExpiresAt)
+	}
+	// An empty string clears; a field left out is left alone. The two
+	// must not collapse into one, or "never expires" could not be ordered.
+	if spec.PasswordExpiresAt == nil || !spec.PasswordExpiresAt.IsZero() {
+		t.Fatalf("the clear was read as %v", spec.PasswordExpiresAt)
+	}
+	omitted, _ := (ExpiryPayload{UID: "jane", PrincipalExpiresAt: &date}).Spec()
+	if omitted.PasswordExpiresAt != nil {
+		t.Fatal("an omitted expiration was read as a change")
+	}
+}
+
+func TestLifecycleChangesTakeTheUserPermissionAndFreshAuthentication(t *testing.T) {
+	for _, action := range []ActionType{ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset} {
+		if action.Permission() != "identity.user.write" {
+			t.Errorf("%s has the permission %s", action, action.Permission())
+		}
+		if !action.ChangesAccess() {
+			t.Errorf("%s is not taken as a change of access", action)
+		}
+		if !action.Known() {
+			t.Errorf("%s is not a known change", action)
+		}
+	}
+	// A host's groups decide which rules reach it: the policy scope, with
+	// the same fresh authentication as a rule.
+	if ActionHostGroupMembers.Permission() != "identity.policy.write" {
+		t.Errorf("a host group change has the permission %s", ActionHostGroupMembers.Permission())
+	}
+	if !ActionHostGroupMembers.ChangesAccess() || !ActionHostGroupMembers.Known() {
+		t.Error("a host group change is not a known change of access")
+	}
+}

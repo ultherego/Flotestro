@@ -1138,14 +1138,17 @@ func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 type ListFilter struct {
 	HostID string
 	State  string
-	// Action keeps one operation type; Actor the identity that ordered it;
-	// CampaignID the rollout the tasks belong to; FanoutID the read fan-out
-	// that ordered them; ErrorCode the result the tasks ended with.
-	Action     string
-	Actor      string
-	CampaignID string
-	FanoutID   string
-	ErrorCode  string
+	// Action keeps one operation type; ActionPrefix a family of them, by
+	// the beginning of the name (packages. is every package operation);
+	// Actor the identity that ordered it; CampaignID the rollout the tasks
+	// belong to; FanoutID the read fan-out that ordered them; ErrorCode the
+	// result the tasks ended with.
+	Action       string
+	ActionPrefix string
+	Actor        string
+	CampaignID   string
+	FanoutID     string
+	ErrorCode    string
 	// Since and Until bound the creation time; Until is exclusive.
 	Since *time.Time
 	Until *time.Time
@@ -1192,6 +1195,12 @@ func (f ListFilter) conditions() ([]string, []any) {
 	add("host_id", f.HostID)
 	add("state", f.State)
 	add("action_type", f.Action)
+	// The prefix is compared as a string, not as a pattern: an operation
+	// name carries dots and underscores, which a LIKE would read as its own.
+	if f.ActionPrefix != "" {
+		args = append(args, f.ActionPrefix)
+		conditions = append(conditions, fmt.Sprintf("left(action_type, length($%d)) = $%d", len(args), len(args)))
+	}
 	add("created_by", f.Actor)
 	add("campaign_id", f.CampaignID)
 	add("fanout_id", f.FanoutID)

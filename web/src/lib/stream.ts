@@ -48,6 +48,73 @@ export function useProgressStream(path: string | null, keys: unknown[][]) {
   }, [path, queryClient]);
 }
 
+/** A turn of an installation order, as the stream announces it. */
+export type EnrollmentTurn = {
+  request_id: string;
+  change: "created" | "redeemed" | "refused" | "revoked";
+  site?: string;
+  environment?: string;
+  kind?: string;
+  host_id?: string;
+  code?: string;
+};
+
+/**
+ * The turns of one installation order, from the fleet stream.
+ *
+ * The event is a signal like a job event: the screen reads the order from
+ * the API and shows what is recorded. The hook says whether the stream is
+ * open, so the screen can keep its poll as the fallback and slow it down
+ * while the stream carries the news; a browser or a proxy that cannot hold
+ * the stream leaves the poll at its usual pace.
+ */
+export function useEnrollmentStream(requestId: string | null, keys: unknown[][]) {
+  const queryClient = useQueryClient();
+  const [connected, setConnected] = useState(false);
+  const [lastTurn, setLastTurn] = useState<EnrollmentTurn | null>(null);
+
+  useEffect(() => {
+    if (!requestId) {
+      setConnected(false);
+      setLastTurn(null);
+      return;
+    }
+    const source = new EventSource("/api/v1/events", { withCredentials: true });
+    const refresh = () => {
+      for (const key of keys) {
+        queryClient.invalidateQueries({ queryKey: key });
+      }
+    };
+    source.addEventListener("ready", () => {
+      setConnected(true);
+      refresh();
+    });
+    source.addEventListener("enrollment", (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        const turn: EnrollmentTurn | undefined = data.enrollment;
+        if (!turn || turn.request_id !== requestId) return;
+        setLastTurn(turn);
+        refresh();
+      } catch {
+        // An unreadable turn is skipped: the poll still reads the order.
+      }
+    });
+    // A broken stream is resumed by the browser; until then the poll is
+    // the only source, and the screen is told so.
+    source.onerror = () => setConnected(false);
+
+    return () => {
+      source.close();
+      setConnected(false);
+    };
+    // The query keys are constant within a screen; the dependency is the order.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestId, queryClient]);
+
+  return { connected, lastTurn };
+}
+
 /**
  * The polling interval for the aggregate views that have no stream of their
  * own. The fleet list and the dashboard change on their own - through the

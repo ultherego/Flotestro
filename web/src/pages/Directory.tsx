@@ -1,12 +1,19 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
-import type { AccessSimulation, DirectoryChange, DirectoryGroup, DirectoryUser, HBACRule, SudoRule } from "../lib/types";
+import type { AccessSimulation, DirectoryChange, DirectoryGroup, HBACRule, IdentityStatus, SudoRule } from "../lib/types";
 import { ErrorBox, Empty } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { useT } from "../i18n";
+import { Forbidden, ListField, PlanImpact, ReasonField, names, useDirectoryChange } from "./directory/shared";
+import { Users } from "./directory/Users";
+import { Hosts } from "./directory/Hosts";
+import { HostGroups } from "./directory/HostGroups";
+import { SshKeys } from "./directory/SshKeys";
+import { Services } from "./directory/Services";
+import { Health } from "./directory/Health";
 
-type Tab = "users" | "groups" | "hbac" | "sudo" | "dns";
+type Tab = "users" | "groups" | "hbac" | "sudo" | "hosts" | "host-groups" | "ssh-keys" | "services" | "dns" | "health";
 
 // The tab key is an identifier in code, not a caption for the operator.
 const TAB_TITLES: Record<Tab, string> = {
@@ -14,11 +21,19 @@ const TAB_TITLES: Record<Tab, string> = {
   groups: "Groups",
   hbac: "HBAC rules",
   sudo: "sudo rules",
+  hosts: "Hosts",
+  "host-groups": "Host groups",
+  "ssh-keys": "SSH keys",
+  services: "Services",
   dns: "DNS",
+  health: "Integration health",
 };
 
+const TABS: Tab[] = ["users", "groups", "hbac", "sudo", "hosts", "host-groups", "ssh-keys", "services", "dns", "health"];
+
 /**
- * The identity directory view. HBAC and sudo rules have a permission of
+ * The identity directory view: the objects the document names as managed
+ * from the panel, one tab each. HBAC and sudo rules have a permission of
  * their own: they describe who may enter a host and raise their privileges.
  */
 export function Directory() {
@@ -27,7 +42,7 @@ export function Directory() {
 
   const status = useQuery({
     queryKey: ["identity-status"],
-    queryFn: () => api.get<{ configured: boolean; reachable?: boolean; principal?: string; summary?: string; error?: string }>("/api/v1/identity/status"),
+    queryFn: () => api.get<IdentityStatus>("/api/v1/identity/status"),
   });
 
   return (
@@ -44,7 +59,7 @@ export function Directory() {
       />
 
       <div className="tabs">
-        {(["users", "groups", "hbac", "sudo", "dns"] as Tab[]).map((key) => (
+        {TABS.map((key) => (
           <button key={key} className={tab === key ? "active" : ""} onClick={() => setTab(key)}>
             {t(TAB_TITLES[key])}
           </button>
@@ -55,50 +70,29 @@ export function Directory() {
       {tab === "groups" && <Groups />}
       {tab === "hbac" && <HBACRules />}
       {tab === "sudo" && <SudoRules />}
+      {tab === "hosts" && <Hosts />}
+      {tab === "host-groups" && <HostGroups />}
+      {tab === "ssh-keys" && <SshKeys />}
+      {tab === "services" && <Services />}
       {tab === "dns" && <DirectoryDNS />}
+      {tab === "health" && <Health />}
     </>
   );
 }
 
-function Forbidden() {
-  const t = useT();
-  return <Card><Empty>{t("You do not have permission to read this resource.")}</Empty></Card>;
-}
-
-function Users() {
-  const t = useT();
-  const { data, error } = useQuery({
-    queryKey: ["identity-users"],
-    queryFn: () => api.get<Collection<DirectoryUser>>("/api/v1/identity/users"),
-    retry: false,
-  });
-  if (error instanceof ApiError && error.forbidden) return <Forbidden />;
-  if (error) return <ErrorBox error={error} />;
-  if (!data?.items.length) return <Card><Empty>{t("No accounts.")}</Empty></Card>;
-
-  return (
-    <Card flush>
-      <table>
-        <thead><tr><th>{t("Account")}</th><th>{t("Full name")}</th><th className="num">UID</th><th>{t("Groups")}</th><th className="num">{t("SSH keys")}</th><th>{t("State")}</th></tr></thead>
-        <tbody>
-          {data.items.map((user) => (
-            <tr key={user.uid}>
-              <td className="mono">{user.uid}</td>
-              <td>{[user.first_name, user.last_name].filter(Boolean).join(" ")}</td>
-              <td className="num">{user.uid_number || "—"}</td>
-              <td>{(user.groups ?? []).join(", ") || "—"}</td>
-              <td className="num">{user.ssh_key_fingerprints?.length ?? 0}</td>
-              <td>{user.disabled ? <span className="badge error">{t("locked")}</span> : <span className="badge ok">{t("active")}</span>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
-  );
-}
-
+/**
+ * The user groups and their membership. A membership change ends the panel
+ * sessions of the moved users: a session carries the groups of the moment
+ * of login, and the only honest thing to do with the old scope is to end it.
+ */
 function Groups() {
   const t = useT();
+  const [editing, setEditing] = useState<DirectoryGroup | null>(null);
+  const [add, setAdd] = useState("");
+  const [remove, setRemove] = useState("");
+  const [reason, setReason] = useState("");
+  const { mutation, change, message } = useDirectoryChange(["identity-groups", "identity-users"]);
+
   const { data, error } = useQuery({
     queryKey: ["identity-groups"],
     queryFn: () => api.get<Collection<DirectoryGroup>>("/api/v1/identity/groups"),
@@ -106,108 +100,65 @@ function Groups() {
   });
   if (error instanceof ApiError && error.forbidden) return <Forbidden />;
   if (error) return <ErrorBox error={error} />;
-  if (!data?.items.length) return <Card><Empty>{t("No groups.")}</Empty></Card>;
 
   return (
-    <Card flush>
-      <table>
-        <thead><tr><th>{t("Group")}</th><th className="num">GID</th><th>{t("Description")}</th><th>{t("Members")}</th></tr></thead>
-        <tbody>
-          {data.items.map((group) => (
-            <tr key={group.name}>
-              <td className="mono">{group.name}</td>
-              <td className="num">{group.gid_number || "—"}</td>
-              <td>{group.description || "—"}</td>
-              <td>{(group.members ?? []).join(", ") || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Card>
+    <>
+      {editing && (
+        <Card
+          title={t("Members of the group {name}", { name: editing.name })}
+          description={t("The plan shows the resulting membership and the hosts and sudo rules the group leads to; the moved users lose their panel sessions and log in with the new scope.")}
+          footer={
+            <Actions>
+              <button disabled={(!names(add).length && !names(remove).length) || reason.trim().length < 8 || mutation.isPending}
+                      onClick={() => mutation.mutate({
+                        action: "identity.group.members", reason,
+                        payload: { group: { group: editing.name, add: names(add), remove: names(remove) } },
+                      }, { onSuccess: () => setEditing(null) })}>
+                {t("Plan membership change")}
+              </button>
+              <button className="secondary" onClick={() => setEditing(null)}>{t("Close")}</button>
+              {message && <p className="page-error">{message}</p>}
+            </Actions>
+          }
+        >
+          <p className="source">
+            <strong>{t("Current members ({n})", { n: (editing.members ?? []).length })}:</strong>{" "}
+            <span className="mono">{(editing.members ?? []).join(", ") || "—"}</span>
+          </p>
+          <FieldGrid>
+            <ListField label={t("Add users")} value={add} onChange={setAdd} placeholder="alice, bob" />
+            <ListField label={t("Remove users")} value={remove} onChange={setRemove} placeholder="carol" />
+            <ReasonField value={reason} onChange={setReason} />
+          </FieldGrid>
+        </Card>
+      )}
+
+      {change && <PlanImpact change={change} />}
+
+      <Card flush>
+        {!data?.items.length ? (
+          <Empty>{t("No groups.")}</Empty>
+        ) : (
+          <table>
+            <thead><tr><th>{t("Group")}</th><th className="num">GID</th><th>{t("Description")}</th><th>{t("Members")}</th><th></th></tr></thead>
+            <tbody>
+              {data.items.map((group) => (
+                <tr key={group.name}>
+                  <td className="mono">{group.name}</td>
+                  <td className="num">{group.gid_number || "—"}</td>
+                  <td>{group.description || "—"}</td>
+                  <td>{(group.members ?? []).join(", ") || "—"}</td>
+                  <td className="num">
+                    <button className="secondary" onClick={() => { setEditing(group); setAdd(""); setRemove(""); }}>{t("Edit members")}</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </>
   );
-}
-
-/** Splits a comma-separated field into names; blanks fall out. */
-function names(text: string): string[] {
-  return text.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-/** A field holding a list of names, typed as one comma-separated line. */
-function ListField({ label, value, onChange, placeholder, disabled }: {
-  label: string; value: string; onChange: (value: string) => void; placeholder?: string; disabled?: boolean;
-}) {
-  return (
-    <Field label={label}>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} disabled={disabled} />
-    </Field>
-  );
-}
-
-/**
- * The impact of a planned change, shown as the plan came back: the hosts
- * and users the rule reaches, the diff against the rule of the same name,
- * the warnings and the conflicts. The approval by a second person happens
- * on the change itself; this is what that person is going to read.
- */
-function PlanImpact({ change }: { change: DirectoryChange }) {
-  const t = useT();
-  const plan = change.plan;
-  if (!plan) return null;
-  const conflicts = plan.conflicts ?? [];
-  const warnings = plan.warnings ?? [];
-  return (
-    <Card
-      title={plan.summary}
-      tone={conflicts.length ? "error" : warnings.length ? "warn" : undefined}
-      description={
-        conflicts.length
-          ? t("Change {id} is blocked by conflicts and cannot be approved.", { id: change.id.slice(0, 8) })
-          : t("Change {id} is {state}; a second person approves it with a reason.", { id: change.id.slice(0, 8), state: change.state.replace("_", " ") })
-      }
-    >
-      {conflicts.map((conflict, index) => (
-        <p key={index} className="warning"><span>{conflict}</span></p>
-      ))}
-      {warnings.map((warning, index) => (
-        <p key={index} className="warning"><span>{warning}</span></p>
-      ))}
-      <ul className="source">
-        {(plan.steps ?? []).map((step, index) => <li key={index}>{step}</li>)}
-      </ul>
-      <p className="source">
-        <strong>{t("Hosts reached ({n})", { n: (plan.reachable_hosts ?? []).length })}:</strong>{" "}
-        <span className="mono">{(plan.reachable_hosts ?? []).join(", ") || "—"}</span>
-      </p>
-      <p className="source">
-        <strong>{t("Users reached ({n})", { n: (plan.affected_users ?? []).length })}:</strong>{" "}
-        <span className="mono">{(plan.affected_users ?? []).join(", ") || "—"}</span>
-      </p>
-    </Card>
-  );
-}
-
-/** Orders a directory change and keeps the answer for the impact card. */
-function useDirectoryChange(invalidate: string[]) {
-  const t = useT();
-  const queryClient = useQueryClient();
-  const [change, setChange] = useState<DirectoryChange | null>(null);
-  const [message, setMessage] = useState("");
-  const mutation = useMutation({
-    mutationFn: (body: Record<string, unknown>) => api.post<DirectoryChange>("/api/v1/identity/changes", body),
-    onSuccess: (result) => {
-      setChange(result);
-      setMessage("");
-      for (const key of invalidate) queryClient.invalidateQueries({ queryKey: [key] });
-      queryClient.invalidateQueries({ queryKey: ["directory-changes"] });
-    },
-    onError: (error) => {
-      setChange(null);
-      setMessage(error instanceof ApiError && error.code === "reason_required"
-        ? t("A change of access needs a reason of at least 8 characters.")
-        : error instanceof Error ? error.message : String(error));
-    },
-  });
-  return { mutation, change, message };
 }
 
 const EMPTY_HBAC = {

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
@@ -54,6 +55,10 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	summary, err := s.directory.Ping(r.Context())
+	// The connector's own account of itself - its keytab, its last answer
+	// and its last failure, the age of its cache - is read after the ping,
+	// so that the ping just made is the call it reports.
+	connector := s.directory.Health()
 	if err != nil {
 		// An unavailable directory is not a panel error: the state is
 		// reported instead of pretending there is no data.
@@ -63,6 +68,7 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 			"principal":  s.directory.Principal(),
 			"error":      err.Error(),
 			"hosts":      fleet,
+			"connector":  connector,
 		})
 		return
 	}
@@ -72,7 +78,26 @@ func (s *Server) handleIdentityStatus(w http.ResponseWriter, r *http.Request) {
 		"principal":  s.directory.Principal(),
 		"summary":    summary,
 		"hosts":      fleet,
+		"connector":  connector,
 	})
+}
+
+// directoryUsers reads the live accounts, or with preserved=true the ones
+// removed with their entry kept. The two lists are served apart on purpose:
+// a preserved account belongs to no group and reaches no host, and mixing
+// it into the live list would count it where it does not belong.
+func directoryUsers(s *Server, r *http.Request) ([]freeipa.User, error) {
+	if r.URL.Query().Get("preserved") == "true" {
+		return s.directory.PreservedUsers(r.Context())
+	}
+	return s.directory.Users(r.Context())
+}
+
+// directoryServices reads the Kerberos service principals of the hosts.
+// Reading which principal has a keytab is the whole of it: no keytab is
+// ever fetched, and the adapter has no command that would.
+func directoryServices(s *Server, r *http.Request) ([]freeipa.Service, error) {
+	return s.directory.Services(r.Context())
 }
 
 // directoryHandler builds a read handler for one directory resource.

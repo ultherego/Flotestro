@@ -76,7 +76,7 @@ func TestCampaignRecordsAStepPerTargetPhase(t *testing.T) {
 		t.Fatalf("the file campaign started from state %s", campaign.State)
 	}
 	afterPlanning := h.awaitCampaign(campaign.ID,
-		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true}, 3*time.Minute)
+		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
 	if afterPlanning.State != "awaiting_approval" {
 		t.Fatalf("planning ended in state %s (%s)", afterPlanning.State, afterPlanning.PauseReason)
 	}

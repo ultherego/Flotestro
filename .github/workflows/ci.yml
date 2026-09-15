@@ -21,6 +21,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # The newest patch of the module's Go line: the standard library
+          # carries the fixes govulncheck asks for, and go.mod names only
+          # the minimum the code needs.
+          check-latest: true
           # The module and build caches are keyed by go.sum by default.
           cache: true
 
@@ -57,6 +61,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          check-latest: true
           cache: true
 
       # Go runs one fuzz target per invocation, so each target is a step.
