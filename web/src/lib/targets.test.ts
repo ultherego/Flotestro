@@ -3,7 +3,10 @@ import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createElement, type ReactNode } from "react";
 import type { CampaignTarget } from "./types";
-import { loadedTargets, TARGET_PAGE, TARGET_STATES, useTargets, type TargetPage } from "./targets";
+import {
+  expressionSuggestions, expressionText, loadedTargets, parseExpression, SELECTOR_KEYS, SELECTOR_OPERATORS,
+  TARGET_PAGE, TARGET_STATES, useTargets, type TargetPage,
+} from "./targets";
 
 /* The pages come from the API; the client is replaced by a function each
    test programs. The mock is hoisted with the module, because the factory
@@ -109,5 +112,138 @@ describe("useTargets", () => {
     expect(get).not.toHaveBeenCalled();
     expect(result.current.isFetching).toBe(false);
     expect(loadedTargets(result.current.data)).toEqual([]);
+  });
+});
+
+describe("parseExpression", () => {
+  /** The selector the text means, as the server would receive it. */
+  function selector(text: string) {
+    const check = parseExpression(text);
+    if (!check.ok) throw new Error(`${text}: ${check.error}`);
+    return check.expression;
+  }
+  /** The error of a text that does not parse. */
+  function refusal(text: string): string {
+    const check = parseExpression(text);
+    if (check.ok) throw new Error(`${text} parsed as ${JSON.stringify(check.expression)}`);
+    return check.error;
+  }
+
+  it("reads one condition, with or without spaces around the operator", () => {
+    expect(selector("site = warsaw")).toEqual({ site: "warsaw" });
+    expect(selector("site=warsaw")).toEqual({ site: "warsaw" });
+    expect(selector("os == debian")).toEqual({ os_family: "debian" });
+  });
+
+  it("keeps the equals sign of a tag inside its value", () => {
+    expect(selector("tag=role=db")).toEqual({ tag: "role=db" });
+    expect(selector("tag = role=db")).toEqual({ tag: "role=db" });
+  });
+
+  it("takes every key of the live selector under its name or alias", () => {
+    expect(selector("security_updates = true and reboot_required = false and failed_units = true")).toEqual({
+      all: [{ security_updates: "true" }, { reboot_required: "false" }, { failed_units: "true" }],
+    });
+    expect(selector("env = prod and connection = online and lifecycle = active and release_channel = beta")).toEqual({
+      all: [{ environment: "prod" }, { connection_state: "online" }, { lifecycle_state: "active" }, { channel: "beta" }],
+    });
+    expect(selector("os_version = 12 and relay = edge-1 and failure_domain = rack-7 and owner = platform")).toEqual({
+      all: [{ os_version: "12" }, { relay: "edge-1" }, { failure_domain: "rack-7" }, { owner: "platform" }],
+    });
+    expect(selector("group = databases and capability = packages.apt")).toEqual({
+      all: [{ group: "databases" }, { capability: "packages.apt" }],
+    });
+  });
+
+  it("compares the agent version with every operator and nothing else", () => {
+    expect(selector("agent_version < 0.49.0")).toEqual({ agent_version: "< 0.49.0" });
+    expect(selector("agent_version<=0.49.0")).toEqual({ agent_version: "<= 0.49.0" });
+    expect(selector("agent_version >= v0.49.0")).toEqual({ agent_version: ">= v0.49.0" });
+    expect(selector("agent_version > 0.48.2")).toEqual({ agent_version: "> 0.48.2" });
+    expect(selector("agent_version = 0.49.0")).toEqual({ agent_version: "0.49.0" });
+    expect(selector("agent_version != 0.49.0")).toEqual({ not: { agent_version: "0.49.0" } });
+    expect(refusal("site < warsaw")).toContain("applies to agent_version");
+    expect(refusal("agent_version < latest")).toContain("not a version");
+    expect(refusal("agent_version >= 0.49.0-rc1")).toContain("not a version");
+  });
+
+  it("binds and tighter than or, not to one condition, and parentheses over both", () => {
+    expect(selector("site = a or site = b and tag = x")).toEqual({
+      any: [{ site: "a" }, { all: [{ site: "b" }, { tag: "x" }] }],
+    });
+    expect(selector("(site = a or site = b) and tag = x")).toEqual({
+      all: [{ any: [{ site: "a" }, { site: "b" }] }, { tag: "x" }],
+    });
+    expect(selector("not site = a and tag = x")).toEqual({ all: [{ not: { site: "a" } }, { tag: "x" }] });
+    expect(selector("not (site = a or site = b)")).toEqual({ not: { any: [{ site: "a" }, { site: "b" }] } });
+    expect(selector("environment != prod")).toEqual({ not: { environment: "prod" } });
+    expect(selector("SITE = warsaw AND Tag = role")).toEqual({ all: [{ site: "warsaw" }, { tag: "role" }] });
+  });
+
+  it("takes a value with spaces in double quotes", () => {
+    expect(selector('owner = "platform team"')).toEqual({ owner: "platform team" });
+    expect(selector('owner = "the \\"core\\" team"')).toEqual({ owner: 'the "core" team' });
+  });
+
+  it("refuses what the server refuses, naming the place", () => {
+    expect(refusal("")).toBe("the expression is empty");
+    expect(refusal("colour = blue")).toContain('"colour" at 0 is not a key');
+    expect(refusal("site warsaw")).toContain("an operator such as = is expected");
+    expect(refusal("site =")).toContain("a value is expected");
+    expect(refusal("site = a and")).toContain("a condition is missing");
+    expect(refusal("site = a site = b")).toContain('unexpected "site" at 9');
+    expect(refusal("(site = a")).toContain("never closed");
+    expect(refusal("site = a)")).toContain('unexpected ")"');
+    expect(refusal('owner = "platform')).toContain("quote opened at 8 is never closed");
+    expect(refusal("site => a")).toContain("is not an operator");
+    expect(refusal("security_updates = yes")).toContain("not one of true, false");
+    expect(refusal("connection = sleeping")).toContain("not one of online, offline, stale, unknown");
+    expect(refusal("tag = Role=db")).toContain("is not a tag");
+    expect(refusal("site = " + "x".repeat(129))).toContain("longer than 128");
+    expect(parseExpression("site = warsaw and colour = blue")).toMatchObject({ ok: false, at: 18 });
+  });
+
+  it("reads back what expressionText writes", () => {
+    const expression = selector("(site=warsaw and not tag=role=db) or agent_version < 0.49.0");
+    const text = expressionText(expression);
+    expect(text).toBe("((site=warsaw and not tag=role=db) or agent_version < 0.49.0)");
+    expect(selector(text)).toEqual(expression);
+    expect(expressionText({ agent_version: "0.49.0" })).toBe("agent_version = 0.49.0");
+    expect(expressionText(undefined)).toBe("");
+  });
+});
+
+describe("expressionSuggestions", () => {
+  it("offers the keys where a condition starts, narrowed by what is typed", () => {
+    expect(expressionSuggestions("")).toEqual([...SELECTOR_KEYS.map((key) => key.name), "not"]);
+    expect(expressionSuggestions("sec")).toEqual(["security_updates"]);
+    expect(expressionSuggestions("site = a and ")).toContain("tag");
+    expect(expressionSuggestions("not (")).toContain("site");
+    expect(expressionSuggestions("site = a and re")).toEqual(["reboot_required", "relay"]);
+  });
+
+  it("offers the operators after a key: every one for the version, equality for the rest", () => {
+    expect(expressionSuggestions("site ")).toEqual(["=", "!="]);
+    expect(expressionSuggestions("site")).toEqual(["=", "!="]);
+    expect(expressionSuggestions("agent_version ")).toEqual(SELECTOR_OPERATORS);
+    expect(expressionSuggestions("agent_version <")).toEqual(SELECTOR_OPERATORS);
+  });
+
+  it("offers the values of a key that takes a fixed set, and nothing for free text", () => {
+    expect(expressionSuggestions("connection = ")).toEqual(["online", "offline", "stale", "unknown"]);
+    expect(expressionSuggestions("connection = on")).toEqual(["online"]);
+    expect(expressionSuggestions("reboot_required = ")).toEqual(["true", "false"]);
+    expect(expressionSuggestions("site = ")).toEqual([]);
+  });
+
+  it("offers the keywords after a complete condition", () => {
+    expect(expressionSuggestions("site = a ")).toEqual(["and", "or"]);
+    expect(expressionSuggestions("site = a an")).toEqual(["and"]);
+    expect(expressionSuggestions("(site = a) ")).toEqual(["and", "or"]);
+    expect(expressionSuggestions("owner = site ")).toEqual(["and", "or"]);
+  });
+
+  it("offers nothing while a quote is open", () => {
+    expect(expressionSuggestions('owner = "plat')).toEqual([]);
   });
 });

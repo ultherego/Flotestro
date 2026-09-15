@@ -770,6 +770,12 @@ func run() error {
 	orchestrator.Authorizer = authzStore
 	go orchestrator.Run(ctx)
 
+	// The scheduled campaigns: the loop places the stored orders at their
+	// moments through the same door a request takes, under the rights of
+	// whoever wrote the schedule; each campaign then waits for its
+	// approval like any other.
+	go campaigns.NewScheduleLoop(campaignStore, panelServer, log, 5*time.Second).Run(ctx)
+
 	// The runner carries the remediation plans out step by step: every step is
 	// an ordinary job of a module, and the next one starts only once the
 	// previous one has succeeded.

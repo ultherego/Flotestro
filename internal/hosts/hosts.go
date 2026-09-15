@@ -212,7 +212,12 @@ type Host struct {
 	Hostname    string `json:"hostname"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	Owner       string `json:"owner,omitempty"`
+	// PlacementChangedAt is when an operator last moved the host to another
+	// site or environment. Absent for a host that stands where it enrolled:
+	// the placement of such a host is the enrollment order's, and the
+	// order is the record of it.
+	PlacementChangedAt *time.Time `json:"placement_changed_at,omitempty"`
+	Owner              string     `json:"owner,omitempty"`
 	// FailureDomain is what the host goes down with - a rack, an
 	// availability zone, a cluster whose members keep a service alive -
 	// recorded by an operator, and keyed on by the budgets that keep a
@@ -1298,7 +1303,8 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
-		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
+		select h.id, h.machine_id, h.hostname, h.site, h.environment, h.placement_changed_at,
+		       coalesce(h.owner, ''), h.tags,
 		       coalesce(h.failure_domain, ''), h.release_channel,
 		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at, h.lifecycle_changed_by,
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
@@ -1348,7 +1354,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		// is judged from the same facts the host tab shows.
 		var identityPayload []byte
 		var identityObservedAt *time.Time
-		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
+		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment,
+			&h.PlacementChangedAt, &h.Owner, &h.Tags,
 			&h.FailureDomain, &h.ReleaseChannel,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt, &h.LifecycleChangedBy,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
@@ -1775,6 +1782,68 @@ func (s *Store) SetFailureDomain(ctx context.Context, hostID, domain string) (*H
 		`update hosts set failure_domain = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("setting the failure domain: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// MaxPlacementLength bounds the site and the environment of a host. Both
+// are names an operator types and a selector names; the bound is the one
+// the selectors put on a leaf value, so a placement the panel accepts is
+// one a group can select on.
+const MaxPlacementLength = 128
+
+// ErrInvalidPlacement means a site or an environment the panel does not
+// accept; the message says which and what is wrong with it.
+var ErrInvalidPlacement = errors.New("invalid placement")
+
+// NormalizePlacement checks a site and an environment. Neither may be
+// empty: a host is always somewhere, and the enrollment order that
+// admitted it already named a site and an environment - "default" and
+// "unassigned" when the operator named none. Clearing them would put the
+// host under no budget and in no scope, which is not "unplaced" but
+// invisible. Control characters are refused, because both names are
+// printed in tables, become budget keys and are matched by role bindings.
+func NormalizePlacement(site, environment string) (string, string, error) {
+	site = strings.TrimSpace(site)
+	environment = strings.TrimSpace(environment)
+	for _, field := range []struct{ name, value string }{{"site", site}, {"environment", environment}} {
+		if field.value == "" {
+			return "", "", fmt.Errorf("%w: the %s is required", ErrInvalidPlacement, field.name)
+		}
+		if len(field.value) > MaxPlacementLength {
+			return "", "", fmt.Errorf("%w: the %s is longer than %d characters",
+				ErrInvalidPlacement, field.name, MaxPlacementLength)
+		}
+		for _, r := range field.value {
+			if r < ' ' || r == 0x7f {
+				return "", "", fmt.Errorf("%w: control characters are not allowed in the %s",
+					ErrInvalidPlacement, field.name)
+			}
+		}
+	}
+	return site, environment, nil
+}
+
+// SetPlacement moves a host to a site and an environment. The moment of
+// the move is recorded only when something actually changed: a write that
+// repeats the current placement is a no-op on the host, not a move, so
+// the host page keeps showing when the host really arrived.
+func (s *Store) SetPlacement(ctx context.Context, hostID, site, environment string) (*Host, error) {
+	site, environment, err := NormalizePlacement(site, environment)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx, `
+		update hosts
+		   set placement_changed_at = case when site = $2 and environment = $3
+		                                   then placement_changed_at else now() end,
+		       site = $2, environment = $3, updated_at = now()
+		 where id = $1`, hostID, site, environment)
+	if err != nil {
+		return nil, fmt.Errorf("setting the placement: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, ErrNotFound

@@ -302,11 +302,20 @@ func dropNull(value json.RawMessage) json.RawMessage {
 type ListFilter struct {
 	TargetID   string
 	TargetType string
+	// HostID keeps the events of one host: those aimed at the host and
+	// those of its jobs, which name the host in their detail. The host's
+	// own trail reads with it; TargetID alone would show the host without
+	// what was done on it.
+	HostID string
 	// Actor is the identity that acted: a principal subject or an agent's
 	// host identifier.
-	Actor   string
-	Action  string
-	Outcome string
+	Actor  string
+	Action string
+	// ActionPrefix keeps a family of actions by the beginning of the name
+	// (job. is every event about a job), the way the job list narrows an
+	// operation family; Action keeps one action alone.
+	ActionPrefix string
+	Outcome      string
 	// Since and Until bound the time of the events; Until is exclusive.
 	Since *time.Time
 	Until *time.Time
@@ -325,8 +334,19 @@ func (f ListFilter) conditions(args []any) ([]string, []any) {
 	}
 	add("target_id", f.TargetID)
 	add("target_type", f.TargetType)
+	if f.HostID != "" {
+		args = append(args, f.HostID)
+		conditions = append(conditions, fmt.Sprintf(
+			"((target_type = 'host' and target_id = $%d) or detail->>'host_id' = $%d)", len(args), len(args)))
+	}
 	add("actor_id", f.Actor)
 	add("action", f.Action)
+	// The prefix is compared as a string, not as a pattern: an action name
+	// carries dots and underscores, which a LIKE would read as its own.
+	if f.ActionPrefix != "" {
+		args = append(args, f.ActionPrefix)
+		conditions = append(conditions, fmt.Sprintf("left(action, length($%d)) = $%d", len(args), len(args)))
+	}
 	add("outcome", f.Outcome)
 	if f.Since != nil {
 		args = append(args, *f.Since)

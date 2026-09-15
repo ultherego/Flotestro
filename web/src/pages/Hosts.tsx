@@ -8,7 +8,9 @@ import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host, type Rela
 import { relativeTime } from "../lib/format";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { Breakdown, Meter, StatusBar } from "../components/widgets";
+import { HostsMetadata } from "./HostsMetadata";
 import { useT } from "../i18n";
 
 /** The adapters a host can be filtered by; the names the hosts report. */
@@ -117,6 +119,11 @@ export function Hosts() {
   // The bulk workspace is where a selection goes; whoever cannot read
   // campaigns has no such workspace and sees no checkboxes.
   const canSelect = (permissions.data?.permissions ?? []).includes("campaign.read");
+  // The metadata panel is for whoever may write tags or maintenance
+  // windows; the server judges each host on its own anyway.
+  const canSetMetadata = ["host.tag.write", "host.maintenance.write"]
+    .some((permission) => (permissions.data?.permissions ?? []).includes(permission));
+  const [metadataOpen, setMetadataOpen] = useState(false);
   const navigate = useNavigate();
   // The address carries the filters: a tile on the dashboard, a chip on a
   // row and a bookmark all link here with some already set, and every
@@ -298,7 +305,7 @@ export function Hosts() {
         </Card>
 
         <Card className="span-9" flush>
-          <Toolbar end={hosts.data && <span>{t("{n} hosts", { n: total })}</span>}>
+          <Toolbar end={<>{hosts.data && <span>{t("{n} hosts", { n: total })}</span>}<ExportButton path="/api/v1/hosts" params={params} /></>}>
             <input
               placeholder={t("Search hostname, address, machine ID or owner")}
               value={filters.q}
@@ -595,8 +602,22 @@ export function Hosts() {
               <button type="button" className="primary" onClick={openInBulk}>
                 {t("Open in Bulk workspace ({n})", { n: selected.size })}
               </button>
-              <button type="button" className="secondary" onClick={() => setSelected(new Set())}>{t("Clear selection")}</button>
+              {canSetMetadata && (
+                <button type="button" className="secondary" onClick={() => setMetadataOpen(true)} data-testid="set-metadata">
+                  {t("Set metadata…")}
+                </button>
+              )}
+              <button type="button" className="secondary" onClick={() => { setSelected(new Set()); setMetadataOpen(false); }}>{t("Clear selection")}</button>
             </div>
+          )}
+          {/* The panel edits the loaded rows that are ticked: a host ticked
+              and then filtered out of view is not edited unseen. */}
+          {metadataOpen && selected.size > 0 && (
+            <HostsMetadata
+              hosts={rows.filter((host) => selected.has(host.id))}
+              permissions={permissions.data?.permissions ?? []}
+              onClose={() => setMetadataOpen(false)}
+            />
           )}
         </Card>
 

@@ -22,7 +22,8 @@ func (s *Server) recordAuditRead(r *http.Request, actor authz.Principal, action 
 	detail := map[string]any{}
 	for key, value := range map[string]string{
 		"target_id": filter.TargetID, "target_type": filter.TargetType,
-		"actor": filter.Actor, "action": filter.Action, "outcome": filter.Outcome,
+		"actor": filter.Actor, "action": filter.Action, "action_prefix": filter.ActionPrefix,
+		"outcome": filter.Outcome,
 	} {
 		if value != "" {
 			detail["filter_"+key] = value
@@ -54,15 +55,38 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	filter := audit.ListFilter{TargetID: hostID}
-	s.recordAuditRead(r, actor, "audit.read", "host", hostID, filter, map[string]any{"limit": limit})
-	page, err := s.audit.ListPaged(r.Context(), filter, audit.Cursor{}, limit)
+	// The trail of one host takes the filters of the fleet trail and pages
+	// the same way: the host tab asks "the denials on this host since
+	// Monday" as the fleet page does, and a host with a long history is
+	// browsed rather than cut off at the newest rows. The target is the
+	// host of the address, whatever the query says.
+	filter, ok := auditFilter(w, r)
+	if !ok {
+		return
+	}
+	filter.HostID = hostID
+	filter.TargetID = ""
+	query := r.URL.Query()
+	cursor, err := audit.ParseCursor(query.Get("cursor"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	limit = paging.Limit(limit, defaultListPage, maxListPage)
+	extra := map[string]any{"limit": limit}
+	if cursor.Set {
+		extra["continued"] = true
+	}
+	s.recordAuditRead(r, actor, "audit.read", "host", hostID, filter, extra)
+	page, err := s.audit.ListPaged(r.Context(), filter, cursor, limit)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": page.Items, "count": len(page.Items)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
+	})
 }
 
 // auditFilter reads the filter of a trail read from the query. The time
@@ -71,11 +95,12 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 func auditFilter(w http.ResponseWriter, r *http.Request) (audit.ListFilter, bool) {
 	query := r.URL.Query()
 	filter := audit.ListFilter{
-		TargetID:   query.Get("target_id"),
-		TargetType: query.Get("target_type"),
-		Actor:      query.Get("actor"),
-		Action:     query.Get("action"),
-		Outcome:    query.Get("outcome"),
+		TargetID:     query.Get("target_id"),
+		TargetType:   query.Get("target_type"),
+		Actor:        query.Get("actor"),
+		Action:       query.Get("action"),
+		ActionPrefix: query.Get("action_prefix"),
+		Outcome:      query.Get("outcome"),
 	}
 	var err error
 	if filter.Since, err = parseTimeParam(query.Get("since")); err != nil {

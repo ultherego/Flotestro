@@ -1,7 +1,6 @@
 package adminapi
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1235,79 +1234,44 @@ const campaignCSVPage = 1000
 // writeCampaignCSV streams the targets of a campaign as a CSV file. The
 // report is meant for a campaign on ten thousand hosts: the rows go page by
 // page from the database straight to the socket, and each page leaves the
-// panel's memory before the next one is read. The headers are the only
-// thing decided before the first row; an error in the middle of the export
-// cannot become a problem document any more and ends up as a short file.
+// panel's memory before the next one is read. The file is named after the
+// campaign, not the day: it is the record of one rollout, and two exports
+// of it are the same file.
 func (s *Server) writeCampaignCSV(w http.ResponseWriter, r *http.Request, campaign *campaigns.Campaign) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", "campaign-"+campaign.ID+".csv"))
-	w.WriteHeader(http.StatusOK)
-
-	flusher, _ := w.(http.Flusher)
-	writer := csv.NewWriter(w)
-	if err := writer.Write(campaignCSVColumns); err != nil {
-		return
-	}
-	cursor := campaigns.TargetCursor{}
-	for {
-		page, err := s.campaigns.TargetsPage(r.Context(), campaign.ID, campaigns.TargetFilter{}, cursor, campaignCSVPage)
-		if err != nil {
-			s.log.Warn("the CSV export of the campaign broke off", "campaign_id", campaign.ID, "err", err)
-			return
-		}
-		for _, target := range page.Items {
-			if err := writer.Write(campaignCSVRow(target)); err != nil {
-				return
+	s.writeCSV(w, r, "campaign-"+campaign.ID+".csv", campaignCSVColumns, func(yield func([]string) bool) error {
+		cursor := campaigns.TargetCursor{}
+		for {
+			page, err := s.campaigns.TargetsPage(r.Context(), campaign.ID, campaigns.TargetFilter{}, cursor, campaignCSVPage)
+			if err != nil {
+				return err
+			}
+			for _, target := range page.Items {
+				if !yield(campaignCSVRow(target)) {
+					return nil
+				}
+			}
+			if page.NextCursor == "" {
+				return nil
+			}
+			if cursor, err = campaigns.ParseTargetCursor(page.NextCursor); err != nil {
+				return err
 			}
 		}
-		writer.Flush()
-		if writer.Error() != nil {
-			return
-		}
-		if flusher != nil {
-			flusher.Flush()
-		}
-		if page.NextCursor == "" {
-			return
-		}
-		if cursor, err = campaigns.ParseTargetCursor(page.NextCursor); err != nil {
-			return
-		}
-	}
+	})
 }
 
 // campaignCSVRow renders one target in the order of campaignCSVColumns.
 // Times are RFC 3339 and empty when the target never reached that point.
 func campaignCSVRow(target campaigns.Target) []string {
-	stamp := func(at *time.Time) string {
-		if at == nil {
-			return ""
-		}
-		return at.UTC().Format(time.RFC3339)
-	}
 	jobID := ""
 	if target.JobID != nil {
 		jobID = *target.JobID
 	}
 	return []string{
-		csvText(target.Hostname), target.HostID, strconv.Itoa(target.Wave), strconv.Itoa(target.Position),
-		string(target.State), target.ErrorCode, csvText(target.Message),
-		stamp(target.StartedAt), stamp(target.FinishedAt), jobID,
+		target.Hostname, target.HostID, strconv.Itoa(target.Wave), strconv.Itoa(target.Position),
+		string(target.State), target.ErrorCode, target.Message,
+		formatTime(target.StartedAt), formatTime(target.FinishedAt), jobID,
 	}
-}
-
-// csvText keeps a cell from becoming a formula. A host name or a message
-// comes from the host, and a spreadsheet runs a cell that starts with =,
-// +, - or @; a leading apostrophe makes it text again.
-func csvText(value string) string {
-	if value == "" {
-		return value
-	}
-	switch value[0] {
-	case '=', '+', '-', '@', '\t', '\r':
-		return "'" + value
-	}
-	return value
 }
 
 func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {

@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -58,12 +59,14 @@ func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	scopes := s.scopes(ctx, rules)
 	for _, rule := range rules {
-		if !rule.Enabled {
+		within := scopes[rule.ID]
+		if !rule.Enabled || within == nil {
 			continue
 		}
 		for _, host := range hosts {
-			if !rule.Selector.matches(host) {
+			if !within.covers(host.ID) {
 				continue
 			}
 			value, detail, known := measure(rule, host, now)
@@ -108,7 +111,75 @@ func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 	// The episodes of the rules that no longer cover their host - the
 	// selector changed, the host moved - end here rather than staying open
 	// for ever.
-	return s.closeOrphans(ctx, rules, hosts, open, now)
+	return s.closeOrphans(ctx, rules, scopes, hosts, open, now)
+}
+
+// scope is the answer of a rule's selector over the fleet for one run of
+// the evaluator.
+type scope struct {
+	// everybody is true for a selector that narrows nothing; hosts is the
+	// set the selector resolved to otherwise.
+	everybody bool
+	hosts     map[string]bool
+}
+
+// covers says whether the host is in the scope.
+func (sc *scope) covers(hostID string) bool {
+	return sc.everybody || sc.hosts[hostID]
+}
+
+// scopes resolves the selector of every enabled rule once per run, in the
+// database, through the same compiler the campaign preview uses: a rule
+// on a tag, a group or an expression picks exactly the hosts a campaign
+// on the same selector would.
+//
+// A rule whose selector does not resolve - a group deleted since the rule
+// was written - has no entry. Its episodes stay as they are, neither
+// advanced nor closed: nothing can be said about hosts nobody can name,
+// and a log line says which rule needs mending.
+func (s *Store) scopes(ctx context.Context, rules []Rule) map[string]*scope {
+	scopes := make(map[string]*scope, len(rules))
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		if !rule.Selector.Narrows() {
+			scopes[rule.ID] = &scope{everybody: true}
+			continue
+		}
+		covered, err := s.coveredHosts(ctx, rule.Selector)
+		if err != nil {
+			s.log.Warn("the selector of an alert rule does not resolve; the rule is not evaluated",
+				"rule", rule.Name, "error", err)
+			continue
+		}
+		scopes[rule.ID] = &scope{hosts: covered}
+	}
+	return scopes
+}
+
+// coveredHosts reads the identifiers of the hosts a selector names among
+// the ones the evaluator looks at.
+func (s *Store) coveredHosts(ctx context.Context, sel Selector) (map[string]bool, error) {
+	condition, args, err := s.compileSelector(ctx, sel, 0)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.pool.Query(ctx,
+		`select h.id from hosts h where h.lifecycle_state <> 'retired' and `+condition, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	covered := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		covered[id] = true
+	}
+	return covered, rows.Err()
 }
 
 func (s *Store) startEpisode(ctx context.Context, rule Rule, host hostState,
@@ -149,21 +220,33 @@ func (s *Store) refresh(ctx context.Context, episode openAlert, value float64, d
 
 // closeOrphans ends the open episodes whose rule no longer covers their
 // host or whose host is gone from the fleet.
-func (s *Store) closeOrphans(ctx context.Context, rules []Rule, hosts []hostState,
-	open map[string]openAlert, now time.Time) error {
+//
+// A rule whose selector did not resolve this run keeps its episodes: they
+// are not orphans, they are waiting for the rule to be mended.
+func (s *Store) closeOrphans(ctx context.Context, rules []Rule, scopes map[string]*scope,
+	hosts []hostState, open map[string]openAlert, now time.Time) error {
 	covered := map[string]bool{}
+	unresolved := map[string]bool{}
 	for _, rule := range rules {
 		if !rule.Enabled {
 			continue
 		}
+		within := scopes[rule.ID]
+		if within == nil {
+			unresolved[rule.ID] = true
+			continue
+		}
 		for _, host := range hosts {
-			if rule.Selector.matches(host) {
+			if within.covers(host.ID) {
 				covered[rule.ID+"/"+host.ID] = true
 			}
 		}
 	}
 	for key, episode := range open {
 		if covered[key] {
+			continue
+		}
+		if ruleID, _, _ := strings.Cut(key, "/"); unresolved[ruleID] {
 			continue
 		}
 		if episode.State == "pending" {
@@ -179,28 +262,6 @@ func (s *Store) closeOrphans(ctx context.Context, rules []Rule, hosts []hostStat
 		}
 	}
 	return nil
-}
-
-// matches says whether the selector covers the host.
-func (sel Selector) matches(host hostState) bool {
-	if sel.Site != "" && sel.Site != host.Site {
-		return false
-	}
-	if sel.Environment != "" && sel.Environment != host.Environment {
-		return false
-	}
-	if sel.OSFamily != "" && sel.OSFamily != host.OSFamily {
-		return false
-	}
-	if len(sel.HostIDs) == 0 {
-		return true
-	}
-	for _, id := range sel.HostIDs {
-		if id == host.ID {
-			return true
-		}
-	}
-	return false
 }
 
 // measure computes the value of the rule's metric for the host and the

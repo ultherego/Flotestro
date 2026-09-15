@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -24,10 +25,31 @@ type taggedHostView struct {
 type groupView struct {
 	ID           string         `json:"id"`
 	Name         string         `json:"name"`
+	Description  string         `json:"description"`
 	Kind         string         `json:"kind"`
 	Selector     map[string]any `json:"selector"`
 	MemberCount  *int           `json:"member_count"`
 	Unresolvable string         `json:"unresolvable"`
+	// UsedBy comes with one group: the campaigns and policies whose
+	// selector names it.
+	UsedBy *struct {
+		Campaigns []groupReferenceView `json:"campaigns"`
+		Policies  []groupReferenceView `json:"policies"`
+	} `json:"used_by"`
+}
+
+// groupReferenceView is one record that names a group.
+type groupReferenceView struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// groupPreviewView mirrors the answer of the selector preview.
+type groupPreviewView struct {
+	Count    int      `json:"count"`
+	Sample   []string `json:"sample"`
+	Selector string   `json:"selector"`
 }
 
 // setTags replaces the tags of a host and puts the previous ones back when
@@ -364,4 +386,118 @@ func TestTheSelectorRefusesACyclicGroup(t *testing.T) {
 	if unchanged.Selector["tag"] != "role=db" {
 		t.Errorf("the refused edit changed the selector to %v", unchanged.Selector)
 	}
+}
+
+// TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt: a group's name, description
+// and selector change through one write that carries the tag the group
+// was read with - a stale tag is refused - and the group read back says
+// which campaign names it, so a typo is a correction, not a delete and a
+// recreation that would orphan every selector naming the old record.
+func TestAGroupIsEditedInPlaceAndKnowsWhoNamesIt(t *testing.T) {
+	h := newHarness(t)
+	lab := h.hosts()
+	if len(lab) == 0 {
+		t.Skip("no host in the lab")
+	}
+	host := lab[0]
+	marker := uniqueTag("edit")
+	h.setTags(host.ID, []string{marker})
+
+	group := h.createGroup(map[string]any{
+		"name": uniqueName("draft"), "kind": "dynamic",
+		"description": "before the edit",
+		"selector":    map[string]any{"tag": marker},
+	})
+	response, body := h.request(http.MethodGet, "/api/v1/host-groups/"+group.ID, nil, nil)
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("GET the group: status %d; body: %s", response.StatusCode, body)
+	}
+	fresh := response.Header.Get("ETag")
+	if fresh == "" {
+		t.Fatal("the group read carries no ETag")
+	}
+
+	// The write names the version it starts from; a tag nobody has is
+	// refused with the current one, so the editor reads again.
+	renamed := uniqueName("final")
+	edit := map[string]any{
+		"name": renamed, "description": "after the edit",
+		"selector": map[string]any{"all": []map[string]any{
+			{"tag": marker},
+			{"not": map[string]any{"lifecycle_state": "retired"}},
+		}},
+	}
+	response, body = h.request(http.MethodPut, "/api/v1/host-groups/"+group.ID, edit,
+		map[string]string{"If-Match": `W/"0000000000000000"`})
+	if response.StatusCode != http.StatusPreconditionFailed {
+		t.Fatalf("a stale If-Match answered %d; body: %s", response.StatusCode, body)
+	}
+	response, body = h.request(http.MethodPut, "/api/v1/host-groups/"+group.ID, edit,
+		map[string]string{"If-Match": fresh})
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("the fresh If-Match answered %d; body: %s", response.StatusCode, body)
+	}
+	if next := response.Header.Get("ETag"); next == "" || next == fresh {
+		t.Errorf("after the write the ETag is %q, before it was %q", next, fresh)
+	}
+
+	// The record read back is the edited one, under the same identifier,
+	// and it still resolves to the tagged host.
+	var edited groupView
+	h.get("/api/v1/host-groups/"+group.ID, &edited)
+	if edited.Name != renamed || edited.Description != "after the edit" {
+		t.Errorf("the edited group is %q / %q, expected %q / %q", edited.Name, edited.Description, renamed, "after the edit")
+	}
+	if _, ok := edited.Selector["all"]; !ok {
+		t.Errorf("the edited selector is %v, expected the conjunction", edited.Selector)
+	}
+	if got := idsOf(h.groupHosts(group.ID)); !sameIDs(got, []string{host.ID}) {
+		t.Fatalf("after the edit the group resolves to %v, expected only %s", got, host.Hostname)
+	}
+	if edited.UsedBy == nil || len(edited.UsedBy.Campaigns) != 0 || len(edited.UsedBy.Policies) != 0 {
+		t.Errorf("a group nobody names yet is used by %+v", edited.UsedBy)
+	}
+
+	// The preview answers for the selector under construction the way the
+	// group page answers for the saved one: the count and the names.
+	var preview groupPreviewView
+	h.get("/api/v1/host-groups/preview?expression="+url.QueryEscape(fmt.Sprintf(`{"group":%q}`, renamed)), &preview)
+	if preview.Count != 1 || len(preview.Sample) != 1 || preview.Sample[0] != host.Hostname {
+		t.Errorf("the preview of the group answers %+v, expected %s alone", preview, host.Hostname)
+	}
+	if preview.Selector != "group="+renamed {
+		t.Errorf("the preview describes the selector as %q", preview.Selector)
+	}
+	// A group nobody created is a refusal with the name, not a count of zero.
+	h.do(http.MethodGet, "/api/v1/host-groups/preview?expression="+
+		url.QueryEscape(fmt.Sprintf(`{"group":%q}`, uniqueName("nobody"))), nil, nil, http.StatusBadRequest)
+	h.do(http.MethodGet, "/api/v1/host-groups/preview", nil, nil, http.StatusBadRequest)
+
+	// A campaign that names the group by its new name shows up on the group
+	// as what uses it, with the state the campaign is in.
+	campaign := h.createCampaign(labCampaign("on the edited group", "cron.service", map[string]any{
+		"selector": map[string]any{"expression": map[string]any{"group": renamed}},
+	}))
+	var named groupView
+	h.get("/api/v1/host-groups/"+group.ID, &named)
+	if named.UsedBy == nil {
+		t.Fatal("the group read carries no used_by")
+	}
+	found := false
+	for _, reference := range named.UsedBy.Campaigns {
+		if reference.ID == campaign.ID {
+			found = true
+			if reference.Name != campaign.Name || reference.State == "" {
+				t.Errorf("the reference to the campaign is %+v", reference)
+			}
+		}
+	}
+	if !found {
+		encoded, _ := json.Marshal(named.UsedBy)
+		t.Errorf("the campaign %s is not among what uses the group: %s", campaign.ID, encoded)
+	}
+
+	// The kind is not for editing: a list turned into a selector would keep
+	// members nobody sees.
+	h.do(http.MethodPut, "/api/v1/host-groups/"+group.ID, map[string]any{"kind": "static"}, nil, http.StatusBadRequest)
 }

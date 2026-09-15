@@ -869,13 +869,16 @@ func (p *Pacman) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, 
 // Holds returns the packages held on the host: the ones of the panel and the
 // ones of the administrator alike. A held package will not get updates
 // whoever held it, and the operator is to see that.
-func (p *Pacman) Holds(ctx context.Context) []string {
+func (p *Pacman) Holds(ctx context.Context) ([]string, string) {
 	data, err := os.ReadFile(PacmanConfPath)
 	if err != nil {
-		return nil
+		return nil, "pacman.conf: " + err.Error()
 	}
 	_, all := PacmanHolds(string(data))
-	return all
+	if all == nil {
+		all = []string{}
+	}
+	return all, ""
 }
 
 // PacmanHolds reads the IgnorePkg entries of the options section. It returns

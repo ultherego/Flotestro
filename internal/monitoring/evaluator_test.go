@@ -125,26 +125,59 @@ func TestCompareAppliesTheOperator(t *testing.T) {
 	}
 }
 
-func TestSelectorMatchesLikeACampaignSelector(t *testing.T) {
-	host := hostState{ID: "h1", Site: "warsaw", Environment: "prod", OSFamily: "debian"}
+// TestSelectorTreeIsACampaignSelector: the scope of a rule is the same
+// structure a campaign selector is, so the two compile into the same host
+// query. Every set field is one condition, all of them hold at once, and
+// the groups are alternatives.
+func TestSelectorTreeIsACampaignSelector(t *testing.T) {
 	cases := []struct {
 		name     string
 		selector Selector
-		want     bool
+		want     string
 	}{
-		{"empty covers everyone", Selector{}, true},
-		{"the site", Selector{Site: "warsaw"}, true},
-		{"another site", Selector{Site: "berlin"}, false},
-		{"the environment and family", Selector{Environment: "prod", OSFamily: "debian"}, true},
-		{"another family", Selector{OSFamily: "rhel"}, false},
-		{"the host by identifier", Selector{HostIDs: []string{"h2", "h1"}}, true},
-		{"other hosts by identifier", Selector{HostIDs: []string{"h2"}}, false},
-		{"an empty list does not narrow", Selector{HostIDs: []string{}}, true},
+		{"empty narrows nothing", Selector{}, ""},
+		{"only a host list narrows nothing here", Selector{HostIDs: []string{"h1"}}, ""},
+		{"the site", Selector{Site: "warsaw"}, "site=warsaw"},
+		{"the environment and family", Selector{Environment: "prod", OSFamily: "debian"},
+			"(environment=prod and os_family=debian)"},
+		{"every tag", Selector{Tags: []string{"role=db", "tier=gold"}}, "(tag=role=db and tag=tier=gold)"},
+		{"one group", Selector{Groups: []string{"databases"}}, "group=databases"},
+		{"any of the groups", Selector{Groups: []string{"databases", "caches"}},
+			"(group=databases or group=caches)"},
+		{"the owner", Selector{Owner: "platform"}, "owner=platform"},
+		{"the expression", Selector{Expression: "agent_version < 0.49.0 or reboot_required = true"},
+			"(agent_version < 0.49.0 or reboot_required=true)"},
+		{"everything at once", Selector{Site: "warsaw", Tags: []string{"role=db"}, Expression: "security_updates = true"},
+			"(site=warsaw and tag=role=db and security_updates=true)"},
 	}
 	for _, c := range cases {
-		if got := c.selector.matches(host); got != c.want {
-			t.Errorf("%s: matches = %v", c.name, got)
+		expression, err := c.selector.Tree()
+		if err != nil {
+			t.Errorf("%s: %v", c.name, err)
+			continue
 		}
+		if got := expression.Describe(); got != c.want {
+			t.Errorf("%s: expression = %q, expected %q", c.name, got, c.want)
+		}
+		if narrows := c.selector.Narrows(); narrows != (c.want != "" || len(c.selector.HostIDs) > 0) {
+			t.Errorf("%s: narrows = %v", c.name, narrows)
+		}
+	}
+	if _, err := (Selector{Expression: "colour = blue"}).Tree(); err == nil {
+		t.Error("an expression naming no key was rendered")
+	}
+}
+
+// TestScopeCoversTheResolvedHosts: a scope that narrows nothing covers
+// every host; one resolved to a set covers exactly that set.
+func TestScopeCoversTheResolvedHosts(t *testing.T) {
+	everybody := &scope{everybody: true}
+	if !everybody.covers("h1") || !everybody.covers("h2") {
+		t.Error("a scope that narrows nothing left a host out")
+	}
+	some := &scope{hosts: map[string]bool{"h1": true}}
+	if !some.covers("h1") || some.covers("h2") {
+		t.Error("a resolved scope covers the wrong hosts")
 	}
 }
 
@@ -162,6 +195,12 @@ func TestRuleValidation(t *testing.T) {
 		"negative window":  func(r *Rule) { r.ForMinutes = -1 },
 		"window too long":  func(r *Rule) { r.ForMinutes = 24*60 + 1 },
 		"bad host id":      func(r *Rule) { r.Selector.HostIDs = []string{"not-a-uuid"} },
+		"bad tag":          func(r *Rule) { r.Selector.Tags = []string{"Role=db"} },
+		"bad group name":   func(r *Rule) { r.Selector.Groups = []string{"data bases"} },
+		"padded owner":     func(r *Rule) { r.Selector.Owner = " platform" },
+		"unknown key":      func(r *Rule) { r.Selector.Expression = "colour = blue" },
+		"ordered site":     func(r *Rule) { r.Selector.Expression = "site < warsaw" },
+		"bad state":        func(r *Rule) { r.Selector.Expression = "connection = sleeping" },
 	}
 	for name, change := range broken {
 		rule := valid
@@ -169,6 +208,12 @@ func TestRuleValidation(t *testing.T) {
 		if err := rule.Validate(); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+	scoped := valid
+	scoped.Selector = Selector{Tags: []string{"role=db"}, Groups: []string{"databases"},
+		Owner: "platform", Expression: "agent_version < 0.49.0 and not reboot_required = true"}
+	if err := scoped.Validate(); err != nil {
+		t.Errorf("a rule scoped by tag, group, owner and expression was refused: %v", err)
 	}
 }
 

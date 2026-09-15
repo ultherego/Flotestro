@@ -1,0 +1,86 @@
+import { describe, expect, it } from "vitest";
+import { filterRows, heldCount, packageRows, packageVersion, type InstalledPackage, type PlanChange } from "./Packages";
+
+/* The table joins three answers of the host - the installed list, the
+   holds and the last upgrade plan - and the join decides what a row says
+   about a package. It is a pure function, so every branch is checked here
+   without a screen. */
+
+const installed: InstalledPackage[] = [
+  { name: "openssl", version: "3.0.15", release: "1~deb12u1", architecture: "amd64", source_name: "openssl", repository_id: "bookworm-security" },
+  { name: "nano", version: "7.2", release: "1", architecture: "amd64", source_name: "nano" },
+  { name: "libc6", version: "2.36", release: "9+deb12u9", architecture: "i386", source_name: "glibc", origin_class: "vendor_distribution" },
+  { name: "zsh", version: "5.9", architecture: "amd64", epoch: "0" },
+];
+
+const plan: PlanChange[] = [
+  { name: "openssl", current_version: "3.0.15-1~deb12u1", candidate_version: "3.0.16-1~deb12u1", security: true },
+  { name: "libc6:i386", candidate_version: "2.36-9+deb12u10", security: false },
+];
+
+describe("packageVersion", () => {
+  it("prints the version the way the manager does, with the epoch in front and the release behind", () => {
+    expect(packageVersion({ name: "a", version: "1.2", release: "3", epoch: "2" })).toBe("2:1.2-3");
+    expect(packageVersion({ name: "a", version: "1.2" })).toBe("1.2");
+    // A zero epoch is no epoch to the eye.
+    expect(packageVersion({ name: "a", version: "1.2", epoch: "0", release: "1" })).toBe("1.2-1");
+  });
+});
+
+describe("packageRows", () => {
+  it("marks the held packages when the holds were read, and leaves the state unknown when they were not", () => {
+    const known = packageRows(installed, ["nano"], undefined);
+    expect(known.find((row) => row.name === "nano")?.held).toBe(true);
+    expect(known.find((row) => row.name === "zsh")?.held).toBe(false);
+
+    const unread = packageRows(installed, undefined, undefined);
+    for (const row of unread) expect(row.held).toBeUndefined();
+  });
+
+  it("takes the candidate version and the security flag from the plan, by the name or by name:arch", () => {
+    const rows = packageRows(installed, [], plan);
+    expect(rows.find((row) => row.name === "openssl")).toMatchObject({ candidate: "3.0.16-1~deb12u1", security: true });
+    expect(rows.find((row) => row.name === "libc6")).toMatchObject({ candidate: "2.36-9+deb12u10", security: false });
+    expect(rows.find((row) => row.name === "nano")).toMatchObject({ candidate: undefined, security: false });
+  });
+
+  it("shows a change the plan did not price as an unknown version rather than as nothing waiting", () => {
+    const rows = packageRows(installed, [], [{ name: "zsh" }]);
+    expect(rows.find((row) => row.name === "zsh")?.candidate).toBe("?");
+  });
+});
+
+describe("filterRows", () => {
+  const rows = packageRows(installed, ["nano"], plan);
+
+  it("sorts by name and reverses on request", () => {
+    expect(filterRows(rows, "", "all").map((row) => row.name)).toEqual(["libc6", "nano", "openssl", "zsh"]);
+    expect(filterRows(rows, "", "all", "desc").map((row) => row.name)).toEqual(["zsh", "openssl", "nano", "libc6"]);
+  });
+
+  it("searches the name and the source package, case-insensitively", () => {
+    expect(filterRows(rows, "SSL", "all").map((row) => row.name)).toEqual(["openssl"]);
+    expect(filterRows(rows, "glibc", "all").map((row) => row.name)).toEqual(["libc6"]);
+    expect(filterRows(rows, "  ", "all")).toHaveLength(4);
+  });
+
+  it("keeps the upgradable, the security and the held packages on request", () => {
+    expect(filterRows(rows, "", "upgradable").map((row) => row.name)).toEqual(["libc6", "openssl"]);
+    expect(filterRows(rows, "", "security").map((row) => row.name)).toEqual(["openssl"]);
+    expect(filterRows(rows, "", "held").map((row) => row.name)).toEqual(["nano"]);
+  });
+
+  it("keeps nothing under the held filter when the holds were not read", () => {
+    expect(filterRows(packageRows(installed, undefined, plan), "", "held")).toEqual([]);
+  });
+});
+
+describe("heldCount", () => {
+  it("counts the holds only when the host read them", () => {
+    expect(heldCount({ holds_known: true, holds: ["nano", "zsh"] })).toBe(2);
+    expect(heldCount({ holds_known: true })).toBe(0);
+    expect(heldCount({ holds_known: false, holds_unavailable_reason: "apt-mark showhold: code 1" })).toBeUndefined();
+    expect(heldCount({})).toBeUndefined();
+    expect(heldCount(undefined)).toBeUndefined();
+  });
+});

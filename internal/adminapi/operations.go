@@ -610,6 +610,14 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	for _, scope := range scopes {
 		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
+	if asCSV {
+		s.writeJobsCSV(w, r, filter)
+		return
+	}
 	cursor, err := jobs.ParseCursor(query.Get("cursor"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
@@ -625,6 +633,59 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
 	})
+}
+
+// jobsCSVColumns is the header of the task export. The order is fixed: a
+// sheet built against one export reads the next one. The payload stays
+// out: it is JSON of any shape, and a plan is read on the job page.
+var jobsCSVColumns = []string{
+	"id", "hostname", "host_id", "action_type", "state", "created_at", "created_by", "requires_approval",
+	"approved_by", "approved_at", "finished_at", "result_status", "result_error_code", "result_message",
+	"wait_reason", "canceled_by", "cancel_reason", "campaign_id", "fanout_id", "expires_at",
+}
+
+// writeJobsCSV streams the task list as a file: the same filter and the
+// same scope as the JSON list, every page of it, newest first as the list
+// goes. The pages come one at a time from the store; the file ends with a
+// truncation row past exportRowLimit tasks, and a history that long is
+// narrowed by since and until rather than read whole.
+func (s *Server) writeJobsCSV(w http.ResponseWriter, r *http.Request, filter jobs.ListFilter) {
+	s.writeCSV(w, r, exportFileName("jobs", time.Now()), jobsCSVColumns, func(yield func([]string) bool) error {
+		cursor := jobs.Cursor{}
+		for {
+			page, err := s.jobs.ListPaged(r.Context(), filter, cursor, maxListPage)
+			if err != nil {
+				return err
+			}
+			for _, job := range page.Items {
+				if !yield(jobCSVRow(job)) {
+					return nil
+				}
+			}
+			if page.NextCursor == "" {
+				return nil
+			}
+			if cursor, err = jobs.ParseCursor(page.NextCursor); err != nil {
+				return err
+			}
+		}
+	})
+}
+
+// jobCSVRow renders one task in the order of jobsCSVColumns.
+func jobCSVRow(job jobs.Job) []string {
+	deref := func(value *string) string {
+		if value == nil {
+			return ""
+		}
+		return *value
+	}
+	return []string{
+		job.ID, job.Hostname, job.HostID, job.ActionType, string(job.State), csvInstant(job.CreatedAt), job.CreatedBy,
+		strconv.FormatBool(job.RequiresApproval), job.ApprovedBy, formatTime(job.ApprovedAt), formatTime(job.FinishedAt),
+		job.ResultStatus, job.ResultErrorCode, job.ResultMessage, job.WaitReason, job.CanceledBy, job.CancelReason,
+		deref(job.CampaignID), deref(job.FanoutID), csvInstant(job.ExpiresAt),
+	}
 }
 
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {

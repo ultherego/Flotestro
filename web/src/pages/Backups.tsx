@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -93,6 +94,7 @@ export function FleetBackups() {
         description={t("What is copied, where to and how old the newest copy is. Warning after {warning} h, urgent after {critical} h. A copy nobody has ever read back is a promise, not a safeguard — that is what the verification column says, with a {days}-day limit.", {
           warning: data.thresholds.warning_hours, critical: data.thresholds.critical_hours, days: data.thresholds.verification_days,
         })}
+        actions={<ExportButton path="/api/v1/backups" />}
       />
 
       <div className="widgets">

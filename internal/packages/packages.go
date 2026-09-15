@@ -259,7 +259,11 @@ type Lifecycle interface {
 	Install(ctx context.Context, options Options) (Apply, error)
 	Remove(ctx context.Context, options Options, expected []string) (Apply, error)
 	SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, error)
-	Holds(ctx context.Context) []string
+	// Holds returns the packages held on the host and, when the list could
+	// not be read, the reason. A hold that was not read is not a host
+	// without holds: the inventory shows the count as unknown, and a
+	// package that is held will not take a security fix either.
+	Holds(ctx context.Context) ([]string, string)
 }
 
 // Detect returns the adapter proper for the host.

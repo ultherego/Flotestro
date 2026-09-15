@@ -1,7 +1,6 @@
 package adminapi
 
 import (
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -956,6 +955,36 @@ func (s *Server) handleDeleteGroupMapping(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// accessReviewColumns is the header of the review file. The order is
+// fixed: an auditor's sheet built against one review reads the next one.
+var accessReviewColumns = []string{
+	"subject", "display_name", "kind", "roles", "last_login_at", "last_token_use_at",
+	"days_since_use", "earliest_expiry", "tokens", "flags",
+}
+
+// accessReviewRow renders one identity in the order of accessReviewColumns.
+// A role is written with its scope and, where it has one, its end, so the
+// sheet says not only what an identity may do but for how long.
+func accessReviewRow(principal authz.ReviewedPrincipal) []string {
+	roles := make([]string, 0, len(principal.Bindings))
+	for _, binding := range principal.Bindings {
+		role := string(binding.Role) + "@" + binding.Scope.Site + "/" + binding.Scope.Environment
+		if binding.ValidUntil != nil {
+			role += " until " + binding.ValidUntil.UTC().Format(time.RFC3339)
+		}
+		if binding.Expired {
+			role += " (expired)"
+		}
+		roles = append(roles, role)
+	}
+	return []string{
+		principal.Subject, principal.DisplayName, principal.Kind, strings.Join(roles, "; "),
+		formatTime(principal.LastLoginAt), formatTime(principal.LastTokenUseAt),
+		csvInt(principal.DaysSinceUse), formatTime(principal.EarliestExpiry),
+		strconv.Itoa(len(principal.Tokens)), strings.Join(principal.Flags, " "),
+	}
+}
+
 // handleAccessReview lists every enabled identity with what it can do,
 // when it was last used and what the reviewer should look at. The review
 // is a compliance artefact, so making one is on the trail: an auditor asks
@@ -965,10 +994,13 @@ func (s *Server) handleAccessReview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	format := r.URL.Query().Get("format")
-	if format != "" && format != "json" && format != "csv" {
-		problem(w, http.StatusBadRequest, "invalid_format", "format must be json or csv")
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
 		return
+	}
+	format := "json"
+	if asCSV {
+		format = "csv"
 	}
 	now := time.Now()
 	principals, err := s.authz.ReviewAccess(r.Context(), now)
@@ -987,43 +1019,20 @@ func (s *Server) handleAccessReview(w http.ResponseWriter, r *http.Request) {
 		Action: "access.review", TargetType: "principal", TargetID: "",
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
-			"format": orDefault(format, "json"), "principals": len(principals), "flagged": flagged,
+			"format": format, "principals": len(principals), "flagged": flagged,
 		},
 	})
 
 	if format == "csv" {
-		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-		w.Header().Set("Content-Disposition",
-			`attachment; filename="access-review-`+now.UTC().Format("20060102")+`.csv"`)
-		writer := csv.NewWriter(w)
-		_ = writer.Write([]string{
-			"subject", "display_name", "kind", "roles", "last_login_at", "last_token_use_at",
-			"days_since_use", "earliest_expiry", "tokens", "flags",
-		})
-		for _, principal := range principals {
-			roles := make([]string, 0, len(principal.Bindings))
-			for _, binding := range principal.Bindings {
-				role := string(binding.Role) + "@" + binding.Scope.Site + "/" + binding.Scope.Environment
-				if binding.ValidUntil != nil {
-					role += " until " + binding.ValidUntil.UTC().Format(time.RFC3339)
+		s.writeCSV(w, r, "access-review-"+now.UTC().Format("20060102")+".csv", accessReviewColumns,
+			func(yield func([]string) bool) error {
+				for _, principal := range principals {
+					if !yield(accessReviewRow(principal)) {
+						return nil
+					}
 				}
-				if binding.Expired {
-					role += " (expired)"
-				}
-				roles = append(roles, role)
-			}
-			days := ""
-			if principal.DaysSinceUse != nil {
-				days = strconv.Itoa(*principal.DaysSinceUse)
-			}
-			_ = writer.Write([]string{
-				principal.Subject, principal.DisplayName, principal.Kind, strings.Join(roles, "; "),
-				formatTime(principal.LastLoginAt), formatTime(principal.LastTokenUseAt),
-				days, formatTime(principal.EarliestExpiry),
-				strconv.Itoa(len(principal.Tokens)), strings.Join(principal.Flags, " "),
+				return nil
 			})
-		}
-		writer.Flush()
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -1035,11 +1044,4 @@ func (s *Server) handleAccessReview(w http.ResponseWriter, r *http.Request) {
 			"token_max_days":    int(authz.ReviewTokenMaxAge.Hours() / 24),
 		},
 	})
-}
-
-func formatTime(value *time.Time) string {
-	if value == nil {
-		return ""
-	}
-	return value.UTC().Format(time.RFC3339)
 }

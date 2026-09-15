@@ -215,6 +215,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /auth/callback", s.handleAuthCallback)
 	s.route(mux, "POST /auth/logout", s.handleLogout)
 	s.route(mux, "GET /api/v1/fleet/summary", s.handleFleetSummary)
+	// One question across every kind the caller may read.
+	s.route(mux, "GET /api/v1/search", s.handleSearch)
 	s.route(mux, "GET /api/v1/fleet/activity", s.handleFleetActivity)
 	s.route(mux, "GET /api/v1/hosts", s.handleListHosts)
 	s.route(mux, "GET /api/v1/hosts/{id}", s.handleGetHost)
@@ -223,6 +225,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/hosts/{id}/files/history", s.handleFileHistory)
 	s.route(mux, "GET /api/v1/files/versions/{sha256}", s.handleFileVersion)
 	s.route(mux, "GET /api/v1/hosts/{id}/inventory/{module}", s.handleHostInventoryModule)
+	// The installed packages of a host as the store keeps them, with the holds.
+	s.route(mux, "GET /api/v1/hosts/{id}/packages", s.handleHostPackages)
 	// The kernels and releases the panel has seen the host on; the current
 	// platform is the system module of the inventory.
 	s.route(mux, "GET /api/v1/hosts/{id}/system/history", s.handleHostSystemHistory)
@@ -282,10 +286,16 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "PUT /api/v1/hosts/{id}/owner", s.handleSetHostOwner)
 	s.route(mux, "PUT /api/v1/hosts/{id}/management-address", s.handleSetHostManagementAddress)
 	s.route(mux, "PUT /api/v1/hosts/{id}/failure-domain", s.handleSetHostFailureDomain)
+	s.route(mux, "PUT /api/v1/hosts/{id}/placement", s.handleSetHostPlacement)
+	// One order for the facts of many hosts, answered host by host.
+	s.route(mux, "POST /api/v1/hosts/bulk-metadata", s.handleBulkHostMetadata)
 	// Host groups: a saved answer to "which hosts", either a fixed member
 	// list or a selector resolved when read. A campaign names a group in
 	// its selector instead of repeating the list.
 	s.route(mux, "GET /api/v1/host-groups", s.handleListGroups)
+	// The selector preview: what a selector under construction resolves
+	// to now, for the group form; the same evaluation as the group page.
+	s.route(mux, "GET /api/v1/host-groups/preview", s.handleGroupPreview)
 	s.route(mux, "POST /api/v1/host-groups", s.handleCreateGroup)
 	s.route(mux, "GET /api/v1/host-groups/{id}", s.handleGetGroup)
 	s.route(mux, "PUT /api/v1/host-groups/{id}", s.handleUpdateGroup)
@@ -316,6 +326,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/budgets/{key...}", s.handleGetBudget)
 	s.route(mux, "PUT /api/v1/budgets/{key...}", s.handleSetBudget)
 	s.route(mux, "GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
+	s.route(mux, "GET /api/v1/vulnerabilities/cves", s.handleFleetCVEs)
+	s.route(mux, "GET /api/v1/vulnerabilities/cves/{cve}", s.handleCVE)
 	s.route(mux, "GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)
 
 	s.monitoringRoutes(mux)
@@ -374,6 +386,17 @@ func (s *Server) Routes() http.Handler {
 	// A retry is a new order for the hosts the campaign lost, under a new
 	// approval; the settled campaign itself never changes.
 	s.route(mux, "POST /api/v1/campaigns/{id}/retry", s.handleRetryCampaign)
+	// Scheduled campaigns: an order kept for a moment or a rule of moments,
+	// placed through the door above under its author's rights; each
+	// campaign it places waits for its approval. The calendar lines up the
+	// host windows, the campaign windows and the moments of the schedules.
+	s.route(mux, "GET /api/v1/campaign-schedules", s.handleListCampaignSchedules)
+	s.route(mux, "POST /api/v1/campaign-schedules", s.handleCreateCampaignSchedule)
+	s.route(mux, "GET /api/v1/campaign-schedules/{id}", s.handleGetCampaignSchedule)
+	s.route(mux, "PUT /api/v1/campaign-schedules/{id}", s.handleUpdateCampaignSchedule)
+	s.route(mux, "DELETE /api/v1/campaign-schedules/{id}", s.handleDeleteCampaignSchedule)
+	s.route(mux, "POST /api/v1/campaign-schedules/{id}/run-now", s.handleRunCampaignScheduleNow)
+	s.route(mux, "GET /api/v1/maintenance/calendar", s.handleMaintenanceCalendar)
 	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
 
 	// Desired-state policies: a draft, its publications, the verdicts the
@@ -978,6 +1001,14 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	if !attentionFilters(w, query, &filter) {
 		return
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
+	if asCSV {
+		s.writeHostsCSV(w, r, filter)
+		return
+	}
 	cursor, err := hosts.ParseCursor(query.Get("cursor"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
@@ -994,6 +1025,63 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		"items": page.Items, "count": len(page.Items),
 		"total": page.Total, "next_cursor": page.NextCursor,
 	})
+}
+
+// hostsCSVColumns is the header of the fleet export. The order is fixed:
+// a sheet built against one export reads the next one.
+var hostsCSVColumns = []string{
+	"hostname", "id", "site", "environment", "owner", "failure_domain", "lifecycle_state",
+	"connection_state", "last_seen_at", "os_family", "os_distribution", "os_version", "architecture",
+	"agent_version", "release_channel", "management_address", "tags", "reboot_required",
+	"failed_units", "pending_updates", "pending_security_updates", "package_database_broken",
+	"maintenance_until", "identity_domain", "last_connection_refusal", "enrolled_at",
+}
+
+// writeHostsCSV streams the fleet list as a file: the same filter and the
+// same scope as the JSON list, every page of it, in the order of the list.
+// The rows come a page at a time from the store, so a fleet of ten
+// thousand hosts costs the panel one page of memory; the file ends with a
+// truncation row past exportRowLimit hosts.
+func (s *Server) writeHostsCSV(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter) {
+	s.writeCSV(w, r, exportFileName("hosts", time.Now()), hostsCSVColumns, func(yield func([]string) bool) error {
+		cursor := hosts.Cursor{}
+		for {
+			page, err := s.hosts.ListPaged(r.Context(), filter, cursor, maxListPage)
+			if err != nil {
+				return err
+			}
+			for _, host := range page.Items {
+				if !yield(hostCSVRow(host)) {
+					return nil
+				}
+			}
+			if page.NextCursor == "" {
+				return nil
+			}
+			if cursor, err = hosts.ParseCursor(page.NextCursor); err != nil {
+				return err
+			}
+		}
+	})
+}
+
+// hostCSVRow renders one host in the order of hostsCSVColumns. A fact the
+// host has not reported is an empty cell, not a zero or a false.
+func hostCSVRow(host hosts.Host) []string {
+	maintenance, refusal := "", ""
+	if host.Maintenance != nil {
+		maintenance = csvInstant(host.Maintenance.Until)
+	}
+	if host.LastConnectionRefusal != nil {
+		refusal = host.LastConnectionRefusal.Code
+	}
+	return []string{
+		host.Hostname, host.ID, host.Site, host.Environment, host.Owner, host.FailureDomain, host.LifecycleState,
+		host.ConnectionState, formatTime(host.LastSeenAt), host.OSFamily, host.OSDistribution, host.OSVersion, host.Architecture,
+		host.AgentVersion, host.ReleaseChannel, host.ManagementAddress, csvList(host.Tags), csvBool(host.RebootRequired),
+		csvInt(host.FailedUnits), csvInt(host.PendingUpdates), csvInt(host.PendingSecurityUpdates), strconv.FormatBool(host.PackageDatabaseBroken),
+		maintenance, host.Identity.Domain, refusal, csvInstant(host.EnrolledAt),
+	}
 }
 
 // The page of a fleet list: what a screen gets without asking, and the

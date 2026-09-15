@@ -407,7 +407,10 @@ func TestRemovalPlanShowsDependencies(t *testing.T) {
 }
 
 // TestHoldIsReversible checks that the operation describes a desired state,
-// not a toggle: repeating it does not reverse the change.
+// not a toggle: repeating it does not reverse the change. The hold is also
+// a fact of the inventory: after the change the packages module names the
+// package among the holds, and after the release it does not - an operator
+// reading the tab is to see which packages will take no upgrade.
 func TestHoldIsReversible(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -422,7 +425,100 @@ func TestHoldIsReversible(t *testing.T) {
 		if job.State != "succeeded" {
 			t.Fatalf("hold=%v: state = %s, code = %s", hold, job.State, job.ResultErrorCode)
 		}
+
+		holds := h.packageHolds(host.ID)
+		if !holds.Known && holds.Reason == "" {
+			// An agent from before the holds rode in the fragment says
+			// nothing about them at all; that is not a failed read.
+			t.Skipf("hold=%v: the agent of %s does not report the holds yet", hold, host.Hostname)
+		}
+		if !holds.Known {
+			t.Fatalf("hold=%v: the packages module did not read the holds: %s", hold, holds.Reason)
+		}
+		if containsName(holds.Holds, "nano") != hold {
+			t.Errorf("hold=%v: the packages module names the holds %v", hold, holds.Holds)
+		}
 	}
+}
+
+// packageHoldsView is the hold state of the packages module of a host.
+type packageHoldsView struct {
+	Holds  []string `json:"holds"`
+	Known  bool     `json:"holds_known"`
+	Reason string   `json:"holds_unavailable_reason"`
+}
+
+// packageHolds refreshes the packages module and reads the holds out of it:
+// the facts after a hold have to come from after the change, not from the
+// last inventory cycle.
+func (h *harness) packageHolds(hostID string) packageHoldsView {
+	h.t.Helper()
+	job, attempts := h.runOperation(hostID, map[string]any{
+		"action": "inventory.refresh", "reason": "integration test of the package holds",
+		"payload": map[string]any{"inventory": map[string]any{"modules": []string{"packages"}}},
+	}, 5*time.Minute)
+	if job.State != "succeeded" {
+		h.t.Fatalf("the packages refresh ended in state %s: %s", job.State, lastMessage(attempts))
+	}
+	var fragment struct {
+		Payload packageHoldsView `json:"payload"`
+	}
+	h.get("/api/v1/hosts/"+hostID+"/inventory/packages", &fragment)
+	return fragment.Payload
+}
+
+// TestHostPackageListIsServedWithItsState checks that the installed
+// packages the panel holds for a host are readable as a list, with the
+// state of the copy beside them: the moment of the read and the job that
+// made it. The list is what the Packages tab draws, and a row without a
+// name or a version would be a row about nothing.
+func TestHostPackageListIsServedWithItsState(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "packages.list", "reason": "integration test of the package list",
+	}, 5*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("reading the package list: state = %s, %s", job.State, lastMessage(attempts))
+	}
+
+	var list struct {
+		Items []listedPackage `json:"items"`
+		Count int             `json:"count"`
+		State struct {
+			PackageCount int    `json:"package_count"`
+			CollectedAt  string `json:"collected_at"`
+			JobID        string `json:"job_id"`
+			Reason       string `json:"unavailable_reason"`
+		} `json:"state"`
+	}
+	h.get("/api/v1/hosts/"+host.ID+"/packages", &list)
+	if list.State.Reason != "" {
+		t.Fatalf("the list of %s is unavailable: %s", host.Hostname, list.State.Reason)
+	}
+	if list.Count == 0 || list.Count != len(list.Items) || list.Count != list.State.PackageCount {
+		t.Fatalf("the list carries %d rows, count %d, state %d", len(list.Items), list.Count, list.State.PackageCount)
+	}
+	if list.State.CollectedAt == "" || list.State.JobID == "" {
+		t.Errorf("the state does not say when and by which job the list was read: %+v", list.State)
+	}
+	names := make([]string, 0, len(list.Items))
+	for _, pkg := range list.Items {
+		if pkg.Name == "" || pkg.Version == "" {
+			t.Fatalf("a row without a name or a version: %+v", pkg)
+		}
+		names = append(names, pkg.Name)
+	}
+	if !containsName(names, "dpkg") {
+		t.Errorf("the list of a Debian host does not carry dpkg")
+	}
+}
+
+// listedPackage is one row of the package list as the panel serves it.
+type listedPackage struct {
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	Architecture string `json:"architecture"`
 }
 
 // labBrokenPackage is the package of the lab repository whose maintainer

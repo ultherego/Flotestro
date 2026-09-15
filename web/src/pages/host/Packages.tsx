@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, loadedItems, type Collection, type Page } from "../../lib/api";
@@ -6,6 +6,7 @@ import { awaitJob } from "../../lib/jobs";
 import { RELEASE_CHANNELS, type Attempt, type Host, type Job, type ReleaseChannel } from "../../lib/types";
 import { Empty, ErrorCode, JobState, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
+import { VirtualRows } from "../../components/virtual";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
   ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, useHost, useModule,
@@ -36,13 +37,21 @@ type RepositoryView = {
   repositories_unavailable_reason?: string;
 };
 
-type PackagesState = {
+export type PackagesState = {
   manager?: string;
   installed?: number;
   upgradable?: number;
   security_upgradable?: number;
   unavailable_reason?: string;
   repositories?: RepositoryView;
+  // The digest of the host's own package list: the panel's copy is stale
+  // when it carries another one.
+  installed_digest?: string;
+  // The holds as the host reports them: an unread list is not a host
+  // without holds, so the count is unknown until holds_known says so.
+  holds?: string[];
+  holds_known?: boolean;
+  holds_unavailable_reason?: string;
 };
 
 type RemovalPlan = {
@@ -50,6 +59,128 @@ type RemovalPlan = {
   removals?: string[];
   protected?: string[];
 };
+
+/** One installed package as the panel's copy of the host's list carries it. */
+export type InstalledPackage = {
+  name: string;
+  version: string;
+  epoch?: string;
+  release?: string;
+  architecture?: string;
+  source_name?: string;
+  repository_id?: string;
+  origin?: string;
+  origin_class?: string;
+  vendor?: string;
+};
+
+type PackageListState = {
+  digest?: string;
+  package_count: number;
+  collected_at?: string;
+  job_id?: string;
+  unavailable_reason?: string;
+};
+
+type PackageList = {
+  items: InstalledPackage[];
+  count: number;
+  state: PackageListState;
+};
+
+/** One change of an upgrade plan: what the host would move a package to. */
+export type PlanChange = {
+  name: string;
+  current_version?: string;
+  candidate_version?: string;
+  origin?: string;
+  security?: boolean;
+};
+
+/** A row of the package table: the package with what the host says about it. */
+export type PackageRow = InstalledPackage & {
+  /** Whether the package is held; unknown when the host did not read the holds. */
+  held?: boolean;
+  /** The version the last upgrade plan would move it to; absent when nothing waits. */
+  candidate?: string;
+  security: boolean;
+};
+
+export type PackageFilter = "all" | "upgradable" | "security" | "held";
+
+/**
+ * The version of a package as the manager prints it: the epoch in front,
+ * the release behind, so the row reads like the tool's own output and a
+ * candidate version from the plan compares by eye.
+ */
+export function packageVersion(pkg: InstalledPackage): string {
+  let version = pkg.version;
+  if (pkg.epoch && pkg.epoch !== "0") version = `${pkg.epoch}:${version}`;
+  if (pkg.release) version = `${version}-${pkg.release}`;
+  return version;
+}
+
+/**
+ * The rows of the table: every installed package joined with the holds the
+ * host reported and the changes of the last upgrade plan. A held state is
+ * unknown when the holds were not read, and a package the plan does not
+ * name has no candidate - which says "nothing waits", not "not planned":
+ * the caption of the table says how old the plan is.
+ */
+export function packageRows(
+  items: InstalledPackage[], holds: string[] | undefined, changes: PlanChange[] | undefined,
+): PackageRow[] {
+  const held = holds ? new Set(holds) : undefined;
+  // apt names a foreign-architecture package as name:arch in the plan; the
+  // list keeps the name and the architecture apart, so both spellings match.
+  const planned = new Map<string, PlanChange>();
+  for (const change of changes ?? []) {
+    planned.set(change.name, change);
+    const bare = change.name.split(":")[0];
+    if (!planned.has(bare)) planned.set(bare, change);
+  }
+  return items.map((pkg) => {
+    const change = planned.get(pkg.architecture ? `${pkg.name}:${pkg.architecture}` : pkg.name) ?? planned.get(pkg.name);
+    return {
+      ...pkg,
+      held: held ? held.has(pkg.name) : undefined,
+      candidate: change?.candidate_version || (change ? "?" : undefined),
+      security: change?.security === true,
+    };
+  });
+}
+
+/**
+ * The rows narrowed by the search box and the filter, in the chosen order.
+ * The search is over the name and the source package, case-insensitively;
+ * the filter "held" keeps the rows known to be held, so an unread hold
+ * list filters to nothing rather than to everything.
+ */
+export function filterRows(
+  rows: PackageRow[], query: string, filter: PackageFilter, direction: "asc" | "desc" = "asc",
+): PackageRow[] {
+  const needle = query.trim().toLowerCase();
+  const kept = rows.filter((row) => {
+    if (needle && !row.name.toLowerCase().includes(needle) && !(row.source_name ?? "").toLowerCase().includes(needle)) {
+      return false;
+    }
+    switch (filter) {
+      case "upgradable": return row.candidate !== undefined;
+      case "security": return row.security;
+      case "held": return row.held === true;
+      default: return true;
+    }
+  });
+  kept.sort((a, b) => a.name.localeCompare(b.name) || (a.architecture ?? "").localeCompare(b.architecture ?? ""));
+  if (direction === "desc") kept.reverse();
+  return kept;
+}
+
+/** The count of held packages from the module: unknown until the host read the holds. */
+export function heldCount(packages: PackagesState | undefined): number | undefined {
+  if (!packages || packages.holds_known !== true) return undefined;
+  return packages.holds?.length ?? 0;
+}
 
 /**
  * The host's packages.
@@ -66,8 +197,11 @@ export function Packages() {
   const packages = module.data?.payload;
 
   const [names, setNames] = useState("");
-  const [plan, setPlan] = useState<RemovalPlan | null>(null);
-  const [toRemove, setToRemove] = useState<string[] | null>(null);
+  // The removal plan and the set it was computed for: a removal ordered
+  // from the table names one package, a removal from the form names what
+  // was typed, and the confirmation removes the set that was reviewed.
+  const [plan, setPlan] = useState<{ requested: string[]; plan: RemovalPlan } | null>(null);
+  const [toRemove, setToRemove] = useState<{ requested: string[]; removals: string[] } | null>(null);
   const [sourceIntent, setSourceIntent] = useState<SourceIntent | null>(null);
   const [agentVersion, setAgentVersion] = useState("");
   const [repairing, setRepairing] = useState(false);
@@ -106,23 +240,39 @@ export function Packages() {
 
   // The removal plan is computed on the host, so the screen waits for its result.
   const planRemoval = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (requested: string[]) => {
       const job = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "packages.plan",
-        payload: { package_plan: { mode: "remove", only_packages: list() } },
+        payload: { package_plan: { mode: "remove", only_packages: requested } },
       });
       const last = await awaitJob<RemovalPlan>(api, job.id);
       if (!last) throw new Error(t("The plan did not arrive in time."));
       if (last.status !== "succeeded") {
         throw new Error(last.message || t("The host refused to plan the removal."));
       }
-      return last.detail ?? {};
+      return { requested, plan: last.detail ?? {} };
     },
     onSuccess: (result) => { setPlan(result); setMessage(""); },
     onError: (error) => {
       setPlan(null);
       setMessage(error instanceof Error ? error.message : String(error));
     },
+  });
+
+  // The package list is read by the panel on its own cycle; the operator
+  // asks for it here when the copy is missing or older than the host. The
+  // rows appear when the job lands, not at the next timed refetch.
+  const readList = useMutation({
+    mutationFn: () => api.post<Job>(`/api/v1/hosts/${host.id}/operations`, { action: "packages.list", payload: {} }),
+    onSuccess: (job) => {
+      setMessage(t("Job {id} reads the package list.", { id: job.id.slice(0, 8) }));
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      void awaitJob(api, job.id).then(
+        () => queryClient.invalidateQueries({ queryKey: ["host-packages", host.id] }),
+        () => undefined,
+      );
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
   const sources = packages?.repositories?.repositories ?? [];
@@ -150,8 +300,9 @@ export function Packages() {
 
       <Widgets>
         {/* The counts decide whether the rest is worth reading; an unknown
-            count is a dash, because zero would mean "nothing to do". Held
-            packages are not in the report yet, so their slot says so. */}
+            count is a dash, because zero would mean "nothing to do". The
+            holds come from the host with the counters, and a hold list the
+            host could not read leaves the slot unknown. */}
         <Summary
           title={t("Updates")}
           description={t("The installed packages by what waits for them.")}
@@ -160,7 +311,7 @@ export function Packages() {
             { label: t("up to date"), value: upToDate, tone: "ok" },
             { label: t("upgradable"), value: pending, tone: "warn" },
             { label: t("security"), value: security, tone: "error" },
-            { label: t("held"), value: undefined, tone: "neutral" },
+            { label: t("held"), value: heldCount(packages), tone: "neutral" },
           ]}
         />
         <Section title={t("Sources")} span={4} flush>
@@ -258,7 +409,7 @@ export function Packages() {
             <button
               className="hm-danger"
               disabled={planRemoval.isPending || list().length === 0}
-              onClick={() => planRemoval.mutate()}
+              onClick={() => planRemoval.mutate(list())}
             >
               {planRemoval.isPending ? t("Planning…") : t("Plan removal")}
             </button>
@@ -321,35 +472,35 @@ export function Packages() {
       </Widgets>
 
       {plan && (
-        <Section title={t("Removal plan")} count={plan.removals?.length ?? 0} flush>
-          {plan.protected && plan.protected.length > 0 && (
+        <Section title={t("Removal plan")} count={plan.plan.removals?.length ?? 0} flush>
+          {plan.plan.protected && plan.plan.protected.length > 0 && (
             <p className="warning">
               <span>
-                {t("These packages are protected and will not be removed: {packages}. Removing them would leave the host unmanageable or unbootable.", { packages: plan.protected.join(", ") })}
+                {t("These packages are protected and will not be removed: {packages}. Removing them would leave the host unmanageable or unbootable.", { packages: plan.plan.protected.join(", ") })}
               </span>
             </p>
           )}
-          {!plan.removals?.length ? (
+          {!plan.plan.removals?.length ? (
             <Empty>{t("Nothing would be removed.")}</Empty>
           ) : (
             <>
               <Table>
                 <thead><tr><th>{t("Package")}</th><th>{t("Reason")}</th></tr></thead>
                 <tbody>
-                  {plan.removals.map((pkg) => (
+                  {plan.plan.removals.map((pkg) => (
                     <tr key={pkg}>
                       <td className="hm-mono">{pkg}</td>
-                      <td>{list().includes(pkg) ? t("requested") : t("dependency")}</td>
+                      <td>{plan.requested.includes(pkg) ? t("requested") : t("dependency")}</td>
                     </tr>
                   ))}
                 </tbody>
               </Table>
               <Foot>
                 <span>
-                  {t("{n} package(s) would be removed. The host recomputes this set before removing; a difference cancels the operation.", { n: plan.removals.length })}
+                  {t("{n} package(s) would be removed. The host recomputes this set before removing; a difference cancels the operation.", { n: plan.plan.removals.length })}
                 </span>
-                {(!plan.protected || plan.protected.length === 0) && (
-                  <button className="danger" onClick={() => setToRemove(plan.removals ?? [])}>
+                {(!plan.plan.protected || plan.plan.protected.length === 0) && (
+                  <button className="danger" onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}>
                     {t("Remove these packages")}
                   </button>
                 )}
@@ -358,6 +509,19 @@ export function Packages() {
           )}
         </Section>
       )}
+
+      <InstalledPackages
+        host={host}
+        packages={packages}
+        busy={request.isPending || planRemoval.isPending}
+        onRead={() => readList.mutate()}
+        reading={readList.isPending}
+        onHold={(name, hold) => request.mutate({
+          action: "packages.hold.set",
+          payload: { package_change: { packages: [name], hold } },
+        })}
+        onRemove={(name) => { setPlan(null); planRemoval.mutate([name]); }}
+      />
 
       <Repositories
         view={packages?.repositories}
@@ -406,7 +570,8 @@ export function Packages() {
           host={host}
           label={t("Remove packages")}
           description={t("{n} package(s) will be removed: {packages}.", {
-            n: toRemove.length, packages: `${toRemove.slice(0, 6).join(", ")}${toRemove.length > 6 ? "…" : ""}`,
+            n: toRemove.removals.length,
+            packages: `${toRemove.removals.slice(0, 6).join(", ")}${toRemove.removals.length > 6 ? "…" : ""}`,
           })}
           busy={request.isPending}
           onConfirm={(reason, confirmation) =>
@@ -415,7 +580,7 @@ export function Packages() {
               reason,
               target_confirmation: confirmation,
               payload: {
-                package_change: { packages: list(), expected_removals: toRemove },
+                package_change: { packages: toRemove.requested, expected_removals: toRemove.removals },
               },
             })
           }
@@ -427,6 +592,270 @@ export function Packages() {
 }
 
 type SourceIntent = { label: string; description: string; payload: Record<string, unknown> };
+
+/** The height of a package row: one line of text, so the window arithmetic holds. */
+const PACKAGE_ROW = 34;
+
+/**
+ * The installed packages, from the panel's copy of the host's list.
+ *
+ * The copy is read on request and kept next to the vulnerability
+ * assessment; the inventory carries the digest of the host's own list, so
+ * the table says when the copy stopped describing the host instead of
+ * serving it as current. The holds come from the host with the counters,
+ * and the version a package would move to comes from the last upgrade
+ * plan - the table joins the three, and the caption says how old each is.
+ * A few thousand rows are windowed: the search runs over the whole list,
+ * the browser draws a screenful.
+ */
+function InstalledPackages({
+  host, packages, busy, reading, onRead, onHold, onRemove,
+}: {
+  host: Host;
+  packages: PackagesState | undefined;
+  /** Whether an order is on its way; the row actions wait for it. */
+  busy: boolean;
+  reading: boolean;
+  onRead: () => void;
+  onHold: (name: string, hold: boolean) => void;
+  onRemove: (name: string) => void;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PackageFilter>("all");
+  const [direction, setDirection] = useState<"asc" | "desc">("asc");
+  const [selected, setSelected] = useState<string>("");
+
+  const list = useQuery({
+    queryKey: ["host-packages", host.id],
+    queryFn: () => api.get<PackageList>(`/api/v1/hosts/${host.id}/packages`),
+    retry: false,
+  });
+  const plan = useLastUpgradePlan(host.id);
+
+  const holds = useMemo(() => (packages?.holds_known ? packages.holds ?? [] : undefined), [packages]);
+  const rows = useMemo(
+    () => packageRows(list.data?.items ?? [], holds, plan.changes),
+    [list.data, holds, plan.changes],
+  );
+  const shown = useMemo(() => filterRows(rows, query, filter, direction), [rows, query, filter, direction]);
+  const current = rows.find((row) => `${row.name}/${row.architecture ?? ""}` === selected);
+  const state = list.data?.state;
+  // The copy is stale when the host's own list has another digest: the
+  // rows then describe an earlier moment, and the caption says so.
+  const stale = !!state?.digest && !!packages?.installed_digest && state.digest !== packages.installed_digest;
+  const pacman = packages?.manager === "pacman";
+  const key = (row: PackageRow) => `${row.name}/${row.architecture ?? ""}`;
+
+  return (
+    <>
+      <Section
+        title={t("Installed packages")}
+        count={list.data ? shown.length : undefined}
+        description={t("The panel's copy of the host's package list, joined with the holds the host reports and the changes of the last upgrade plan. Select a package to act on it.")}
+        tools={list.data && list.data.items.length > 0 && (
+          <>
+            <input
+              placeholder={t("Search by name or source package")}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <select value={filter} onChange={(e) => setFilter(e.target.value as PackageFilter)}>
+              <option value="all">{t("all packages")}</option>
+              <option value="upgradable">{t("upgradable only")}</option>
+              <option value="security">{t("security updates only")}</option>
+              <option value="held">{t("held only")}</option>
+            </select>
+            <select value={direction} onChange={(e) => setDirection(e.target.value as "asc" | "desc")}>
+              <option value="asc">{t("name A–Z")}</option>
+              <option value="desc">{t("name Z–A")}</option>
+            </select>
+          </>
+        )}
+        flush
+      >
+        {list.error ? (
+          <Empty>{list.error instanceof Error ? list.error.message : String(list.error)}</Empty>
+        ) : !list.data ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : list.data.items.length === 0 ? (
+          <>
+            {/* No rows is not a host without packages: the panel has not
+                read the list, or could not, and says which. */}
+            <Empty>
+              {state?.unavailable_reason === "package_list_missing" || !state?.unavailable_reason
+                ? t("The panel has not read the package list of this host yet.")
+                : t("The package list could not be read: {reason}", { reason: state.unavailable_reason })}
+            </Empty>
+            <Foot>
+              <span>{t("The read goes through a job and needs no root on the host.")}</span>
+              <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                {reading ? t("Requesting…") : t("Read the package list")}
+              </button>
+            </Foot>
+          </>
+        ) : (
+          <>
+            {stale && (
+              <p className="warning">
+                <span>{t("The host's own list has changed since the panel read it; the rows describe an earlier moment.")}</span>
+                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                  {reading ? t("Requesting…") : t("Read it again")}
+                </button>
+              </p>
+            )}
+            {packages && packages.holds_known === false && (
+              <p className="warning">
+                <span>
+                  {t("The holds could not be read, so no package is known to be held")}
+                  {packages.holds_unavailable_reason ? `: ${packages.holds_unavailable_reason}` : "."}
+                </span>
+              </p>
+            )}
+            {shown.length === 0 ? (
+              <Empty>{t("No package matches.")}</Empty>
+            ) : (
+              <VirtualRows
+                items={shown}
+                rowHeight={PACKAGE_ROW}
+                height={480}
+                columns={7}
+                rowKey={key}
+                head={
+                  <tr>
+                    <th>{t("Package")}</th><th>{t("Version")}</th><th>{t("Architecture")}</th>
+                    <th>{t("Source")}</th><th>{t("Upgrade to")}</th><th>{t("Security")}</th><th>{t("Held")}</th>
+                  </tr>
+                }
+                render={(row) => (
+                  <>
+                    <td>
+                      <button
+                        className="inline"
+                        aria-pressed={selected === key(row)}
+                        onClick={() => setSelected(selected === key(row) ? "" : key(row))}
+                        title={row.source_name && row.source_name !== row.name ? t("source package {name}", { name: row.source_name }) : undefined}
+                      >
+                        {row.name}
+                      </button>
+                    </td>
+                    <td className="hm-mono">{packageVersion(row)}</td>
+                    <td>{row.architecture || "—"}</td>
+                    <td className="source" title={row.origin || undefined}>
+                      {row.repository_id || row.origin || originWords(t, row.origin_class)}
+                    </td>
+                    <td className="hm-mono">{row.candidate ?? ""}</td>
+                    <td>{row.security && <span className="badge error">{t("security")}</span>}</td>
+                    <td>
+                      {row.held === true
+                        ? <span className="badge warn">{t("held")}</span>
+                        : row.held === undefined
+                          ? <span className="badge unknown" title={t("The holds were not read.")}>?</span>
+                          : ""}
+                    </td>
+                  </>
+                )}
+              />
+            )}
+            <Foot>
+              <span>
+                {t("{shown} of {total} packages", { shown: shown.length, total: list.data.items.length })}
+                {" · "}
+                {t("list read")} <Time value={state?.collected_at} />
+                {state?.job_id && <> (<Link to={`/jobs/${state.job_id}`} className="mono">{state.job_id.slice(0, 8)}</Link>)</>}
+                {" · "}
+                {plan.at
+                  ? <>{t("upgrade plan from")} <Time value={plan.at} /></>
+                  : t("no upgrade plan yet; the upgrade column fills in after one")}
+              </span>
+              <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                {reading ? t("Requesting…") : t("Read again")}
+              </button>
+            </Foot>
+            {/* The actions of the selected package stand under the table,
+                with the target named once more: a hold and a release go
+                straight to a job, a removal to a plan first, and an upgrade
+                to the request form with its reason. */}
+            {current && (
+              <Foot>
+                <span>
+                  <span className="hm-mono">{current.name}</span> {packageVersion(current)}
+                  {current.candidate && <> → <span className="hm-mono">{current.candidate}</span></>}
+                  {current.held === true && <> · {t("held")}</>}
+                </span>
+                <button className="secondary" disabled={busy} onClick={() => onHold(current.name, current.held !== true)}>
+                  {current.held === true ? t("Unhold") : t("Hold")}
+                </button>
+                <button className="hm-danger" disabled={busy} onClick={() => onRemove(current.name)}>
+                  {t("Plan removal")}
+                </button>
+                <button className="secondary" onClick={() => setSelected("")}>{t("Deselect")}</button>
+              </Foot>
+            )}
+          </>
+        )}
+      </Section>
+      {current && (pacman ? (
+        <Section title={t("Upgrade {name}", { name: current.name })}>
+          <p className="source" style={{ margin: 0 }}>
+            {t("pacman upgrades the whole system at once: a single package cannot be moved on its own without leaving the host partially upgraded. Plan updates above and upgrade the host as a whole.")}
+          </p>
+        </Section>
+      ) : (
+        <RequestOperation
+          host={host}
+          description={current.candidate
+            ? t("Upgrades {name} alone, from {from} to {to}, through a package transaction; the rest of the host stays as it is.", {
+                name: current.name, from: packageVersion(current), to: current.candidate,
+              })
+            : t("Upgrades {name} alone through a package transaction; the last plan named no newer version, so the host may find nothing to do.", { name: current.name })}
+          action="packages.upgrade"
+          payload={{ package_upgrade: { packages: [current.name] } }}
+          label={t("Upgrade {name}", { name: current.name })}
+        />
+      ))}
+    </>
+  );
+}
+
+/** The origin class of a package in the operator's words; empty when the host did not classify it. */
+function originWords(t: (key: string) => string, originClass?: string): string {
+  switch (originClass) {
+    case "vendor_distribution": return t("distribution");
+    case "third_party_repository": return t("third-party repository");
+    case "local_package": return t("local package");
+    case "origin_unknown": return t("origin unknown");
+    default: return "—";
+  }
+}
+
+/**
+ * The changes of the last upgrade plan of the host, with when it was made.
+ * The plan is the newest succeeded packages.plan job that planned an
+ * upgrade - a removal plan or an install plan says nothing about what
+ * waits - and its changes are in the result of its last attempt.
+ */
+function useLastUpgradePlan(hostId: string): { changes?: PlanChange[]; at?: string } {
+  const jobs = useQuery({
+    queryKey: ["jobs", hostId, "packages.plan", "succeeded"],
+    queryFn: () => api.get<Page<Job>>(`/api/v1/jobs?host_id=${hostId}&action=packages.plan&state=succeeded&limit=10`),
+  });
+  const upgrade = (jobs.data?.items ?? []).find((job) => {
+    const mode = (job.payload as { package_plan?: { mode?: string } } | undefined)?.package_plan?.mode;
+    return !mode || mode === "upgrade";
+  });
+  const attempts = useQuery({
+    queryKey: ["job-attempts", upgrade?.id ?? ""],
+    queryFn: () => api.get<Collection<Attempt>>(`/api/v1/jobs/${upgrade?.id}/attempts`),
+    enabled: !!upgrade,
+    staleTime: Infinity,
+  });
+  if (!upgrade || !attempts.data) return {};
+  const last = attempts.data.items[attempts.data.items.length - 1];
+  const detail = last?.detail as { kind?: string; changes?: PlanChange[] } | undefined;
+  if (detail?.kind !== "package_plan") return {};
+  return { changes: detail.changes, at: upgrade.finished_at ?? upgrade.created_at };
+}
 
 /** How many transactions one page of the history carries. */
 const HISTORY_PAGE = 20;

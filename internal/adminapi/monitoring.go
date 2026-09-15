@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/monitoring"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 // SetMonitoring attaches the built-in monitoring: the samples the agents
@@ -306,13 +307,18 @@ func (s *Server) handleGetAlertRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rule)
 }
 
-// ruleProblem answers a store error of the rules; true when it did.
+// ruleProblem answers a store error of the rules; true when it did. A
+// selector the store cannot resolve - a group nobody created, a cycle -
+// is refused in the same words the campaign page uses.
 func (s *Server) ruleProblem(w http.ResponseWriter, err error) bool {
 	switch {
 	case err == nil:
 		return false
 	case errors.Is(err, monitoring.ErrNotFound):
 		problem(w, http.StatusNotFound, "rule_not_found", "no such alert rule")
+	case errors.Is(err, selector.ErrInvalid), errors.Is(err, selector.ErrUnknownGroup),
+		errors.Is(err, selector.ErrCycle):
+		s.selectorProblem(w, err)
 	default:
 		s.fail(w, err)
 	}
@@ -342,8 +348,7 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	created, err := s.monitoring.CreateRule(r.Context(), rule)
-	if err != nil {
-		s.fail(w, err)
+	if s.ruleProblem(w, err) {
 		return
 	}
 	s.audit.Record(r.Context(), audit.Event{
@@ -432,7 +437,19 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
 	limit, _ := strconv.Atoi(query.Get("limit"))
+	if asCSV {
+		// The file takes the most the store hands out at once, whatever the
+		// screen asked for: the alert history has no cursor, so the export
+		// is the newest alertHistoryCeiling alerts of the filter and no
+		// truncation row is needed - the bound is the store's, not the
+		// export's, and a longer history is narrowed by state or host.
+		limit = alertHistoryCeiling
+	}
 	alerts, err := s.monitoring.ListAlerts(r.Context(), monitoring.AlertFilter{
 		State:    query.Get("state"),
 		Severity: query.Get("severity"),
@@ -444,7 +461,45 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if asCSV {
+		s.writeAlertsCSV(w, r, alerts)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": alerts, "count": len(alerts)})
+}
+
+// alertHistoryCeiling is the most alerts the store lists in one answer,
+// and so the most an export carries.
+const alertHistoryCeiling = 500
+
+// alertsCSVColumns is the header of the alert export. The order is fixed:
+// a sheet built against one export reads the next one.
+var alertsCSVColumns = []string{
+	"id", "hostname", "host_id", "rule_name", "rule_id", "metric", "severity", "state", "value", "detail",
+	"started_at", "fired_at", "resolved_at", "silenced",
+}
+
+// writeAlertsCSV streams the alert history as a file, newest first as the
+// screen lists it, with the same state, severity and host filter.
+func (s *Server) writeAlertsCSV(w http.ResponseWriter, r *http.Request, alerts []monitoring.Alert) {
+	s.writeCSV(w, r, exportFileName("alerts", time.Now()), alertsCSVColumns, func(yield func([]string) bool) error {
+		for _, alert := range alerts {
+			if !yield(alertCSVRow(alert)) {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// alertCSVRow renders one alert in the order of alertsCSVColumns. An
+// alert that never fired has no fired_at; one still open no resolved_at.
+func alertCSVRow(alert monitoring.Alert) []string {
+	return []string{
+		alert.ID, alert.Hostname, alert.HostID, alert.RuleName, alert.RuleID, alert.Metric, alert.Severity, alert.State,
+		csvFloat(alert.Value), alert.Detail, csvInstant(alert.StartedAt), formatTime(alert.FiredAt),
+		formatTime(alert.ResolvedAt), strconv.FormatBool(alert.Silenced),
+	}
 }
 
 // handleListSilences returns the silences in force on the visible hosts.

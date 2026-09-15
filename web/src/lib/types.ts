@@ -74,6 +74,7 @@ export type Host = {
   lifecycle_reason?: string;
   lifecycle_changed_at?: string;
   lifecycle_changed_by?: string;
+  placement_changed_at?: string;
   os_family?: string;
   os_distribution?: string;
   os_version?: string;
@@ -170,6 +171,17 @@ export type SelectorExpression = {
   owner?: string;
   /** The release channel the host follows: an upgrade in waves names beta first. */
   channel?: ReleaseChannel;
+  /** A prefix of the OS version: '12' names every 12.x. */
+  os_version?: string;
+  /** 'true' or 'false'; a host that has not reported the fact is in neither. */
+  security_updates?: string;
+  reboot_required?: string;
+  failed_units?: string;
+  /** A comparison: '< 0.49.0', '>= 0.49.0', or a bare version for equality. */
+  agent_version?: string;
+  /** A relay by identifier or name, through whose open session the host connects. */
+  relay?: string;
+  failure_domain?: string;
 };
 
 /** The release channels a host may follow. */
@@ -1145,6 +1157,13 @@ export type RuleSelector = {
   environment?: string;
   os_family?: string;
   host_ids?: string[];
+  /** Every listed tag has to be on the host. */
+  tags?: string[];
+  /** The host has to be in one of the groups, by identifier or name. */
+  groups?: string[];
+  owner?: string;
+  /** The text form of a campaign selector, e.g. "agent_version < 0.49.0 or reboot_required = true". */
+  expression?: string;
 };
 
 export type AlertRule = {

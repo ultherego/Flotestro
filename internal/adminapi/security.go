@@ -86,6 +86,10 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
 	if err != nil {
 		s.fail(w, err)
@@ -107,6 +111,10 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now().UTC()
+	if asCSV {
+		s.writeFindingsCSV(w, r, visible, fragments, now)
+		return
+	}
 	checks := map[string]*checkView{}
 	order := make([]string, 0, len(compliance.Checks))
 	for _, check := range compliance.Checks {
@@ -159,6 +167,53 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"hosts": len(visible), "checks": results, "generated_at": now,
 	})
+}
+
+// findingsCSVColumns is the header of the findings export. The order is
+// fixed: a sheet built against one export reads the next one.
+var findingsCSVColumns = []string{
+	"hostname", "host_id", "check_id", "check_version", "title", "severity", "status", "reason_code",
+	"expected", "observed", "evidence", "module", "observed_at", "remediation_action",
+}
+
+// writeFindingsCSV streams every finding of the visible fleet: one row per
+// host and check, with the verdict of that pair in the status column -
+// failed, passed, unknown or not_applicable. The screen sums the checks
+// and shows a sample of the hosts behind each; the file is the whole
+// matrix, because an auditor asks which hosts, not how many. The fleet
+// list is the one the screen judges, so the file agrees with the screen;
+// past exportRowLimit rows the file ends with a truncation row.
+func (s *Server) writeFindingsCSV(w http.ResponseWriter, r *http.Request, visible []hosts.Host,
+	fragments map[string][]inventory.Fragment, now time.Time) {
+	s.writeCSV(w, r, exportFileName("findings", now), findingsCSVColumns, func(yield func([]string) bool) error {
+		for _, host := range visible {
+			report := compliance.Evaluate(host.ID, hostInput(host, fragments[host.ID]), now)
+			for _, finding := range report.Findings {
+				if !yield(findingCSVRow(host, finding)) {
+					return nil
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// findingCSVRow renders one finding in the order of findingsCSVColumns.
+func findingCSVRow(host hosts.Host, finding compliance.Finding) []string {
+	status := "failed"
+	switch {
+	case !finding.Applicable:
+		status = "not_applicable"
+	case finding.Unknown:
+		status = "unknown"
+	case finding.Passed:
+		status = "passed"
+	}
+	return []string{
+		host.Hostname, host.ID, finding.CheckID, strconv.Itoa(finding.CheckVersion), finding.Title, finding.Severity,
+		status, finding.ReasonCode, finding.Expected, finding.Observed, finding.Evidence, finding.Module,
+		csvInstant(finding.ObservedAt), remediationAction(finding),
+	}
 }
 
 func remediationAction(finding compliance.Finding) string {

@@ -86,6 +86,23 @@ func itoa(value int) string {
 	return string(digits)
 }
 
+// packageHolds reads the packages held on the host for the inventory. A
+// manager without a hold feature answers with a reason, not with an empty
+// list: the panel then shows the count as unknown rather than as zero.
+func packageHolds(ctx context.Context) ([]string, string) {
+	manager, err := packages.Detect()
+	if err != nil {
+		return nil, err.Error()
+	}
+	lifecycle, ok := manager.(packages.Lifecycle)
+	if !ok {
+		return nil, "this package manager cannot hold packages"
+	}
+	readCtx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	return lifecycle.Holds(readCtx)
+}
+
 // packageDigest computes the fingerprint of the package list for the inventory.
 func packageDigest(ctx context.Context, manager string) (string, int, string) {
 	if manager == "" {

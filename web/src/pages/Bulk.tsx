@@ -14,6 +14,7 @@ import { VirtualRows } from "../components/virtual";
 import { loadedTargets, REBOOT_TIMEOUT, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
+import { browserZone, emptyRecurrence, RecurrenceFields, recurrenceProblem, recurrenceText, type RecurrenceForm } from "./Schedules";
 import { useT } from "../i18n";
 
 /**
@@ -246,6 +247,7 @@ export function emptyOrder(): Order {
     healthCheckUnits: "",
     jobTimeoutSeconds: 0,
     requiresApproval: true,
+    schedule: { enabled: false, startAt: "", recurrence: emptyRecurrence() },
   };
 }
 
@@ -255,7 +257,11 @@ export function emptyOrder(): Order {
  * and wins over a draft: the operator followed it on purpose.
  */
 export function prefilledOrder(params: URLSearchParams): Draft | null {
-  if (!params.has("action") && !params.has("name") && !params.has("reason")) return null;
+  if (!params.has("action") && !params.has("name") && !params.has("reason")
+    && !params.has("group") && !params.has("host_id")) return null;
+  // A group page hands its name over: the order then opens on the group's
+  // selector, the way a host list opens on its identifiers.
+  const group = params.get("group") ?? "";
   return {
     order: {
       ...emptyOrder(),
@@ -265,6 +271,8 @@ export function prefilledOrder(params: URLSearchParams): Draft | null {
       compensates: params.get("compensates") ?? "",
       hostIDs: params.getAll("host_id"),
       reason: params.get("reason") ?? "",
+      group,
+      targetMode: group ? "expression" : "filters",
     },
     step: 0,
   };
@@ -529,7 +537,50 @@ type Order = {
   // Whether the campaign waits for a consent before anything runs. A
   // critical operation cannot turn it off.
   requiresApproval: boolean;
+  // Whether the order is kept for a moment instead of placed now: the
+  // first run as a datetime-local value in the browser's zone, and the
+  // rule of the moments after it. The schedule places the same order
+  // through the same door at its moments; each campaign then waits for
+  // its approval like any other.
+  schedule: ScheduleChoice;
 };
+
+/** The moment an order is kept for, and the rule of the moments after it. */
+export type ScheduleChoice = { enabled: boolean; startAt: string; recurrence: RecurrenceForm };
+
+/**
+ * What is wrong with the schedule of an order, or null when nothing is
+ * or nothing is scheduled: a single run needs a moment ahead, a recurring
+ * one a complete rule.
+ */
+export function scheduleProblem(choice: ScheduleChoice, now: Date): "start_invalid" | "start_past" | "moment_required" | "recurrence" | null {
+  if (!choice.enabled) return null;
+  const rule = recurrenceText(choice.recurrence);
+  const start = choice.startAt ? new Date(choice.startAt) : null;
+  if (start && Number.isNaN(start.getTime())) return "start_invalid";
+  if (!rule && !start) return "moment_required";
+  if (!rule && start && start.getTime() <= now.getTime()) return "start_past";
+  if (rule && recurrenceProblem(choice.recurrence)) return "recurrence";
+  return null;
+}
+
+/**
+ * The body of a schedule as the API takes it: the order as it would be
+ * placed now, kept for the moment, with the reason on the schedule as
+ * well - it is what the trail keeps next to the schedule and what every
+ * campaign it places carries.
+ */
+export function scheduleBody(order: Order, risk: string | undefined): Record<string, unknown> {
+  const rule = recurrenceText(order.schedule.recurrence);
+  return {
+    name: order.name,
+    order: campaignBody(order, risk),
+    start_at: windowInstant(order.schedule.startAt),
+    recurrence: rule || undefined,
+    timezone: browserZone(),
+    reason: order.reason.trim(),
+  };
+}
 
 /**
  * The expression the order carries: the chosen group and the tag rules
@@ -838,6 +889,21 @@ function windowWords(t: (text: string) => string, problem: WindowProblem | null)
   return "";
 }
 
+/** The sentence for what is wrong with the schedule, or an empty string when nothing is. */
+function scheduleWords(t: (text: string) => string, problem: ReturnType<typeof scheduleProblem>): string {
+  switch (problem) {
+    case "start_invalid":
+      return t("the first run is not a valid date and time");
+    case "start_past":
+      return t("a single run has to lie ahead");
+    case "moment_required":
+      return t("give the schedule a first run or a recurrence");
+    case "recurrence":
+      return t("the recurrence is incomplete: a day, an hour and a minute");
+  }
+  return "";
+}
+
 function stepGates(
   t: (text: string, params?: Record<string, string | number>) => string,
   order: Order,
@@ -852,6 +918,7 @@ function stepGates(
   const hasEligible = (preview?.eligible ?? 0) > 0;
   const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
   const window = windowWords(t, windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date()));
+  const schedule = scheduleWords(t, scheduleProblem(order.schedule, new Date()));
   const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
   return [
     { open: hasAction && exclusionsExplained && !refusal, reason: refusal
@@ -864,7 +931,7 @@ function stepGates(
     { open: hasAction && hasTargets, reason: t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
-    { open: window === "" && timeoutFits, reason: window || t("the job timeout is out of bounds") },
+    { open: window === "" && schedule === "" && timeoutFits, reason: window || schedule || t("the job timeout is out of bounds") },
     { open: Boolean(campaign), reason: t("the campaign does not exist yet") },
     { open: Boolean(campaign && campaign.state !== "planning"), reason: t("hosts are still planning") },
   ];
@@ -1642,6 +1709,9 @@ function WindowStep({
   const units = parseUnits(order.healthCheckUnits);
   const forced = approvalForced(operation?.risk);
   const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
+  const schedule = order.schedule;
+  const scheduleFault = scheduleWords(t, scheduleProblem(schedule, new Date()));
+  const changeSchedule = (delta: Partial<ScheduleChoice>) => change({ schedule: { ...schedule, ...delta } });
   return (
     <Card
       title={`5. ${t("Window and verification")}`}
@@ -1697,6 +1767,34 @@ function WindowStep({
           </span>
         </div>
       </FieldGrid>
+      {/* The order kept for a moment instead of placed now. The schedule
+          places this same order through the same door at its moments, so
+          everything above still applies to each campaign it places - the
+          window, the checks, the approval. */}
+      <FieldGrid>
+        <div className="field wide">
+          <label className="toggle">
+            <input type="checkbox" checked={schedule.enabled} onChange={(e) => changeSchedule({ enabled: e.target.checked })} />{" "}
+            {t("Schedule instead of ordering now")}
+          </label>
+          <span className="field-hint">
+            {schedule.enabled
+              ? scheduleFault || t("The order is kept and placed at its moments under your rights as they stand then; each campaign waits for its approval. Listed under Campaigns › Schedules.")
+              : t("Keep the order for a moment ahead, once or on a monthly or weekly rule, instead of creating the campaign now.")}
+          </span>
+        </div>
+        {schedule.enabled && (
+          <>
+            <Field label={t("First run")}
+              hint={schedule.recurrence.freq
+                ? t("Optional with a recurrence: the earliest moment the rule may name.")
+                : t("The one moment the order is placed at. Local time.")}>
+              <input type="datetime-local" value={schedule.startAt} onChange={(e) => changeSchedule({ startAt: e.target.value })} />
+            </Field>
+            <RecurrenceFields value={schedule.recurrence} onChange={(recurrence) => changeSchedule({ recurrence })} />
+          </>
+        )}
+      </FieldGrid>
     </Card>
   );
 }
@@ -1730,6 +1828,19 @@ function CreateStep({
     },
     onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
   });
+  // A scheduled order creates no campaign now: the schedule is the
+  // record, and the wizard ends here with a link to it.
+  const [scheduled, setScheduled] = useState("");
+  const schedule = useMutation({
+    mutationFn: () => api.post<{ id: string }>("/api/v1/campaign-schedules", scheduleBody(order, operation?.risk)),
+    onSuccess: (created) => {
+      queryClient.invalidateQueries({ queryKey: ["campaign-schedules"] });
+      clearDraft(sessionStorageOrNull());
+      setScheduled(created.id);
+    },
+    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
+  });
+  const scheduling = order.schedule.enabled;
 
   return (
     <Card
@@ -1767,9 +1878,21 @@ function CreateStep({
         </Field>
       </FieldGrid>
       <Actions>
-        <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID) || !reasonOK}>
-          {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
-        </button>
+        {scheduling ? (
+          <button onClick={() => schedule.mutate()} disabled={schedule.isPending || Boolean(scheduled) || !reasonOK}>
+            {schedule.isPending ? t("Scheduling…") : t("Schedule a campaign on {n} hosts", { n: targets })}
+          </button>
+        ) : (
+          <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID) || !reasonOK}>
+            {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
+          </button>
+        )}
+        {scheduled && (
+          <span className="source">
+            {t("The schedule is recorded; the campaign is created at its moment.")}{" "}
+            <Link to="/campaigns/schedules">{t("Open the schedules")}</Link>
+          </span>
+        )}
         {errorMessage && <p className="page-error">{errorMessage}</p>}
       </Actions>
     </Card>

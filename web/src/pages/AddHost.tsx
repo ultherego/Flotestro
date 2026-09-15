@@ -10,6 +10,7 @@ import type {
 } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
+import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
 /** The order right after creation - the only moment the token exists. */
@@ -143,6 +144,8 @@ export function AddHost() {
     queryFn: () => api.get<{ items: EnrollmentOrder[] }>("/api/v1/enrollment-requests"),
   });
 
+  // The placement the fleet already has, offered under the inputs.
+  const facets = useFleetFacets();
   // The typed placement reaches the server after a pause, not per keystroke.
   const settledSite = useDebounced(site.trim());
   const settledEnvironment = useDebounced(environment.trim());
@@ -376,11 +379,17 @@ export function AddHost() {
                 placeholder={t("web-042, Warsaw production")}
               />
             </Field>
+            {/* The sites and environments the fleet already has are offered
+                under the inputs, so a new host lands in "warsaw" and not in
+                a "Warsaw" of its own; a name nobody used yet still goes
+                through - the first host of a site has to come from somewhere. */}
             <Field label={t("Site")}>
-              <input value={site} onChange={(e) => setSite(e.target.value)} />
+              <input value={site} onChange={(e) => setSite(e.target.value)} list="add-host-sites" />
+              <FacetList id="add-host-sites" facets={facets.data?.by_site} />
             </Field>
             <Field label={t("Environment")}>
-              <input value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+              <input value={environment} onChange={(e) => setEnvironment(e.target.value)} list="add-host-environments" />
+              <FacetList id="add-host-environments" facets={facets.data?.by_environment} />
             </Field>
             {/* The owner and the tags are optional here and editable on
                 the host later; given now, the host needs no second visit

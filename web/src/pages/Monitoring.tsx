@@ -8,10 +8,12 @@ import type {
 } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { bytes } from "../lib/format";
+import { expressionSuggestions, parseExpression } from "../lib/targets";
 import { t as translate, useT } from "../i18n";
 
 /* ---------------------------------------------------------------------- */
@@ -71,15 +73,37 @@ export function describeCondition(rule: { metric: string; operator: RuleOperator
   return `${rule.metric} ${OPERATOR_SIGNS[rule.operator] ?? rule.operator} ${metricValue(rule.metric, rule.threshold)}`;
 }
 
+/**
+ * The scope of a rule as the server takes it: the flat fields, the tags
+ * the host has to carry, the groups it may be in, its owner, and an
+ * expression in the text form of a campaign selector for what the fields
+ * cannot say. Every set field holds at once.
+ */
+export type RuleScope = RuleSelector & {
+  tags?: string[];
+  groups?: string[];
+  owner?: string;
+  expression?: string;
+};
+
 /** Which hosts a rule selects, in one line; nothing chosen is the whole fleet. */
-export function describeSelector(selector: RuleSelector | undefined): string {
+export function describeSelector(selector: RuleScope | undefined): string {
   const parts = [
     selector?.site ? `site=${selector.site}` : "",
     selector?.environment ? `environment=${selector.environment}` : "",
     selector?.os_family ? `os=${selector.os_family}` : "",
+    ...(selector?.tags ?? []).map((tag) => `tag=${tag}`),
+    selector?.groups?.length ? `group=${selector.groups.join("|")}` : "",
+    selector?.owner ? `owner=${selector.owner}` : "",
+    selector?.expression ?? "",
     selector?.host_ids?.length ? translate("{n} named hosts", { n: selector.host_ids.length }) : "",
   ].filter(Boolean);
   return parts.length ? parts.join(", ") : translate("whole fleet");
+}
+
+/** The words of a list field - tags, groups - cut at commas and spaces, empty ones dropped. */
+function words(text: string): string[] {
+  return text.split(/[\s,]+/).map((word) => word.trim()).filter(Boolean);
 }
 
 export function severityTone(severity: AlertSeverity): "error" | "warn" | "info" {
@@ -353,12 +377,15 @@ export function FleetMonitoring() {
           title={t("Recent alerts")}
           description={t("The last fifty, newest first: what fired, when, and whether it has resolved.")}
           actions={
-            <select value={historyState} onChange={(e) => setHistoryState(e.target.value as AlertState | "")}>
-              <option value="">{t("every state")}</option>
-              <option value="firing">{t("firing")}</option>
-              <option value="pending">{t("pending")}</option>
-              <option value="resolved">{t("resolved")}</option>
-            </select>
+            <>
+              <select value={historyState} onChange={(e) => setHistoryState(e.target.value as AlertState | "")}>
+                <option value="">{t("every state")}</option>
+                <option value="firing">{t("firing")}</option>
+                <option value="pending">{t("pending")}</option>
+                <option value="resolved">{t("resolved")}</option>
+              </select>
+              <ExportButton path="/api/v1/monitoring/alerts" params={new URLSearchParams(historyState ? { state: historyState } : {})} />
+            </>
           }
           flush
         >
@@ -602,12 +629,19 @@ function FiringRow({ alert, open, onOpen, children }: { alert: Alert; open: bool
   );
 }
 
+/** A rule as the form sends it: the input of the API with the wider scope. */
+type RuleDraft = Omit<AlertRuleInput, "selector"> & { selector: RuleScope };
+
 /** The body the server takes for a rule, from a rule or a form. */
-function ruleBody(rule: AlertRuleInput): AlertRuleInput {
-  const selector: RuleSelector = {};
+function ruleBody(rule: RuleDraft): RuleDraft {
+  const selector: RuleScope = {};
   if (rule.selector.site) selector.site = rule.selector.site;
   if (rule.selector.environment) selector.environment = rule.selector.environment;
   if (rule.selector.os_family) selector.os_family = rule.selector.os_family;
+  if (rule.selector.tags?.length) selector.tags = rule.selector.tags;
+  if (rule.selector.groups?.length) selector.groups = rule.selector.groups;
+  if (rule.selector.owner) selector.owner = rule.selector.owner;
+  if (rule.selector.expression) selector.expression = rule.selector.expression;
   if (rule.selector.host_ids?.length) selector.host_ids = rule.selector.host_ids;
   return {
     name: rule.name.trim(),
@@ -624,8 +658,11 @@ function ruleBody(rule: AlertRuleInput): AlertRuleInput {
 /**
  * The form of a rule, new or edited. The metric, the operator and the
  * severity are chosen from what the server accepts, so a typo cannot make
- * a rule that never fires. The scope is by site, environment and system
- * family; a rule with none of them watches the whole fleet.
+ * a rule that never fires. The scope is by site, environment, system
+ * family, tags, groups, owner and an expression for the rest; a rule with
+ * none of them watches the whole fleet. The expression is checked as it
+ * is typed, with the same grammar the server reads, so a scope the server
+ * would refuse is said so under the field rather than after the save.
  */
 function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: RuleCatalogue; onDone: (message?: string) => void }) {
   const t = useT();
@@ -639,20 +676,34 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
   const [threshold, setThreshold] = useState(rule ? String(rule.threshold) : "");
   const [forMinutes, setForMinutes] = useState(rule ? String(rule.for_minutes) : "5");
   const [severity, setSeverity] = useState<AlertSeverity>(rule?.severity ?? "warning");
-  const [site, setSite] = useState(rule?.selector?.site ?? "");
-  const [environment, setEnvironment] = useState(rule?.selector?.environment ?? "");
-  const [osFamily, setOsFamily] = useState(rule?.selector?.os_family ?? "");
+  const scope = rule?.selector as RuleScope | undefined;
+  const [site, setSite] = useState(scope?.site ?? "");
+  const [environment, setEnvironment] = useState(scope?.environment ?? "");
+  const [osFamily, setOsFamily] = useState(scope?.os_family ?? "");
+  const [tags, setTags] = useState(scope?.tags?.join(" ") ?? "");
+  const [groups, setGroups] = useState(scope?.groups?.join(", ") ?? "");
+  const [owner, setOwner] = useState(scope?.owner ?? "");
+  const [expression, setExpression] = useState(scope?.expression ?? "");
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const body = (): AlertRuleInput => ruleBody({
+  // The expression is read the way the server reads it; an empty one is
+  // no scope rather than a mistake.
+  const expressionCheck = expression.trim() === "" ? undefined : parseExpression(expression.trim());
+  const suggestions = expressionSuggestions(expression);
+
+  const body = (): RuleDraft => ruleBody({
     name,
     metric,
     operator,
     threshold: Number(threshold),
     for_minutes: Number(forMinutes),
     severity,
-    selector: { site, environment, os_family: osFamily, host_ids: rule?.selector?.host_ids },
+    selector: {
+      site, environment, os_family: osFamily,
+      tags: words(tags), groups: words(groups), owner: owner.trim(), expression: expression.trim(),
+      host_ids: scope?.host_ids,
+    },
     enabled,
   });
 
@@ -668,7 +719,8 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
 
   const thresholdNumber = Number(threshold);
   const ready = name.trim() !== "" && metric !== "" && threshold.trim() !== "" && Number.isFinite(thresholdNumber)
-    && Number.isInteger(Number(forMinutes)) && Number(forMinutes) >= 0;
+    && Number.isInteger(Number(forMinutes)) && Number(forMinutes) >= 0
+    && (expressionCheck === undefined || expressionCheck.ok);
 
   return (
     <Card
@@ -708,6 +760,41 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
         </Field>
         <Field label={t("System family")} hint={t("Empty: every family (debian, rhel, arch…).")}>
           <input value={osFamily} onChange={(e) => setOsFamily(e.target.value)} />
+        </Field>
+        <Field label={t("Tags")} hint={t("Every listed tag has to be on the host; key or key=value, separated by spaces.")}>
+          <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="role=db tier=gold" />
+        </Field>
+        <Field label={t("Groups")} hint={t("The host has to be in one of the listed groups; names separated by commas.")}>
+          <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="databases, caches" />
+        </Field>
+        <Field label={t("Owner")} hint={t("Empty: every owner.")}>
+          <input value={owner} onChange={(e) => setOwner(e.target.value)} />
+        </Field>
+        {/* The expression takes what the fields cannot say - a version
+            comparison, a health fact, an alternative - in the text form a
+            campaign selector has. The list under the field offers what may
+            come next; the hint shows the error where the text stops
+            parsing, in the server's words. */}
+        <Field
+          label={t("Expression")}
+          wide
+          hint={expressionCheck && !expressionCheck.ok
+            ? <span className="page-error">{expressionCheck.error}</span>
+            : t("Selector text for what the fields cannot say, e.g. agent_version < 0.49.0 or reboot_required = true; and, or, not and parentheses combine conditions.")}
+        >
+          <input
+            className="mono"
+            value={expression}
+            onChange={(e) => setExpression(e.target.value)}
+            list="alert-rule-expression-words"
+            spellCheck={false}
+            placeholder="security_updates = true and connection = online"
+          />
+          <datalist id="alert-rule-expression-words">
+            {suggestions.map((word) => (
+              <option key={word} value={`${expression.replace(/[A-Za-z0-9_=!<>]*$/, "")}${word} `} />
+            ))}
+          </datalist>
         </Field>
         <label className="toggle">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />

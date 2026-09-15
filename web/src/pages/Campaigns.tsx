@@ -132,9 +132,12 @@ export function Campaigns() {
         title={t("Campaigns")}
         description={t("Campaigns are the main mechanism for fleet-wide change.")}
         actions={
-          <Link className="button primary" to="/bulk" title={t("The Bulk workspace: the targets, the reason, the offline policy and the whole rollout, step by step.")}>
-            {t("New campaign")}
-          </Link>
+          <>
+            <Link className="button secondary" to="/campaigns/schedules">{t("Schedules")}</Link>
+            <Link className="button primary" to="/bulk" title={t("The Bulk workspace: the targets, the reason, the offline policy and the whole rollout, step by step.")}>
+              {t("New campaign")}
+            </Link>
+          </>
         }
       />
 

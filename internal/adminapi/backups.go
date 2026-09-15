@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -361,6 +362,10 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
 	if err != nil {
 		s.fail(w, err)
@@ -482,6 +487,10 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 		return items[i].LastSuccessAt.Before(*items[j].LastSuccessAt)
 	})
 
+	if asCSV {
+		s.writeBackupsCSV(w, r, items, now)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": items, "counts": counts, "unverified": unverified,
 		"never_restored": neverRestored,
@@ -493,6 +502,41 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 			"verification_days": int(backupstore.VerificationThreshold.Hours() / 24),
 		},
 	})
+}
+
+// backupsCSVColumns is the header of the fleet export. The order is fixed:
+// a sheet built against one export reads the next one.
+var backupsCSVColumns = []string{
+	"hostname", "host_id", "definition", "tool", "repository", "status", "last_success_at", "age_hours",
+	"unverified", "last_restore_at",
+}
+
+// writeBackupsCSV streams every backup definition of the visible fleet,
+// the worst first as the screen sorts them. The rows are the ones the
+// screen shows, so the two agree; an empty last_success_at is a copy that
+// never ran, and an empty last_restore_at one nobody has ever read back.
+func (s *Server) writeBackupsCSV(w http.ResponseWriter, r *http.Request, items []fleetBackup, now time.Time) {
+	s.writeCSV(w, r, exportFileName("backups", now), backupsCSVColumns, func(yield func([]string) bool) error {
+		for _, item := range items {
+			if !yield(fleetBackupCSVRow(item)) {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// fleetBackupCSVRow renders one definition in the order of
+// backupsCSVColumns.
+func fleetBackupCSVRow(item fleetBackup) []string {
+	age := ""
+	if item.AgeHours != nil {
+		age = csvFloat(*item.AgeHours)
+	}
+	return []string{
+		item.Hostname, item.HostID, item.Definition, item.Tool, item.Repository, item.Status,
+		formatTime(item.LastSuccessAt), age, strconv.FormatBool(item.Unverified), formatTime(item.LastRestoreAt),
+	}
 }
 
 // repositoryLoad describes one backend seen from the whole fleet.

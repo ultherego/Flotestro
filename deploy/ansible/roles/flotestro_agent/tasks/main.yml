@@ -145,6 +145,11 @@
           purpose: new
           site: "{{ flotestro_agent_site }}"
           environment: "{{ flotestro_agent_environment }}"
+          # The owner and the tags are checked where the order is placed,
+          # the way the tag editor checks them: a tag of the wrong shape
+          # fails the play here, not the enrollment on the host.
+          owner: "{{ flotestro_agent_owner }}"
+          tags: "{{ flotestro_agent_tags }}"
           expected_machine_id: "{{ flotestro_machine_id.content | b64decode | trim }}"
           max_uses: 1
           ttl_minutes: "{{ flotestro_enrollment_ttl_minutes }}"

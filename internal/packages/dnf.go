@@ -652,15 +652,20 @@ func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, err
 	return apply, nil
 }
 
-// Holds returns the packages held on the host.
-func (d *DNF) Holds(ctx context.Context) []string {
+// Holds returns the packages held on the host. A host without the
+// versionlock plugin cannot hold, and says so instead of reporting no holds.
+func (d *DNF) Holds(ctx context.Context) ([]string, string) {
 	// --quiet removes the lines about metadata from the output; without it the
 	// first line was sometimes shown as the name of a held package.
 	result := run(ctx, time.Minute, dnfPath, "--quiet", dnfVersionlock, "list")
 	if !result.Ran || result.ExitCode != 0 {
-		return nil
+		return nil, "dnf versionlock list: " + result.Reason()
 	}
-	return ParseVersionlock(result.Stdout)
+	held := ParseVersionlock(result.Stdout)
+	if held == nil {
+		held = []string{}
+	}
+	return held, ""
 }
 
 // HasVersionlock says whether the host can hold packages.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobWindow, utcStamp } from "./Logs";
+import { findMatches, jobWindow, logFileName, splitMatches, utcStamp } from "./Logs";
 import type { Attempt, Job } from "../../lib/types";
 
 /* The window of a job is what the journal read is bounded to; it is
@@ -50,5 +50,55 @@ describe("jobWindow", () => {
     expect(window?.unit).toBeUndefined();
     const read = jobWindow(job({ action_type: "journal.read", payload: { journal: { unit: "sshd.service", lines: 10 } } }), [attempt()]);
     expect(read?.unit).toBe("sshd.service");
+  });
+});
+
+/* The search runs over the lines on screen; the helpers decide which
+   lines match and how a line is cut for the marks, so they are tested
+   without a screen. */
+
+describe("findMatches", () => {
+  const lines = ["Sep 15 10:00:01 web01 sshd[12]: Accepted publickey", "Sep 15 10:00:02 web01 cron[13]: (root) CMD", "sshd: error"];
+
+  it("lists the matching lines by index, case-insensitively", () => {
+    expect(findMatches(lines, "SSHD")).toEqual([0, 2]);
+    expect(findMatches(lines, "cron")).toEqual([1]);
+    expect(findMatches(lines, "nothing")).toEqual([]);
+  });
+
+  it("matches nothing for a blank search and for no lines", () => {
+    expect(findMatches(lines, "")).toEqual([]);
+    expect(findMatches(lines, "   ")).toEqual([]);
+    expect(findMatches(undefined, "sshd")).toEqual([]);
+  });
+});
+
+describe("splitMatches", () => {
+  it("cuts a line into the pieces to mark and the pieces to leave, keeping the line's case", () => {
+    expect(splitMatches("Error: disk error", "error")).toEqual([
+      { text: "Error", hit: true }, { text: ": disk ", hit: false }, { text: "error", hit: true },
+    ]);
+    expect(splitMatches("abcabc", "bc")).toEqual([
+      { text: "a", hit: false }, { text: "bc", hit: true }, { text: "a", hit: false }, { text: "bc", hit: true },
+    ]);
+  });
+
+  it("leaves a line without a match, and a blank search, as one piece", () => {
+    expect(splitMatches("nothing here", "sshd")).toEqual([{ text: "nothing here", hit: false }]);
+    expect(splitMatches("nothing here", "")).toEqual([{ text: "nothing here", hit: false }]);
+    expect(splitMatches("", "x")).toEqual([{ text: "", hit: false }]);
+  });
+});
+
+describe("logFileName", () => {
+  const at = Date.UTC(2026, 8, 15, 10, 1, 0);
+
+  it("names the file by the host, the unit and the moment", () => {
+    expect(logFileName("web01", "cron.service", at)).toBe("web01-cron.service-20260915100100.log");
+  });
+
+  it("turns a path into one file name and names an unbounded journal read", () => {
+    expect(logFileName("web01", "/var/log/syslog", at)).toBe("web01-var-log-syslog-20260915100100.log");
+    expect(logFileName("web01", "", at)).toBe("web01-all-20260915100100.log");
   });
 });

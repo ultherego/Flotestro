@@ -5,7 +5,9 @@ import { api } from "../lib/api";
 import type { RemediationOrder, RemediationPreview, Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
+import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
 type HostWithFinding = { host_id: string; hostname: string; observed: string; action?: string };
@@ -149,6 +151,7 @@ export function FleetSecurity() {
       <PageHeader
         title={t("Security")}
         description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — and the fix is one campaign: every host gets its own plan of module jobs, one approval covers the whole set.")}
+        actions={<ExportButton path="/api/v1/security" />}
       />
 
       <div className="widgets">
@@ -289,6 +292,8 @@ export function FleetSecurity() {
 function FleetRemediation({ checks, selected }: { checks: Check[]; selected: Set<string> }) {
   const t = useT();
   const navigate = useNavigate();
+  // The sites and environments the fleet has, offered under the filters.
+  const facets = useFleetFacets();
   const [draft, setDraft] = useState<RemediationOrderDraft>({
     scope: "findings", site: "", environment: "", reason: "",
     canary: 1, wave: 5, concurrent: 2, manualGate: false,
@@ -347,10 +352,12 @@ function FleetRemediation({ checks, selected }: { checks: Check[]; selected: Set
         {draft.scope === "filters" && (
           <>
             <Field label={t("Site")}>
-              <input placeholder={t("site")} value={draft.site} onChange={(e) => change({ site: e.target.value })} />
+              <input placeholder={t("site")} value={draft.site} onChange={(e) => change({ site: e.target.value })} list="remediation-sites" />
+              <FacetList id="remediation-sites" facets={facets.data?.by_site} />
             </Field>
             <Field label={t("Environment")}>
-              <input placeholder={t("environment")} value={draft.environment} onChange={(e) => change({ environment: e.target.value })} />
+              <input placeholder={t("environment")} value={draft.environment} onChange={(e) => change({ environment: e.target.value })} list="remediation-environments" />
+              <FacetList id="remediation-environments" facets={facets.data?.by_environment} />
             </Field>
           </>
         )}

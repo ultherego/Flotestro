@@ -774,17 +774,18 @@ func (a *APT) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, err
 	return apply, nil
 }
 
-// Holds returns the packages held on the host.
-func (a *APT) Holds(ctx context.Context) []string {
+// Holds returns the packages held on the host. The read needs no root:
+// apt-mark reads the selections out of the dpkg database.
+func (a *APT) Holds(ctx context.Context) ([]string, string) {
 	result := run(ctx, 30*time.Second, aptMarkPath, "showhold")
 	if !result.Ran || result.ExitCode != 0 {
-		return nil
+		return nil, "apt-mark showhold: " + result.Reason()
 	}
-	var held []string
+	held := []string{}
 	for _, line := range strings.Split(result.Stdout, "\n") {
 		if name := strings.TrimSpace(line); name != "" {
 			held = append(held, name)
 		}
 	}
-	return held
+	return held, ""
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
@@ -371,6 +372,14 @@ func (s *Server) handlePolicyResults(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_filter", "verdict is compliant, drift, error or not_applicable")
 		return
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
+	if asCSV {
+		s.writePolicyResultsCSV(w, r, found, filter)
+		return
+	}
 	requested, _ := strconv.Atoi(query.Get("limit"))
 	limit := paging.Limit(requested, 100, 500)
 	results, next, total, err := s.policyStore().Results(r.Context(), found.ID, filter, query.Get("cursor"), limit)
@@ -385,6 +394,56 @@ func (s *Server) handlePolicyResults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": results, "count": len(results), "total": total, "next_cursor": next,
 	})
+}
+
+// policyResultsCSVColumns is the header of the verdict export. The order
+// is fixed: a sheet built against one export reads the next one.
+var policyResultsCSVColumns = []string{
+	"policy_id", "policy_name", "hostname", "host_id", "rule_index", "rule_kind", "rule_subject",
+	"version", "verdict", "reason", "observed_revision", "evaluated_at",
+}
+
+// writePolicyResultsCSV streams the verdicts of a policy as a file: the
+// same host and verdict filter as the JSON list, every page of it, in
+// the order of the list. The pages come one at a time from the store;
+// the file ends with a truncation row past exportRowLimit verdicts. The
+// file is named after the policy so two policies' exports do not collide
+// in a download folder.
+func (s *Server) writePolicyResultsCSV(w http.ResponseWriter, r *http.Request, found *policy.Policy, filter policy.ResultFilter) {
+	s.writeCSV(w, r, exportFileName("policy-"+found.ID+"-results", time.Now()), policyResultsCSVColumns,
+		func(yield func([]string) bool) error {
+			cursor := ""
+			for {
+				results, next, _, err := s.policyStore().Results(r.Context(), found.ID, filter, cursor, maxListPage)
+				if err != nil {
+					return err
+				}
+				for _, result := range results {
+					if !yield(policyResultCSVRow(result)) {
+						return nil
+					}
+				}
+				if next == "" {
+					return nil
+				}
+				cursor = next
+			}
+		})
+}
+
+// policyResultCSVRow renders one verdict in the order of
+// policyResultsCSVColumns. The rule is named by its kind and subject - the
+// package, the unit, the path, the key or the account - as the screen
+// names it; the whole declaration is read on the policy page.
+func policyResultCSVRow(result policy.Result) []string {
+	kind, subject := "", ""
+	if result.Rule != nil {
+		kind, subject = result.Rule.Kind, result.Rule.Subject()
+	}
+	return []string{
+		result.PolicyID, result.PolicyName, result.Hostname, result.HostID, strconv.Itoa(result.RuleIndex), kind, subject,
+		strconv.Itoa(result.Version), result.Verdict, result.Reason, result.ObservedRevision, csvInstant(result.EvaluatedAt),
+	}
 }
 
 // handleHostPolicies lists the verdicts of every policy on one host.

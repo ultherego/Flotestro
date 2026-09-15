@@ -5,6 +5,11 @@
 // approver, and both have to read it without a parser. The structure is
 // compiled to SQL over the hosts table, so a selector never pulls the fleet
 // into memory to filter it - the same rule the host list follows.
+//
+// The one-line text form ("site = warsaw and not tag = role=db") exists
+// for the places where an operator types a scope by hand - an alert rule,
+// a search box. Parse turns it into the same structure; nothing is
+// evaluated from text.
 package selector
 
 import (
@@ -13,6 +18,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 // Expression is one node of a selector: exactly one field is set. A
@@ -46,6 +53,29 @@ type Expression struct {
 	// Channel is the release channel the host follows: stable or beta. An
 	// agent upgrade in waves names the beta hosts first.
 	Channel string `json:"channel,omitempty"`
+	// OSVersion is a prefix of the version the host reports: '12' names
+	// every Debian 12.x and '12.4' one point release. A prefix rather than
+	// equality, because a family writes its version in more digits than an
+	// operator means when naming a release.
+	OSVersion string `json:"os_version,omitempty"`
+	// SecurityUpdates, RebootRequired and FailedUnits are 'true' or
+	// 'false': whether the host has pending security updates, needs a
+	// reboot, has a failed unit. A host that has not reported the fact is
+	// in neither list - unknown is not "no".
+	SecurityUpdates string `json:"security_updates,omitempty"`
+	RebootRequired  string `json:"reboot_required,omitempty"`
+	FailedUnits     string `json:"failed_units,omitempty"`
+	// AgentVersion is a comparison with a version: '< 0.49.0', '>= 0.49.0',
+	// '= 0.49.0'; a bare version means equality. Versions compare part by
+	// part, so 0.10.0 is newer than 0.9.0. A host whose version does not
+	// parse is on neither side of any comparison.
+	AgentVersion string `json:"agent_version,omitempty"`
+	// Relay names the relay, by identifier or by name, whose open session
+	// the host connects through. The session says which route the host
+	// took; a host that connects directly today is behind no relay.
+	Relay string `json:"relay,omitempty"`
+	// FailureDomain is the domain an operator placed the host in.
+	FailureDomain string `json:"failure_domain,omitempty"`
 
 	// MemberOf is the expanded form of a reference to a static group: the
 	// identifier whose member list decides. Expand produces it; a selector
@@ -82,7 +112,53 @@ var (
 	connectionStates = []string{"online", "offline", "stale", "unknown"}
 	lifecycleStates  = []string{"active", "quarantined", "recovery", "retiring", "retired"}
 	releaseChannels  = []string{"stable", "beta"}
+	booleans         = []string{"true", "false"}
 )
+
+// versionPattern is the shape of a version an agent reports, as far as
+// the comparison reads it: up to four numeric parts, an optional 'v' in
+// front. A suffix such as '-rc1' is not part of the order and is refused
+// in a selector rather than silently dropped.
+var versionPattern = regexp.MustCompile(`^v?(\d+(?:\.\d+){0,3})$`)
+
+// versionOperators are the comparisons a version leaf may make, longest
+// first so that '<=' is not read as '<' followed by '='.
+var versionOperators = []string{"<=", ">=", "<", ">", "="}
+
+// VersionComparison is an agent_version leaf taken apart: the operator
+// and the version without its 'v'.
+type VersionComparison struct {
+	Operator string
+	Version  string
+}
+
+// String renders the comparison in the form a leaf carries: the operator,
+// one space, the version.
+func (v VersionComparison) String() string {
+	return v.Operator + " " + v.Version
+}
+
+// ParseVersionComparison reads an agent_version leaf: an operator among
+// <, <=, >, >=, = followed by a version, or a bare version, which means
+// equality.
+func ParseVersionComparison(value string) (VersionComparison, error) {
+	text := strings.TrimSpace(value)
+	comparison := VersionComparison{Operator: "="}
+	for _, operator := range versionOperators {
+		if strings.HasPrefix(text, operator) {
+			comparison.Operator = operator
+			text = strings.TrimSpace(text[len(operator):])
+			break
+		}
+	}
+	match := versionPattern.FindStringSubmatch(text)
+	if match == nil {
+		return VersionComparison{}, fmt.Errorf("%w: %q is not a version comparison (an operator among <, <=, >, >=, = and a version such as 0.49.0)",
+			ErrInvalid, value)
+	}
+	comparison.Version = match[1]
+	return comparison, nil
+}
 
 var (
 	// ErrInvalid means a selector that does not hold together; the message
@@ -188,6 +264,15 @@ func (e *Expression) validate(depth int, nodes *int, at string) error {
 				return fmt.Errorf("%w: %s.channel %q is not one of %s", ErrInvalid, at, fact.value,
 					strings.Join(releaseChannels, ", "))
 			}
+		case "security_updates", "reboot_required", "failed_units":
+			if !contains(booleans, fact.value) {
+				return fmt.Errorf("%w: %s.%s %q is not true or false", ErrInvalid, at, fact.name, fact.value)
+			}
+		case "agent_version":
+			if _, err := ParseVersionComparison(fact.value); err != nil {
+				return fmt.Errorf("%w: %s.agent_version %q is not a version comparison (an operator among <, <=, >, >=, = and a version such as 0.49.0)",
+					ErrInvalid, at, fact.value)
+			}
 		}
 	}
 	return nil
@@ -213,6 +298,13 @@ func (e *Expression) leaves() []leaf {
 		{"lifecycle_state", e.LifecycleState},
 		{"owner", e.Owner},
 		{"channel", e.Channel},
+		{"os_version", e.OSVersion},
+		{"security_updates", e.SecurityUpdates},
+		{"reboot_required", e.RebootRequired},
+		{"failed_units", e.FailedUnits},
+		{"agent_version", e.AgentVersion},
+		{"relay", e.Relay},
+		{"failure_domain", e.FailureDomain},
 		{"group_id", e.MemberOf},
 	}
 }
@@ -440,6 +532,43 @@ func (c *compiler) node(e *Expression) (string, error) {
 		return "h.owner = " + c.param(e.Owner), nil
 	case e.Channel != "":
 		return "h.release_channel = " + c.param(e.Channel), nil
+	case e.OSVersion != "":
+		return "starts_with(h.os_version, " + c.param(e.OSVersion) + ")", nil
+	case e.SecurityUpdates != "":
+		// A count of null is a host that has not reported; the comparison
+		// leaves it out of both answers, the way the host list does.
+		if e.SecurityUpdates == "true" {
+			return "h.pending_security_updates > 0", nil
+		}
+		return "h.pending_security_updates = 0", nil
+	case e.RebootRequired != "":
+		return "h.reboot_required = " + e.RebootRequired, nil
+	case e.FailedUnits != "":
+		if e.FailedUnits == "true" {
+			return "h.failed_units > 0", nil
+		}
+		return "h.failed_units = 0", nil
+	case e.AgentVersion != "":
+		comparison, err := ParseVersionComparison(e.AgentVersion)
+		if err != nil {
+			return "", err
+		}
+		// The version is ordered numerically part by part, the same way
+		// the host list orders it; a host whose version does not parse is
+		// left out of every comparison rather than compared as text.
+		return "(h.agent_version ~ '^v?\\d+(\\.\\d+)*' and " + VersionParts("h") + " " + comparison.Operator +
+			" string_to_array(" + c.param(comparison.Version) + ", '.')::int[])", nil
+	case e.Relay != "":
+		// The session, not the host, says which route it took. A reference
+		// that parses as an identifier is one; anything else is the name.
+		if _, err := uuid.Parse(e.Relay); err == nil {
+			return "exists (select 1 from agent_sessions s" +
+				" where s.host_id = h.id and s.ended_at is null and s.relay_id = " + c.param(e.Relay) + "::uuid)", nil
+		}
+		return "exists (select 1 from agent_sessions s join relays r on r.id = s.relay_id" +
+			" where s.host_id = h.id and s.ended_at is null and r.name = " + c.param(e.Relay) + ")", nil
+	case e.FailureDomain != "":
+		return "h.failure_domain = " + c.param(e.FailureDomain), nil
 	case e.MemberOf != "":
 		return "exists (select 1 from host_group_members m" +
 			" where m.group_id = " + c.param(e.MemberOf) + "::uuid and m.host_id = h.id)", nil
@@ -448,6 +577,14 @@ func (c *compiler) node(e *Expression) (string, error) {
 	default:
 		return "", fmt.Errorf("%w: a node names no condition", ErrInvalid)
 	}
+}
+
+// VersionParts renders the agent version of the aliased host row as an
+// array of integers, so two versions compare part by part rather than as
+// text - '0.10.0' after '0.9.0', not before it. It reads only a version
+// the caller has already matched against the same pattern.
+func VersionParts(alias string) string {
+	return "string_to_array(substring(" + alias + ".agent_version from '^v?(\\d+(?:\\.\\d+)*)'), '.')::int[]"
 }
 
 func (c *compiler) join(children []Expression, operator string) (string, error) {
@@ -477,9 +614,17 @@ func (e *Expression) Describe() string {
 		return "not " + e.Not.Describe()
 	}
 	for _, fact := range e.leaves() {
-		if fact.value != "" {
-			return fact.name + "=" + fact.value
+		if fact.value == "" {
+			continue
 		}
+		if fact.name == "agent_version" {
+			// The value already carries its operator: "agent_version < 0.49.0",
+			// not "agent_version=< 0.49.0".
+			if comparison, err := ParseVersionComparison(fact.value); err == nil {
+				return fact.name + " " + comparison.String()
+			}
+		}
+		return fact.name + "=" + fact.value
 	}
 	return "nothing"
 }

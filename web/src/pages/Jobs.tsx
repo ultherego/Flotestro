@@ -8,6 +8,7 @@ import { PlanSummary } from "../components/plan";
 import type { Attempt, FleetActivity, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, PageHeader, Toolbar } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { OPERATIONS_INTERVAL, REFRESH_INTERVAL, useProgress } from "../lib/stream";
 import { bulkPrefill } from "./Bulk";
@@ -342,7 +343,7 @@ export function Jobs() {
         </Card>
 
         <Card className="span-12" flush>
-          <Toolbar end={<span>{t("{n} listed", { n: jobs.length })}</span>}>
+          <Toolbar end={<><span>{t("{n} listed", { n: jobs.length })}</span><ExportButton path="/api/v1/jobs" params={params} /></>}>
             <select value={filters.state} onChange={(e) => setFilter("state", e.target.value)}>
               <option value="">{t("state: any")}</option>
               {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}

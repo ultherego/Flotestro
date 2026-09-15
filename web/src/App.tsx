@@ -57,6 +57,8 @@ import { HostJobs } from "./pages/host/Jobs";
 import { HostAudit } from "./pages/host/Audit";
 import { Jobs } from "./pages/Jobs";
 import { JobPage } from "./pages/Job";
+import { Vulnerability } from "./pages/Vulnerability";
+import { Schedules as CampaignSchedules } from "./pages/Schedules";
 import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
@@ -271,6 +273,7 @@ export function App() {
               <Route path="/backups" element={<FleetBackups />} />
               <Route path="/monitoring" element={<FleetMonitoring />} />
               <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
+              <Route path="/vulnerabilities/:cve" element={<Vulnerability />} />
               <Route path="/secrets" element={<Secrets />} />
               <Route path="/secrets/:name" element={<SecretPage />} />
               {/* The host module is a segment of the address, so a refresh, the
@@ -313,6 +316,7 @@ export function App() {
               <Route path="/reads/:id" element={<Reads />} />
               {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
               {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
+              {seesCampaigns && <Route path="/campaigns/schedules" element={<CampaignSchedules />} />}
               {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
               {seesBudgets && <Route path="/budgets" element={<Budgets />} />}
               {capabilities.directory && <Route path="/directory" element={<Directory />} />}

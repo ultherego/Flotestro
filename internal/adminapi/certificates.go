@@ -378,6 +378,10 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
+		return
+	}
 	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
 	if err != nil {
 		s.fail(w, err)
@@ -445,6 +449,12 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 		}
 		return items[i].NotAfter.Before(*items[j].NotAfter)
 	})
+	// The file is the whole list, not the screen's cut of it: the cut
+	// keeps the screen readable, and a file is where the rest goes.
+	if asCSV {
+		s.writeCertificatesCSV(w, r, items, now)
+		return
+	}
 	// The expiry timeline is computed before truncating the list: the
 	// truncation concerns what is shown, not what the fleet really has.
 	all := items
@@ -463,6 +473,38 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 			"warning_days":  int(certificatestore.WarningThreshold.Hours() / 24),
 		},
 	})
+}
+
+// certificatesCSVColumns is the header of the fleet export. The order is
+// fixed: a sheet built against one export reads the next one.
+var certificatesCSVColumns = []string{
+	"hostname", "host_id", "path", "subject", "issuer", "not_after", "days_to_expiry", "status",
+	"renewal", "owner_service", "unavailable_reason",
+}
+
+// writeCertificatesCSV streams every certificate of the visible fleet,
+// nearest expiry first as the screen sorts them, without the screen's cut
+// at FleetCertificateLimit: the file is for the operator who wants the
+// whole list, and the truncation row of the export is the only bound.
+func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, items []fleetCertificate, now time.Time) {
+	s.writeCSV(w, r, exportFileName("certificates", now), certificatesCSVColumns, func(yield func([]string) bool) error {
+		for _, item := range items {
+			if !yield(fleetCertificateCSVRow(item)) {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// fleetCertificateCSVRow renders one certificate in the order of
+// certificatesCSVColumns. A certificate the host could not read has no
+// date and no days, and its reason stands in the last column.
+func fleetCertificateCSVRow(item fleetCertificate) []string {
+	return []string{
+		item.Hostname, item.HostID, item.Path, item.Subject, item.Issuer, formatTime(item.NotAfter),
+		csvInt(item.DaysToExpiry), item.Status, item.Renewal, item.Service, item.Reason,
+	}
 }
 
 // moduleFragment picks the fragment of one module from the host's fragment

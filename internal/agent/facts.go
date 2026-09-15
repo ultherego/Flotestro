@@ -76,10 +76,17 @@ type Packages struct {
 	// inventory does not carry: the panel compares the digest with its own copy
 	// and knows when its list stopped describing the host. Without it a missing
 	// row in the panel database would look like a host without vulnerabilities.
-	InstalledDigest   string  `json:"installed_digest,omitempty"`
-	InstalledCount    *uint32 `json:"installed_count,omitempty"`
-	InstalledReason   string  `json:"installed_unavailable_reason,omitempty"`
-	UnavailableReason string  `json:"unavailable_reason,omitempty"`
+	InstalledDigest string  `json:"installed_digest,omitempty"`
+	InstalledCount  *uint32 `json:"installed_count,omitempty"`
+	InstalledReason string  `json:"installed_unavailable_reason,omitempty"`
+	// Holds names the packages the host will not upgrade: the ones the panel
+	// held and the ones held by hand alike, because a held package takes no
+	// security fix whoever held it. HoldsKnown says whether the list was
+	// read; an unread list is not a host without holds.
+	Holds             []string `json:"holds,omitempty"`
+	HoldsKnown        bool     `json:"holds_known"`
+	HoldsReason       string   `json:"holds_unavailable_reason,omitempty"`
+	UnavailableReason string   `json:"unavailable_reason,omitempty"`
 }
 
 // Health holds the signals sent in the heartbeat. Empty indicators mean a state

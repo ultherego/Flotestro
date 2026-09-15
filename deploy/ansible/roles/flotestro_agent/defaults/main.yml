@@ -25,6 +25,13 @@ flotestro_agent_config_path: /etc/flotestro/agent.yaml
 flotestro_agent_state_dir: /var/lib/flotestro-agent
 flotestro_agent_site: default
 flotestro_agent_environment: unassigned
+# What the inventory already knows about the host: who answers for it and
+# the tags it carries ('key' or 'key=value', lower-case keys). Both go onto
+# the order and land on the host the moment it enrolls, so a host installed
+# from Ansible needs no second visit in the panel. Empty means nobody and
+# no tags.
+flotestro_agent_owner: ""
+flotestro_agent_tags: []
 flotestro_agent_inventory_interval: 15m
 flotestro_agent_max_concurrent_tasks: 2
 flotestro_agent_mode: full

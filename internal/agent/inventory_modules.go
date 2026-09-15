@@ -84,6 +84,11 @@ var moduleCollectors = map[string]InventoryModule{
 					number := uint32(count)
 					facts.Packages.InstalledCount = &number
 				}
+				// The holds travel with the counters: the tab that shows how
+				// many packages wait for an upgrade is to show how many will
+				// not take one, and the read is a cheap one without root.
+				facts.Packages.Holds, facts.Packages.HoldsReason = packageHolds(ctx)
+				facts.Packages.HoldsKnown = facts.Packages.HoldsReason == ""
 				// The package sources are read together with the summary: it is
 				// one tab and one answer to the question of where the host takes
 				// its software from. The read goes without root, because the

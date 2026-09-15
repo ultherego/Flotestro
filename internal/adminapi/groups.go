@@ -65,7 +65,35 @@ func (s *Server) handleListGroups(w http.ResponseWriter, r *http.Request) {
 type groupView struct {
 	selector.SavedGroup
 	Unresolvable string `json:"unresolvable,omitempty"`
+	// UsedBy names the campaigns and the policies whose selector refers to
+	// the group. It is read for one group, not for the list: the answer is
+	// two searches over recorded selectors, and the list asks for none.
+	UsedBy *groupUsage `json:"used_by,omitempty"`
 }
+
+// groupUsage is where a group is named: the campaigns and the policies
+// whose recorded selector refers to it. An operator about to delete or
+// reshape a group reads it to know what the change reaches.
+type groupUsage struct {
+	Campaigns []groupReference `json:"campaigns"`
+	Policies  []groupReference `json:"policies"`
+}
+
+// groupReference is one record that names a group, with the state that
+// says whether the reference is live: a completed campaign keeps its
+// selector for the trail, an enabled policy resolves it at every check.
+type groupReference struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+// maxGroupReferences bounds each list of the usage: the page says what is
+// named, and a group named by hundreds of old campaigns is told the newest.
+const maxGroupReferences = 50
+
+// groupPreviewSampleSize bounds the sample of a selector preview.
+const groupPreviewSampleSize = 20
 
 // groupView counts a dynamic group for the caller. A static group already
 // carries its count from the store.
@@ -102,7 +130,109 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request) {
 	// The tag names the version of the record; a member change moves
 	// updated_at too, so it covers the list as well as the definition.
 	setETag(w, etagOfTime(group.UpdatedAt))
-	writeJSON(w, http.StatusOK, s.groupView(r.Context(), *group, principal.ScopesFor(authz.PermHostRead)))
+	view := s.groupView(r.Context(), *group, principal.ScopesFor(authz.PermHostRead))
+	usage, err := s.groupUsedBy(r.Context(), group)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	view.UsedBy = usage
+	writeJSON(w, http.StatusOK, view)
+}
+
+// groupUsedBy searches the recorded selectors of the campaigns and the
+// policies for a reference to the group, by name or by identifier - a
+// selector may name it either way. The search walks the whole selector
+// document, because a reference sits wherever the operator put it: under
+// `all`, under `not`, three levels down.
+func (s *Server) groupUsedBy(ctx context.Context, group *selector.SavedGroup) (*groupUsage, error) {
+	vars, err := json.Marshal(map[string]string{"name": group.Name, "id": group.ID})
+	if err != nil {
+		return nil, err
+	}
+	const path = `$.** ? (@.group == $name || @.group == $id)`
+	usage := &groupUsage{Campaigns: []groupReference{}, Policies: []groupReference{}}
+	if usage.Campaigns, err = s.scanGroupReferences(ctx, `
+		select id::text, name, state from campaigns
+		 where jsonb_path_exists(selector, $1::text::jsonpath, $2::jsonb)
+		 order by created_at desc limit $3`, path, vars); err != nil {
+		return nil, fmt.Errorf("searching the campaigns for the group: %w", err)
+	}
+	// A policy has no state column; a draft is a document nobody published
+	// yet, and a published one is switched on or off.
+	if usage.Policies, err = s.scanGroupReferences(ctx, `
+		select id::text, name,
+		       case when version = 0 then 'draft' when enabled then 'enabled' else 'disabled' end
+		  from policies
+		 where jsonb_path_exists(selector, $1::text::jsonpath, $2::jsonb)
+		 order by name limit $3`, path, vars); err != nil {
+		return nil, fmt.Errorf("searching the policies for the group: %w", err)
+	}
+	return usage, nil
+}
+
+func (s *Server) scanGroupReferences(ctx context.Context, query, path string, vars []byte) ([]groupReference, error) {
+	rows, err := s.pool.Query(ctx, query, path, vars, maxGroupReferences)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	references := []groupReference{}
+	for rows.Next() {
+		var reference groupReference
+		if err := rows.Scan(&reference.ID, &reference.Name, &reference.State); err != nil {
+			return nil, err
+		}
+		references = append(references, reference)
+	}
+	return references, rows.Err()
+}
+
+// handleGroupPreview answers what a selector resolves to before a group is
+// saved with it: the count against the caller's scope and a sample of
+// names, evaluated the way the group page and a campaign evaluate it. The
+// selector travels in the query as JSON, like the campaign preview: a
+// read with a body is a read nobody can link to.
+func (s *Server) handleGroupPreview(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "host_group")
+	if !ok {
+		return
+	}
+	text := strings.TrimSpace(r.URL.Query().Get("expression"))
+	if text == "" {
+		problem(w, http.StatusBadRequest, "invalid_selector", "the expression is missing")
+		return
+	}
+	expression := &selector.Expression{}
+	if err := json.Unmarshal([]byte(text), expression); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_selector", "the expression is not valid JSON")
+		return
+	}
+	if err := expression.Validate(); err != nil {
+		s.selectorProblem(w, err)
+		return
+	}
+	expanded, err := selector.Expand(r.Context(), expression, s.groups)
+	if err != nil {
+		s.selectorProblem(w, err)
+		return
+	}
+	filter := hosts.ListFilter{Expression: expanded, Scopes: principal.ScopesFor(authz.PermHostRead)}
+	count, err := s.hosts.Count(r.Context(), filter)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	sample, err := s.hosts.Page(r.Context(), filter, "", "", groupPreviewSampleSize)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":    count,
+		"sample":   hostNames(sample),
+		"selector": expression.Describe(),
+	})
 }
 
 // handleCreateGroup records a group. A static group may come with its

@@ -4,6 +4,7 @@ package integration
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,18 +176,21 @@ func TestJobListFiltersByActionAndPages(t *testing.T) {
 }
 
 // auditPage mirrors one page of the trail.
+// auditEventView is one event of a trail as the API serves it.
+type auditEventView struct {
+	ID         int64          `json:"id"`
+	OccurredAt time.Time      `json:"occurred_at"`
+	Action     string         `json:"action"`
+	Outcome    string         `json:"outcome"`
+	ActorID    string         `json:"actor_id"`
+	TargetID   string         `json:"target_id"`
+	RequestID  string         `json:"request_id"`
+	Detail     map[string]any `json:"detail"`
+}
+
 type auditPage struct {
-	Items []struct {
-		ID         int64          `json:"id"`
-		OccurredAt time.Time      `json:"occurred_at"`
-		Action     string         `json:"action"`
-		Outcome    string         `json:"outcome"`
-		ActorID    string         `json:"actor_id"`
-		TargetID   string         `json:"target_id"`
-		RequestID  string         `json:"request_id"`
-		Detail     map[string]any `json:"detail"`
-	} `json:"items"`
-	NextCursor string `json:"next_cursor"`
+	Items      []auditEventView `json:"items"`
+	NextCursor string           `json:"next_cursor"`
 }
 
 // TestAuditListFiltersByAction checks that the trail narrowed to one action
@@ -227,6 +231,73 @@ func TestAuditListFiltersByAction(t *testing.T) {
 
 	h.do("GET", "/api/v1/audit?cursor=not-a-cursor", nil, nil, 400)
 	h.do("GET", "/api/v1/audit?until=tomorrow", nil, nil, 400)
+	h.awaitTerminal(job.ID, 60*time.Second)
+}
+
+// TestHostAuditTrailFiltersAndPages checks that the trail of one host takes
+// the filters of the fleet trail and pages the same way: the host tab asks
+// "the job events on this host" by the family of the action, every event
+// on the page concerns that host, and a further page holds older events
+// than the last one of the first. The action family is a prefix, because
+// an operator narrows to job. and does not know the full list of actions.
+func TestHostAuditTrailFiltersAndPages(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	job := h.createOperation(host.ID, map[string]any{
+		"action":  "journal.read",
+		"payload": map[string]any{"journal": map[string]any{"unit": "cron.service", "lines": 3}},
+	})
+
+	var page auditPage
+	h.get("/api/v1/hosts/"+host.ID+"/audit?action_prefix=job.&outcome=success&limit=2", &page)
+	if len(page.Items) == 0 {
+		t.Fatal("no job event on the host although a task was just ordered")
+	}
+	// A job's events are aimed at the job and name the host in their
+	// detail; the host's trail carries them by that name.
+	onHost := func(event auditEventView) bool {
+		return event.TargetID == host.ID || event.Detail["host_id"] == host.ID
+	}
+	found := false
+	for _, event := range page.Items {
+		if !onHost(event) {
+			t.Errorf("event %d of host %s is on the trail of host %s", event.ID, event.TargetID, host.ID)
+		}
+		if !strings.HasPrefix(event.Action, "job.") || event.Outcome != "success" {
+			t.Errorf("the filter let through %s/%s", event.Action, event.Outcome)
+		}
+		if event.Action == "job.create" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the first page does not carry the job.create event of the task just ordered")
+	}
+
+	if page.NextCursor == "" {
+		t.Fatal("a page of two on a host with a history has no next page")
+	}
+	var next auditPage
+	h.get("/api/v1/hosts/"+host.ID+"/audit?action_prefix=job.&outcome=success&limit=2&cursor="+url.QueryEscape(page.NextCursor), &next)
+	last := page.Items[len(page.Items)-1]
+	for _, event := range next.Items {
+		if event.OccurredAt.After(last.OccurredAt) ||
+			(event.OccurredAt.Equal(last.OccurredAt) && event.ID >= last.ID) {
+			t.Errorf("event %d of the second page is not older than the first page", event.ID)
+		}
+	}
+
+	// A query naming another target does not widen the trail: the host of
+	// the address is the target, whatever the query says.
+	var other auditPage
+	h.get("/api/v1/hosts/"+host.ID+"/audit?target_id=another-host&limit=5", &other)
+	for _, event := range other.Items {
+		if !onHost(event) {
+			t.Errorf("a target_id in the query let through event %d of %s", event.ID, event.TargetID)
+		}
+	}
+
+	h.do("GET", "/api/v1/hosts/"+host.ID+"/audit?cursor=not-a-cursor", nil, nil, 400)
 	h.awaitTerminal(job.ID, 60*time.Second)
 }
 

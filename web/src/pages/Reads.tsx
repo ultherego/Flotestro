@@ -167,11 +167,16 @@ function NewRead({ onDone }: { onDone: () => void }) {
   const [payloadText, setPayloadText] = useState(
     prefill.get("payload") ?? JSON.stringify(DEFAULT_PAYLOADS[action] ?? {}, null, 2),
   );
-  const [mode, setMode] = useState<TargetMode>("filters");
+  // A group page hands over its name: the read then opens on the group's
+  // selector rather than on the filters.
+  const prefilledGroup = prefill.get("group") ?? "";
+  const [mode, setMode] = useState<TargetMode>(prefilledGroup ? "expression" : "filters");
   const [site, setSite] = useState(prefill.get("site") ?? "");
   const [environment, setEnvironment] = useState(prefill.get("environment") ?? "");
   const [osFamily, setOsFamily] = useState("");
-  const [rules, setRules] = useState<Rule[]>([{ field: "tag", value: "", negated: false }]);
+  const [rules, setRules] = useState<Rule[]>(prefilledGroup
+    ? [{ field: "group", value: prefilledGroup, negated: false }]
+    : [{ field: "tag", value: "", negated: false }]);
   const [combine, setCombine] = useState<"all" | "any">("all");
   const [hostIDs, setHostIDs] = useState<Set<string>>(new Set());
   const [reason, setReason] = useState("");

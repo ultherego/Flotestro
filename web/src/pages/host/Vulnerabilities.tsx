@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
@@ -7,6 +8,7 @@ import { Breakdown, Meter } from "../../components/widgets";
 import {
   Fact, Facts, Foot, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost,
 } from "./shared";
+import { bulkPrefill } from "../Bulk";
 import { useT } from "../../i18n";
 
 type Finding = {
@@ -124,6 +126,59 @@ function highestScore(
   return best;
 }
 
+/** How many findings the table shows before asking; the page grows by
+ *  this much per click. The counts above the table cover every finding
+ *  either way. */
+export const FINDINGS_PAGE = 300;
+
+/** The name the operator sees on the host: the binary package, or the
+ *  source one where the vendor names no binary. */
+function packageName(finding: Pick<Finding, "binary_package" | "source_package">): string {
+  return finding.binary_package || finding.source_package || "";
+}
+
+/** Whether a finding matches the search: a CVE number, an advisory or a
+ *  package name, by prefix and case-insensitively. */
+export function findingMatches(finding: Pick<Finding, "advisory_id" | "cve_ids" | "binary_package" | "source_package">, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const candidates = [finding.advisory_id, finding.binary_package ?? "", finding.source_package ?? "", ...(finding.cve_ids ?? [])];
+  return candidates.some((candidate) => candidate.toLowerCase().startsWith(needle));
+}
+
+/** The canonical rung of a vendor severity, so one filter fits every
+ *  vendor's words: Red Hat's "important" is high and its "moderate" is
+ *  medium. An unrated finding is one the vendor has not weighed. */
+export function severityRung(severity?: string): string {
+  switch ((severity ?? "").toLowerCase()) {
+    case "critical": return "critical";
+    case "high": case "important": return "high";
+    case "medium": case "moderate": return "medium";
+    case "low": return "low";
+    case "negligible": case "unimportant": return "negligible";
+    default: return "unrated";
+  }
+}
+
+/**
+ * The address of the Bulk workspace with a package upgrade of this host
+ * written in: one package from a finding's row, or every package with a
+ * vendor fix from "Patch all fixable". Null when there is nothing to
+ * install - a finding without a fix is a risk to weigh, not an order.
+ */
+export function patchAddress(host: { id: string; hostname?: string }, findings: Pick<Finding, "state" | "vendor_fix" | "binary_package" | "source_package">[]): string | null {
+  const packages: string[] = [];
+  for (const finding of findings) {
+    if (finding.state !== "affected" || finding.vendor_fix !== "known") continue;
+    const name = packageName(finding);
+    if (name && !packages.includes(name)) packages.push(name);
+  }
+  if (packages.length === 0) return null;
+  const label = host.hostname || host.id.slice(0, 8);
+  const name = packages.length === 1 ? `Patch ${packages[0]} on ${label}` : `Patch ${packages.length} packages on ${label}`;
+  return bulkPrefill("packages.upgrade", name, { package_upgrade: { packages: packages.sort() } }, undefined, [host.id]);
+}
+
 /** The reasons an assessment is incomplete - in the operator's language, not codes. */
 const REASONS: Record<string, string> = {
   feed_missing: "no security feed for this distribution",
@@ -164,6 +219,9 @@ export function Vulnerabilities() {
   const host = useHost();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<"fixable" | "no-fix" | "unknown">("fixable");
+  const [search, setSearch] = useState("");
+  const [severity, setSeverity] = useState("");
+  const [shown, setShown] = useState(FINDINGS_PAGE);
   const [message, setMessage] = useState("");
 
   const report = useQuery({
@@ -204,10 +262,19 @@ export function Vulnerabilities() {
   const coverage = data?.coverage_percent;
 
   const visible = findings.filter((finding) => {
+    if (!findingMatches(finding, search)) return false;
+    if (severity && severityRung(finding.vendor_severity) !== severity) return false;
     if (filter === "unknown") return finding.state === "unknown";
     if (filter === "no-fix") return finding.state === "affected" && !finding.fixed_version;
     return finding.state === "affected" && !!finding.fixed_version;
   });
+  const narrowed = (next: () => void) => {
+    // A new search starts the page over: the rows the operator loaded
+    // for the previous one are not the rows of this one.
+    setShown(FINDINGS_PAGE);
+    next();
+  };
+  const patchAll = patchAddress(host, findings);
 
   return (
     <ModulePage>
@@ -215,10 +282,20 @@ export function Vulnerabilities() {
         title={t("Vulnerabilities")}
         description={t("What the distribution's own security tracker says about the packages on this host. Fixes are backported, so upstream version ranges cannot answer this question — only the vendor can. Where the vendor says nothing, the panel says \"not known\", never \"clean\".")}
         actions={
-          <button disabled={reread.isPending || host.connection_state !== "online"}
-                  onClick={() => reread.mutate()}>
-            {t("Re-read packages")}
-          </button>
+          <>
+            {/* The order goes through the Bulk workspace: a package upgrade
+                is planned on the host and approved there, and the panel
+                never installs anything from a tab. */}
+            {patchAll ? (
+              <Link className="button" to={patchAll}>{t("Patch all fixable")}</Link>
+            ) : (
+              <button disabled title={t("No finding on this host has a vendor fix to install.")}>{t("Patch all fixable")}</button>
+            )}
+            <button disabled={reread.isPending || host.connection_state !== "online"}
+                    onClick={() => reread.mutate()}>
+              {t("Re-read packages")}
+            </button>
+          </>
         }
       />
       <p className="hm-freshness">
@@ -299,8 +376,19 @@ export function Vulnerabilities() {
         span={12}
         tools={
           <span className="hm-choices">
+            <input
+              placeholder={t("CVE, advisory or package")}
+              value={search}
+              onChange={(e) => narrowed(() => setSearch(e.target.value))}
+            />
+            <select value={severity} onChange={(e) => narrowed(() => setSeverity(e.target.value))}>
+              <option value="">{t("any severity")}</option>
+              {["critical", "high", "medium", "low", "negligible", "unrated"].map((rung) => (
+                <option key={rung} value={rung}>{rung}</option>
+              ))}
+            </select>
             {(["fixable", "no-fix", "unknown"] as const).map((key) => (
-              <button key={key} className={filter === key ? "" : "secondary"} onClick={() => setFilter(key)}>
+              <button key={key} className={filter === key ? "" : "secondary"} onClick={() => narrowed(() => setFilter(key))}>
                 {key === "fixable" ? t("Fixable") : key === "no-fix" ? t("No fix") : t("Not established")}
               </button>
             ))}
@@ -310,7 +398,9 @@ export function Vulnerabilities() {
       >
         {!visible.length ? (
           <Empty>
-            {filter === "fixable"
+            {search.trim() || severity
+              ? t("No finding matches these filters.")
+              : filter === "fixable"
               ? t("Nothing here can be closed by installing an update.")
               : filter === "no-fix"
                 ? t("The vendor has published a fix for everything it knows about here.")
@@ -322,11 +412,11 @@ export function Vulnerabilities() {
               <tr>
                 <th>{t("Severity")}</th><th className="hm-num">CVSS</th><th>{t("Advisory")}</th><th>{t("Package")}</th>
                 <th>{t("Installed")}</th><th>{t("Compared")}</th><th>{t("Fixed in")}</th>
-                <th>{t("Vendor fix")}</th><th>{t("In repositories")}</th>
+                <th>{t("Vendor fix")}</th><th>{t("In repositories")}</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {visible.slice(0, 300).map((finding, index) => (
+              {visible.slice(0, shown).map((finding, index) => (
                 <tr key={`${finding.advisory_id}-${finding.binary_package}-${finding.installed_version}-${index}`}>
                   <td><SeverityBadge severity={finding.vendor_severity} /></td>
                   {/* The upstream score stands next to the vendor severity,
@@ -339,8 +429,15 @@ export function Vulnerabilities() {
                   </td>
                   <td>
                     <span className="hm-mono hm-primary">{finding.advisory_id}</span>
+                    {/* Every CVE leads to its fleet page: the same number
+                        on twenty hosts is one matter, and that page names
+                        the twenty. */}
                     {finding.cve_ids?.length ? (
-                      <div className="source hm-mono">{finding.cve_ids.join(", ")}</div>
+                      <div className="source hm-mono">
+                        {finding.cve_ids.map((id, position) => (
+                          <span key={id}>{position > 0 && ", "}<Link to={`/vulnerabilities/${id}`}>{id}</Link></span>
+                        ))}
+                      </div>
                     ) : null}
                   </td>
                   <td>
@@ -385,14 +482,23 @@ export function Vulnerabilities() {
                       <span className="badge">{t("plan an update to find out")}</span>
                     )}
                   </td>
+                  <td>
+                    {(() => {
+                      const patch = patchAddress(host, [finding]);
+                      return patch ? <Link className="button" to={patch}>{t("Patch")}</Link> : null;
+                    })()}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </Table>
         )}
-        {visible.length > 300 && (
+        {visible.length > shown && (
           <Foot>
-            <span>{t("Showing the first 300 of {n}. The counts above cover all of them.", { n: visible.length })}</span>
+            <span>{t("Showing the first {shown} of {n}. The counts above cover all of them.", { shown, n: visible.length })}</span>
+            <button className="secondary" onClick={() => setShown((previous) => previous + FINDINGS_PAGE)}>
+              {t("Load more ({n} left)", { n: visible.length - shown })}
+            </button>
           </Foot>
         )}
       </Section>

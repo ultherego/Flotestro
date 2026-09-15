@@ -9,11 +9,13 @@ import type {
 import { POLICY_MODES, POLICY_RULE_KINDS, POLICY_VERDICTS } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
 import { buildExpression, describeExpression, SelectorBuilder, type Rule, type RuleField } from "./Groups";
 import { Standing, VerdictChip, modeLabel, ruleSummary, verdictLabel } from "./Policies";
+import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
 /* ---------------------------------------------------------------------- */
@@ -371,6 +373,8 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
   const t = useT();
   const [draft, setDraft] = useState<Draft>(() => draftOf(policy));
   const [error, setError] = useState("");
+  // The sites and environments the fleet has, offered under the filters.
+  const facets = useFleetFacets();
   // A refetch that brings a newer version replaces the form; typing in
   // between is not lost silently, because the tag would then refuse the
   // write and the message says to read again.
@@ -468,8 +472,14 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
         </Field>
         {draft.targetMode === "filters" && (
           <>
-            <Field label={t("Site")}><input value={draft.site} onChange={(e) => change({ site: e.target.value })} disabled={!canWrite} /></Field>
-            <Field label={t("Environment")}><input value={draft.environment} onChange={(e) => change({ environment: e.target.value })} disabled={!canWrite} /></Field>
+            <Field label={t("Site")}>
+              <input value={draft.site} onChange={(e) => change({ site: e.target.value })} disabled={!canWrite} list="policy-sites" />
+              <FacetList id="policy-sites" facets={facets.data?.by_site} />
+            </Field>
+            <Field label={t("Environment")}>
+              <input value={draft.environment} onChange={(e) => change({ environment: e.target.value })} disabled={!canWrite} list="policy-environments" />
+              <FacetList id="policy-environments" facets={facets.data?.by_environment} />
+            </Field>
             <Field label={t("OS family")}><input value={draft.osFamily} onChange={(e) => change({ osFamily: e.target.value })} placeholder="debian" disabled={!canWrite} /></Field>
           </>
         )}
@@ -570,6 +580,7 @@ function Results({ policyID }: { policyID: string }) {
         </select>
         <input placeholder={t("host id")} value={host} onChange={(e) => { setHost(e.target.value); reset(); }} className="mono" />
         <span className="source">{page.data ? t("{n} verdicts", { n: page.data.total }) : ""}</span>
+        <ExportButton path={`/api/v1/policies/${policyID}/results`} params={query} />
       </Toolbar>
       {page.error ? (
         <ErrorBox error={page.error} />

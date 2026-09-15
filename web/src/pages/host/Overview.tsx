@@ -16,6 +16,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { FacetList, useFleetFacets } from "../Bulk";
 import { useT } from "../../i18n";
 
 type SystemState = {
@@ -90,6 +91,13 @@ export function Overview() {
             <Fact label={t("Hostname")}><span className="hm-mono">{host.hostname}</span></Fact>
             <Fact label={t("System")}>{host.os_distribution} {host.os_version} ({host.os_family})</Fact>
             <Fact label={t("Architecture")}>{host.architecture || "—"}</Fact>
+            {/* The placement is edited here like the owner, but it is not
+                a label: budgets, role scopes and group selectors key on it
+                and none of them is re-evaluated by the move, so the editor
+                says so and asks for a reason. */}
+            <Fact label={t("Site / environment")}>
+              <HostPlacement host={host} editable={canEditFacts} />
+            </Fact>
             <Fact label={t("Owner")}>
               <HostFact
                 host={host}
@@ -346,6 +354,129 @@ function HostFact({ host, editable, value, shown, label, help, placeholder, path
       </Fields>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? t("saving…") : t("Save")}</button>
+        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+      </FormActions>
+      <Message text={message} error />
+    </Form>
+  );
+}
+
+/**
+ * The placement of the host - its site and its environment - edited in
+ * place. Both are sent whole, the one that stays repeated, so the write
+ * reads as "this host stands here". The reason is required: a move
+ * changes who may manage the host, which budgets its changes load and
+ * which groups it stands in, from the next order on, and the trail must
+ * say why. The host says when it was last moved, because nothing
+ * re-evaluates on its own after a move and the reader of a stale group
+ * or budget needs the date.
+ */
+function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const facets = useFleetFacets();
+  const [editing, setEditing] = useState(false);
+  const [site, setSite] = useState("");
+  const [environment, setEnvironment] = useState("");
+  const [reason, setReason] = useState("");
+  const [etag, setEtag] = useState("");
+  const [message, setMessage] = useState("");
+  // The moment of the last move rides on the host view; a host that
+  // stands where it enrolled has none.
+  const movedAt = (host as Host & { placement_changed_at?: string }).placement_changed_at;
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Host>(`/api/v1/hosts/${host.id}/placement`,
+        { site: site.trim(), environment: environment.trim(), reason: reason.trim() },
+        { headers: etag ? { "If-Match": etag } : {} }),
+    onSuccess: () => {
+      setEditing(false);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+      queryClient.invalidateQueries({ queryKey: ["fleet-activity"] });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 412) {
+        setMessage(t("Somebody changed this host since you opened the editor; close it and open it again to see the current value."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const open = async () => {
+    setSite(host.site);
+    setEnvironment(host.environment);
+    setReason("");
+    setMessage("");
+    setEditing(true);
+    try {
+      const fresh = await api.getWithMeta<Host>(`/api/v1/hosts/${host.id}`);
+      setEtag(fresh.etag);
+    } catch {
+      setEtag("");
+    }
+  };
+
+  const ready = site.trim() !== "" && environment.trim() !== "" && reason.trim().length >= 8
+    && (site.trim() !== host.site || environment.trim() !== host.environment);
+
+  if (!editing) {
+    return (
+      <span data-testid="fact-placement">
+        <span>{host.site} / {host.environment}</span>
+        {movedAt && (
+          <>
+            {" "}
+            <span className="source" title={t("When an operator last moved the host to another site or environment.")}>
+              {t("moved {when}", { when: relativeTime(movedAt) })}
+            </span>
+          </>
+        )}
+        {editable && (
+          <>
+            {" "}
+            <button type="button" className="link" onClick={open}>{t("edit")}</button>
+          </>
+        )}
+      </span>
+    );
+  }
+  return (
+    <Form>
+      <Fields>
+        <Field label={t("Site")} help={t("Where the host stands. The site keys the site budgets and the scope of every role; a running campaign keeps the capacity it was planned with.")}>
+          <input
+            value={site}
+            onChange={(e) => setSite(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            list="placement-sites"
+            autoFocus
+            data-testid="edit-site"
+          />
+          <FacetList id="placement-sites" facets={facets.data?.by_site} />
+        </Field>
+        <Field label={t("Environment")} help={t("What the host serves. The environment decides who may change the host and whether a change needs a second person, from the next order on.")}>
+          <input
+            value={environment}
+            onChange={(e) => setEnvironment(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            list="placement-environments"
+            data-testid="edit-environment"
+          />
+          <FacetList id="placement-environments" facets={facets.data?.by_environment} />
+        </Field>
+        <Field label={t("Reason")} help={t("Required, at least 8 characters; kept in the audit trail.")}>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("moved to the new rack, wrong token at enrollment")} />
+        </Field>
+      </Fields>
+      <FormNote>
+        {t("Groups that select on the site or the environment take the host in or let it go at their next read; nothing already planned is re-evaluated.")}
+      </FormNote>
+      <FormActions>
+        <button onClick={() => save.mutate()} disabled={save.isPending || !ready}>{save.isPending ? t("saving…") : t("Move")}</button>
         <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />

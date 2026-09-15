@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
@@ -57,6 +57,55 @@ export function utcStamp(millis: number): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
     ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
 }
+
+/**
+ * The lines that carry the searched text, by index, case-insensitively.
+ * A blank search matches nothing rather than everything: the count would
+ * otherwise equal the line count and say nothing.
+ */
+export function findMatches(lines: string[] | undefined, query: string): number[] {
+  const needle = query.toLowerCase();
+  if (!lines || needle.trim() === "") return [];
+  const hits: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.toLowerCase().includes(needle)) hits.push(index);
+  });
+  return hits;
+}
+
+/**
+ * One line cut into the pieces that match the search and the pieces that
+ * do not, in order, so the screen can mark the former. The comparison is
+ * case-insensitive; the pieces keep the line's own case.
+ */
+export function splitMatches(line: string, query: string): { text: string; hit: boolean }[] {
+  const needle = query.toLowerCase();
+  if (needle.trim() === "" || line === "") return [{ text: line, hit: false }];
+  const lower = line.toLowerCase();
+  const pieces: { text: string; hit: boolean }[] = [];
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, from);
+    if (at < 0) break;
+    if (at > from) pieces.push({ text: line.slice(from, at), hit: false });
+    pieces.push({ text: line.slice(at, at + needle.length), hit: true });
+    from = at + needle.length;
+  }
+  if (from < line.length) pieces.push({ text: line.slice(from), hit: false });
+  return pieces;
+}
+
+/**
+ * The name of the file a download saves the lines under: the host, the
+ * source and the moment, with a path's slashes turned into dashes so the
+ * name is one file name and not a directory.
+ */
+export function logFileName(hostname: string, source: string, millis: number): string {
+  const stamp = utcStamp(millis).replace(" UTC", "").replace(/[-: ]/g, "");
+  const part = source.replace(/^\/+/, "").replace(/[\/\s]+/g, "-") || "all";
+  return `${hostname}-${part}-${stamp}.log`;
+}
+
 type FileResult = {
   path?: string;
   lines?: string[];
@@ -99,6 +148,13 @@ export function Logs() {
   const [lines, setLines] = useState<string[] | null>(null);
   const [footer, setFooter] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  // The search runs over the lines on screen, not on the host: the read is
+  // bounded already, and the operator narrows what came back. The cursor
+  // walks the matches; the wrap decides whether a long line folds.
+  const [search, setSearch] = useState("");
+  const [matchIndex, setMatchIndex] = useState(0);
+  const [wrap, setWrap] = useState(true);
+  const [copied, setCopied] = useState("");
 
   const stream = useJournalPreview(preview, paused);
 
@@ -221,6 +277,44 @@ export function Logs() {
   const output = preview ? stream.lines : lines ?? undefined;
   const severe = /\b(emerg|alert|crit|fatal|panic|error|err|fail(ed|ure)?)\b/i;
   const warning = /\bwarn(ing)?\b/i;
+  const matches = findMatches(output, search);
+  const current = matches.length > 0 ? ((matchIndex % matches.length) + matches.length) % matches.length : -1;
+
+  // The lines go out as one text file through a link the page makes and
+  // removes again; the clipboard takes the same text.
+  const text = () => (output ?? []).join("\n") + (output?.length ? "\n" : "");
+  const download = () => {
+    const blob = new Blob([text()], { type: "text/plain;charset=utf-8" });
+    const href = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = href;
+    anchor.download = logFileName(host.hostname, source === "journal" ? (windowUnit || "journal") : path, Date.now());
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(href);
+  };
+  const copy = () => {
+    navigator.clipboard.writeText(text()).then(
+      () => setCopied(t("copied")),
+      () => setCopied(t("the clipboard refused")),
+    );
+  };
+  const tools = (
+    <LogTools
+      search={search}
+      onSearch={(value) => { setSearch(value); setMatchIndex(0); }}
+      matches={matches.length}
+      current={current}
+      onStep={(step) => setMatchIndex((value) => value + step)}
+      wrap={wrap}
+      onWrap={setWrap}
+      onDownload={download}
+      onCopy={copy}
+      copied={copied}
+      disabled={!output?.length}
+    />
+  );
 
   return (
     <ModulePage>
@@ -445,6 +539,7 @@ export function Logs() {
         <Section
           title={t("Live")}
           span={12}
+          tools={tools}
           description={
             <>
               {t("Streaming for up to 5 minutes, capped at 32 KiB/s.")}
@@ -456,20 +551,18 @@ export function Logs() {
           {stream.lines.length === 0 ? (
             <Empty>{t("Waiting for the first lines…")}</Empty>
           ) : (
-            <pre className="hm-log">
-              {stream.lines.join("\n")}
-            </pre>
+            <LogView lines={stream.lines} search={search} matches={matches} current={current} wrap={wrap} />
           )}
         </Section>
       )}
 
       {lines !== null && !preview && (
-        <Section title={t("Output")} count={lines.length} span={12} flush>
+        <Section title={t("Output")} count={lines.length} span={12} tools={tools} flush>
           {lines.length === 0 ? (
             <Empty>{t("Nothing matched.")}</Empty>
           ) : (
             <div className="hm-section-body">
-              <pre className="hm-log">{lines.join("\n")}</pre>
+              <LogView lines={lines} search={search} matches={matches} current={current} wrap={wrap} />
             </div>
           )}
           {footer && <Foot><span>{footer}</span></Foot>}
@@ -477,6 +570,101 @@ export function Logs() {
       )}
       </Widgets>
     </ModulePage>
+  );
+}
+
+/**
+ * The search, the walk through its matches, the wrap and the two ways of
+ * taking the lines away. The same strip stands over the live stream and
+ * over a finished read, so the operator does not look for it twice.
+ */
+function LogTools({
+  search, onSearch, matches, current, onStep, wrap, onWrap, onDownload, onCopy, copied, disabled,
+}: {
+  search: string;
+  onSearch: (value: string) => void;
+  matches: number;
+  current: number;
+  onStep: (step: number) => void;
+  wrap: boolean;
+  onWrap: (value: boolean) => void;
+  onDownload: () => void;
+  onCopy: () => void;
+  copied: string;
+  disabled: boolean;
+}) {
+  const t = useT();
+  return (
+    <>
+      <input
+        placeholder={t("Find in the output")}
+        value={search}
+        onChange={(e) => onSearch(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && matches > 0) onStep(e.shiftKey ? -1 : 1);
+        }}
+        aria-label={t("Find in the output")}
+      />
+      {/* The count says whether the search found anything: no match is
+          "0 matches", not a quiet empty screen. */}
+      {search.trim() !== "" && (
+        <span className="source">
+          {matches > 0 ? t("{n} of {total} matches", { n: current + 1, total: matches }) : t("0 matches")}
+        </span>
+      )}
+      <span className="segmented">
+        <button type="button" disabled={matches === 0} onClick={() => onStep(-1)} title={t("Previous match")}>↑</button>
+        <button type="button" disabled={matches === 0} onClick={() => onStep(1)} title={t("Next match")}>↓</button>
+      </span>
+      <label className="toggle">
+        <input type="checkbox" checked={wrap} onChange={(e) => onWrap(e.target.checked)} />
+        {t("wrap lines")}
+      </label>
+      <button type="button" className="secondary" disabled={disabled} onClick={onCopy}>{t("Copy")}</button>
+      <button type="button" className="secondary" disabled={disabled} onClick={onDownload}>{t("Download")}</button>
+      {copied && <span className="source">{copied}</span>}
+    </>
+  );
+}
+
+/**
+ * The lines with the matches marked and the current one brought into view.
+ * Every line is its own element only while a search is on: a read of two
+ * thousand lines is one text node otherwise, which is what a pre is for.
+ */
+function LogView({
+  lines, search, matches, current, wrap,
+}: {
+  lines: string[];
+  search: string;
+  matches: number[];
+  current: number;
+  wrap: boolean;
+}) {
+  const pre = useRef<HTMLPreElement>(null);
+  const searching = search.trim() !== "";
+  const currentLine = searching && current >= 0 ? matches[current] : -1;
+  // The current match is brought into view when it changes, not on every
+  // line the stream appends: a live view is not pulled back to it.
+  useEffect(() => {
+    if (currentLine < 0) return;
+    pre.current?.querySelector("[data-current]")?.scrollIntoView({ block: "nearest" });
+  }, [currentLine]);
+  const style = { whiteSpace: wrap ? "pre-wrap" as const : "pre" as const };
+  if (!searching) return <pre ref={pre} className="hm-log" style={style}>{lines.join("\n")}</pre>;
+  return (
+    <pre ref={pre} className="hm-log" style={style}>
+      {lines.map((line, index) => (
+        <span key={index} data-current={index === currentLine ? "" : undefined}>
+          {splitMatches(line, search).map((piece, at) => (
+            piece.hit
+              ? <mark key={at} style={index === currentLine ? { outline: "2px solid var(--accent)" } : undefined}>{piece.text}</mark>
+              : piece.text
+          ))}
+          {"\n"}
+        </span>
+      ))}
+    </pre>
   );
 }
 

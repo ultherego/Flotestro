@@ -4,10 +4,13 @@ import (
 	"context"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
@@ -167,6 +170,56 @@ type hostVulnerabilities struct {
 	// reason alone - and a host with one package outside the distribution
 	// has an empty reason and an incomplete assessment.
 	FullyAssessed bool `json:"fully_assessed"`
+	// BySeverity counts the affected findings by canonical severity, so
+	// the table can say "three critical" without the operator opening the
+	// host. An absent word is a zero here, because the count comes from the
+	// findings themselves; it is the coverage next to it that says whether
+	// zero means anything.
+	BySeverity map[string]int `json:"by_severity"`
+}
+
+// fleetHostFilter narrows the host table of the fleet screen. The summary
+// numbers above the table are counted over the whole visible fleet either
+// way: a filter changes what the table lists, not how bad the fleet is.
+type fleetHostFilter struct {
+	// Query is a fragment of the hostname.
+	Query string
+	// Severity keeps the hosts with an affected finding of this canonical
+	// severity.
+	Severity string
+	// Sort is "affected" (the default: the worst first), "fixable" (the
+	// most vendor fixes waiting first) or "hostname".
+	Sort   string
+	Limit  int
+	Offset int
+}
+
+// parseFleetHostFilter reads the table filters of the fleet screen; a
+// filter it cannot read ends the request.
+func parseFleetHostFilter(w http.ResponseWriter, r *http.Request) (fleetHostFilter, bool) {
+	query := r.URL.Query()
+	filter := fleetHostFilter{
+		Query:    strings.ToLower(strings.TrimSpace(query.Get("q"))),
+		Severity: strings.ToLower(strings.TrimSpace(query.Get("severity"))),
+		Sort:     strings.ToLower(strings.TrimSpace(query.Get("sort"))),
+	}
+	if filter.Severity != "" && vuln.SeverityRank(filter.Severity) < 0 {
+		problem(w, http.StatusBadRequest, "invalid_filter",
+			"severity must be one of critical, high, medium, low, negligible or unrated")
+		return filter, false
+	}
+	switch filter.Sort {
+	case "", "affected", "fixable", "hostname":
+	default:
+		problem(w, http.StatusBadRequest, "invalid_filter", "sort must be affected, fixable or hostname")
+		return filter, false
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	filter.Limit = paging.Limit(limit, defaultListPage, maxListPage)
+	if offset, err := strconv.Atoi(query.Get("offset")); err == nil && offset > 0 {
+		filter.Offset = offset
+	}
+	return filter, true
 }
 
 // handleFleetVulnerabilities returns the assessment of the whole visible
@@ -183,6 +236,14 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	if s.vulnerabilities == nil {
 		problem(w, http.StatusNotImplemented, "vulnerability_correlator_disabled",
 			"the vulnerability correlator is disabled in this installation")
+		return
+	}
+	filter, ok := parseFleetHostFilter(w, r)
+	if !ok {
+		return
+	}
+	asCSV, ok := exportFormat(w, r)
+	if !ok {
 		return
 	}
 
@@ -225,6 +286,11 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		s.fail(w, err)
 		return
 	}
+	severities, err := s.vulnerabilities.SeverityCounts(r.Context(), ids)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
 	for _, hostID := range ids {
 		state, present := states[hostID]
 		state.HostID = hostID
@@ -249,23 +315,65 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		if state.Affected > 0 {
 			hostsAffected++
 		}
+		bySeverity := severities[hostID]
+		if bySeverity == nil {
+			bySeverity = map[string]int{}
+		}
 		items = append(items, hostVulnerabilities{
 			HostState: state, CoveragePercent: state.Coverage() * 100,
-			FullyAssessed: state.FullAssessment(),
+			FullyAssessed: state.FullAssessment(), BySeverity: bySeverity,
 		})
 	}
 
+	// The table is narrowed after the fleet is counted: the numbers above
+	// it describe the whole visible fleet whatever the operator is looking
+	// for in it.
+	rows := make([]hostVulnerabilities, 0, len(items))
+	for _, item := range items {
+		if filter.Query != "" && !strings.Contains(strings.ToLower(item.Hostname), filter.Query) {
+			continue
+		}
+		if filter.Severity != "" && item.BySeverity[filter.Severity] == 0 {
+			continue
+		}
+		rows = append(rows, item)
+	}
+
 	// The worst on top: hosts with vulnerabilities, then those that could
-	// not be assessed, clean ones at the end.
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Affected != items[j].Affected {
-			return items[i].Affected > items[j].Affected
+	// not be assessed, clean ones at the end. Sorting by the vendor fixes
+	// waiting puts the hosts something can be done about first.
+	sort.SliceStable(rows, func(i, j int) bool {
+		switch filter.Sort {
+		case "hostname":
+			return rows[i].Hostname < rows[j].Hostname
+		case "fixable":
+			if rows[i].AffectedWithVendorFix != rows[j].AffectedWithVendorFix {
+				return rows[i].AffectedWithVendorFix > rows[j].AffectedWithVendorFix
+			}
 		}
-		if (items[i].CoverageReason == "") != (items[j].CoverageReason == "") {
-			return items[i].CoverageReason != ""
+		if rows[i].Affected != rows[j].Affected {
+			return rows[i].Affected > rows[j].Affected
 		}
-		return items[i].Hostname < items[j].Hostname
+		if (rows[i].CoverageReason == "") != (rows[j].CoverageReason == "") {
+			return rows[i].CoverageReason != ""
+		}
+		return rows[i].Hostname < rows[j].Hostname
 	})
+	// The file takes the filtered and sorted table whole, without the
+	// screen's page: a page is for reading, a file for the rest.
+	if asCSV {
+		s.writeVulnerabilitiesCSV(w, r, rows, now)
+		return
+	}
+	total := len(rows)
+	if filter.Offset >= len(rows) {
+		rows = rows[:0]
+	} else {
+		rows = rows[filter.Offset:]
+	}
+	if len(rows) > filter.Limit {
+		rows = rows[:filter.Limit]
+	}
 
 	sources := make([]map[string]any, 0, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -278,7 +386,9 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items, "affected": affected,
+		"items": rows, "count": len(rows), "total": total,
+		"limit": filter.Limit, "offset": filter.Offset,
+		"affected":                 affected,
 		"affected_with_vendor_fix": withVendorFix,
 		"affected_no_fix":          noFix, "unknown": unknown,
 		// Four numbers, because they are four different questions: how many
@@ -293,4 +403,46 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		"sources":                  sources,
 		"max_snapshot_age_hours":   int(s.feedAge.Hours()),
 	})
+}
+
+// vulnerabilitiesCSVColumns is the header of the fleet export. The order
+// is fixed: a sheet built against one export reads the next one. The
+// severity columns count the affected findings of that canonical
+// severity on the host.
+var vulnerabilitiesCSVColumns = []string{
+	"hostname", "host_id", "distribution", "release", "affected", "affected_with_vendor_fix", "affected_no_fix",
+	"unknown", "critical", "high", "medium", "low", "negligible", "unrated",
+	"affected_packages", "unique_advisories", "unique_cves", "packages_total", "packages_covered",
+	"coverage_percent", "fully_assessed", "coverage_reason", "advisories_reason", "provider", "evaluated_at",
+}
+
+// writeVulnerabilitiesCSV streams the fleet assessment as a file: one row
+// per host of the filtered table, in the order the screen sorts it, with
+// the coverage next to the counts - a host with zero findings and no
+// assessment is not a clean host, and the file says so in its own
+// columns. The screen's page does not apply; the export's own cap does.
+func (s *Server) writeVulnerabilitiesCSV(w http.ResponseWriter, r *http.Request, items []hostVulnerabilities, now time.Time) {
+	s.writeCSV(w, r, exportFileName("vulnerabilities", now), vulnerabilitiesCSVColumns, func(yield func([]string) bool) error {
+		for _, item := range items {
+			if !yield(hostVulnerabilitiesCSVRow(item)) {
+				return nil
+			}
+		}
+		return nil
+	})
+}
+
+// hostVulnerabilitiesCSVRow renders one host in the order of
+// vulnerabilitiesCSVColumns.
+func hostVulnerabilitiesCSVRow(item hostVulnerabilities) []string {
+	severity := func(name string) string { return strconv.Itoa(item.BySeverity[name]) }
+	return []string{
+		item.Hostname, item.HostID, item.Distribution, item.Release, strconv.Itoa(item.Affected),
+		strconv.Itoa(item.AffectedWithVendorFix), strconv.Itoa(item.AffectedNoFix), strconv.Itoa(item.Unknown),
+		severity("critical"), severity("high"), severity("medium"), severity("low"), severity("negligible"), severity("unrated"),
+		strconv.Itoa(item.AffectedPackages), strconv.Itoa(item.UniqueAdvisories), strconv.Itoa(item.UniqueCVEs),
+		strconv.Itoa(item.PackagesTotal), strconv.Itoa(item.PackagesCovered), csvFloat(item.CoveragePercent),
+		strconv.FormatBool(item.FullyAssessed), item.CoverageReason, item.AdvisoriesReason, item.Provider,
+		formatTime(item.EvaluatedAt),
+	}
 }

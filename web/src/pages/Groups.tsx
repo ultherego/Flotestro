@@ -1,13 +1,125 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/api";
+import { api, ApiError, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
 import type { Host, HostGroup, SelectorExpression, Whoami } from "../lib/types";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { ConnectionState, Empty, ErrorBox, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
+
+/** One campaign or policy whose selector names a group, as the API lists it. */
+export type GroupReference = { id: string; name: string; state: string };
+
+/** Where a group is named; read with one group, never with the list. */
+export type GroupUsage = { campaigns: GroupReference[]; policies: GroupReference[] };
+
+/** The single-group answer: the record and the records that name it. */
+export type GroupDetail = HostGroup & { used_by?: GroupUsage };
+
+/** What a selector resolves to now: the count and a sample of names. */
+export type SelectorPreviewView = { count: number; sample: string[]; selector: string };
+
+/** How the list is ordered: by name, or by size with the biggest first. */
+export type GroupSort = "name" | "size";
+
+/**
+ * The groups whose name or description carries the text, case aside. An
+ * empty search keeps everything.
+ */
+export function filterGroups<T extends Pick<HostGroup, "name" | "description">>(items: T[], search: string): T[] {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return items;
+  return items.filter((group) =>
+    group.name.toLowerCase().includes(needle) || (group.description ?? "").toLowerCase().includes(needle));
+}
+
+/**
+ * The groups in the chosen order. By size the biggest comes first and a
+ * group whose size is not known comes last: unknown is not zero, so it
+ * must not sort as the smallest.
+ */
+export function sortGroups<T extends Pick<HostGroup, "name" | "member_count">>(items: T[], sort: GroupSort): T[] {
+  const sorted = [...items];
+  if (sort === "name") return sorted.sort((a, b) => a.name.localeCompare(b.name));
+  return sorted.sort((a, b) => {
+    if (a.member_count === undefined && b.member_count === undefined) return a.name.localeCompare(b.name);
+    if (a.member_count === undefined) return 1;
+    if (b.member_count === undefined) return -1;
+    return b.member_count - a.member_count || a.name.localeCompare(b.name);
+  });
+}
+
+/**
+ * The address of the campaign wizard with the group as the target, or -
+ * when hosts were ticked on the group's table - those hosts alone by
+ * identifier: an expression decides alone in an order, so a group next
+ * to a list would silently outvote the ticks. The order is named after
+ * the group; the operator renames it in the wizard. The group travels
+ * under `group`, the way the wizard keeps it.
+ */
+export function bulkAddress(groupName: string, hostIDs: string[] = []): string {
+  const params = new URLSearchParams({ name: groupName });
+  if (hostIDs.length === 0) params.set("group", groupName);
+  for (const id of hostIDs) params.append("host_id", id);
+  return `/bulk?${params}`;
+}
+
+/** The address of a new read with the group as its selector. */
+export function readsAddress(groupName: string): string {
+  const params = new URLSearchParams({ action: "journal.read", group: groupName });
+  return `/reads?${params}`;
+}
+
+/**
+ * The saved expression as rows of the builder: one leaf per row, a `not`
+ * around a leaf as the row's negation, and the rows joined by all or any.
+ * `exact` is false when the expression is deeper than rows can say - an
+ * `any` inside an `all`, a `not` around a branch - and then the rows are
+ * only a start: saving them would replace what was written.
+ */
+export function rulesOf(expression?: SelectorExpression | null): { rules: Rule[]; combine: "all" | "any"; exact: boolean } {
+  const empty = { rules: [{ field: "tag", value: "", negated: false } as Rule], combine: "all" as const, exact: false };
+  if (!expression) return { ...empty, exact: true };
+  const leaves = expression.all ?? expression.any ?? [expression];
+  const combine: "all" | "any" = expression.any ? "any" : "all";
+  const rules: Rule[] = [];
+  let exact = true;
+  for (const leaf of leaves) {
+    const rule = leafRule(leaf);
+    if (rule) rules.push(rule); else exact = false;
+  }
+  if (rules.length === 0) return { ...empty, exact: false };
+  return { rules, combine, exact };
+}
+
+/** One row from a leaf, or null when the leaf is not a fact about a host. */
+function leafRule(leaf: SelectorExpression): Rule | null {
+  const negated = leaf.not !== undefined;
+  const fact = leaf.not ?? leaf;
+  if (fact.all || fact.any || fact.not) return null;
+  const entry = Object.entries(fact).find(([key, value]) => typeof value === "string" && value !== "" && RULE_FIELDS.includes(key as RuleField));
+  if (!entry) return null;
+  return { field: entry[0] as RuleField, value: entry[1] as string, negated };
+}
+
+/**
+ * The sentence a delete dialog says about what names the group: nothing
+ * when nothing does, otherwise the campaigns and policies by name so the
+ * operator knows what stops resolving.
+ */
+export function usageSentence(usage: GroupUsage | undefined, t: (key: string, vars?: Record<string, string | number>) => string): string {
+  if (!usage) return "";
+  const names = [
+    ...usage.campaigns.map((campaign) => t("campaign {name}", { name: campaign.name })),
+    ...usage.policies.map((policy) => t("policy {name}", { name: policy.name })),
+  ];
+  if (names.length === 0) return "";
+  return t("Its selector is named by: {list}. They will stop resolving.", { list: names.join(", ") });
+}
 
 /**
  * Host groups: a saved answer to "which hosts".
@@ -33,6 +145,50 @@ function usePermissions(): Set<string> {
   return new Set(whoami.data?.permissions ?? []);
 }
 
+/**
+ * The question "delete this group?" with what it reaches: the group is
+ * read once more before the dialog, because the list does not carry the
+ * campaigns and policies that name it, and the dialog is where they are
+ * to be read. The answer resolves true when the group is gone.
+ */
+function useDeleteGroup(): (group: Pick<HostGroup, "id" | "name">) => Promise<boolean> {
+  const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  return async (group) => {
+    let usage: GroupUsage | undefined;
+    try {
+      usage = (await api.get<GroupDetail>(`/api/v1/host-groups/${group.id}`)).used_by;
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    const named = usageSentence(usage, t);
+    const { ok } = await confirm({
+      title: t("Delete the group {name}?", { name: group.name }),
+      body: (
+        <>
+          <p>{t("A selector that names it will stop resolving; a campaign already ordered keeps its snapshot.")}</p>
+          {named && <p className="page-error">{named}</p>}
+        </>
+      ),
+      confirmLabel: t("Delete"),
+      danger: true,
+    });
+    if (!ok) return false;
+    try {
+      await api.del<void>(`/api/v1/host-groups/${group.id}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+    queryClient.invalidateQueries({ queryKey: ["host-groups"] });
+    toast.success(t("Group {name} deleted", { name: group.name }));
+    return true;
+  };
+}
+
 function GroupList() {
   const t = useT();
   const permissions = usePermissions();
@@ -43,9 +199,13 @@ function GroupList() {
     refetchInterval: REFRESH_INTERVAL,
   });
   const [creating, setCreating] = useState(false);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<GroupSort>("name");
+  const deleteGroup = useDeleteGroup();
+  const items = groups.data?.items ?? [];
+  const shown = useMemo(() => sortGroups(filterGroups(items, search), sort), [items, search, sort]);
 
   if (groups.error) return <ErrorBox error={groups.error} />;
-  const items = groups.data?.items ?? [];
 
   return (
     <>
@@ -66,22 +226,34 @@ function GroupList() {
         )}
 
         <Card className="span-12" flush>
+          {items.length > 0 && (
+            <Toolbar end={<span>{t("{n} of {total} groups", { n: shown.length, total: items.length })}</span>}>
+              <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} />
+              <select value={sort} onChange={(e) => setSort(e.target.value as GroupSort)} aria-label={t("Sort")}>
+                <option value="name">{t("sort by name")}</option>
+                <option value="size">{t("sort by size")}</option>
+              </select>
+            </Toolbar>
+          )}
           {groups.isLoading ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
             <EmptyState action={canWrite && !creating && <button className="secondary" onClick={() => setCreating(true)}>{t("New group")}</button>}>
               {t("No groups yet. A campaign can still name hosts by site, environment, tags or a list.")}
             </EmptyState>
+          ) : shown.length === 0 ? (
+            <EmptyState>{t("No group matches the search.")}</EmptyState>
           ) : (
             <table>
               <thead>
                 <tr>
                   <th>{t("Group")}</th><th>{t("Kind")}</th><th>{t("Selector")}</th>
                   <th className="num">{t("Hosts")}</th><th>{t("Created by")}</th><th>{t("Updated")}</th>
+                  {canWrite && <th></th>}
                 </tr>
               </thead>
               <tbody>
-                {items.map((group) => (
+                {shown.map((group) => (
                   <tr key={group.id}>
                     <td>
                       <div className="fp-host-cell">
@@ -103,6 +275,11 @@ function GroupList() {
                     </td>
                     <td>{group.created_by}</td>
                     <td><Time value={group.updated_at} /></td>
+                    {canWrite && (
+                      <td className="num">
+                        <button type="button" className="danger" onClick={() => deleteGroup(group)}>{t("Delete")}</button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -131,6 +308,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
   const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<HostGroup["kind"]>("static");
@@ -151,6 +329,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
       }),
     onSuccess: (group) => {
       queryClient.invalidateQueries({ queryKey: ["host-groups"] });
+      toast.success(t("Group {name} created", { name: group.name }));
       onDone();
       navigate(`/groups/${group.id}`);
     },
@@ -184,7 +363,10 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
       {kind === "static" ? (
         <HostChooser selected={members} onChange={setMembers} />
       ) : (
-        <SelectorBuilder rules={rules} combine={combine} onRules={setRules} onCombine={setCombine} />
+        <>
+          <SelectorBuilder rules={rules} combine={combine} onRules={setRules} onCombine={setCombine} />
+          <SelectorPreview expression={expression} />
+        </>
       )}
 
       <Actions>
@@ -276,14 +458,21 @@ export function HostChooser({ selected, onChange }: { selected: Set<string>; onC
 export type Rule = { field: RuleField; value: string; negated: boolean };
 
 export type RuleField =
-  | "tag" | "group" | "site" | "environment" | "os_family" | "capability"
-  | "connection_state" | "lifecycle_state" | "owner";
+  | "tag" | "group" | "site" | "environment" | "os_family" | "os_version" | "capability"
+  | "connection_state" | "lifecycle_state" | "owner" | "channel"
+  | "security_updates" | "reboot_required" | "failed_units" | "agent_version"
+  | "relay" | "failure_domain";
 
 /** The facts a rule can name, in the order the builder offers them. */
 export const RULE_FIELDS: RuleField[] = [
-  "tag", "group", "site", "environment", "os_family", "capability",
-  "connection_state", "lifecycle_state", "owner",
+  "tag", "group", "site", "environment", "os_family", "os_version", "capability",
+  "connection_state", "lifecycle_state", "owner", "channel",
+  "security_updates", "reboot_required", "failed_units", "agent_version",
+  "relay", "failure_domain",
 ];
+
+/** The facts a host reports as yes or no; a host that has not reported is on neither side. */
+const YES_NO_FIELDS: RuleField[] = ["security_updates", "reboot_required", "failed_units"];
 
 /**
  * The rows as the expression the server will read: one leaf per row, a
@@ -294,8 +483,9 @@ export function buildExpression(rules: Rule[], combine: "all" | "any"): Selector
   const leaves = rules
     .filter((rule) => rule.value.trim() !== "")
     .map((rule): SelectorExpression => {
-      const leaf: SelectorExpression = {};
-      leaf[rule.field] = rule.value.trim();
+      // Every leaf the builder offers is a string on the wire; the channel
+      // is typed narrower in the view, which is what the cast is for.
+      const leaf = { [rule.field]: rule.value.trim() } as SelectorExpression;
       return rule.negated ? { not: leaf } : leaf;
     });
   if (leaves.length === 0) return null;
@@ -331,8 +521,11 @@ export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
     onRules(rules.map((rule, i) => (i === index ? { ...rule, ...delta } : rule)));
   const names: Record<RuleField, string> = {
     tag: t("tag"), group: t("group"), site: t("site"), environment: t("environment"),
-    os_family: t("os family"), capability: t("capability"),
+    os_family: t("os family"), os_version: t("os version"), capability: t("capability"),
     connection_state: t("connection state"), lifecycle_state: t("lifecycle state"), owner: t("owner"),
+    channel: t("release channel"), security_updates: t("security updates waiting"),
+    reboot_required: t("reboot required"), failed_units: t("failed units"),
+    agent_version: t("agent version"), relay: t("relay"), failure_domain: t("failure domain"),
   };
   return (
     <>
@@ -384,6 +577,21 @@ function RuleValue({ rule, onChange }: { rule: Rule; onChange: (value: string) =
     enabled: rule.field === "group",
     staleTime: 60 * 1000,
   });
+  if (YES_NO_FIELDS.includes(rule.field)) {
+    return (
+      <select value={rule.value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{t("pick yes or no…")}</option>
+        <option value="true">{t("yes")}</option>
+        <option value="false">{t("no")}</option>
+      </select>
+    );
+  }
+  if (rule.field === "agent_version") {
+    return (
+      <input value={rule.value} placeholder={t("< 0.49.0")}
+        onChange={(e) => onChange(e.target.value)} />
+    );
+  }
   switch (rule.field) {
     case "connection_state":
       return (
@@ -418,6 +626,219 @@ function RuleValue({ rule, onChange }: { rule: Rule; onChange: (value: string) =
 }
 
 /**
+ * What the selector under construction resolves to now, asked of the
+ * server as the rows change and answered with the count against the
+ * caller's scope and a sample of names. The call waits for the typing to
+ * settle; a selector the server refuses - a group that does not exist, a
+ * cycle - shows the refusal in place of a count, not a zero.
+ */
+export function SelectorPreview({ expression }: { expression: SelectorExpression | null }) {
+  const t = useT();
+  const encoded = useDebounced(expression ? JSON.stringify(expression) : "");
+  const preview = useQuery({
+    queryKey: ["host-group-preview", encoded],
+    queryFn: () => api.get<SelectorPreviewView>(`/api/v1/host-groups/preview?expression=${encodeURIComponent(encoded)}`),
+    enabled: encoded !== "",
+    staleTime: 10 * 1000,
+    retry: false,
+  });
+  if (!expression) return null;
+  const stale = encoded !== JSON.stringify(expression);
+  return (
+    <div data-testid="selector-preview">
+      <h4 className="widget-subhead">{t("Matches now")}</h4>
+      {preview.error ? (
+        <p className="page-error">{preview.error instanceof ApiError ? preview.error.message : String(preview.error)}</p>
+      ) : preview.isLoading || stale || !preview.data ? (
+        <p className="source">{t("Counting…")}</p>
+      ) : (
+        <>
+          <p>
+            <strong>{t("{n} hosts", { n: preview.data.count })}</strong>
+            {preview.data.count > preview.data.sample.length && (
+              <span className="source"> {t("first {n} shown", { n: preview.data.sample.length })}</span>
+            )}
+          </p>
+          {preview.data.sample.length > 0 && <p className="mono">{preview.data.sample.join(", ")}</p>}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The form that changes a group in place: the name, the description and,
+ * for a dynamic group, the selector. The write goes back with the tag the
+ * group was read with, so an edit over somebody else's change is refused
+ * rather than winning quietly. The kind does not change here; that is a
+ * new group.
+ *
+ * A selector too deep for the builder's rows is edited as its JSON: the
+ * rows would only approximate it, and a save from them would replace
+ * what somebody wrote by hand.
+ */
+function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; onDone: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const saved = rulesOf(group.selector);
+  const [name, setName] = useState(group.name);
+  const [description, setDescription] = useState(group.description ?? "");
+  const [rules, setRules] = useState<Rule[]>(saved.rules);
+  const [combine, setCombine] = useState<"all" | "any">(saved.combine);
+  const [asJSON, setAsJSON] = useState(!saved.exact);
+  const [jsonText, setJsonText] = useState(JSON.stringify(group.selector ?? {}, null, 2));
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const parsed = useMemo((): { expression: SelectorExpression | null; error: string } => {
+    if (!asJSON) return { expression: buildExpression(rules, combine), error: "" };
+    try {
+      const value = JSON.parse(jsonText) as SelectorExpression;
+      if (!value || typeof value !== "object" || Array.isArray(value)) return { expression: null, error: t("the selector has to be a JSON object") };
+      return { expression: value, error: "" };
+    } catch {
+      return { expression: null, error: t("the selector is not valid JSON") };
+    }
+  }, [asJSON, rules, combine, jsonText, t]);
+  const dynamic = group.kind === "dynamic";
+  const ready = name.trim() !== "" && (!dynamic || parsed.expression !== null);
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<HostGroup>(`/api/v1/host-groups/${group.id}`, {
+        name: name.trim(),
+        description: description.trim(),
+        selector: dynamic ? parsed.expression : undefined,
+      }, etag ? { headers: { "If-Match": etag } } : undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["host-group", group.id] });
+      queryClient.invalidateQueries({ queryKey: ["host-group-hosts", group.id] });
+      queryClient.invalidateQueries({ queryKey: ["host-groups"] });
+      toast.success(t("Group {name} saved", { name: name.trim() }));
+      onDone();
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 412) {
+        // The record moved under the editor; the page refetches, the form
+        // is rebuilt from the current version, and the word about it has
+        // to outlive the form.
+        queryClient.invalidateQueries({ queryKey: ["host-group", group.id] });
+        toast.error(t("The group changed since it was read; the form now shows the current version, start the edit again."));
+        return;
+      }
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  return (
+    <Card className="span-12" title={t("Edit group")} description={dynamic
+      ? t("The name a selector names it by, the description, and the rule the server compiles.")
+      : t("The name a selector names it by and the description; the members are edited on their own.")}>
+      <FieldGrid>
+        <Field label={t("Name")}>
+          <input value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Field label={t("Description")}>
+          <input value={description} onChange={(e) => setDescription(e.target.value)} />
+        </Field>
+      </FieldGrid>
+      {dynamic && (
+        <>
+          {asJSON ? (
+            <>
+              <h4 className="widget-subhead">{t("Selector")}</h4>
+              {!saved.exact && (
+                <p className="source">{t("The saved selector is deeper than the builder's rows can say, so it is edited as written.")}</p>
+              )}
+              <textarea rows={10} style={{ width: "100%", fontFamily: "var(--font-mono)", fontSize: 12 }} value={jsonText} onChange={(e) => setJsonText(e.target.value)} />
+              {parsed.error && <p className="page-error">{parsed.error}</p>}
+              {saved.exact && (
+                <p>
+                  <button type="button" className="secondary" onClick={() => {
+                    // The rows take the JSON back when it still fits
+                    // them; otherwise they stay as they were.
+                    const back = rulesOf(parsed.expression);
+                    if (parsed.expression && back.exact) {
+                      setRules(back.rules);
+                      setCombine(back.combine);
+                    }
+                    setAsJSON(false);
+                  }}>
+                    {t("Back to the rules")}
+                  </button>
+                </p>
+              )}
+            </>
+          ) : (
+            <>
+              <SelectorBuilder rules={rules} combine={combine} onRules={setRules} onCombine={setCombine} />
+              <p>
+                <button type="button" className="secondary" onClick={() => {
+                  setJsonText(JSON.stringify(parsed.expression ?? group.selector ?? {}, null, 2));
+                  setAsJSON(true);
+                }}>
+                  {t("Edit as JSON")}
+                </button>
+              </p>
+            </>
+          )}
+          <SelectorPreview expression={parsed.expression} />
+        </>
+      )}
+      <Actions>
+        <button onClick={() => { setErrorMessage(""); save.mutate(); }} disabled={!ready || save.isPending}>
+          {save.isPending ? t("Saving…") : t("Save changes")}
+        </button>
+        <button className="secondary" onClick={onDone} disabled={save.isPending}>{t("Cancel")}</button>
+        {errorMessage && <p className="page-error">{errorMessage}</p>}
+      </Actions>
+    </Card>
+  );
+}
+
+/**
+ * The campaigns and the policies whose selector names the group. A
+ * campaign that ended keeps its selector for the trail and is listed with
+ * its state; an enabled policy resolves the group at every check, so an
+ * edit of the selector reaches it at the next one.
+ */
+function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] }) {
+  const t = useT();
+  const total = usage.campaigns.length + usage.policies.length;
+  return (
+    <Card className="span-12" title={t("Used by")} description={total === 0
+      ? t("No campaign or policy names this group in its selector.")
+      : kind === "dynamic"
+        ? t("A change of the selector reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")
+        : t("A change of the members reaches every policy listed at its next check; a campaign keeps the snapshot it froze.")}>
+      {total > 0 && (
+        <table>
+          <thead>
+            <tr><th>{t("Record")}</th><th>{t("Name")}</th><th>{t("State")}</th></tr>
+          </thead>
+          <tbody>
+            {usage.campaigns.map((campaign) => (
+              <tr key={`campaign-${campaign.id}`}>
+                <td>{t("campaign")}</td>
+                <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
+                <td><span className="badge">{t(campaign.state)}</span></td>
+              </tr>
+            ))}
+            {usage.policies.map((policy) => (
+              <tr key={`policy-${policy.id}`}>
+                <td>{t("policy")}</td>
+                <td><Link to={`/policies/${policy.id}`}>{policy.name}</Link></td>
+                <td><span className="badge">{t(policy.state)}</span></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Card>
+  );
+}
+
+/**
  * One group: what it is, and the hosts it resolves to now. For a static
  * group the member list can be replaced here; for a dynamic one the
  * selector is the definition, and the list under it is today's answer.
@@ -426,11 +847,16 @@ function GroupPage({ id }: { id: string }) {
   const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const permissions = usePermissions();
   const canWrite = permissions.has("host.group.write");
+  const seesCampaigns = permissions.has("campaign.read");
+  const deleteGroup = useDeleteGroup();
+  // The record comes with its tag: the edit form writes back on that
+  // version, and a write over a newer one is refused by the server.
   const group = useQuery({
     queryKey: ["host-group", id],
-    queryFn: () => api.get<HostGroup>(`/api/v1/host-groups/${id}`),
+    queryFn: () => api.getWithMeta<GroupDetail>(`/api/v1/host-groups/${id}`),
     refetchInterval: REFRESH_INTERVAL,
   });
   const [search, setSearch] = useState("");
@@ -448,8 +874,10 @@ function GroupPage({ id }: { id: string }) {
     getNextPageParam: (last) => last.next_cursor || undefined,
     refetchInterval: REFRESH_INTERVAL,
   });
+  const [editing, setEditing] = useState(false);
   const [editingMembers, setEditingMembers] = useState(false);
   const [members, setMembers] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
 
   const saveMembers = useMutation({
@@ -460,23 +888,28 @@ function GroupPage({ id }: { id: string }) {
       queryClient.invalidateQueries({ queryKey: ["host-group", id] });
       queryClient.invalidateQueries({ queryKey: ["host-group-hosts", id] });
       queryClient.invalidateQueries({ queryKey: ["host-groups"] });
-    },
-    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
-  });
-  const remove = useMutation({
-    mutationFn: () => api.del<void>(`/api/v1/host-groups/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["host-groups"] });
-      navigate("/groups");
+      toast.success(t("Members saved"));
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
   if (group.error) return <ErrorBox error={group.error} />;
   if (!group.data) return <Empty>{t("Loading…")}</Empty>;
-  const g = group.data;
+  const g = group.data.data;
+  const etag = group.data.etag;
   const rows = loadedItems(hosts.data);
   const total = hosts.data?.pages[0]?.total ?? rows.length;
+  const toggle = (hostID: string, on: boolean) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (on) next.add(hostID); else next.delete(hostID);
+      return next;
+    });
+  };
+  // The header box ticks what is loaded, not what the group resolves to:
+  // a page not yet fetched has hosts nobody has seen, and a campaign
+  // must not reach them from a box that looked like "all".
+  const allLoadedSelected = rows.length > 0 && rows.every((host) => selected.has(host.id));
 
   return (
     <>
@@ -485,9 +918,19 @@ function GroupPage({ id }: { id: string }) {
         breadcrumb={[{ label: t("Groups"), to: "/groups" }]}
         title={<>{g.name} <KindBadge kind={g.kind} /></>}
         description={g.description || (g.kind === "dynamic" ? t("Resolved from its selector every time it is read.") : t("A member list kept by hand."))}
-        actions={canWrite && (
+        actions={(
           <>
-            {g.kind === "static" && !editingMembers && (
+            {/* The wizard and the read form open with the group as the
+                target; whoever cannot order a campaign is not shown the
+                door to it. */}
+            {seesCampaigns && (
+              <button className="secondary" onClick={() => navigate(bulkAddress(g.name))}>{t("Start a campaign on this group")}</button>
+            )}
+            <button className="secondary" onClick={() => navigate(readsAddress(g.name))}>{t("Run a read on this group")}</button>
+            {canWrite && !editing && (
+              <button className="secondary" onClick={() => { setMessage(""); setEditing(true); }}>{t("Edit")}</button>
+            )}
+            {canWrite && g.kind === "static" && !editingMembers && (
               <button className="secondary" onClick={() => {
                 // The editor starts from what the group resolves to now,
                 // so a save without a change changes nothing.
@@ -498,27 +941,29 @@ function GroupPage({ id }: { id: string }) {
                 {t("Edit members")}
               </button>
             )}
-            <button
-              className="danger"
-              disabled={remove.isPending}
-              onClick={() => {
-                if (window.confirm(t("Delete the group {name}? A selector that names it will stop resolving.", { name: g.name }))) remove.mutate();
-              }}
-            >
-              {t("Delete")}
-            </button>
+            {canWrite && (
+              <button className="danger" onClick={async () => { if (await deleteGroup(g)) navigate("/groups"); }}>
+                {t("Delete")}
+              </button>
+            )}
           </>
         )}
       />
 
       <div className="widgets">
-        {g.kind === "dynamic" && (
+        {editing && (
+          <EditGroup key={etag} group={g} etag={etag} onDone={() => setEditing(false)} />
+        )}
+
+        {g.kind === "dynamic" && !editing && (
           <Card className="span-12" title={t("Selector")} description={t("The rule the server compiles into the host query; the list below is today's answer.")}>
             <p className="mono">{describeExpression(g.selector)}</p>
             <pre>{JSON.stringify(g.selector, null, 2)}</pre>
             {g.unresolvable && <p className="page-error">{t("The selector does not resolve: {reason}", { reason: g.unresolvable })}</p>}
           </Card>
         )}
+
+        {g.used_by && <UsedBy usage={g.used_by} kind={g.kind} />}
 
         {editingMembers && (
           <Card className="span-12" title={t("Members")} description={t("The list is replaced whole: a host left unchecked leaves the group.")}>
@@ -546,6 +991,16 @@ function GroupPage({ id }: { id: string }) {
             <table>
               <thead>
                 <tr>
+                  {seesCampaigns && (
+                    <th>
+                      <input
+                        type="checkbox"
+                        aria-label={t("Select every loaded host")}
+                        checked={allLoadedSelected}
+                        onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((host) => host.id)) : new Set())}
+                      />
+                    </th>
+                  )}
                   <th>{t("Host")}</th><th>{t("State")}</th><th>{t("System")}</th><th>{t("Site")}</th>
                   <th>{t("Environment")}</th><th>{t("Tags")}</th><th>{t("Last seen")}</th>
                 </tr>
@@ -553,6 +1008,9 @@ function GroupPage({ id }: { id: string }) {
               <tbody>
                 {rows.map((host) => (
                   <tr key={host.id}>
+                    {seesCampaigns && (
+                      <td><input type="checkbox" checked={selected.has(host.id)} onChange={(e) => toggle(host.id, e.target.checked)} /></td>
+                    )}
                     <td><Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link></td>
                     <td><ConnectionState state={host.connection_state} /></td>
                     <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
@@ -571,6 +1029,22 @@ function GroupPage({ id }: { id: string }) {
                 {t("Load more ({n} left)", { n: total - rows.length })}
               </button>
             </p>
+          )}
+          {selected.size > 0 && (
+            <div
+              data-testid="selection-bar"
+              style={{
+                position: "sticky", bottom: 0, zIndex: 4,
+                display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
+                padding: "10px 16px", background: "var(--bg-panel)", borderTop: "1px solid var(--border)",
+              }}
+            >
+              <span>{t("{n} selected", { n: selected.size })}</span>
+              <button type="button" className="primary" onClick={() => navigate(bulkAddress(g.name, [...selected]))}>
+                {t("Open in Bulk workspace ({n})", { n: selected.size })}
+              </button>
+              <button type="button" className="secondary" onClick={() => setSelected(new Set())}>{t("Clear selection")}</button>
+            </div>
           )}
         </Card>
       </div>

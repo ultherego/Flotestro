@@ -56,6 +56,32 @@ func TestCompileRendersEveryLeaf(t *testing.T) {
 		{"static group", `{"group_id":"0b0e7a3e-0000-4000-8000-000000000001"}`,
 			"exists (select 1 from host_group_members m where m.group_id = $3::uuid and m.host_id = h.id)",
 			[]any{"0b0e7a3e-0000-4000-8000-000000000001"}},
+		{"os version prefix", `{"os_version":"12"}`, "starts_with(h.os_version, $3)", []any{"12"}},
+		// The health facts leave a host that has not reported out of both
+		// answers: the column is null, and null compares with nothing.
+		{"security updates pending", `{"security_updates":"true"}`, "h.pending_security_updates > 0", nil},
+		{"no security updates", `{"security_updates":"false"}`, "h.pending_security_updates = 0", nil},
+		{"reboot required", `{"reboot_required":"true"}`, "h.reboot_required = true", nil},
+		{"no reboot required", `{"reboot_required":"false"}`, "h.reboot_required = false", nil},
+		{"failed units", `{"failed_units":"true"}`, "h.failed_units > 0", nil},
+		{"no failed units", `{"failed_units":"false"}`, "h.failed_units = 0", nil},
+		{"agent older than", `{"agent_version":"< 0.49.0"}`,
+			"(h.agent_version ~ '^v?\\d+(\\.\\d+)*' and " + VersionParts("h") + " < string_to_array($3, '.')::int[])",
+			[]any{"0.49.0"}},
+		{"agent at least", `{"agent_version":">=v0.49.0"}`,
+			"(h.agent_version ~ '^v?\\d+(\\.\\d+)*' and " + VersionParts("h") + " >= string_to_array($3, '.')::int[])",
+			[]any{"0.49.0"}},
+		{"agent exactly", `{"agent_version":"0.49.0"}`,
+			"(h.agent_version ~ '^v?\\d+(\\.\\d+)*' and " + VersionParts("h") + " = string_to_array($3, '.')::int[])",
+			[]any{"0.49.0"}},
+		{"relay by id", `{"relay":"0b0e7a3e-0000-4000-8000-000000000009"}`,
+			"exists (select 1 from agent_sessions s where s.host_id = h.id and s.ended_at is null and s.relay_id = $3::uuid)",
+			[]any{"0b0e7a3e-0000-4000-8000-000000000009"}},
+		{"relay by name", `{"relay":"edge-1"}`,
+			"exists (select 1 from agent_sessions s join relays r on r.id = s.relay_id" +
+				" where s.host_id = h.id and s.ended_at is null and r.name = $3)",
+			[]any{"edge-1"}},
+		{"failure domain", `{"failure_domain":"rack-7"}`, "h.failure_domain = $3", []any{"rack-7"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -66,10 +92,53 @@ func TestCompileRendersEveryLeaf(t *testing.T) {
 			if sql != tc.sql {
 				t.Errorf("sql = %q, expected %q", sql, tc.sql)
 			}
+			if len(args) == 0 && len(tc.args) == 0 {
+				return
+			}
 			if !reflect.DeepEqual(args, tc.args) {
 				t.Errorf("args = %#v, expected %#v", args, tc.args)
 			}
 		})
+	}
+}
+
+// TestVersionPartsMatchesTheHostList: the version condition of a selector
+// reads the same pattern the host list matches, so "agent_version < x"
+// in a campaign and "behind" on the dashboard order the versions alike.
+func TestVersionPartsMatchesTheHostList(t *testing.T) {
+	want := `string_to_array(substring(h.agent_version from '^v?(\d+(?:\.\d+)*)'), '.')::int[]`
+	if got := VersionParts("h"); got != want {
+		t.Errorf("VersionParts = %q, expected %q", got, want)
+	}
+}
+
+// TestParseVersionComparison reads the forms an agent_version leaf may
+// take and refuses what is not a version.
+func TestParseVersionComparison(t *testing.T) {
+	cases := map[string]VersionComparison{
+		"< 0.49.0":   {"<", "0.49.0"},
+		"<=0.49":     {"<=", "0.49"},
+		">= v1.2.3":  {">=", "1.2.3"},
+		"> 0.49.0":   {">", "0.49.0"},
+		"= 0.49.0":   {"=", "0.49.0"},
+		"0.49.0":     {"=", "0.49.0"},
+		"v0.49.0.1":  {"=", "0.49.0.1"},
+		"  < 0.49.0": {"<", "0.49.0"},
+	}
+	for in, want := range cases {
+		got, err := ParseVersionComparison(in)
+		if err != nil {
+			t.Errorf("%q was refused: %v", in, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%q = %+v, expected %+v", in, got, want)
+		}
+	}
+	for _, in := range []string{"", "<", "latest", "0.49.0-rc1", "!= 0.49.0", "1.2.3.4.5", "< 0.49.0 and"} {
+		if _, err := ParseVersionComparison(in); !errors.Is(err, ErrInvalid) {
+			t.Errorf("%q passed as a version comparison: %v", in, err)
+		}
 	}
 }
 
@@ -124,6 +193,12 @@ func TestValidateRefusesWhatDoesNotHoldTogether(t *testing.T) {
 		"internal group id":     `{"group_id":"0b0e7a3e-0000-4000-8000-000000000001"}`,
 		"padded value":          `{"site":" warsaw"}`,
 		"too long":              `{"owner":"` + strings.Repeat("x", maxValue+1) + `"}`,
+		"yes is not a boolean":  `{"security_updates":"yes"}`,
+		"reboot 1":              `{"reboot_required":"1"}`,
+		"failed units count":    `{"failed_units":"2"}`,
+		"version word":          `{"agent_version":"latest"}`,
+		"version prerelease":    `{"agent_version":"< 0.49.0-rc1"}`,
+		"version not equal":     `{"agent_version":"!= 0.49.0"}`,
 	}
 	for name, text := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -142,6 +217,14 @@ func TestValidateRefusesWhatDoesNotHoldTogether(t *testing.T) {
 		`{"group":"databases"}`,
 		`{"channel":"beta"}`,
 		`{"any":[{"site":"a"},{"not":{"environment":"prod"}}]}`,
+		`{"security_updates":"true"}`,
+		`{"reboot_required":"false"}`,
+		`{"failed_units":"true"}`,
+		`{"agent_version":"< 0.49.0"}`,
+		`{"agent_version":"0.49.0"}`,
+		`{"os_version":"12"}`,
+		`{"relay":"edge-1"}`,
+		`{"failure_domain":"rack-7"}`,
 	}
 	for _, text := range valid {
 		if err := parse(t, text).Validate(); err != nil {
@@ -231,6 +314,11 @@ func TestExpandRefusesACycleAndAMissingGroup(t *testing.T) {
 func TestDescribeReadsInOneLine(t *testing.T) {
 	e := parse(t, `{"all":[{"site":"warsaw"},{"not":{"tag":"role=db"}}]}`)
 	if got := e.Describe(); got != "(site=warsaw and not tag=role=db)" {
+		t.Errorf("describe = %q", got)
+	}
+	// A version leaf carries its operator; the line reads as a comparison.
+	e = parse(t, `{"any":[{"agent_version":"<0.49.0"},{"security_updates":"true"}]}`)
+	if got := e.Describe(); got != "(agent_version < 0.49.0 or security_updates=true)" {
 		t.Errorf("describe = %q", got)
 	}
 }

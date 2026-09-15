@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/selector"
 )
 
 // ErrNotFound says the rule, alert or silence does not exist.
@@ -78,12 +79,115 @@ var Severities = []string{"critical", "warning", "info"}
 
 // Selector names the hosts a rule covers, in the shape of a campaign
 // selector. Empty fields do not narrow - an empty host list included - so
-// an empty selector covers the whole fleet.
+// an empty selector covers the whole fleet. The fields that are set all
+// have to hold: a site and a tag name the tagged hosts of that site.
 type Selector struct {
-	Site        string   `json:"site,omitempty"`
-	Environment string   `json:"environment,omitempty"`
-	OSFamily    string   `json:"os_family,omitempty"`
-	HostIDs     []string `json:"host_ids,omitempty"`
+	Site        string `json:"site,omitempty"`
+	Environment string `json:"environment,omitempty"`
+	OSFamily    string `json:"os_family,omitempty"`
+	// Tags keeps the hosts carrying every one of the tags, 'key' or
+	// 'key=value' as recorded on the host.
+	Tags []string `json:"tags,omitempty"`
+	// Groups keeps the hosts of any of the saved groups, named by
+	// identifier or by name. A rule on the databases and the caches
+	// watches both; a host has to be in one of them, not in all.
+	Groups []string `json:"groups,omitempty"`
+	Owner  string   `json:"owner,omitempty"`
+	// Expression is the text form of a campaign selector, for a scope the
+	// flat fields cannot say: "agent_version < 0.49.0 or reboot_required =
+	// true". It is parsed when the rule is written and again when it is
+	// evaluated, never evaluated from text.
+	Expression string   `json:"expression,omitempty"`
+	HostIDs    []string `json:"host_ids,omitempty"`
+}
+
+// Narrows says whether the selector leaves any host out.
+func (sel Selector) Narrows() bool {
+	return sel.Site != "" || sel.Environment != "" || sel.OSFamily != "" || len(sel.Tags) > 0 ||
+		len(sel.Groups) > 0 || sel.Owner != "" || sel.Expression != "" || len(sel.HostIDs) > 0
+}
+
+// Tree renders the selector as the campaign selector package reads it,
+// the host list aside: every set field is one condition and all of them
+// hold at once. Nil means nothing narrows but the host list, if any. The
+// tree is what the evaluator compiles into the host query, so a rule
+// scoped by a tag and a campaign scoped by the same tag pick the same
+// hosts.
+func (sel Selector) Tree() (*selector.Expression, error) {
+	var all []selector.Expression
+	if sel.Site != "" {
+		all = append(all, selector.Expression{Site: sel.Site})
+	}
+	if sel.Environment != "" {
+		all = append(all, selector.Expression{Environment: sel.Environment})
+	}
+	if sel.OSFamily != "" {
+		all = append(all, selector.Expression{OSFamily: sel.OSFamily})
+	}
+	for _, tag := range sel.Tags {
+		all = append(all, selector.Expression{Tag: tag})
+	}
+	if len(sel.Groups) == 1 {
+		all = append(all, selector.Expression{Group: sel.Groups[0]})
+	} else if len(sel.Groups) > 1 {
+		var groups []selector.Expression
+		for _, group := range sel.Groups {
+			groups = append(groups, selector.Expression{Group: group})
+		}
+		all = append(all, selector.Expression{Any: groups})
+	}
+	if sel.Owner != "" {
+		all = append(all, selector.Expression{Owner: sel.Owner})
+	}
+	if sel.Expression != "" {
+		parsed, err := selector.Parse(sel.Expression)
+		if err != nil {
+			return nil, fmt.Errorf("expression: %w", err)
+		}
+		all = append(all, *parsed)
+	}
+	switch len(all) {
+	case 0:
+		return nil, nil
+	case 1:
+		return &all[0], nil
+	default:
+		return &selector.Expression{All: all}, nil
+	}
+}
+
+// validate checks the selector as the operator wrote it: the shape of
+// every field, and the whole as one selector, so that a scope the campaign
+// page would refuse is refused here in the same words.
+func (sel Selector) validate() error {
+	for _, tag := range sel.Tags {
+		if !selector.TagPattern.MatchString(tag) {
+			return fmt.Errorf("tags: %q is not a tag (key or key=value, lower-case key)", tag)
+		}
+	}
+	for _, group := range sel.Groups {
+		if _, err := uuid.Parse(group); err != nil && !selector.NamePattern.MatchString(group) {
+			return fmt.Errorf("groups: %q is not a group name or identifier", group)
+		}
+	}
+	if strings.TrimSpace(sel.Owner) != sel.Owner {
+		return errors.New("owner: the name has surrounding whitespace")
+	}
+	for _, id := range sel.HostIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			return fmt.Errorf("host_ids: %q is not a host identifier", id)
+		}
+	}
+	expression, err := sel.Tree()
+	if err != nil {
+		return err
+	}
+	if expression != nil {
+		if err := expression.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Rule is one alert rule.
@@ -122,12 +226,7 @@ func (r Rule) Validate() error {
 	if r.ForMinutes < 0 || r.ForMinutes > 24*60 {
 		return errors.New("for_minutes has to be between 0 and 1440")
 	}
-	for _, id := range r.Selector.HostIDs {
-		if _, err := uuid.Parse(id); err != nil {
-			return fmt.Errorf("host_ids: %q is not a host identifier", id)
-		}
-	}
-	return nil
+	return r.Selector.validate()
 }
 
 func contains(list []string, value string) bool {
@@ -203,12 +302,35 @@ func scanRule(rows pgx.Rows) (Rule, error) {
 	return rule, nil
 }
 
+// groupDirectory resolves the group references of a selector against
+// the saved groups. The directory is a view over the same pool, so it is
+// made where it is used rather than kept.
+func (s *Store) groupDirectory() selector.Groups {
+	return selector.NewStore(s.pool)
+}
+
+// resolveSelector checks that the selector of a rule resolves: a group it
+// names exists and the expansion stays within bounds. A rule naming a
+// group nobody created is refused with the name rather than recorded as a
+// rule that quietly watches nobody.
+func (s *Store) resolveSelector(ctx context.Context, sel Selector) error {
+	expression, err := sel.Tree()
+	if err != nil || expression == nil {
+		return err
+	}
+	_, err = selector.Expand(ctx, expression, s.groupDirectory())
+	return err
+}
+
 // CreateRule records a rule and returns it with its identifier.
 func (s *Store) CreateRule(ctx context.Context, rule Rule) (*Rule, error) {
 	if err := rule.Validate(); err != nil {
 		return nil, err
 	}
-	selector, err := json.Marshal(rule.Selector)
+	if err := s.resolveSelector(ctx, rule.Selector); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(rule.Selector)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +340,7 @@ func (s *Store) CreateRule(ctx context.Context, rule Rule) (*Rule, error) {
 		    severity, selector, enabled, created_by)
 		values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
 		id, strings.TrimSpace(rule.Name), rule.Metric, rule.Operator, rule.Threshold,
-		rule.ForMinutes, rule.Severity, selector, rule.Enabled, rule.CreatedBy); err != nil {
+		rule.ForMinutes, rule.Severity, encoded, rule.Enabled, rule.CreatedBy); err != nil {
 		return nil, err
 	}
 	return s.GetRule(ctx, id)
@@ -236,7 +358,10 @@ func (s *Store) UpdateRule(ctx context.Context, id string, rule Rule) (*Rule, er
 	if err != nil {
 		return nil, err
 	}
-	selector, err := json.Marshal(rule.Selector)
+	if err := s.resolveSelector(ctx, rule.Selector); err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(rule.Selector)
 	if err != nil {
 		return nil, err
 	}
@@ -252,7 +377,7 @@ func (s *Store) UpdateRule(ctx context.Context, id string, rule Rule) (*Rule, er
 		    severity = $7, selector = $8::jsonb, enabled = $9, updated_at = now()
 		where id = $1`,
 		id, strings.TrimSpace(rule.Name), rule.Metric, rule.Operator, rule.Threshold,
-		rule.ForMinutes, rule.Severity, selector, rule.Enabled); err != nil {
+		rule.ForMinutes, rule.Severity, encoded, rule.Enabled); err != nil {
 		return nil, err
 	}
 	conditionChanged := current.Metric != rule.Metric || current.Operator != rule.Operator ||
@@ -430,19 +555,87 @@ func (s *Store) HostAlerts(ctx context.Context, hostID string) ([]Alert, error) 
 }
 
 // RulesMatching counts the enabled rules whose selector covers the host.
+//
+// Every selector is compiled the way the evaluator compiles it and asked
+// of this one host in a single query, so the count on the host page and
+// the rules that fire on the host cannot disagree. A rule whose selector
+// does not resolve any more - a group deleted since - covers nobody here,
+// as it evaluates nobody.
 func (s *Store) RulesMatching(ctx context.Context, hostID string) (int, error) {
-	var count int
-	err := s.pool.QueryRow(ctx, `
+	if _, err := uuid.Parse(hostID); err != nil {
+		return 0, nil
+	}
+	rules, err := s.ListRules(ctx)
+	if err != nil {
+		return 0, err
+	}
+	args := []any{hostID}
+	var conditions []string
+	count := 0
+	for _, rule := range rules {
+		if !rule.Enabled {
+			continue
+		}
+		if !rule.Selector.Narrows() {
+			count++
+			continue
+		}
+		condition, extra, err := s.compileSelector(ctx, rule.Selector, len(args))
+		if err != nil {
+			s.log.Warn("the selector of an alert rule does not resolve", "rule", rule.Name, "error", err)
+			continue
+		}
+		conditions = append(conditions, condition)
+		args = append(args, extra...)
+	}
+	if len(conditions) == 0 {
+		return count, nil
+	}
+	var covered int
+	err = s.pool.QueryRow(ctx, `
 		select count(*)
-		from alert_rules r, hosts h
-		where h.id = $1 and r.enabled
-		  and (coalesce(r.selector->>'site', '') = '' or r.selector->>'site' = h.site)
-		  and (coalesce(r.selector->>'environment', '') = '' or r.selector->>'environment' = h.environment)
-		  and (coalesce(r.selector->>'os_family', '') = '' or r.selector->>'os_family' = h.os_family)
-		  and (r.selector->'host_ids' is null or jsonb_typeof(r.selector->'host_ids') <> 'array'
-		       or jsonb_array_length(r.selector->'host_ids') = 0
-		       or r.selector->'host_ids' @> to_jsonb(h.id::text))`, hostID).Scan(&count)
-	return count, err
+		from hosts h, unnest(array[`+strings.Join(conditions, ", ")+`]) as covered
+		where h.id = $1::uuid and covered`, args...).Scan(&covered)
+	if err != nil {
+		return 0, err
+	}
+	return count + covered, nil
+}
+
+// compileSelector renders a selector that narrows as one SQL condition
+// over the alias h of the hosts table, group references resolved and the
+// host list included. offset is the number of parameters the enclosing
+// query already uses.
+func (s *Store) compileSelector(ctx context.Context, sel Selector, offset int) (string, []any, error) {
+	var conditions []string
+	var args []any
+	expression, err := sel.Tree()
+	if err != nil {
+		return "", nil, err
+	}
+	if expression != nil {
+		expanded, err := selector.Expand(ctx, expression, s.groupDirectory())
+		if err != nil {
+			return "", nil, err
+		}
+		condition, extra, err := selector.Compile(expanded, offset)
+		if err != nil {
+			return "", nil, err
+		}
+		conditions = append(conditions, condition)
+		args = append(args, extra...)
+	}
+	if len(sel.HostIDs) > 0 {
+		// The identifiers travel as text and are cast in the query; the
+		// validation has checked their shape, so the cast cannot fail.
+		args = append(args, sel.HostIDs)
+		conditions = append(conditions, fmt.Sprintf(
+			"h.id in (select unnest($%d::text[])::uuid)", offset+len(args)))
+	}
+	if len(conditions) == 0 {
+		return "true", nil, nil
+	}
+	return "(" + strings.Join(conditions, " and ") + ")", args, nil
 }
 
 func (s *Store) queryAlerts(ctx context.Context, query string, args ...any) ([]Alert, error) {

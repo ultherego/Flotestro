@@ -107,6 +107,8 @@ func (s *Server) openAPI() map[string]any {
 			"inventory_stale, package_list_stale, unsupported_system, no_remediation.")
 	describe(schemas, "PolicyResult", "observed_revision", "The revision of the inventory module the verdict rests on.")
 	register("HostAccess", hostAccessView{})
+	register("HostPackageList", hostPackageList{})
+	register("CampaignSchedule", campaigns.Schedule{})
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
 	describe(schemas, "HostAccess", "local_sudo_rules",
@@ -259,11 +261,11 @@ func (s *Server) operation(route apiRoute) map[string]any {
 			"description": "A key chosen by the caller; a repeat with the same key returns the resource already created instead of a second one.",
 		})
 	}
-	if route.Method == http.MethodGet && route.Path == "/api/v1/campaigns/{id}/report" {
+	if route.Method == http.MethodGet && csvExports[route.Path] {
 		params = append(params, map[string]any{
 			"name": "format", "in": "query", "required": false,
 			"schema":      map[string]any{"type": "string", "enum": []string{"json", "csv"}},
-			"description": "The shape of the report: the JSON summary by default, or a CSV file with one row per target.",
+			"description": "The shape of the answer: JSON by default, or with format=csv a file with one row per item, the same filters applied and no page; a file past 50000 rows ends with a row marked truncated.",
 		})
 	}
 	for _, parameter := range queryParameters[route.Method+" "+route.Path] {
@@ -297,12 +299,6 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	if schema, ok := responseSchemas[route.Method+" "+route.Path]; ok {
 		responses[status] = map[string]any{"description": "The resource.",
 			"content": map[string]any{"application/json": map[string]any{"schema": schema}}}
-	} else if route.Path == "/api/v1/campaigns/{id}/report" {
-		responses[status] = map[string]any{"description": "The report: a JSON summary, or with format=csv a file with one row per target.",
-			"content": map[string]any{
-				"application/json": map[string]any{"schema": map[string]any{"type": "object"}},
-				"text/csv":         map[string]any{"schema": map[string]any{"type": "string"}},
-			}}
 	} else if strings.HasSuffix(route.Path, "/config") {
 		responses[status] = map[string]any{"description": "The ready configuration file of the order, without the token.",
 			"content": map[string]any{"application/yaml": map[string]any{"schema": map[string]any{"type": "string"}}}}
@@ -315,6 +311,11 @@ func (s *Server) operation(route apiRoute) map[string]any {
 	} else {
 		responses[status] = map[string]any{"description": "The answer.",
 			"content": map[string]any{"application/json": map[string]any{"schema": map[string]any{"type": "object"}}}}
+	}
+	if route.Method == http.MethodGet && csvExports[route.Path] {
+		answer, _ := responses[status].(map[string]any)
+		content, _ := answer["content"].(map[string]any)
+		content["text/csv"] = map[string]any{"schema": map[string]any{"type": "string"}}
 	}
 	op["responses"] = responses
 	if route.Method == http.MethodPost || route.Method == http.MethodPut {
@@ -341,6 +342,31 @@ var pagingParameters = []queryParameter{
 // The query parameters of the lists. A list filters on the server, so its
 // filters are part of the contract: a CMDB asking for the hosts of one
 // owner must not have to fetch the fleet and filter it itself.
+// campaignScheduleSchema is the body of a schedule: the order as the
+// campaign door takes it, and when to place it.
+var campaignScheduleSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":       map[string]any{"type": "string"},
+		"order":      map[string]any{"type": "object", "description": "The campaign order as POST /api/v1/campaigns takes it; placed at every moment under the same checks and the author's rights, and it always waits for approval."},
+		"start_at":   map[string]any{"type": "string", "description": "RFC 3339. The only moment without a recurrence; the earliest one with it."},
+		"recurrence": map[string]any{"type": "string", "description": "FREQ=MONTHLY;BYMONTHDAY=n;BYHOUR=h;BYMINUTE=m or FREQ=WEEKLY;BYDAY=MO,TH;BYHOUR=h;BYMINUTE=m."},
+		"timezone":   map[string]any{"type": "string", "description": "IANA zone the rule's hours are read in; UTC by default."},
+		"enabled":    map[string]any{"type": "boolean"},
+		"reason":     map[string]any{"type": "string", "description": "Required, min. 8 characters; carried into every order the schedule places."},
+	},
+	"required": []string{"name", "order", "reason"},
+}
+
+// csvExports are the lists that answer format=csv with a file: the same
+// filters and scope as the JSON answer, every row the caller may see, no page.
+var csvExports = map[string]bool{
+	"/api/v1/hosts": true, "/api/v1/jobs": true, "/api/v1/security": true,
+	"/api/v1/vulnerabilities": true, "/api/v1/certificates": true, "/api/v1/backups": true,
+	"/api/v1/policies/{id}/results": true, "/api/v1/monitoring/alerts": true,
+	"/api/v1/campaigns/{id}/report": true, "/api/v1/access/review": true,
+}
+
 var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/hosts": append([]queryParameter{
 		{"q", "string", "A fragment of the hostname, the management address, the machine identifier or the owner; case-insensitive."},
@@ -392,6 +418,31 @@ var queryParameters = map[string][]queryParameter{
 	"GET /api/v1/hosts/{id}/metrics": {
 		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
 	},
+	"GET /api/v1/vulnerabilities": {
+		{"q", "string", "A fragment of the hostname; the summary numbers stay fleet-wide."},
+		{"severity", "string", "critical, high, medium, low, negligible or unrated: hosts with an affected finding of that rung."},
+		{"sort", "string", "affected (default), fixable or hostname."},
+		{"limit", "integer", "The page size: 100 by default, 500 at most."},
+		{"offset", "integer", "Rows to skip."},
+	},
+	"GET /api/v1/vulnerabilities/cves": {
+		{"q", "string", "A prefix of a CVE number or of an affected package name."},
+		{"severity", "string", "critical, high, medium, low, negligible or unrated."},
+		{"fixable", "boolean", "true keeps the CVEs with a vendor fix on at least one host."},
+		{"limit", "integer", "The page size: 50 by default, 500 at most."},
+		{"offset", "integer", "Rows to skip."},
+	},
+	"GET /api/v1/maintenance/calendar": {
+		{"from", "string", "RFC 3339; the start of the range."},
+		{"to", "string", "RFC 3339; the end of the range, a year after from at most."},
+	},
+	"GET /api/v1/search": {
+		{"q", "string", "The beginning of a name: a hostname, machine identifier or management address, a campaign, policy, group, relay or secret name, an identity's subject or display name, at least eight characters of a job identifier, or a CVE identifier in full. Fewer than two characters answer with nothing; a kind the caller may not read is left out."},
+		{"limit", "integer", "The hits per kind: 8 by default, 25 at most."},
+	},
+	"GET /api/v1/host-groups/preview": {
+		{"expression", "string", "The typed selector as JSON; the answer is the count within the caller's scope, a sample of up to 20 hostnames and the selector in one line."},
+	},
 	"GET /api/v1/campaigns/preview": {
 		{"action", "string", "The operation type; without it the preview counts hosts and qualifies none. " +
 			"For an operation the panel splits host by host (system.hostname.set) the answer also lists every ready host under hosts [{id, hostname}], for the mapping to name."},
@@ -427,11 +478,20 @@ var queryParameters = map[string][]queryParameter{
 		{"host_id", "string", ""},
 		{"limit", "integer", "The most alerts to return: 100 by default, 500 at most."},
 	},
+	"GET /api/v1/hosts/{id}/audit": append([]queryParameter{
+		{"actor", "string", "The identity that acted."},
+		{"action", "string", ""},
+		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
+		{"outcome", "string", "success, failure or denied."},
+		{"since", "string", "RFC 3339; events at or after this moment."},
+		{"until", "string", "RFC 3339; events before this moment."},
+	}, pagingParameters...),
 	"GET /api/v1/audit": append([]queryParameter{
 		{"target_id", "string", ""},
 		{"target_type", "string", ""},
 		{"actor", "string", "The identity that acted."},
 		{"action", "string", ""},
+		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
 		{"outcome", "string", "success, failure or denied."},
 		{"since", "string", "RFC 3339; events at or after this moment."},
 		{"until", "string", "RFC 3339; events before this moment."},
@@ -467,45 +527,52 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/hosts":                         pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":                    ref("Host"),
-	"PUT /api/v1/hosts/{id}/tags":               ref("Host"),
-	"PUT /api/v1/hosts/{id}/channel":            ref("Host"),
-	"PUT /api/v1/hosts/{id}/owner":              ref("Host"),
-	"PUT /api/v1/hosts/{id}/management-address": ref("Host"),
-	"PUT /api/v1/hosts/{id}/failure-domain":     ref("Host"),
-	"GET /api/v1/jobs":                          cursorCollection("Job"),
-	"GET /api/v1/jobs/{id}":                     ref("Job"),
-	"POST /api/v1/jobs/{id}/approve":            ref("Job"),
-	"POST /api/v1/jobs/{id}/cancel":             ref("Job"),
-	"GET /api/v1/jobs/{id}/attempts":            collection("Attempt"),
-	"POST /api/v1/hosts/{id}/operations":        ref("Job"),
-	"GET /api/v1/campaigns":                     collection("Campaign"),
-	"POST /api/v1/campaigns":                    ref("Campaign"),
-	"GET /api/v1/campaigns/{id}":                ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/approve":       ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/pause":         ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/resume":        ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/cancel":        ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/retry":         ref("Campaign"),
-	"GET /api/v1/campaigns/{id}/targets":        pagedCollection("CampaignTarget"),
-	"GET /api/v1/campaigns/{id}/timeline":       collection("TimelineEntry"),
-	"GET /api/v1/campaigns/{id}/steps":          cursorCollection("CampaignStep"),
-	"GET /api/v1/audit":                         cursorCollection("AuditEvent"),
-	"GET /api/v1/budgets":                       items("Budget"),
-	"GET /api/v1/fleet/summary":                 ref("FleetSummary"),
-	"GET /api/v1/hosts/{id}/audit":              collection("AuditEvent"),
-	"GET /api/v1/hosts/{id}/system/history":     collection("SystemHistoryEntry"),
-	"GET /api/v1/hosts/{id}/access":             ref("HostAccess"),
-	"GET /api/v1/policies":                      collection("Policy"),
-	"POST /api/v1/policies":                     ref("Policy"),
-	"GET /api/v1/policies/{id}":                 ref("Policy"),
-	"PUT /api/v1/policies/{id}":                 ref("Policy"),
-	"POST /api/v1/policies/{id}/publish":        ref("Policy"),
-	"POST /api/v1/policies/{id}/evaluate":       ref("PolicyOutcome"),
-	"GET /api/v1/policies/{id}/results":         pagedCollection("PolicyResult"),
-	"GET /api/v1/policies/{id}/versions":        collection("PolicyVersion"),
-	"GET /api/v1/hosts/{id}/policies":           collection("PolicyResult"),
+	"GET /api/v1/hosts":                            pagedCollection("Host"),
+	"GET /api/v1/hosts/{id}":                       ref("Host"),
+	"PUT /api/v1/hosts/{id}/tags":                  ref("Host"),
+	"PUT /api/v1/hosts/{id}/channel":               ref("Host"),
+	"PUT /api/v1/hosts/{id}/owner":                 ref("Host"),
+	"PUT /api/v1/hosts/{id}/management-address":    ref("Host"),
+	"PUT /api/v1/hosts/{id}/failure-domain":        ref("Host"),
+	"PUT /api/v1/hosts/{id}/placement":             ref("Host"),
+	"GET /api/v1/jobs":                             cursorCollection("Job"),
+	"GET /api/v1/jobs/{id}":                        ref("Job"),
+	"POST /api/v1/jobs/{id}/approve":               ref("Job"),
+	"POST /api/v1/jobs/{id}/cancel":                ref("Job"),
+	"GET /api/v1/jobs/{id}/attempts":               collection("Attempt"),
+	"POST /api/v1/hosts/{id}/operations":           ref("Job"),
+	"GET /api/v1/campaigns":                        collection("Campaign"),
+	"POST /api/v1/campaigns":                       ref("Campaign"),
+	"GET /api/v1/campaigns/{id}":                   ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/approve":          ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/pause":            ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/resume":           ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/cancel":           ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/retry":            ref("Campaign"),
+	"GET /api/v1/campaign-schedules":               collection("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules":              ref("CampaignSchedule"),
+	"GET /api/v1/campaign-schedules/{id}":          ref("CampaignSchedule"),
+	"PUT /api/v1/campaign-schedules/{id}":          ref("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules/{id}/run-now": ref("Campaign"),
+	"GET /api/v1/campaigns/{id}/targets":           pagedCollection("CampaignTarget"),
+	"GET /api/v1/campaigns/{id}/timeline":          collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":             cursorCollection("CampaignStep"),
+	"GET /api/v1/audit":                            cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                          items("Budget"),
+	"GET /api/v1/fleet/summary":                    ref("FleetSummary"),
+	"GET /api/v1/hosts/{id}/audit":                 cursorCollection("AuditEvent"),
+	"GET /api/v1/hosts/{id}/packages":              ref("HostPackageList"),
+	"GET /api/v1/hosts/{id}/system/history":        collection("SystemHistoryEntry"),
+	"GET /api/v1/hosts/{id}/access":                ref("HostAccess"),
+	"GET /api/v1/policies":                         collection("Policy"),
+	"POST /api/v1/policies":                        ref("Policy"),
+	"GET /api/v1/policies/{id}":                    ref("Policy"),
+	"PUT /api/v1/policies/{id}":                    ref("Policy"),
+	"POST /api/v1/policies/{id}/publish":           ref("Policy"),
+	"POST /api/v1/policies/{id}/evaluate":          ref("PolicyOutcome"),
+	"GET /api/v1/policies/{id}/results":            pagedCollection("PolicyResult"),
+	"GET /api/v1/policies/{id}/versions":           collection("PolicyVersion"),
+	"GET /api/v1/hosts/{id}/policies":              collection("PolicyResult"),
 }
 
 // items is a whole list answered at once, without a count: the budgets
@@ -556,6 +623,38 @@ var requestSchemas = map[string]map[string]any{
 			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		},
 		"required": []string{"address"},
+	},
+	"POST /api/v1/campaign-schedules":     campaignScheduleSchema,
+	"PUT /api/v1/campaign-schedules/{id}": campaignScheduleSchema,
+	"PUT /api/v1/hosts/{id}/placement": {
+		"type": "object",
+		"properties": map[string]any{
+			"site":        map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The site the host stands in. Keys the site:* budgets, the scope of every role binding and the site leaf of group selectors; none of them is re-evaluated by the move."},
+			"environment": map[string]any{"type": "string", "maxLength": hosts.MaxPlacementLength, "description": "The environment the host serves; decides who may change it and whether a change needs a second person, from the next order on."},
+			"reason":      map[string]any{"type": "string", "description": "Required, at least 8 characters; kept in the audit trail."},
+		},
+		"required": []string{"site", "environment", "reason"},
+	},
+	"POST /api/v1/hosts/bulk-metadata": {
+		"type": "object",
+		"properties": map[string]any{
+			"host_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 1000},
+			"reason":   map[string]any{"type": "string", "description": "Required, at least 8 characters; kept with every host's event."},
+			"set": map[string]any{"type": "object", "description": "A field left out leaves that fact alone; an empty owner or failure_domain clears it; maintenance null closes the windows.",
+				"properties": map[string]any{
+					"tags_add":       map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"tags_remove":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
+					"owner":          map[string]any{"type": "string"},
+					"failure_domain": map[string]any{"type": "string"},
+					"site":           map[string]any{"type": "string"},
+					"environment":    map[string]any{"type": "string"},
+					"maintenance": map[string]any{"type": []string{"object", "null"}, "properties": map[string]any{
+						"until":            map[string]any{"type": "string", "format": "date-time"},
+						"duration_minutes": map[string]any{"type": "integer"},
+						"reason":           map[string]any{"type": "string"}}},
+				}},
+		},
+		"required": []string{"host_ids", "reason", "set"},
 	},
 	"PUT /api/v1/hosts/{id}/failure-domain": {
 		"type": "object",

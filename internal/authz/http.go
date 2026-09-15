@@ -29,3 +29,12 @@ func FromContext(ctx context.Context) Principal {
 func (p Principal) Authenticated() bool {
 	return p.ID != ""
 }
+
+// ContextWithPrincipal attaches an identity outside the middleware: a
+// loop placing a stored order carries it through the same handlers a
+// request goes through, under the identity the order is placed as. The
+// identity is whatever the caller resolved; the handlers judge it the way
+// they judge one the middleware established.
+func ContextWithPrincipal(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalKey, principal)
+}

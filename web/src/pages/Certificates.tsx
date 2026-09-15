@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader } from "../components/layout";
+import { ExportButton } from "../components/ExportButton";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -78,6 +79,7 @@ export function FleetCertificates() {
         description={t("Expiry dates from the paths the panel watches and from everything certmonger tracks. Warning at {warning} days, urgent at {critical}. A host that reports no certificate is not a host without them — it is a host nobody has pointed at a path yet.", {
           warning: data.thresholds.warning_days, critical: data.thresholds.critical_days,
         })}
+        actions={<ExportButton path="/api/v1/certificates" />}
       />
 
       <div className="widgets">
