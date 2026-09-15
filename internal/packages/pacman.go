@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -107,6 +108,46 @@ func checkupdatesDB() string {
 	return filepath.Join(runtimeDir, "cache", "checkupdates")
 }
 
+// SyncCopyDir is where the helper keeps the copy of the sync database
+// that a plan reads when checkupdates is not installed. The helper writes
+// it as root and the agent reads it; pacman refuses a sync to anybody but
+// root even into a copy, so the two halves of what checkupdates does with
+// fakeroot are split between the two processes here. The copy is world
+// readable and lives outside the agent's private state directory, because
+// pacman hands the downloads to its own unprivileged user (DownloadUser,
+// alpm), which has to write there too. A copy of public repository
+// indexes is nothing to hide.
+const SyncCopyDir = "/var/cache/flotestro/pacman-sync"
+
+// pacmanDownloadUser is the account pacman drops to for downloads; the
+// sync directory of the copy is handed to it when it exists.
+const pacmanDownloadUser = "alpm"
+
+// SyncCopyMaxAge is how old the copy may be for a plan to trust it; past
+// it the plan asks the helper for a fresh one first.
+const SyncCopyMaxAge = 15 * time.Minute
+
+// NeedsSyncCopy says whether a plan on this manager has to have the helper
+// sync the copy first: pacman without checkupdates, and a copy missing or
+// older than SyncCopyMaxAge.
+func NeedsSyncCopy(manager Manager) bool {
+	if manager == nil || manager.Name() != PacmanName || fileExists(checkupdatesPath) {
+		return false
+	}
+	age, ok := SyncCopyAge()
+	return !ok || age > SyncCopyMaxAge
+}
+
+// SyncCopyAge returns how long ago the copy was synced, or false when there
+// is no copy.
+func SyncCopyAge() (time.Duration, bool) {
+	info, err := os.Stat(filepath.Join(SyncCopyDir, "sync"))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
+}
+
 // Plan computes the changes without touching the system database.
 //
 // An upgrade plan comes from checkupdates, which syncs a copy of the
@@ -149,10 +190,11 @@ func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 		}
 		pending = ParseCheckupdates(result.Stdout)
 	} else {
-		// Without pacman-contrib the adapter does what checkupdates does:
-		// a sync of the repositories into a copy of the database next to
-		// the local one, and the pending updates read from that copy. The
-		// system database stays as it was, which is the whole point.
+		// Without pacman-contrib the plan reads the copy the helper synced
+		// (see Refresh): the pending updates against a fresh copy of the
+		// repositories, with the system database untouched, which is what
+		// checkupdates does. A missing copy is a refusal with a reason: the
+		// agent asks the helper for one before it plans.
 		var err error
 		if pending, err = p.pendingFromSyncCopy(ctx); err != nil {
 			return plan, err
@@ -167,39 +209,30 @@ func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 		}
 		plan.Changes = append(plan.Changes, change)
 	}
-	p.enrichFromSyncCopy(ctx, &plan)
+	copyDir := checkupdatesDB()
+	if !fileExists(checkupdatesPath) {
+		copyDir = SyncCopyDir
+	}
+	p.enrichFromSyncCopy(ctx, &plan, copyDir)
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
 	// The sizes of the candidates come from the same copy of the database
 	// the plan came from, so the plan and its sizes agree.
-	plan.Space = p.planSpace(ctx, plan, "--dbpath", checkupdatesDB())
+	plan.Space = p.planSpace(ctx, plan, "--dbpath", copyDir)
 	return plan, nil
 }
 
-// pendingFromSyncCopy syncs the repositories into the copy of the database
-// the plan reads and lists the updates pending against it. It is what
-// checkupdates does, done by hand when pacman-contrib is not installed:
-// the copy keeps the local database as a link, so pacman compares the
-// fresh repositories with what is installed, and the system's own sync
-// database is never touched. The helper runs as root, so no fakeroot is
-// needed for the sync.
+// pendingFromSyncCopy lists the updates pending against the copy of the
+// sync database the helper keeps (SyncCopyDir). The copy holds the local
+// database as a link, so pacman compares fresh repositories with what is
+// installed, and the query needs no privilege. Without a copy the plan is
+// refused with the same code as a missing checkupdates: nothing was
+// read, and the agent knows to ask the helper for a sync.
 func (p *Pacman) pendingFromSyncCopy(ctx context.Context) ([]Change, error) {
-	db := checkupdatesDB()
-	if err := os.MkdirAll(db, 0o755); err != nil {
-		return nil, fmt.Errorf("%w: the copy of the database cannot be made at %s: %v", ErrCheckupdatesMissing, db, err)
-	}
-	local := filepath.Join(db, "local")
-	if _, err := os.Lstat(local); err != nil {
-		if err := os.Symlink("/var/lib/pacman/local", local); err != nil {
-			return nil, fmt.Errorf("%w: the local database cannot be linked into the copy: %v", ErrCheckupdatesMissing, err)
-		}
-	}
-	sync := run(ctx, 10*time.Minute, pacmanPath, "-Sy", "--dbpath", db, "--logfile", "/dev/null",
-		"--noconfirm", "--noprogressbar")
-	if !sync.Ran || sync.ExitCode != 0 {
-		return nil, fmt.Errorf("pacman -Sy into the copy of the database: %s", sync.Reason())
+	if _, ok := SyncCopyAge(); !ok {
+		return nil, fmt.Errorf("%w; no copy of the sync database at %s either", ErrCheckupdatesMissing, SyncCopyDir)
 	}
 	// Exit 1 without output is pacman's way of saying nothing is pending.
-	pending := run(ctx, 2*time.Minute, pacmanPath, "-Qu", "--dbpath", db)
+	pending := run(ctx, 2*time.Minute, pacmanPath, "-Qu", "--dbpath", SyncCopyDir)
 	switch {
 	case !pending.Ran:
 		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
@@ -209,6 +242,43 @@ func (p *Pacman) pendingFromSyncCopy(ctx context.Context) ([]Change, error) {
 		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
 	}
 	return ParseCheckupdates(pending.Stdout), nil
+}
+
+// SyncCopy refreshes the copy of the sync database at SyncCopyDir. It runs
+// as root in the helper: pacman syncs for nobody else, even into a copy.
+// The system database is not touched - a sync of it without an upgrade
+// is the half-step Arch warns against, and the upgrade syncs by itself.
+func (p *Pacman) SyncCopy(ctx context.Context) error {
+	syncDir := filepath.Join(SyncCopyDir, "sync")
+	if err := os.MkdirAll(syncDir, 0o755); err != nil {
+		return fmt.Errorf("the copy of the sync database cannot be made at %s: %w", SyncCopyDir, err)
+	}
+	// The downloads are written by pacman's download user, not by root:
+	// the sync directory is handed to it, and the parents stay root's.
+	if account, err := user.Lookup(pacmanDownloadUser); err == nil {
+		uid, _ := strconv.Atoi(account.Uid)
+		gid, _ := strconv.Atoi(account.Gid)
+		if err := os.Chown(syncDir, uid, gid); err != nil {
+			return fmt.Errorf("the sync directory of the copy cannot be handed to %s: %w", pacmanDownloadUser, err)
+		}
+	}
+	local := filepath.Join(SyncCopyDir, "local")
+	if _, err := os.Lstat(local); err != nil {
+		if err := os.Symlink("/var/lib/pacman/local", local); err != nil {
+			return fmt.Errorf("the local database cannot be linked into the copy: %w", err)
+		}
+	}
+	sync := run(ctx, 10*time.Minute, pacmanPath, "-Sy", "--dbpath", SyncCopyDir, "--logfile", "/dev/null",
+		"--noconfirm", "--noprogressbar")
+	if !sync.Ran || sync.ExitCode != 0 {
+		return p.failure("pacman -Sy into the copy of the database", sync)
+	}
+	// The indexes land world-readable, as pacman writes them; the agent
+	// reads them from there.
+	if err := os.Chmod(syncDir, 0o755); err != nil {
+		return fmt.Errorf("the copy of the sync database is not readable: %w", err)
+	}
+	return nil
 }
 
 // planSpace measures where the bytes of the plan go. The download size is
@@ -298,12 +368,12 @@ func ParseCheckupdates(output string) []Change {
 // of the database checkupdates has just synced. A failure leaves the plan as
 // it was: the size is an estimate and the origin a convenience, neither is
 // worth a failed plan.
-func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan) {
+func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir string) {
 	if len(plan.Changes) == 0 {
 		return
 	}
 	result := run(ctx, 2*time.Minute, pacmanPath, "-Sup", "--noconfirm",
-		"--dbpath", checkupdatesDB(), "--ignore", AgentPackage,
+		"--dbpath", copyDir, "--ignore", AgentPackage,
 		"--print-format", pacmanPrintFormat)
 	if !result.Ran || result.ExitCode != 0 {
 		return
@@ -377,15 +447,16 @@ func pacmanKernelPackage(name string) bool {
 // This is the one place the system sync database is touched outside a full
 // upgrade: the panel orders it deliberately, as the refresh step of a plan
 // or before an installation.
+//
+// On Arch a refresh of the system database without an upgrade is the
+// partial state the distribution warns against, so the refresh feeds the
+// copy the plans read instead; the upgrade syncs the system database in
+// the same transaction that raises the packages.
 func (p *Pacman) Refresh(ctx context.Context) error {
 	if held, path := p.LockHeld(); held {
 		return fmt.Errorf("%w: %s", ErrLocked, path)
 	}
-	result := run(ctx, 10*time.Minute, pacmanPath, "-Sy", "--noconfirm", "--noprogressbar")
-	if !result.Ran || result.ExitCode != 0 {
-		return p.failure("pacman -Sy", result)
-	}
-	return nil
+	return p.SyncCopy(ctx)
 }
 
 // Upgrade carries the full system upgrade out.

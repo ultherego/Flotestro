@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { Host, Whoami } from "../lib/types";
 import { useCapabilities, type Capabilities } from "../lib/capabilities";
@@ -12,10 +12,6 @@ import { Icon, type IconName } from "./icons";
 
 /** How many recently opened hosts are kept; more than a screenful is noise. */
 const RECENT = 8;
-/** How many hosts of the fleet the empty palette offers to pick from, by name. */
-const FLEET_SHOWN = 8;
-/** How many starred hosts the empty palette resolves; the rest are a filter away. */
-const FAVOURITES_SHOWN = 12;
 /** The pause in typing before the server is asked. */
 const DEBOUNCE = 250;
 /** The shortest query the server answers; below it the palette shows the shortcuts. */
@@ -205,21 +201,6 @@ export function hostPath(target: { id: string; host?: Host }, segment: string, i
   return { path: `/hosts/${target.id}/${wanted}` };
 }
 
-/** A host of the recent or favourite lists as a row of the palette. */
-function hostRow(host: Host, group: "Favourites" | "Recent" | "Hosts"): Row {
-  const meta = [`${host.site} / ${host.environment}`, host.os_family].filter(Boolean).join(" · ");
-  return {
-    key: `${group}:${host.id}`,
-    group,
-    icon: "hosts",
-    title: host.hostname,
-    subtitle: host.management_address ? `${host.management_address} · ${meta}` : meta,
-    path: `/hosts/${host.id}/${DEFAULT_MODULE}`,
-    host,
-    hostID: host.id,
-  };
-}
-
 /**
  * The command palette: the search field of the top bar, and the one
  * control for jumping anywhere in the panel. It reads as a search rather
@@ -284,7 +265,7 @@ export function HostPicker() {
   // the ones they starred and the ones they opened last. Neither is fleet
   // data, so neither goes to the server.
   const [favourites, setFavourites] = useStoredState<string[]>(FAVOURITES_KEY, [], isStringList);
-  const [recent, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
+  const [, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
   useEffect(() => {
     if (!selected) return;
     setRecent((current) => [selected.id, ...current.filter((id) => id !== selected.id)].slice(0, RECENT));
@@ -293,39 +274,6 @@ export function HostPicker() {
   const toggleFavourite = (id: string) =>
     setFavourites((current) => current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]);
 
-  // The remembered hosts are read one by one under the key the host
-  // workspace uses, so a host just visited costs nothing; the requests go
-  // out once the palette is first opened, not on every screen. A host that
-  // is gone since it was starred is left out rather than shown as an error.
-  const remembered = useMemo(() => {
-    const ids = [...favourites.slice(0, FAVOURITES_SHOWN)];
-    for (const id of recent) if (!ids.includes(id)) ids.push(id);
-    return ids;
-  }, [favourites, recent]);
-  const [armed, setArmed] = useState(false);
-  const records = useQueries({
-    queries: remembered.map((id) => ({
-      queryKey: ["host", id],
-      queryFn: () => api.get<Host>(`/api/v1/hosts/${id}`),
-      staleTime: 60_000,
-      retry: false,
-      enabled: armed,
-    })),
-  });
-  const byID = new Map<string, Host>();
-  records.forEach((record, index) => { if (record.data) byID.set(remembered[index], record.data); });
-
-  // A host to pick before a single letter is typed: the first of the
-  // fleet by name, so an operator with nothing starred and nothing recent
-  // still has hosts in front of them, not places alone. Any more is a
-  // filter away.
-  const fleet = useQuery({
-    queryKey: ["hosts", "palette", FLEET_SHOWN],
-    queryFn: () => api.get<{ items: Host[] }>(`/api/v1/hosts?limit=${FLEET_SHOWN}&sort=hostname`),
-    staleTime: 60_000,
-    retry: false,
-    enabled: armed,
-  });
 
   // The server is asked after a pause in typing, and the last answer stays
   // on the screen while the next one is on its way: a list that empties
@@ -340,31 +288,18 @@ export function HostPicker() {
   });
   const searching = settled.length >= MINIMUM;
 
-  // Empty, the palette is the starred hosts, the recent ones and the
-  // places of the panel. With a query it is what the server found, in
-  // groups by kind, and the places whose name the query matches.
+  // Empty, the palette is the places of the panel; the hosts to pick from
+  // stand in the host selector beside it. With a query it is what the
+  // server found, in groups by kind, and the places whose name the query
+  // matches.
   const rows = useMemo<Row[]>(() => {
     if (!searching) {
-      const starred = favourites.slice(0, FAVOURITES_SHOWN).flatMap((id) => { const host = byID.get(id); return host ? [hostRow(host, "Favourites")] : []; });
-      const seen = new Set(starred.map((row) => row.hostID));
-      const opened = recent.flatMap((id) => {
-        const host = byID.get(id);
-        if (!host || seen.has(id)) return [];
-        seen.add(id);
-        return [hostRow(host, "Recent")];
-      });
-      const needle = query.trim().toLowerCase();
-      const picked = (fleet.data?.items ?? []).flatMap((host) => {
-        if (seen.has(host.id) || (needle && !host.hostname.toLowerCase().includes(needle))) return [];
-        seen.add(host.id);
-        return [hostRow(host, "Hosts")];
-      });
       // A query too short for the server still narrows the places: one
       // letter is enough to tell the audit from the access.
-      return [...starred, ...opened, ...picked, ...matchCommands(commands, query, t)];
+      return matchCommands(commands, query, t);
     }
     return [...groupResults(search.data?.items ?? [], settled), ...matchCommands(commands, settled, t)];
-  }, [searching, settled, query, search.data, fleet.data, favourites, recent, records, commands, t]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searching, settled, query, search.data, commands, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ctrl+K (Cmd+K on a Mac) opens the palette from anywhere: jumping
   // between places is the most frequent move in the panel, and it should
@@ -403,7 +338,6 @@ export function HostPicker() {
   }, [open, highlight, listID]);
 
   function show() {
-    setArmed(true);
     setQuery("");
     setOpen(true);
   }
@@ -412,7 +346,7 @@ export function HostPicker() {
     setOpen(false);
     if (row.hostID) {
       if (selected && row.hostID === selected.id) return;
-      const target = hostPath({ id: row.hostID, host: row.host ?? byID.get(row.hostID) }, segment, installation);
+      const target = hostPath({ id: row.hostID, host: row.host }, segment, installation);
       navigate(target.path, target.state ? { state: target.state } : undefined);
       return;
     }
@@ -445,7 +379,6 @@ export function HostPicker() {
     }
   }
 
-  const loadingRemembered = !searching && remembered.length > 0 && records.some((record) => record.isLoading);
   // The server bounds every kind on its own, so the note about the rest
   // is due when any one kind filled its share.
   const truncated = searching && KIND_ORDER.some((kind) =>
@@ -536,7 +469,7 @@ export function HostPicker() {
           {/* The states of the list stand where the rows would: a silent
               empty box does not say whether nothing matched or nothing
               arrived. */}
-          {(loadingRemembered || (searching && search.isLoading)) && <p className="host-picker-note">{t("Loading…")}</p>}
+          {searching && search.isLoading && <p className="host-picker-note">{t("Loading…")}</p>}
           {search.error && searching && (
             <p className="host-picker-note error">
               {t("Could not search: {message}", { message: search.error instanceof Error ? search.error.message : String(search.error) })}
