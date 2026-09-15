@@ -844,3 +844,52 @@ func TestAChangedPreconditionAfterTheWaitIsRefusedWithoutTouchingTheHost(t *test
 		t.Fatalf("a task on the planned boot: status=%s code=%q", again.GetStatus(), again.GetErrorCode())
 	}
 }
+
+// TestAJournalThatCannotTakeTheMarkerStartsNothing is the full disk of the
+// document's scenario list: the state directory refuses the write of the
+// marker, so the helper is never asked and the refusal is typed - the
+// operator reads a cause, not an internal error, and a delivery after the
+// disk is freed runs the operation as if for the first time.
+func TestAJournalThatCannotTakeTheMarkerStartsNothing(t *testing.T) {
+	dir := t.TempDir()
+	journal, err := NewIdempotencyJournal(dir, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A file where the journal expects its directory: every write under it
+	// fails the way a full or read-only file system fails, whoever runs the
+	// test.
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blocked, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	journal.dir = filepath.Join(blocked, "journal")
+
+	asked := false
+	_, client := startFakeHelper(t, func(request *helperv1.HelperRequest) *helperv1.HelperResponse {
+		asked = true
+		return accepted(request)
+	})
+	executor := NewTaskExecutor(client, journal, systemdFacts, quietLogger())
+
+	result := executor.Execute(context.Background(), restartEnvelope("task-1", "key-1"))
+	if result.GetStatus() != agentv1.TaskResult_STATUS_FAILED || result.GetErrorCode() != RejectJournalUnavailable {
+		t.Fatalf("status = %s, code = %s (%s); want failed with %s",
+			result.GetStatus(), result.GetErrorCode(), result.GetMessage(), RejectJournalUnavailable)
+	}
+	if asked {
+		t.Fatal("the helper was asked although the marker was not written")
+	}
+
+	// The journal comes back: the same key runs, and nothing from the
+	// refused delivery stands in its way.
+	journal.dir = dir
+	result = executor.Execute(context.Background(), restartEnvelope("task-2", "key-1"))
+	if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED || result.GetReplayed() {
+		t.Fatalf("after the journal came back: status = %s (%s), replayed = %v",
+			result.GetStatus(), result.GetErrorCode(), result.GetReplayed())
+	}
+	if !asked {
+		t.Fatal("the helper was not asked once the journal could write")
+	}
+}

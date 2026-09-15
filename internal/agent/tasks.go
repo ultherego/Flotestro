@@ -84,6 +84,12 @@ const (
 	// RejectInternalError marks an error on the side of the agent. The task ends
 	// with a negative result instead of taking the whole process with it.
 	RejectInternalError = "agent_internal_error"
+	// RejectJournalUnavailable marks a mutation the agent did not start
+	// because its journal could not take the in-flight marker - a full or
+	// read-only state directory, most often. Not knowing an outcome is
+	// allowed; a second execution nobody can tell from the first is not, so
+	// the host performs nothing until the journal can write again.
+	RejectJournalUnavailable = "journal_unavailable"
 	// RejectNetworkUnreachable marks a network change after which the host lost
 	// its route to the panel. The change is not confirmed, so the host goes back
 	// on its own to the configuration from before it.
@@ -456,7 +462,7 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	if err := e.markInFlight(task, action, payload, now); err != nil {
 		// Not knowing is allowed; a silent second execution is not. A host
 		// whose journal cannot take the marker performs no mutation.
-		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectJournalUnavailable,
 			"the in-flight marker was not written to the journal: "+err.Error())
 	}
 	// The marker is down and the claims are held: the operation starts this
