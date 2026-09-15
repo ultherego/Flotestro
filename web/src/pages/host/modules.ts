@@ -86,6 +86,11 @@ const MODULES: Module[] = [
   { segment: "kernel", name: "Kernel", group: "system", icon: "kernel", reason: requires("kernel"), inventory: "kernel" },
   { segment: "time", name: "Time", group: "system", icon: "time", reason: requires("time"), inventory: "time" },
   { segment: "power", name: "Power", group: "system", icon: "power", reason: requires("systemd"), inventory: "power" },
+  // The verdicts of the desired-state policies that select the host. The
+  // panel judges them from the inventory, so the tab reads no module of
+  // its own and is never unavailable: a host nobody declared anything
+  // about shows so.
+  { segment: "policies", name: "Policies", group: "system", icon: "security", reason: () => "" },
 
   { segment: "network", name: "Network", group: "network", icon: "network", reason: requires("network"), inventory: "network" },
   { segment: "dns", name: "DNS", group: "network", icon: "dns", reason: requires("dns"), inventory: "dns" },

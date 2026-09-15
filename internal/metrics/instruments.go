@@ -78,9 +78,17 @@ func (r *Registry) NewHistogram(name, help string, buckets []float64, labels ...
 }
 
 // Inc adds one to the series of the given label values.
-func (c *Counter) Inc(values ...string) {
+func (c *Counter) Inc(values ...string) { c.Add(1, values...) }
+
+// Add adds a count to the series of the given label values: one event
+// that stands for many, like a pass that held back a batch. A count of
+// zero or less is no event - a counter only goes up.
+func (c *Counter) Add(count float64, values ...string) {
+	if count <= 0 {
+		return
+	}
 	c.mu.Lock()
-	c.values[key(values)]++
+	c.values[key(values)] += count
 	c.mu.Unlock()
 }
 
@@ -212,6 +220,13 @@ var (
 	TargetStateDuration = Default.NewHistogram("flotestro_target_state_duration_seconds",
 		"Time a campaign target spent in a state before leaving it, by state and operation.",
 		DurationBuckets, "state", "action")
+	// DispatchThrottled counts the queued jobs a pass of the scheduler
+	// left in the queue because the dispatch rate had no token for them.
+	// A rising counter is a queue draining at the rate rather than a
+	// fault; a counter that never rises with a full queue is a rate set
+	// too high to matter.
+	DispatchThrottled = Default.NewCounter("flotestro_dispatch_throttled_total",
+		"Queued jobs held back by the dispatch rate, by gateway.", "gateway")
 	// DuplicateIdentity counts the sessions opened while another session
 	// of the same certificate, on a different boot, was still alive.
 	DuplicateIdentity = Default.NewCounter("flotestro_duplicate_identity_total",

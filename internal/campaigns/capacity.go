@@ -29,12 +29,22 @@ func (o *Orchestrator) takeCapacity(ctx context.Context, campaign Campaign,
 	// A backup repository is a shared resource: a site budget knows nothing
 	// about the backend half the fleet writes to at once.
 	repository := campaignRepository(campaign)
+	// The host's place in the fleet names the budgets of the change beyond
+	// the fleet's own: the site and the failure domain are what the panel
+	// recorded about the host, and the gateway is the one its session is
+	// open on now - read from the session table, because the host may be
+	// connected to another instance than the one driving the campaign.
+	gateway, err := o.budgets.SessionGateway(ctx, host.ID)
+	if err != nil {
+		return false, err
+	}
+	where := budgets.Topology{Site: host.Site, FailureDomain: host.FailureDomain, Gateway: gateway}
 	// The claimant is the campaign rather than the host: fairness divides the
 	// tokens between changes, not between machines. Otherwise a campaign on a
 	// thousand hosts would have a thousand times the share of a campaign on
 	// one.
 	refusal, err := o.budgets.Acquire(ctx, target.ID, "campaign:"+campaign.ID,
-		budgets.ClassMaintenance, budgets.Needs(action, host.Site, repository))
+		budgets.ClassMaintenance, budgets.Needs(action, where, repository))
 	if err != nil {
 		return false, err
 	}

@@ -58,6 +58,9 @@ import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
 import { Reads } from "./pages/Reads";
 import { Budgets } from "./pages/Budgets";
+import { Policies } from "./pages/Policies";
+import { PolicyPage } from "./pages/Policy";
+import { HostPolicies } from "./pages/host/Policies";
 import { Directory } from "./pages/Directory";
 import { Access } from "./pages/Access";
 import { Audit } from "./pages/Audit";
@@ -122,6 +125,9 @@ export function App() {
   // The budgets are the reason a job or a campaign stands in the queue, so
   // they stand with the operations they hold back.
   const seesBudgets = permissions.has("budget.read");
+  // The declared state stands with the operations: a policy is the third
+  // model of change, next to the job and the campaign.
+  const seesPolicies = permissions.has("policy.read");
 
   // The navigation, grouped by what the operator is doing rather than by
   // backend module. An item that is not allowed is left out of its group;
@@ -161,6 +167,9 @@ export function App() {
           { to: "/bulk", label: "Bulk Workspace", icon: "bulk" as const },
           { to: "/campaigns", label: "Campaigns", icon: "campaigns" as const },
         ] : []),
+        // A policy declares what is to be true and orders campaigns for
+        // the rest, so it stands after the campaigns it orders.
+        ...(seesPolicies ? [{ to: "/policies", label: "Policies", icon: "security" as const }] : []),
         // The capacity the jobs and the campaigns draw on: the gauge stands
         // last in the group, after the work it meters.
         ...(seesBudgets ? [{ to: "/budgets", label: "Budgets", icon: "overview" as const }] : []),
@@ -250,6 +259,8 @@ export function App() {
           {seesRelays && <Route path="/relays" element={<Relays />} />}
           {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
           <Route path="/security" element={<FleetSecurity />} />
+          {seesPolicies && <Route path="/policies" element={<Policies />} />}
+          {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
           <Route path="/certificates" element={<FleetCertificates />} />
           <Route path="/backups" element={<FleetBackups />} />
           <Route path="/monitoring" element={<FleetMonitoring />} />
@@ -274,6 +285,7 @@ export function App() {
             <Route path="kernel" element={<Kernel />} />
             <Route path="time" element={<Time />} />
             <Route path="power" element={<Power />} />
+            <Route path="policies" element={<HostPolicies />} />
             <Route path="security" element={<Security />} />
             <Route path="certificates" element={<Certificates />} />
             <Route path="backups" element={<Backups />} />

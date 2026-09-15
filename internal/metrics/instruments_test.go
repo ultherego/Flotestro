@@ -37,3 +37,21 @@ func TestHistogramRendersTheExpositionShape(t *testing.T) {
 		}
 	}
 }
+
+// A counter adds counts as well as events, and never goes down: a pass
+// that held back a batch reports the batch, and nothing reports a
+// negative one.
+func TestCounterAddsCountsAndOnlyGoesUp(t *testing.T) {
+	r := &Registry{}
+	c := r.NewCounter("test_held_total", "Test.", "gateway")
+	c.Add(7, "gw-a")
+	c.Inc("gw-a")
+	c.Add(0, "gw-a")
+	c.Add(-3, "gw-a")
+
+	var b strings.Builder
+	r.render(&b)
+	if !strings.Contains(b.String(), `test_held_total{gateway="gw-a"} 8`+"\n") {
+		t.Errorf("the counter rendered:\n%s", b.String())
+	}
+}

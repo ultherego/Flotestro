@@ -12,15 +12,17 @@ import (
 // for: a hundred state reads are not the same load as a hundred package
 // transactions.
 func TestNeedsSeparateReadsFromMutations(t *testing.T) {
-	read := Needs(opspec.ActionPackageList, "warsaw", "")
+	read := Needs(opspec.ActionPackageList, Topology{Site: "warsaw"}, "")
 	if len(read) != 1 || read[0].Key != KeyGlobalReads {
 		t.Fatalf("a read loads budgets %+v", read)
 	}
 
-	mutation := Needs(opspec.ActionPackageUpgrade, "warsaw", "")
+	mutation := Needs(opspec.ActionPackageUpgrade, Topology{Site: "warsaw"}, "")
 	if len(mutation) != 2 {
 		t.Fatalf("a package transaction loads budgets %+v", mutation)
 	}
+	// Only the site is known here: no domain and no gateway budget appear
+	// out of nothing.
 	if mutation[0].Key != KeyGlobalMutations {
 		t.Errorf("transaction outside the mutation budget: %+v", mutation)
 	}
@@ -36,7 +38,7 @@ func TestRebootHasItsOwnSiteFamily(t *testing.T) {
 	if family := SiteFamily(opspec.ActionSystemReboot); family != "reboot" {
 		t.Fatalf("reboot in family %q", family)
 	}
-	needs := Needs(opspec.ActionSystemReboot, "warsaw", "")
+	needs := Needs(opspec.ActionSystemReboot, Topology{Site: "warsaw"}, "")
 	if len(needs) != 2 || needs[1].Key != "site:warsaw:reboot" {
 		t.Fatalf("reboot loads budgets %+v", needs)
 	}
@@ -46,7 +48,7 @@ func TestRebootHasItsOwnSiteFamily(t *testing.T) {
 // turn into the key "site::packages" - that is, into one shared budget for
 // every host nobody has assigned yet.
 func TestHostWithoutSiteGetsNoKeyWithAHole(t *testing.T) {
-	needs := Needs(opspec.ActionPackageUpgrade, "", "")
+	needs := Needs(opspec.ActionPackageUpgrade, Topology{}, "")
 	if len(needs) != 1 || needs[0].Key != KeyGlobalMutations {
 		t.Fatalf("a host without a site loads budgets %+v", needs)
 	}
@@ -112,7 +114,7 @@ func TestRefusalNamesTheObstacle(t *testing.T) {
 // A backup repository is a resource shared by the whole fleet: a site budget
 // knows nothing about the backend half the fleet writes to at once.
 func TestBackendBudgetFollowsTheRepository(t *testing.T) {
-	backup := Needs(opspec.ActionBackupRun, "warsaw", "/srv/copies")
+	backup := Needs(opspec.ActionBackupRun, Topology{Site: "warsaw"}, "/srv/copies")
 	var backend string
 	for _, need := range backup {
 		if strings.HasPrefix(need.Key, "backend:") {
@@ -129,7 +131,7 @@ func TestBackendBudgetFollowsTheRepository(t *testing.T) {
 	}
 
 	// Verifying a copy reads over the same link, so it loads the backend too.
-	verify := Needs(opspec.ActionBackupVerify, "warsaw", "/srv/copies")
+	verify := Needs(opspec.ActionBackupVerify, Topology{Site: "warsaw"}, "/srv/copies")
 	if len(verify) != len(backup) {
 		t.Errorf("verification skips the backend budget: %+v", verify)
 	}
@@ -153,7 +155,7 @@ func TestBackendBudgetFollowsTheRepository(t *testing.T) {
 	}
 	// An operation outside the backup module does not load the backend, even
 	// when an address is present.
-	if len(Needs(opspec.ActionUnitRestart, "warsaw", "/srv/copies")) != 2 {
+	if len(Needs(opspec.ActionUnitRestart, Topology{Site: "warsaw"}, "/srv/copies")) != 2 {
 		t.Error("a unit restart loaded the backend budget")
 	}
 }
@@ -202,7 +204,7 @@ func TestWaitReasonNamesTheKeyAndReadsBack(t *testing.T) {
 // the registry does not describe is not treated as a read: unknown is not
 // harmless.
 func TestUnknownOperationAsksForTheScarcerCapacity(t *testing.T) {
-	needs := Needs(opspec.ActionType("nobody.knows"), "warsaw", "")
+	needs := Needs(opspec.ActionType("nobody.knows"), Topology{Site: "warsaw"}, "")
 	if len(needs) == 0 || needs[0].Key != KeyGlobalMutations {
 		t.Fatalf("an unknown operation loads budgets %+v", needs)
 	}
@@ -255,5 +257,50 @@ func TestLeaseClassIsReadFromTheHolder(t *testing.T) {
 		if got := LeaseClass(c.owner, c.claimant, c.job); got != c.want {
 			t.Errorf("%s: class %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// TestChangeLoadsItsFailureDomainAndGateway guards the topology budgets of
+// the document: a change on a host loads the rack, the zone or the cluster
+// the operator placed it in and the gateway its session goes through,
+// each with a token of the operation's family, next to the site - and a
+// read loads neither.
+func TestChangeLoadsItsFailureDomainAndGateway(t *testing.T) {
+	where := Topology{Site: "warsaw", FailureDomain: "rack-1", Gateway: "edge-03"}
+	needs := Needs(opspec.ActionUnitRestart, where, "")
+	keys := make([]string, 0, len(needs))
+	for _, need := range needs {
+		keys = append(keys, need.Key)
+	}
+	want := []string{KeyGlobalMutations, "site:warsaw:units", "domain:rack-1:units", "gateway:edge-03:units"}
+	if strings.Join(keys, " ") != strings.Join(want, " ") {
+		t.Fatalf("a restart in a placed host loads %v, want %v", keys, want)
+	}
+	if read := Needs(opspec.ActionUnitStatus, where, ""); len(read) != 1 {
+		t.Errorf("a read loads the topology budgets: %+v", read)
+	}
+	// The default policy has to reach a domain and a gateway nobody
+	// described separately.
+	if Pattern("domain:rack-1:units") != "domain:*:units" || Pattern("gateway:edge-03:units") != "gateway:*:units" {
+		t.Error("the topology keys have no pattern of the default policy")
+	}
+}
+
+// TestTopologyKeysStayInThreeParts guards the spelling of free text in a
+// key: a domain named the way the document does ("cluster:pg-a") must not
+// break the key into four parts, and an unknown part names no budget.
+func TestTopologyKeysStayInThreeParts(t *testing.T) {
+	if key := DomainKey("cluster:pg-a", "reboot"); key != "domain:cluster_pg-a:reboot" {
+		t.Errorf("domain key = %q", key)
+	}
+	if key := GatewayKey("edge 03", "packages"); key != "gateway:edge_03:packages" {
+		t.Errorf("gateway key = %q", key)
+	}
+	if DomainKey("", "reboot") != "" || DomainKey("rack-1", "") != "" ||
+		GatewayKey("", "reboot") != "" || GatewayKey("edge-03", "") != "" {
+		t.Error("an unknown domain, gateway or family got a budget key")
+	}
+	if DomainKey("  ", "reboot") != "" {
+		t.Error("a blank domain got a budget key")
 	}
 }

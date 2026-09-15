@@ -122,6 +122,35 @@ func ArrangeForChecks(report compliance.Report, checkIDs []string) (Arrangement,
 			chosen = append(chosen, finding)
 		}
 	}
+	return arrangeChosen(report, chosen, result)
+}
+
+// ArrangeFindings computes one host's plan from every finding of the
+// report that waits for action. It is the builder a desired-state policy
+// orders its remediation through: the policy judges its rules into
+// findings, and the plan, the digest and the grouping are the same ones a
+// fleet remediation gets - so one approval covers the set the same way.
+func ArrangeFindings(report compliance.Report) (Arrangement, error) {
+	result := Arrangement{Skipped: map[string]string{}}
+	chosen := make([]compliance.Finding, 0, len(report.Findings))
+	for _, finding := range report.Findings {
+		switch {
+		case !finding.Applicable:
+			result.Skipped[finding.CheckID] = SkipNotApply
+		case finding.Unknown:
+			result.Skipped[finding.CheckID] = SkipUnknown
+		case finding.Passed:
+			result.Skipped[finding.CheckID] = SkipPassed
+		default:
+			chosen = append(chosen, finding)
+		}
+	}
+	return arrangeChosen(report, chosen, result)
+}
+
+// arrangeChosen builds the plan of the findings that wait for action,
+// carrying the skips already recorded.
+func arrangeChosen(report compliance.Report, chosen []compliance.Finding, result Arrangement) (Arrangement, error) {
 	if len(chosen) == 0 {
 		return result, nil
 	}

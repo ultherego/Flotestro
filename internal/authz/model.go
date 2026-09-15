@@ -290,6 +290,17 @@ const (
 	PermBudgetRead  Permission = "budget.read"
 	PermBudgetWrite Permission = "budget.write"
 
+	// Desired-state policies. Writing a draft and publishing it are
+	// separated the way ordering and approving a campaign are: the
+	// publication is the approval the document names. Automatic
+	// remediation is a permission of its own, as the document requires,
+	// because a policy in that mode changes hosts without a second look;
+	// it is granted to the platform administrator alone.
+	PermPolicyRead          Permission = "policy.read"
+	PermPolicyWrite         Permission = "policy.write"
+	PermPolicyPublish       Permission = "policy.publish"
+	PermPolicyRemediateAuto Permission = "policy.remediate.auto"
+
 	// Permissions of the identity layer. Managing sudo and HBAC is separated
 	// from the rest, because a mistake in those rules opens access to the
 	// whole fleet.
@@ -395,6 +406,7 @@ var rolePermissions = map[Role][]Permission{
 		PermNetworkRead, PermDNSRead, PermDNSPlan, PermFirewallRead, PermStorageRead, PermStorageSmartRead, PermSSHRead, PermKernelRead, PermKernelModulePlan,
 		PermTimeRead, PermTimePlan, PermSecurityRead, PermFilePlan, PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan,
 		PermBackupRead, PermMonitoringRead, PermPackagesRead, PermVulnerabilityRead,
+		PermPolicyRead,
 	},
 	RoleAuditor: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead, PermCampaignRead,
@@ -423,6 +435,9 @@ var rolePermissions = map[Role][]Permission{
 		// exists, who created it, when it was rotated. Nobody sees the
 		// values.
 		PermSecretRead,
+		// Compliance with the declared state is audit material of the
+		// first order: the verdicts, not the fixes.
+		PermPolicyRead,
 	},
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
@@ -446,6 +461,9 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesPlan, PermPackagesRead,
 		// The operator plans and runs campaigns but does not approve them.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
+		// The operator writes the desired state as a draft; publishing it
+		// is the approval, and that stays with the approver.
+		PermPolicyRead, PermPolicyWrite,
 		// A maintenance window is a tool for running operations: it is the
 		// operator who knows that this host is being repaired right now.
 		PermHostMaintenanceWrite,
@@ -479,6 +497,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
 		PermJobApprove, PermCampaignRead, PermCampaignApprove,
 		PermIdentityRead, PermIdentityPolicyRead, PermLocalUserRead,
+		PermPolicyRead, PermPolicyPublish,
 	},
 	// identity_admin manages the directory but does not run operations on hosts.
 	RoleIdentityAdmin: {
@@ -531,6 +550,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostTagWrite, PermHostGroupWrite,
 		PermCampaignRead, PermCampaignCreate, PermCampaignApprove, PermCampaignControl,
 		PermBudgetRead, PermBudgetWrite,
+		PermPolicyRead, PermPolicyWrite, PermPolicyPublish, PermPolicyRemediateAuto,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
 		PermIdentityHostLeave,

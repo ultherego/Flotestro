@@ -136,6 +136,9 @@ type AgentService struct {
 	attempts   map[string]attemptContextEntry
 	log        *slog.Logger
 	gatewayID  string
+	// clonePolicy says what the gateway does with a copied identity: the
+	// empty value is the packaged default, quarantine.
+	clonePolicy ClonePolicy
 
 	heartbeatSeconds int
 	heartbeatJitter  int
@@ -174,6 +177,9 @@ func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
 // SetMetrics connects the store the resource samples of the hosts go to.
 func (s *AgentService) SetMetrics(store *monitoring.Store) { s.samples = store }
+
+// SetClonePolicy sets what the gateway does with a copied identity.
+func (s *AgentService) SetClonePolicy(policy ClonePolicy) { s.clonePolicy = policy }
 
 // sampleFromProto translates a sample of the agent into the stored shape.
 //
@@ -2198,13 +2204,114 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	return nil
 }
 
+// ClonePolicy says what the gateway does once it sees the same identity
+// alive on two boots at once.
+type ClonePolicy string
+
+const (
+	// CloneReport records the incident and counts it, and lets the newer
+	// session stand: the epoch rule has closed the older one already. For
+	// an installation that assesses every clone by hand - a lab that
+	// clones on purpose, a fleet where a replay is likelier than a copy.
+	CloneReport ClonePolicy = "report"
+	// CloneQuarantine cuts the host off: both sessions end, the host goes
+	// into quarantine, and its queued tasks are canceled. Neither machine
+	// may act under the identity until an operator has decided which of
+	// them is the host - an identity recovery gives the right one a key of
+	// its own, or a release lets it back once the copy is gone. The
+	// packaged default: a copied key is a compromised key, and a session
+	// under it is somebody's commands running on a machine nobody vetted.
+	CloneQuarantine ClonePolicy = "quarantine"
+)
+
+// ParseClonePolicy reads the policy out of the configuration. Empty is
+// the default; a word the gateway does not know is refused rather than
+// taken for one of the two, because the two are not close.
+func ParseClonePolicy(value string) (ClonePolicy, error) {
+	switch ClonePolicy(strings.ToLower(strings.TrimSpace(value))) {
+	case "":
+		return CloneQuarantine, nil
+	case CloneReport:
+		return CloneReport, nil
+	case CloneQuarantine:
+		return CloneQuarantine, nil
+	}
+	return "", fmt.Errorf("unknown clone policy %q: report or quarantine", value)
+}
+
+// cloneReaction is what the gateway does about a detected clone beyond the
+// record and the count that every policy makes.
+type cloneReaction struct {
+	// Policy is the policy applied, as the audit trail names it.
+	Policy ClonePolicy
+	// Quarantine puts the host into quarantine and cancels its queued
+	// tasks.
+	Quarantine bool
+	// EndSessions ends both sessions of the identity, the older and the
+	// one that has just opened.
+	EndSessions bool
+}
+
+// cloneSighting is what the detection saw.
+type cloneSighting struct {
+	// Detected says the same certificate was alive on another boot.
+	Detected bool
+	// SameAddress says the older session came from the address the new
+	// one comes from. A copy on another machine speaks from another
+	// address; the machine itself, back from a crash the gateway has not
+	// yet noticed, speaks from its own.
+	SameAddress bool
+}
+
+// reactToClone decides the reaction from the policy and the sighting.
+// Pure, so the decision is checked without a database: no detection is no
+// reaction whatever the policy, and an unset policy is the default one.
+//
+// A sighting from the host's own address is reported, never quarantined:
+// a session the gateway still holds open after a power cut looks exactly
+// like a clone for two heartbeat intervals, and a host cut off for
+// crashing would be the panel's fault, not the operator's finding. A copy
+// hiding behind the same address is the price; the report still names it.
+func reactToClone(policy ClonePolicy, sighting cloneSighting) cloneReaction {
+	if policy == "" {
+		policy = CloneQuarantine
+	}
+	reaction := cloneReaction{Policy: policy}
+	if !sighting.Detected || sighting.SameAddress {
+		return reaction
+	}
+	if policy == CloneQuarantine {
+		reaction.Quarantine = true
+		reaction.EndSessions = true
+	}
+	return reaction
+}
+
+// sameAddress compares the hosts of two session addresses: the port is
+// the connection's, not the machine's, and differs every time.
+func sameAddress(a, b string) bool {
+	host := func(address string) string {
+		if h, _, err := net.SplitHostPort(address); err == nil {
+			return h
+		}
+		return address
+	}
+	return a != "" && host(a) == host(b)
+}
+
+// CloneEndReason is the reason both sessions of a copied identity end with.
+const CloneEndReason = "duplicate_identity"
+
 // detectDuplicateIdentity looks for a clone: the same certificate alive on
 // a different boot at the same time. A reconnect after a reboot also
 // brings a new boot ID, but then the old session is dead; a session that
 // sent a heartbeat a moment ago is another machine with a copied
-// identity or a replay. The new session is not refused here - the epoch
-// rule has already closed the older one - but the incident is recorded
-// where the operator will find it and counted where the alert fires.
+// identity or a replay. The incident is recorded where the operator will
+// find it and counted where the alert fires, whatever the policy; the
+// policy then says whether the host stays in the fleet - the epoch rule
+// has closed the older session already, and under the report policy the
+// newer one stands - or is cut off with both sessions until an operator
+// has decided which machine is the host.
 func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Session, fingerprint []byte) {
 	// Two heartbeat intervals with the jitter: a session silent for longer
 	// is a session that died without saying so.
@@ -2233,22 +2340,109 @@ func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Ses
 		return
 	}
 	metrics.DuplicateIdentity.Inc(s.gatewayID)
+	reaction := reactToClone(s.clonePolicy,
+		cloneSighting{Detected: true, SameAddress: sameAddress(previousAddr, session.RemoteAddr)})
 	s.log.Warn("the same identity is alive on two boots",
 		"host_id", session.HostID, "previous_session", previousID, "previous_boot_id", previousBoot,
 		"previous_addr", previousAddr, "new_session", session.ID, "new_boot_id", session.BootID,
-		"new_addr", session.RemoteAddr)
+		"new_addr", session.RemoteAddr, "policy", string(reaction.Policy))
+	detail := map[string]any{
+		"previous_session": previousID, "previous_boot_id": previousBoot,
+		"previous_addr": previousAddr, "previous_seen_at": lastSeen.UTC().Format(time.RFC3339),
+		"session_id": session.ID, "boot_id": session.BootID, "remote_addr": session.RemoteAddr,
+		"gateway_id": s.gatewayID,
+		"policy":     string(reaction.Policy),
+		"action":     "the older session was superseded; assess the host and quarantine it if the identity was copied",
+	}
+	if reaction.Policy == CloneQuarantine && !reaction.Quarantine {
+		detail["action"] = "the older session spoke from the same address, so the host was left in the fleet: " +
+			"a machine back from a crash looks like this; assess it and quarantine it if the identity was copied"
+	}
+	if reaction.Quarantine {
+		detail["action"] = "the host was quarantined and both sessions ended; " +
+			"order an identity recovery for the machine that is the host, or release it once the copy is gone"
+		detail["quarantined"] = s.quarantineClone(ctx, session, previousID)
+	}
+	if reaction.EndSessions {
+		s.endCloneSessions(ctx, session, previousID)
+	}
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: session.HostID,
 		Action: "security.duplicate_identity", TargetType: "host", TargetID: session.HostID,
 		Outcome: audit.OutcomeDenied,
-		Detail: map[string]any{
-			"previous_session": previousID, "previous_boot_id": previousBoot,
-			"previous_addr": previousAddr, "previous_seen_at": lastSeen.UTC().Format(time.RFC3339),
-			"session_id": session.ID, "boot_id": session.BootID, "remote_addr": session.RemoteAddr,
-			"gateway_id": s.gatewayID,
-			"action":     "the older session was superseded; assess the host and quarantine it if the identity was copied",
-		},
+		Detail:  detail,
 	})
+}
+
+// quarantineClone cuts the host off the way the quarantine API does, in
+// one transaction: the lifecycle state, the queued tasks and the trail. It
+// says whether the state changed - a host already in quarantine or on its
+// way out stays where it is, and the sessions still end.
+//
+// The certificates are not revoked here. A copied key is suspect, but
+// which machine holds the original is the operator's finding, and a
+// revocation would take the way back from both: the assessment ends in
+// an identity recovery for the right machine, with the revocation the
+// recovery order carries, or in a release once the copy is gone.
+func (s *AgentService) quarantineClone(ctx context.Context, session *Session, previousID string) bool {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		s.log.Error("the clone was not quarantined", "host_id", session.HostID, "err", err)
+		return false
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	reason := "duplicate identity: the same certificate was alive on two boots at once"
+	err = s.hosts.ChangeLifecycleState(ctx, tx, session.HostID,
+		[]string{hosts.StateActive, hosts.StateRecovery}, hosts.StateQuarantined, reason, s.gatewayID)
+	if errors.Is(err, hosts.ErrForbiddenTransition) {
+		s.log.Info("the clone's host is already out of the fleet", "host_id", session.HostID)
+		return false
+	}
+	if err != nil {
+		s.log.Error("the clone was not quarantined", "host_id", session.HostID, "err", err)
+		return false
+	}
+	canceled, err := s.jobs.CancelUndelivered(ctx, tx, session.HostID, s.gatewayID, CloneEndReason)
+	if err != nil {
+		s.log.Error("the clone's queued tasks were not canceled", "host_id", session.HostID, "err", err)
+		return false
+	}
+	if err := s.audit.RecordTx(ctx, tx, audit.Event{
+		ActorType: audit.ActorSystem, ActorID: s.gatewayID,
+		Action: "host.quarantine", TargetType: "host", TargetID: session.HostID,
+		Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"reason": reason, "state": hosts.StateQuarantined, "policy": string(CloneQuarantine),
+			"jobs_canceled": canceled, "certificates_revoked": 0,
+			"session_id": session.ID, "previous_session": previousID,
+		},
+	}); err != nil {
+		s.log.Error("the clone's quarantine was not recorded", "host_id", session.HostID, "err", err)
+		return false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		s.log.Error("the clone was not quarantined", "host_id", session.HostID, "err", err)
+		return false
+	}
+	return true
+}
+
+// endCloneSessions ends both sessions of the identity. The session that has
+// just opened is ended before it is registered, so its stream closes as
+// soon as it starts listening; the older one is ended in the registry when
+// it is on this gateway, and in the database for every gateway - another
+// instance learns of the epoch through the database and closes it there.
+func (s *AgentService) endCloneSessions(ctx context.Context, session *Session, previousID string) {
+	session.End(CloneEndReason)
+	if previous, running := s.registry.Get(session.HostID); running && previous.ID != session.ID {
+		previous.End(CloneEndReason)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		update agent_sessions set ended_at = now(), end_reason = $2
+		where id = $1 and ended_at is null`, previousID, CloneEndReason); err != nil {
+		s.log.Error("the clone's session was not closed", "session_id", previousID, "err", err)
+	}
 }
 
 // newerSessionOpen says whether the host has a session of a higher epoch

@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,10 +112,14 @@ func (h *harness) hostSessions(t *testing.T, hostID string) []sessionView {
 }
 
 // TestACloneOfTheIdentityIsReported guards the detection of a copied
-// identity: the same certificate alive on two boots at the same time. The
-// clone is staged as a session row whose heartbeat is dated ahead, so it
-// counts as alive however long the real agent takes to reconnect with its
-// own boot ID.
+// identity and the packaged reaction to it: the same certificate alive on
+// two boots at the same time is recorded as an incident, and under the
+// quarantine policy the lab runs on - reset-lab.sh sets none, so the
+// packaged FLOTESTRO_CLONE_POLICY=quarantine applies - the host is put
+// into quarantine and both sessions end with the reason
+// duplicate_identity. The clone is staged as a session row whose
+// heartbeat is dated ahead, so it counts as alive however long the real
+// agent takes to reconnect with its own boot ID.
 func TestACloneOfTheIdentityIsReported(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -156,13 +161,53 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 	// The reconnect of the real agent is forced the only way the API allows.
 	// The host does not go offline in between: the staged clone row is an
 	// open session of a higher epoch, and the panel rightly takes that as
-	// the host being connected elsewhere. So the wait is for the real
-	// agent's new session, not for the host's state.
+	// the host being connected elsewhere. The real agent's new session
+	// meets the clone the moment it opens and is ended at once, so the
+	// wait is for the policy's doing - the host back in quarantine, this
+	// time by the gateway's hand - not for an open session.
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": "duplicate identity test"}, nil, http.StatusOK)
-	awaitNewSession(ctx, t, pool, host.ID, cloneID, 2*time.Minute)
+	var state struct {
+		LifecycleState  string `json:"lifecycle_state"`
+		LifecycleReason string `json:"lifecycle_reason"`
+	}
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		h.get("/api/v1/hosts/"+host.ID, &state)
+		if state.LifecycleState == "quarantined" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the host was not quarantined for the clone within two minutes: state %q", state.LifecycleState)
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if !strings.Contains(state.LifecycleReason, "duplicate identity") {
+		t.Errorf("the quarantine does not name the clone as its reason: %q", state.LifecycleReason)
+	}
+
+	// Both sessions of the identity end with the same reason: the staged
+	// clone, and the real agent's session that met it. The real one is
+	// closed a moment after it was ended, so it is given a moment.
+	if reason := sessionEnd(ctx, pool, cloneID); reason != "duplicate_identity" {
+		t.Errorf("the clone's session ended with %q, want duplicate_identity", reason)
+	}
+	deadline = time.Now().Add(30 * time.Second)
+	for {
+		sessions := h.hostSessions(t, host.ID)
+		if len(sessions) > 0 && sessions[0].ID != cloneID && sessions[0].Closed {
+			if sessions[0].Reason != "duplicate_identity" {
+				t.Errorf("the real agent's session ended with %q, want duplicate_identity", sessions[0].Reason)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the real agent's session was not closed for the clone: %+v", sessions)
+		}
+		time.Sleep(time.Second)
+	}
 
 	var audit struct {
 		Items []struct {
@@ -175,6 +220,12 @@ func TestACloneOfTheIdentityIsReported(t *testing.T) {
 		if event.Action == "security.duplicate_identity" && event.Detail["previous_session"] == cloneID {
 			if event.Detail["previous_boot_id"] != "cloned-boot" || event.Detail["previous_addr"] != "203.0.113.7" {
 				t.Errorf("the incident does not describe the clone: %+v", event.Detail)
+			}
+			// The incident carries the policy applied and what it did, so
+			// the operator reading the trail knows whether the host is
+			// waiting for them or still in the fleet.
+			if event.Detail["policy"] != "quarantine" || event.Detail["quarantined"] != true {
+				t.Errorf("the incident does not say the host was quarantined by policy: %+v", event.Detail)
 			}
 			return
 		}

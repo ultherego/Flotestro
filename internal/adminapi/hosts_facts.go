@@ -11,8 +11,8 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// The facts an operator records about a host by hand: who answers for it
-// and how it is reached. Like the tags, they are the panel's knowledge
+// The facts an operator records about a host by hand: who answers for it,
+// how it is reached and what it goes down with. Like the tags, they are the panel's knowledge
 // about the machine rather than the machine's about itself - nothing runs
 // on the host and it is not asked - so they share the tag permission and
 // go straight to the row, not through the task queue.
@@ -27,7 +27,8 @@ import (
 // and a tag that changed under an operator's hands every ten seconds would
 // refuse every honest write.
 func hostFactsTag(host *hosts.Host) string {
-	return etagOf("facts", host.Owner, host.ManagementAddress, host.ManagementAddressSource)
+	return etagOf("facts", host.Owner, host.ManagementAddress, host.ManagementAddressSource,
+		host.FailureDomain)
 }
 
 type hostOwnerRequest struct {
@@ -154,6 +155,71 @@ func (s *Server) handleSetHostManagementAddress(w http.ResponseWriter, r *http.R
 		After: map[string]any{
 			"management_address": updated.ManagementAddress, "management_address_source": updated.ManagementAddressSource,
 		},
+	})
+	setETag(w, hostFactsTag(updated))
+	writeJSON(w, http.StatusOK, updated)
+}
+
+type hostFailureDomainRequest struct {
+	// FailureDomain is what the host goes down with - a rack, a zone, a
+	// cluster; empty takes the host out from under the domain budgets.
+	FailureDomain string `json:"failure_domain"`
+	// Reason is the note for the trail; it is kept when given.
+	Reason string `json:"reason"`
+}
+
+// handleSetHostFailureDomain records the failure domain of a host.
+//
+// The domain is a budget key from the moment it is written: the next change
+// on the host asks for a token of domain:<domain>:<family>, next to the
+// site's. That is why it is a fact recorded by hand and not a tag - a tag
+// says something about the host, the domain limits what may happen to it.
+func (s *Server) handleSetHostFailureDomain(w http.ResponseWriter, r *http.Request) {
+	hostID := r.PathValue("id")
+	host, scope, ok := s.hostScope(w, r, hostID)
+	if !ok {
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermHostTagWrite, scope, "host", hostID)
+	if !ok {
+		return
+	}
+	if !requireMatch(w, r, hostFactsTag(host)) {
+		return
+	}
+
+	var request hostFailureDomainRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<12)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	domain, err := hosts.NormalizeFailureDomain(request.FailureDomain)
+	if errors.Is(err, hosts.ErrInvalidFailureDomain) {
+		problem(w, http.StatusBadRequest, "invalid_failure_domain", err.Error())
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	updated, err := s.hosts.SetFailureDomain(r.Context(), hostID, domain)
+	if errors.Is(err, hosts.ErrNotFound) {
+		problem(w, http.StatusNotFound, "host_not_found", "no such host")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "host.failure_domain", TargetType: "host", TargetID: host.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"before": host.FailureDomain, "after": domain, "reason": strings.TrimSpace(request.Reason)},
+		Before: map[string]any{"failure_domain": host.FailureDomain},
+		After:  map[string]any{"failure_domain": domain},
 	})
 	setETag(w, hostFactsTag(updated))
 	writeJSON(w, http.StatusOK, updated)

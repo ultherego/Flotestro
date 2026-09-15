@@ -165,16 +165,62 @@ func SiteKey(site, family string) string {
 // fingerprint: two different repositories must not land in one budget just
 // because the name was cut.
 func BackendKey(repository string) string {
-	repository = strings.TrimSpace(repository)
-	if repository == "" {
+	name := scopeName(repository)
+	if name == "" {
 		return ""
 	}
-	name := strings.NewReplacer(":", "_", " ", "_").Replace(repository)
+	return "backend:" + name + ":backup"
+}
+
+// scopeName turns free text into the middle part of a budget key.
+//
+// A repository address, a failure domain an operator typed ("cluster:pg-a",
+// the way the document names it) or a gateway identifier can hold colons
+// and spaces. The key has to stay in three parts for the pattern of the
+// default policy to find it, so those become underscores, and a long text
+// ends with a fingerprint: two different scopes must not land in one
+// budget just because the name was cut.
+func scopeName(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	name := strings.NewReplacer(":", "_", " ", "_").Replace(text)
 	if len(name) > 100 {
-		sum := sha256.Sum256([]byte(repository))
+		sum := sha256.Sum256([]byte(text))
 		name = name[:100] + "_" + hex.EncodeToString(sum[:])[:16]
 	}
-	return "backend:" + name + ":backup"
+	return name
+}
+
+// DomainKey builds the key of a failure domain budget.
+//
+// A site is where the hosts stand; a failure domain is what goes down
+// together, or what must not: a rack, an availability zone, a cluster whose
+// members keep a service alive. Five reboots may fit in a site and still
+// take every member of one cluster off at once. The domain is free text the
+// operator recorded on the host, so it goes through the same spelling a
+// repository address does.
+func DomainKey(domain, family string) string {
+	name := scopeName(domain)
+	if name == "" || family == "" {
+		return ""
+	}
+	return "domain:" + name + ":" + family
+}
+
+// GatewayKey builds the key of a gateway budget.
+//
+// The gateway is the pipe the changes of its hosts go through: a session
+// over a relay on a thin WAN link carries fewer package transactions at once
+// than a session in the data centre, whatever the site budget says. The
+// gateway is the one the host's session is open on.
+func GatewayKey(gateway, family string) string {
+	name := scopeName(gateway)
+	if name == "" || family == "" {
+		return ""
+	}
+	return "gateway:" + name + ":" + family
 }
 
 // Pattern turns an exact key into the pattern of the default policy.
@@ -216,13 +262,26 @@ func RepositoryOf(payload opspec.Payload) string {
 	return payload.Backup.Repository
 }
 
+// Topology is where a host stands in the fleet: the site it is in, the
+// failure domain it shares with the hosts that go down together, and the
+// gateway its session is open on. Each part names a budget of its own for
+// a change; an empty part names none - a host nobody placed in a domain
+// loads no domain budget rather than a shared budget of the unplaced.
+type Topology struct {
+	Site          string
+	FailureDomain string
+	Gateway       string
+}
+
 // Needs lists the budgets one operation loads on one host.
 //
-// What is not here: a gateway budget and a failure domain budget. The panel
-// does not know the topology that would define them yet - and it is better for
-// them to be absent than to pretend to be a limit computed out of nothing.
-// Adding them means adding entries to this list.
-func Needs(action opspec.ActionType, site, repository string) []Need {
+// A change loads the fleet, the site, the failure domain and the gateway of
+// the host, each with a token of the operation's family; a backup loads its
+// repository as well. The domain and the gateway come from what the panel
+// knows - the attribute an operator recorded, the session the registry
+// holds - and a part it does not know loads nothing, because a limit
+// computed out of nothing would only pretend to guard.
+func Needs(action opspec.ActionType, where Topology, repository string) []Need {
 	// An operation the registry does not describe is not a read just
 	// because nothing says it changes anything: unknown is not harmless,
 	// so it asks for the scarcer capacity.
@@ -233,11 +292,18 @@ func Needs(action opspec.ActionType, site, repository string) []Need {
 	}
 	needs := []Need{{Key: global, Weight: 1}}
 
-	// The site budget applies to changes. Reads load the host and its link,
-	// and those have their own limits on the agent side.
+	// The topology budgets apply to changes. Reads load the host and its
+	// link, and those have their own limits on the agent side.
 	if mutating {
-		if key := SiteKey(site, SiteFamily(action)); key != "" {
-			needs = append(needs, Need{Key: key, Weight: 1})
+		family := SiteFamily(action)
+		for _, key := range []string{
+			SiteKey(where.Site, family),
+			DomainKey(where.FailureDomain, family),
+			GatewayKey(where.Gateway, family),
+		} {
+			if key != "" {
+				needs = append(needs, Need{Key: key, Weight: 1})
+			}
 		}
 	}
 

@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/policy"
 )
 
 // The contract of the public API.
@@ -79,6 +80,32 @@ func (s *Server) openAPI() map[string]any {
 	describe(schemas, "SystemHistoryEntry", "first_seen_at",
 		"When the panel first saw the host on this kernel and release; last_seen_at moves with every report that names the pair. "+
 			"The panel keeps the twenty most recently seen pairs per host.")
+	register("Policy", policy.Policy{})
+	register("PolicyRule", policy.Rule{})
+	register("PolicyVersion", policy.Version{})
+	register("PolicyResult", policy.Result{})
+	register("PolicyOutcome", policy.Outcome{})
+	describe(schemas, "Policy", "version",
+		"The published version the loop judges by; zero for a draft never published. Every publication bumps it.")
+	describe(schemas, "Policy", "draft",
+		"True when the document differs from the published version: the loop keeps judging by the published text until the next publication.")
+	describe(schemas, "Policy", "remediation_mode",
+		"report writes verdicts only; campaign turns a drift set into a campaign that waits for approval; "+
+			"automatic does the same and approves it with the publication, which needs policy.remediate.auto.")
+	describe(schemas, "Policy", "counts",
+		"The verdicts of the latest evaluation, one count per verdict: compliant, drift, error, not_applicable. All four keys are always present.")
+	describe(schemas, "Policy", "selector",
+		"The hosts the policy concerns, in the shape a campaign takes; the expression, when present, decides alone.")
+	describe(schemas, "PolicyRule", "kind",
+		"package_installed {name}, package_absent {name}, unit_state {unit, enabled?, active?}, file_content {path, sha256}, "+
+			"sysctl {key, value}, ssh_key_present {user, fingerprint, public_key?}. Any other kind is refused with unsupported_rule.")
+	describe(schemas, "PolicyResult", "verdict",
+		"compliant, drift, error (the fact is missing, failed or older than twice the module's pace - never a pass), "+
+			"or not_applicable (the host has no adapter for the rule).")
+	describe(schemas, "PolicyResult", "reason",
+		"One line on the verdict; an error or a drift without a fix starts with its code: fact_missing, read_failed, "+
+			"inventory_stale, package_list_stale, unsupported_system, no_remediation.")
+	describe(schemas, "PolicyResult", "observed_revision", "The revision of the inventory module the verdict rests on.")
 	register("HostAccess", hostAccessView{})
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
@@ -360,6 +387,12 @@ var queryParameters = map[string][]queryParameter{
 		{"exclude_reason", "string", ""},
 		{"compensates", "string", "The campaign the order would undo; an empty selector then names the hosts that campaign changed, and the answer carries the original under compensates."},
 	},
+	"GET /api/v1/policies/{id}/results": {
+		{"host_id", "string", "Only the verdicts of this host."},
+		{"verdict", "string", "compliant, drift, error or not_applicable."},
+		{"limit", "integer", "The page size: 100 by default, 500 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+	},
 	"GET /api/v1/campaigns/{id}/steps": {
 		{"host_id", "string", "Only the steps of this host."},
 		{"limit", "integer", "How many hosts one page covers: 200 by default, 1000 at most; a page is cut between hosts, never inside one."},
@@ -417,6 +450,7 @@ var responseSchemas = map[string]map[string]any{
 	"PUT /api/v1/hosts/{id}/channel":            ref("Host"),
 	"PUT /api/v1/hosts/{id}/owner":              ref("Host"),
 	"PUT /api/v1/hosts/{id}/management-address": ref("Host"),
+	"PUT /api/v1/hosts/{id}/failure-domain":     ref("Host"),
 	"GET /api/v1/jobs":                          cursorCollection("Job"),
 	"GET /api/v1/jobs/{id}":                     ref("Job"),
 	"POST /api/v1/jobs/{id}/approve":            ref("Job"),
@@ -439,6 +473,15 @@ var responseSchemas = map[string]map[string]any{
 	"GET /api/v1/hosts/{id}/audit":              collection("AuditEvent"),
 	"GET /api/v1/hosts/{id}/system/history":     collection("SystemHistoryEntry"),
 	"GET /api/v1/hosts/{id}/access":             ref("HostAccess"),
+	"GET /api/v1/policies":                      collection("Policy"),
+	"POST /api/v1/policies":                     ref("Policy"),
+	"GET /api/v1/policies/{id}":                 ref("Policy"),
+	"PUT /api/v1/policies/{id}":                 ref("Policy"),
+	"POST /api/v1/policies/{id}/publish":        ref("Policy"),
+	"POST /api/v1/policies/{id}/evaluate":       ref("PolicyOutcome"),
+	"GET /api/v1/policies/{id}/results":         pagedCollection("PolicyResult"),
+	"GET /api/v1/policies/{id}/versions":        collection("PolicyVersion"),
+	"GET /api/v1/hosts/{id}/policies":           collection("PolicyResult"),
 }
 
 // items is a whole list answered at once, without a count: the budgets
@@ -469,9 +512,9 @@ func pagedCollection(name string) map[string]any {
 }
 
 var requestSchemas = map[string]map[string]any{
-	// The hand-recorded facts of a host. Both writes honour If-Match with
+	// The hand-recorded facts of a host. The writes honour If-Match with
 	// the ETag of GET /api/v1/hosts/{id}, which names the version of the
-	// owner and the management address together.
+	// owner, the management address and the failure domain together.
 	"PUT /api/v1/hosts/{id}/owner": {
 		"type": "object",
 		"properties": map[string]any{
@@ -489,6 +532,16 @@ var requestSchemas = map[string]map[string]any{
 			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
 		},
 		"required": []string{"address"},
+	},
+	"PUT /api/v1/hosts/{id}/failure-domain": {
+		"type": "object",
+		"properties": map[string]any{
+			"failure_domain": map[string]any{"type": "string", "maxLength": hosts.MaxFailureDomainLength,
+				"description": "What the host goes down with: a rack, an availability zone, a cluster. " +
+					"A change on the host then asks for a token of the budget domain:<failure_domain>:<family> next to the site's; empty takes the host out from under it."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"failure_domain"},
 	},
 	"POST /api/v1/enrollment-requests": {
 		"type": "object",
@@ -522,6 +575,15 @@ var requestSchemas = map[string]map[string]any{
 		},
 		"required": []string{"action"},
 	},
+	"POST /api/v1/policies":     policySpecSchema,
+	"PUT /api/v1/policies/{id}": policySpecSchema,
+	"POST /api/v1/policies/{id}/publish": {
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string",
+				"description": "Recorded with the version; required where the step-up policy of the installation asks for one."},
+		},
+	},
 	"POST /api/v1/campaigns": {
 		"type": "object",
 		"properties": map[string]any{
@@ -551,6 +613,25 @@ var requestSchemas = map[string]map[string]any{
 		},
 		"required": []string{"name", "action", "selector"},
 	},
+}
+
+// policySpecSchema is the draft a policy is created and rewritten with.
+// The rules are typed; the publication holds them to their kinds, and a
+// kind this version does not know is refused already here.
+var policySpecSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"name":        map[string]any{"type": "string", "maxLength": policy.MaxNameLength},
+		"description": map[string]any{"type": "string"},
+		"selector":    map[string]any{"type": "object", "description": "The same shape a campaign takes."},
+		"rules":       map[string]any{"type": "array", "items": ref("PolicyRule"), "maxItems": policy.MaxRules},
+		"remediation_mode": map[string]any{"type": "string", "enum": []string{policy.ModeReport, policy.ModeCampaign, policy.ModeAutomatic},
+			"description": "report by default. automatic is accepted in a draft and held to policy.remediate.auto at the publication."},
+		"enabled": map[string]any{"type": "boolean", "description": "A disabled policy keeps its results and is not judged."},
+		"check_interval_seconds": map[string]any{"type": "integer", "minimum": 60, "maximum": 86400,
+			"description": "How often the loop judges the fleet against the policy; 900 by default."},
+	},
+	"required": []string{"name"},
 }
 
 // summaryOf turns a handler name into words: ListHosts -> "List hosts".

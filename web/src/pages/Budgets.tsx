@@ -42,7 +42,7 @@ export type BudgetState = Budget & {
 /* ---------------------------------------------------------------------- */
 
 /** The family of a budget key: what the capacity guards. */
-export type BudgetKind = "global" | "site" | "backend" | "other";
+export type BudgetKind = "global" | "site" | "domain" | "gateway" | "backend" | "other";
 
 /**
  * A budget key taken apart. The keys are three colon-separated parts -
@@ -52,7 +52,7 @@ export type BudgetKind = "global" | "site" | "backend" | "other";
  */
 export type BudgetKey = {
   kind: BudgetKind;
-  /** The site, the backup repository, or empty for a fleet-wide key. */
+  /** The site, the failure domain, the gateway, the backup repository, or empty for a fleet-wide key. */
   scope: string;
   /** What the capacity is spent on: mutations, reads, packages, reboot, backup. */
   resource: string;
@@ -70,7 +70,7 @@ export function describeBudgetKey(key: string): BudgetKey {
   if (family === "global" && scope !== undefined && resource === undefined) {
     return { kind: "global", scope: "", resource: scope, pattern: false };
   }
-  if ((family === "site" || family === "backend") && scope !== undefined && resource !== undefined && rest.length === 0) {
+  if ((family === "site" || family === "domain" || family === "gateway" || family === "backend") && scope !== undefined && resource !== undefined && rest.length === 0) {
     return { kind: family, scope, resource, pattern: scope === "*" };
   }
   return { kind: "other", scope: "", resource: key, pattern: false };
@@ -235,7 +235,7 @@ export function Budgets() {
   const free = budgets.filter((budget) => !saturated(budget) && waiting(budget) === 0);
   const waitingJobs = budgets.reduce((sum, budget) => sum + budget.waiting_jobs, 0);
   const waitingTargets = budgets.reduce((sum, budget) => sum + budget.waiting_targets, 0);
-  const byKind = (["global", "site", "backend", "other"] as BudgetKind[])
+  const byKind = (["global", "site", "domain", "gateway", "backend", "other"] as BudgetKind[])
     .map((kind) => ({ kind, value: budgets.filter((budget) => describeBudgetKey(budget.key).kind === kind).length }))
     .filter((entry) => entry.value > 0);
   const byClass = classTotals(budgets);
@@ -304,6 +304,10 @@ function KindLabel({ kind }: { kind: BudgetKind }) {
       return <>{t("Fleet")}</>;
     case "site":
       return <>{t("Site")}</>;
+    case "domain":
+      return <>{t("Failure domain")}</>;
+    case "gateway":
+      return <>{t("Gateway")}</>;
     case "backend":
       return <>{t("Backup backend")}</>;
     default:

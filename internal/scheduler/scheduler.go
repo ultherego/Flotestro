@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"strings"
 	"time"
@@ -46,6 +47,11 @@ type Options struct {
 	BatchSize int
 	// SendTimeout bounds the wait for a session to accept a task.
 	SendTimeout time.Duration
+	// DispatchRate paces the envelopes leaving this gateway, in envelopes
+	// per second, with a burst of one second's worth. Zero is no pacing:
+	// every leased job goes out at once, which is what a test fleet wants
+	// and a fleet of thousands coming back after an outage does not.
+	DispatchRate float64
 }
 
 // SecretLeases issues short leases for the secrets named in a task.
@@ -65,8 +71,10 @@ type Scheduler struct {
 	credentials EnrollmentCredentials
 	secrets     SecretLeases
 	admission   admission
-	log         *slog.Logger
-	options     Options
+	// bucket paces the dispatch; nil is no pacing.
+	bucket  *Bucket
+	log     *slog.Logger
+	options Options
 }
 
 // SetSecrets attaches the secret store. Without it a task naming a secret
@@ -77,8 +85,12 @@ func (s *Scheduler) SetSecrets(leases SecretLeases) { s.secrets = leases }
 // SetBudgets replaces the capacity budgets the scheduler asks before it
 // takes a task. The scheduler builds its own over the task store's
 // database, so this is for an installation that keeps them elsewhere and
-// for checking the decision without a database.
-func (s *Scheduler) SetBudgets(store Budgets) { s.admission.budgets = store }
+// for checking the decision without a database. A store that also knows
+// the topology of the hosts places them in their failure domains.
+func (s *Scheduler) SetBudgets(store Budgets) {
+	s.admission.budgets = store
+	s.admission.topology, _ = store.(Topology)
+}
 
 func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder,
 	credentials EnrollmentCredentials, log *slog.Logger, options Options) *Scheduler {
@@ -101,8 +113,11 @@ func New(store *jobs.Store, registry *gateway.Registry, recorder *audit.Recorder
 	// over the same tables sees the same grants as the orchestrator's, so
 	// a task and a campaign target compete for the same tokens.
 	if store != nil && store.Pool() != nil {
-		scheduler.admission.budgets = budgets.NewStore(store.Pool(), log)
+		scheduler.SetBudgets(budgets.NewStore(store.Pool(), log))
 	}
+	// The burst is one second of the rate: a pass after a quiet moment
+	// sends what a second would have, no more, whatever the batch size.
+	scheduler.bucket = NewBucket(options.DispatchRate, int(math.Ceil(options.DispatchRate)), nil)
 	return scheduler
 }
 
@@ -181,13 +196,37 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 		s.log.Error("the queue was not read", "err", err)
 		return
 	}
+	if len(candidates) == 0 {
+		return
+	}
+	domains, err := s.admission.failureDomains(ctx, candidates)
+	if err != nil {
+		s.log.Error("the failure domains of the queued tasks were not read", "err", err)
+		return
+	}
+	// The dispatch rate is looked at before any task is taken: a task the
+	// rate has no token for stays queued, not leased, so its lease does
+	// not tick while it waits for a pass that has room. The tokens are
+	// spent only on the tasks actually admitted - a task the budgets
+	// refuse costs no token, and the tasks behind it still get their turn.
+	room := len(candidates)
+	if s.bucket != nil {
+		room = s.bucket.Available()
+	}
 	// Every task is admitted on its own, oldest first, before any is taken:
 	// a task the budgets refuse stays queued as it was, with no attempt
 	// opened, and the tasks behind it in the queue still get their turn - a
 	// restart in one site does not wait behind a reboot refused in another.
 	admitted := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		ok, err := s.admission.admit(ctx, candidate)
+	for i, candidate := range candidates {
+		if len(admitted) >= room {
+			throttled := len(candidates) - i
+			metrics.DispatchThrottled.Add(float64(throttled), s.options.GatewayID)
+			s.log.Info("the dispatch rate held tasks in the queue for the next pass",
+				"held", throttled, "sent", len(admitted))
+			break
+		}
+		ok, err := s.admission.admit(ctx, candidate, domains[candidate.Job.HostID])
 		if err != nil {
 			s.log.Error("the budgets did not answer for the task",
 				"job_id", candidate.Job.ID, "err", err)
@@ -199,6 +238,9 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 	}
 	if len(admitted) == 0 {
 		return
+	}
+	if s.bucket != nil {
+		s.bucket.Take(len(admitted))
 	}
 
 	leased, err := s.store.LeaseJobs(ctx, s.options.GatewayID, admitted, s.options.LeaseDuration)

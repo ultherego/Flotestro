@@ -299,6 +299,12 @@ type Spec struct {
 	// campaign that is not a compensation. The handler checks the rules
 	// (CheckCompensation) before the order reaches the store.
 	CompensatesCampaignID string
+	// PolicyID and PolicyVersion name the desired-state policy that
+	// ordered the campaign as its remediation, and the version of the
+	// document that judged the drift. Empty for a campaign an operator
+	// ordered.
+	PolicyID      string
+	PolicyVersion int
 }
 
 // DefaultDeadline is how long a campaign waits for offline hosts when the
@@ -619,6 +625,11 @@ type Campaign struct {
 	// campaign settles: a count of a campaign still changing hosts would
 	// invite a rollback of a moving target, which the server refuses.
 	ChangedHosts int `json:"changed_hosts"`
+	// PolicyID and PolicyVersion link a remediation campaign back to the
+	// desired-state policy that ordered it; both empty for a campaign an
+	// operator ordered.
+	PolicyID      string `json:"policy_id,omitempty"`
+	PolicyVersion int    `json:"policy_version,omitempty"`
 }
 
 // CampaignLink names another campaign the way a screen links to it.

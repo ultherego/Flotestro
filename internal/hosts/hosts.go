@@ -207,12 +207,18 @@ type Identity struct {
 
 // Host is the view of a host returned by the API.
 type Host struct {
-	ID             string `json:"id"`
-	MachineID      string `json:"machine_id"`
-	Hostname       string `json:"hostname"`
-	Site           string `json:"site"`
-	Environment    string `json:"environment"`
-	Owner          string `json:"owner,omitempty"`
+	ID          string `json:"id"`
+	MachineID   string `json:"machine_id"`
+	Hostname    string `json:"hostname"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	Owner       string `json:"owner,omitempty"`
+	// FailureDomain is what the host goes down with - a rack, an
+	// availability zone, a cluster whose members keep a service alive -
+	// recorded by an operator, and keyed on by the budgets that keep a
+	// campaign from taking a whole domain off at once. Absent for a host
+	// nobody placed: an unknown domain is not a shared one.
+	FailureDomain  string `json:"failure_domain,omitempty"`
 	LifecycleState string `json:"lifecycle_state"`
 	// LifecycleReason and LifecycleChangedAt are the decision behind a
 	// state other than active: who cut the host off and why is part of the
@@ -1199,7 +1205,7 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
-		       h.release_channel,
+		       coalesce(h.failure_domain, ''), h.release_channel,
 		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at,
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
@@ -1249,7 +1255,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var identityPayload []byte
 		var identityObservedAt *time.Time
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
-			&h.ReleaseChannel,
+			&h.FailureDomain, &h.ReleaseChannel,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
@@ -1631,6 +1637,50 @@ func (s *Store) SetOwner(ctx context.Context, hostID, owner string) (*Host, erro
 		`update hosts set owner = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
 	if err != nil {
 		return nil, fmt.Errorf("setting the owner: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// MaxFailureDomainLength bounds the failure domain of a host. It is a
+// name - a rack, a zone, a cluster - not a description of the topology.
+const MaxFailureDomainLength = 128
+
+// ErrInvalidFailureDomain means a failure domain the panel does not
+// accept; the message says what is wrong with it.
+var ErrInvalidFailureDomain = errors.New("invalid failure domain")
+
+// NormalizeFailureDomain checks a failure domain. An empty domain is
+// allowed and means nobody placed the host: clearing the field takes the
+// host out from under the domain budgets rather than putting it in a
+// domain of the unplaced. Control characters are refused, because the
+// domain is printed in tables and becomes part of a budget key.
+func NormalizeFailureDomain(domain string) (string, error) {
+	domain = strings.TrimSpace(domain)
+	if len(domain) > MaxFailureDomainLength {
+		return "", fmt.Errorf("%w: longer than %d characters", ErrInvalidFailureDomain, MaxFailureDomainLength)
+	}
+	for _, r := range domain {
+		if r < ' ' || r == 0x7f {
+			return "", fmt.Errorf("%w: control characters are not allowed", ErrInvalidFailureDomain)
+		}
+	}
+	return domain, nil
+}
+
+// SetFailureDomain records what the host goes down with. An empty domain
+// clears the field.
+func (s *Store) SetFailureDomain(ctx context.Context, hostID, domain string) (*Host, error) {
+	normalized, err := NormalizeFailureDomain(domain)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`update hosts set failure_domain = nullif($2, ''), updated_at = now() where id = $1`, hostID, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("setting the failure domain: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, ErrNotFound

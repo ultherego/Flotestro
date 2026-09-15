@@ -281,6 +281,7 @@ func (s *Server) Routes() http.Handler {
 	// carry an entity tag, because two people correct the same host.
 	s.route(mux, "PUT /api/v1/hosts/{id}/owner", s.handleSetHostOwner)
 	s.route(mux, "PUT /api/v1/hosts/{id}/management-address", s.handleSetHostManagementAddress)
+	s.route(mux, "PUT /api/v1/hosts/{id}/failure-domain", s.handleSetHostFailureDomain)
 	// Host groups: a saved answer to "which hosts", either a fixed member
 	// list or a selector resolved when read. A campaign names a group in
 	// its selector instead of repeating the list.
@@ -371,6 +372,22 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/cancel", s.handleCancelCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
+
+	// Desired-state policies: a draft, its publications, the verdicts the
+	// loop writes, and one evaluation on demand. The only change a policy
+	// sets in motion is a remediation campaign, which waits for its
+	// approval on the campaign routes above.
+	s.route(mux, "GET /api/v1/policies", s.handleListPolicies)
+	s.route(mux, "POST /api/v1/policies", s.handleCreatePolicy)
+	s.route(mux, "GET /api/v1/policies/{id}", s.handleGetPolicy)
+	s.route(mux, "PUT /api/v1/policies/{id}", s.handleUpdatePolicy)
+	s.route(mux, "DELETE /api/v1/policies/{id}", s.handleDeletePolicy)
+	s.route(mux, "POST /api/v1/policies/{id}/publish", s.handlePublishPolicy)
+	s.route(mux, "POST /api/v1/policies/{id}/evaluate", s.handleEvaluatePolicy)
+	s.route(mux, "GET /api/v1/policies/{id}/results", s.handlePolicyResults)
+	s.route(mux, "GET /api/v1/policies/{id}/versions", s.handlePolicyVersions)
+	s.route(mux, "GET /api/v1/policies/{id}/campaigns", s.handlePolicyCampaigns)
+	s.route(mux, "GET /api/v1/hosts/{id}/policies", s.handleHostPolicies)
 
 	// Diagnostic read fan-outs: the same read on a handful of hosts at once,
 	// one ordinary job per host, merged into one answer. Not a campaign -

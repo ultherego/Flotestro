@@ -117,9 +117,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       approval_fingerprint, idempotency_key,
 		                       offline_policy, deadline_at, manual_gate,
 		                       connectivity_lost_absolute, compensates_campaign_id,
-		                       reboot_timeout_seconds)
+		                       reboot_timeout_seconds, policy_id, policy_version)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27)
+		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27, $28, $29)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
 	// The reboot timeout is recorded resolved, like the deadline: the row
 	// says how long the campaign really waits, and the orchestrator does
@@ -133,7 +133,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		fingerprint, nullable(spec.IdempotencyKey),
 		string(spec.OfflinePolicy), int(spec.Deadline()/time.Minute), spec.ManualGate,
 		spec.ConnectivityLostAbsolute, nullable(spec.CompensatesCampaignID),
-		int(spec.RebootTimeout()/time.Second))
+		int(spec.RebootTimeout()/time.Second), nullable(spec.PolicyID), nullableInt(spec.PolicyVersion))
 	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
@@ -888,7 +888,8 @@ const campaignColumns = `
 	                                     'plan_failed', 'expired', 'canceled')
 	            then (select count(*) from campaign_targets t
 	                   where t.campaign_id = campaigns.id and ` + changedTargetCondition + `)
-	            else 0 end
+	            else 0 end,
+	       coalesce(policy_id::text, ''), coalesce(policy_version, 0)
 	from campaigns `
 
 // changedTargetCondition tells a target whose change landed on the host,
@@ -928,7 +929,8 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
 			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute, &c.RebootTimeoutSeconds,
-			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy, &c.ChangedHosts); err != nil {
+			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy, &c.ChangedHosts,
+			&c.PolicyID, &c.PolicyVersion); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -1221,6 +1223,15 @@ func (s *Store) Counts(ctx context.Context, campaignID string) (map[string]int, 
 		counts[state] = count
 	}
 	return counts, rows.Err()
+}
+
+// nullableInt writes zero as NULL: a campaign without a policy has no
+// version of it.
+func nullableInt(value int) any {
+	if value == 0 {
+		return nil
+	}
+	return value
 }
 
 func nullable(value string) any {

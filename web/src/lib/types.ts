@@ -60,6 +60,8 @@ export type Host = {
   site: string;
   environment: string;
   owner?: string;
+  /** What the host goes down with - a rack, a zone, a cluster - as an operator recorded it; absent when nobody placed it. */
+  failure_domain?: string;
   // What operators recorded about the host: "key" or "key=value". Always a
   // list; a host without tags has an empty one.
   tags: string[];
@@ -1332,4 +1334,150 @@ export type RemediationOrder = {
   campaign: Campaign;
   groups: RemediationPlanGroup[];
   excluded: RemediationExcludedHost[];
+};
+
+/* ---------------------------------------------------------------------- */
+/* Desired-state policies.                                                 */
+/* ---------------------------------------------------------------------- */
+
+/** The rule kinds this version of the panel judges, in the order the editor offers them. */
+export type PolicyRuleKind =
+  | "package_installed" | "package_absent" | "unit_state" | "file_content" | "sysctl" | "ssh_key_present";
+export const POLICY_RULE_KINDS: PolicyRuleKind[] = [
+  "package_installed", "package_absent", "unit_state", "file_content", "sysctl", "ssh_key_present",
+];
+
+/**
+ * One typed declaration. Exactly the fields of its kind are set; the
+ * server holds them to the kind at the publication and refuses a kind it
+ * does not judge with unsupported_rule.
+ */
+export type PolicyRule = {
+  kind: PolicyRuleKind | string;
+  /** The package of package_installed and package_absent. */
+  name?: string;
+  /** The unit of unit_state, and the halves of its state; an absent half is undeclared. */
+  unit?: string;
+  enabled?: boolean;
+  active?: boolean;
+  /** The managed file of file_content and the digest of the version it is to hold. */
+  path?: string;
+  sha256?: string;
+  /** The key and value of sysctl. */
+  key?: string;
+  value?: string;
+  /** The account and the SHA256 fingerprint of ssh_key_present; the material lets the panel fix an empty account. */
+  user?: string;
+  fingerprint?: string;
+  public_key?: string;
+};
+
+/** report writes verdicts; campaign orders a campaign that waits for approval; automatic approves it with the publication. */
+export type PolicyRemediationMode = "report" | "campaign" | "automatic";
+export const POLICY_MODES: PolicyRemediationMode[] = ["report", "campaign", "automatic"];
+
+/** The four verdicts of a rule on a host; error is never compliant. */
+export type PolicyVerdict = "compliant" | "drift" | "error" | "not_applicable";
+export const POLICY_VERDICTS: PolicyVerdict[] = ["compliant", "drift", "error", "not_applicable"];
+
+/** The campaign selector as a policy carries it: the same shape a campaign order takes. */
+export type PolicySelector = {
+  site?: string;
+  environment?: string;
+  os_family?: string;
+  host_ids?: string[];
+  expression?: SelectorExpression | null;
+  exclude?: string[];
+  exclude_reason?: string;
+};
+
+export type Policy = {
+  id: string;
+  name: string;
+  description: string;
+  /** The published version the loop judges by; zero for a draft never published. */
+  version: number;
+  selector: PolicySelector;
+  rules: PolicyRule[];
+  remediation_mode: PolicyRemediationMode;
+  enabled: boolean;
+  check_interval_seconds: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  published_at?: string;
+  published_by?: string;
+  last_evaluated_at?: string;
+  /** The document differs from the published version; the loop judges by the published text. */
+  draft: boolean;
+  /** The verdicts of the latest evaluation; every verdict is a key, zero included. */
+  counts: Record<PolicyVerdict, number>;
+};
+
+/** The draft as it is created and rewritten. */
+export type PolicySpec = {
+  name: string;
+  description: string;
+  selector: PolicySelector;
+  rules: PolicyRule[];
+  remediation_mode: PolicyRemediationMode;
+  enabled: boolean;
+  check_interval_seconds: number;
+};
+
+/** One publication: the frozen document and who published it, on what authentication. */
+export type PolicyVersion = {
+  policy_id: string;
+  version: number;
+  document: {
+    name: string;
+    description: string;
+    selector: PolicySelector;
+    rules: PolicyRule[];
+    remediation_mode: PolicyRemediationMode;
+    check_interval_seconds: number;
+  };
+  published_by: string;
+  published_at: string;
+  reason?: string;
+  authentication?: string;
+  acr?: string;
+  amr?: string[];
+  authenticated_at?: string;
+};
+
+/** The verdict of one rule on one host, with the rule the judged version carried. */
+export type PolicyResult = {
+  policy_id: string;
+  policy_name?: string;
+  host_id: string;
+  hostname?: string;
+  rule_index: number;
+  rule?: PolicyRule;
+  version: number;
+  verdict: PolicyVerdict;
+  /** One line; an error or an unfixable drift starts with its code. */
+  reason?: string;
+  observed_revision?: string;
+  evaluated_at: string;
+};
+
+/** What one evaluation did. */
+export type PolicyOutcome = {
+  policy_id: string;
+  version: number;
+  hosts: number;
+  counts: Record<PolicyVerdict, number>;
+  campaign_id?: string;
+  remediation?: string;
+  evaluated_at: string;
+};
+
+/** A remediation campaign the policy ordered. */
+export type PolicyCampaignLink = {
+  id: string;
+  name: string;
+  state: string;
+  policy_version: number;
+  created_at: string;
 };

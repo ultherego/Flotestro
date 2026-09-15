@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/ultherego/flotestro/internal/budgets"
@@ -95,7 +96,7 @@ func TestMutationIsAdmittedAgainstTheMutationAndSiteBudgets(t *testing.T) {
 	w := &fakeWaits{}
 	a := newAdmission(b, w)
 
-	ok, err := a.admit(context.Background(), candidate("j1", opspec.ActionUnitRestart, "warsaw"))
+	ok, err := a.admit(context.Background(), candidate("j1", opspec.ActionUnitRestart, "warsaw"), "")
 	if err != nil || !ok {
 		t.Fatalf("admit = %v, %v; want admitted", ok, err)
 	}
@@ -110,8 +111,11 @@ func TestMutationIsAdmittedAgainstTheMutationAndSiteBudgets(t *testing.T) {
 		t.Errorf("an operator's restart asks as %s", ask.class)
 	}
 	keys := keysAsked(ask.needs)
-	if keys[0] != budgets.KeyGlobalMutations || keys[1] != "site:warsaw:units" {
-		t.Errorf("a restart asked for %v", keys)
+	// The gateway of the session is this one: the queue was read for the
+	// hosts connected here.
+	want := []string{budgets.KeyGlobalMutations, "site:warsaw:units", "gateway:gw-test:units"}
+	if strings.Join(keys, " ") != strings.Join(want, " ") {
+		t.Errorf("a restart asked for %v, want %v", keys, want)
 	}
 	if w.writes != 0 {
 		t.Errorf("an admitted task got a wait reason: %v", w.reasons)
@@ -125,7 +129,7 @@ func TestReadIsNotBlockedByTheMutationBudget(t *testing.T) {
 	w := &fakeWaits{}
 	a := newAdmission(b, w)
 
-	ok, err := a.admit(context.Background(), candidate("r1", opspec.ActionUnitStatus, "warsaw"))
+	ok, err := a.admit(context.Background(), candidate("r1", opspec.ActionUnitStatus, "warsaw"), "")
 	if err != nil || !ok {
 		t.Fatalf("a read was held by the mutation budget: %v, %v", ok, err)
 	}
@@ -144,7 +148,7 @@ func TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing(t *testing.T) {
 	a := newAdmission(b, w)
 	c := candidate("j2", opspec.ActionUnitRestart, "warsaw")
 
-	ok, err := a.admit(context.Background(), c)
+	ok, err := a.admit(context.Background(), c, "")
 	if err != nil || ok {
 		t.Fatalf("admit = %v, %v; want a wait", ok, err)
 	}
@@ -159,7 +163,7 @@ func TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing(t *testing.T) {
 	// The next pass sees the same refusal: the reason is already there and
 	// is not rewritten.
 	c.Job.WaitReason = want
-	if _, err := a.admit(context.Background(), c); err != nil {
+	if _, err := a.admit(context.Background(), c, ""); err != nil {
 		t.Fatal(err)
 	}
 	if w.writes != 1 {
@@ -169,7 +173,7 @@ func TestRefusedTaskWaitsWithTheBudgetNamedAndHoldsNothing(t *testing.T) {
 	// Once there is room the task is admitted, and each pass asked exactly
 	// once: nothing counts twice.
 	delete(b.full, budgets.KeyGlobalMutations)
-	ok, err = a.admit(context.Background(), c)
+	ok, err = a.admit(context.Background(), c, "")
 	if err != nil || !ok {
 		t.Fatalf("admit after the budget freed = %v, %v", ok, err)
 	}
@@ -187,14 +191,14 @@ func TestCampaignAndFanOutTasksAreNotCountedTwice(t *testing.T) {
 	campaignID := "c1"
 	c := candidate("j3", opspec.ActionUnitRestart, "warsaw")
 	c.Job.CampaignID = &campaignID
-	if ok, err := a.admit(context.Background(), c); err != nil || !ok {
+	if ok, err := a.admit(context.Background(), c, ""); err != nil || !ok {
 		t.Errorf("a campaign's task was asked again: %v, %v", ok, err)
 	}
 
 	fanoutID := "f1"
 	r := candidate("r2", opspec.ActionUnitStatus, "warsaw")
 	r.Job.FanoutID = &fanoutID
-	if ok, err := a.admit(context.Background(), r); err != nil || !ok {
+	if ok, err := a.admit(context.Background(), r, ""); err != nil || !ok {
 		t.Errorf("a fan-out's task was asked again: %v, %v", ok, err)
 	}
 	if b.acquires != 0 {
@@ -215,7 +219,7 @@ func TestStatedClassWinsAndPanelWorkIsBackground(t *testing.T) {
 	lock := candidate("j6", opspec.ActionLocalUserLock, "warsaw")
 
 	for _, c := range []jobs.Candidate{urgent, sweep, lock} {
-		if _, err := a.admit(context.Background(), c); err != nil {
+		if _, err := a.admit(context.Background(), c, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -235,7 +239,7 @@ func TestBackupAsksForItsRepository(t *testing.T) {
 	a := newAdmission(b, &fakeWaits{})
 	c := candidate("j7", opspec.ActionBackupRun, "warsaw")
 	c.Job.Payload = json.RawMessage(`{"backup":{"repository":"sftp://vault/fleet"}}`)
-	if _, err := a.admit(context.Background(), c); err != nil {
+	if _, err := a.admit(context.Background(), c, ""); err != nil {
 		t.Fatal(err)
 	}
 	keys := keysAsked(b.asked[0].needs)
@@ -251,7 +255,7 @@ func TestTokensOfTasksTheLeaseMissedGoBack(t *testing.T) {
 	b := newFakeBudgets()
 	a := newAdmission(b, &fakeWaits{})
 	for _, id := range []string{"j8", "j9"} {
-		if _, err := a.admit(context.Background(), candidate(id, opspec.ActionUnitRestart, "warsaw")); err != nil {
+		if _, err := a.admit(context.Background(), candidate(id, opspec.ActionUnitRestart, "warsaw"), ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -278,7 +282,7 @@ func TestUnwrittenReasonIsAnError(t *testing.T) {
 	b := newFakeBudgets(budgets.KeyGlobalMutations)
 	w := &fakeWaits{fail: errors.New("database away")}
 	a := newAdmission(b, w)
-	if _, err := a.admit(context.Background(), candidate("j10", opspec.ActionUnitRestart, "warsaw")); err == nil {
+	if _, err := a.admit(context.Background(), candidate("j10", opspec.ActionUnitRestart, "warsaw"), ""); err == nil {
 		t.Error("a wait reason that was not written passed as fine")
 	}
 }
@@ -298,4 +302,78 @@ func contains(keys []string, key string) bool {
 		}
 	}
 	return false
+}
+
+// fakeTopology places hosts in failure domains, or fails to answer.
+type fakeTopology struct {
+	domains map[string]string
+	fail    error
+	asked   [][]string
+}
+
+func (f *fakeTopology) FailureDomains(_ context.Context, hostIDs []string) (map[string]string, error) {
+	f.asked = append(f.asked, hostIDs)
+	if f.fail != nil {
+		return nil, f.fail
+	}
+	return f.domains, nil
+}
+
+// TestHostInAFailureDomainAsksForItsDomainBudget guards the topology
+// budget of a job: a change on a host the operator placed in a rack asks
+// for the rack's token of the family, next to the site's and the
+// gateway's, and a host nobody placed asks for no domain at all.
+func TestHostInAFailureDomainAsksForItsDomainBudget(t *testing.T) {
+	b := newFakeBudgets("domain:rack-1:units")
+	w := &fakeWaits{}
+	a := newAdmission(b, w)
+	a.topology = &fakeTopology{domains: map[string]string{"host-j20": "rack-1"}}
+
+	placed := candidate("j20", opspec.ActionUnitRestart, "warsaw")
+	unplaced := candidate("j21", opspec.ActionUnitRestart, "warsaw")
+	campaignID := "c2"
+	held := candidate("j22", opspec.ActionUnitRestart, "warsaw")
+	held.Job.CampaignID = &campaignID
+	domains, err := a.failureDomains(context.Background(), []jobs.Candidate{placed, unplaced, held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Only the hosts that will be asked about are looked up: a campaign's
+	// task holds its tokens already.
+	if asked := a.topology.(*fakeTopology).asked; len(asked) != 1 || strings.Join(asked[0], " ") != "host-j20 host-j21" {
+		t.Errorf("the topology was asked for %v", asked)
+	}
+
+	ok, err := a.admit(context.Background(), placed, domains[placed.Job.HostID])
+	if err != nil || ok {
+		t.Fatalf("a restart in a full rack: admit = %v, %v; want a wait", ok, err)
+	}
+	if w.reasons["j20"] != budgets.WaitReasonPrefix+"domain:rack-1:units" {
+		t.Errorf("wait reason = %q", w.reasons["j20"])
+	}
+	ok, err = a.admit(context.Background(), unplaced, domains[unplaced.Job.HostID])
+	if err != nil || !ok {
+		t.Fatalf("a restart on an unplaced host: admit = %v, %v; want admitted", ok, err)
+	}
+	for _, key := range keysAsked(b.asked[1].needs) {
+		if strings.HasPrefix(key, "domain:") {
+			t.Errorf("an unplaced host asked for the domain budget %s", key)
+		}
+	}
+}
+
+// TestFailedDomainLookupStopsThePass guards that a limit the operator set
+// does not lapse because a query did: the pass ends with the error rather
+// than admitting the tasks as hosts of no domain.
+func TestFailedDomainLookupStopsThePass(t *testing.T) {
+	a := newAdmission(newFakeBudgets(), &fakeWaits{})
+	a.topology = &fakeTopology{fail: errors.New("the database is away")}
+	if _, err := a.failureDomains(context.Background(), []jobs.Candidate{candidate("j23", opspec.ActionUnitRestart, "warsaw")}); err == nil {
+		t.Fatal("a failed lookup answered with no domains instead of an error")
+	}
+	// Without a topology there is nothing to ask and nothing to fail.
+	a.topology = nil
+	if domains, err := a.failureDomains(context.Background(), []jobs.Candidate{candidate("j24", opspec.ActionUnitRestart, "warsaw")}); err != nil || len(domains) != 0 {
+		t.Fatalf("no topology gave %v, %v", domains, err)
+	}
 }

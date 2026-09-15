@@ -27,6 +27,14 @@ type WaitRecorder interface {
 	SetWaitReason(ctx context.Context, jobID, reason string) error
 }
 
+// Topology tells where the hosts of the queued tasks stand: the failure
+// domain the budgets are keyed by, which the queue does not carry. The
+// budget store answers it; a scheduler without one places no host in a
+// domain, and loads no domain budget.
+type Topology interface {
+	FailureDomains(ctx context.Context, hostIDs []string) (map[string]string, error)
+}
+
 // admission decides, task by task, whether the fleet has room for it.
 //
 // A campaign asks the same question for every one of its hosts. A task
@@ -34,10 +42,34 @@ type WaitRecorder interface {
 // were fifty mutations nobody admitted, and the limit the fleet decided on
 // held only for those who went through a campaign.
 type admission struct {
-	budgets Budgets
-	waits   WaitRecorder
-	log     *slog.Logger
-	gateway string
+	budgets  Budgets
+	topology Topology
+	waits    WaitRecorder
+	log      *slog.Logger
+	gateway  string
+}
+
+// failureDomains reads the domains of the hosts behind the candidates that
+// will be asked about, once per pass. A lookup that fails stops the pass
+// rather than admitting the tasks as if no host had a domain: a limit the
+// operator set must not lapse because a query did.
+func (a admission) failureDomains(ctx context.Context, candidates []jobs.Candidate) (map[string]string, error) {
+	if a.topology == nil || a.budgets == nil {
+		return map[string]string{}, nil
+	}
+	hostIDs := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
+	for _, candidate := range candidates {
+		if candidate.Job.CampaignID != nil || candidate.Job.FanoutID != nil || seen[candidate.Job.HostID] {
+			continue
+		}
+		seen[candidate.Job.HostID] = true
+		hostIDs = append(hostIDs, candidate.Job.HostID)
+	}
+	if len(hostIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	return a.topology.FailureDomains(ctx, hostIDs)
 }
 
 // admit asks the budgets whether the task can start now.
@@ -47,7 +79,11 @@ type admission struct {
 // pass. The wait itself does the rest - the budgets promote a claimant by
 // how long it has waited, so a task refused for its fair share stops being
 // bound by the share after the promotion age of its class.
-func (a admission) admit(ctx context.Context, candidate jobs.Candidate) (bool, error) {
+//
+// The domain is the host's failure domain as the pass read it; the gateway
+// of the session is this one, because the queue is read for the hosts
+// connected here.
+func (a admission) admit(ctx context.Context, candidate jobs.Candidate, domain string) (bool, error) {
 	job := candidate.Job
 	// A campaign's task and a fan-out's task already hold their tokens: the
 	// orchestrator took them for the target before it created the job, and
@@ -58,7 +94,8 @@ func (a admission) admit(ctx context.Context, candidate jobs.Candidate) (bool, e
 	}
 
 	action := opspec.ActionType(job.ActionType)
-	needs := budgets.Needs(action, candidate.Site, repositoryOf(job.Payload))
+	where := budgets.Topology{Site: candidate.Site, FailureDomain: domain, Gateway: a.gateway}
+	needs := budgets.Needs(action, where, repositoryOf(job.Payload))
 	class := budgets.JobClass(action, job.CreatedBy, budgets.Class(job.BudgetClass))
 	// The owner is the job, so an attempt that comes back to the queue and
 	// asks again replaces its own grant rather than adding to it. The

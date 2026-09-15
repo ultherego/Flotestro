@@ -624,3 +624,57 @@ func keysOf(needs []Need) []string {
 	}
 	return result
 }
+
+// FailureDomains reads the failure domain of every given host. A host
+// nobody placed in a domain is missing from the answer, and a host
+// nobody knows is too.
+//
+// The lookup lives with the budgets rather than with the queue because it
+// serves the budget keys alone: the queue carries the site of a host, and
+// the domain is asked for the same way at the same moment, by the
+// scheduler for a job and by the orchestrator for a campaign target.
+func (s *Store) FailureDomains(ctx context.Context, hostIDs []string) (map[string]string, error) {
+	if len(hostIDs) == 0 {
+		return map[string]string{}, nil
+	}
+	rows, err := s.pool.Query(ctx,
+		`select id::text, failure_domain from hosts
+		  where id = any($1::uuid[]) and failure_domain is not null`, hostIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	domains := map[string]string{}
+	for rows.Next() {
+		var id, domain string
+		if err := rows.Scan(&id, &domain); err != nil {
+			return nil, err
+		}
+		if domain != "" {
+			domains[id] = domain
+		}
+	}
+	return domains, rows.Err()
+}
+
+// SessionGateway names the gateway the host's open session is on; empty
+// means the host has no open session, and so no gateway to load.
+//
+// The registry of a gateway knows only its own sessions. A campaign is
+// driven by whichever instance runs the orchestrator, and the host it
+// starts may be connected to another one - the session table is the one
+// place every gateway's sessions meet, so the gateway is read from there.
+func (s *Store) SessionGateway(ctx context.Context, hostID string) (string, error) {
+	var gateway string
+	err := s.pool.QueryRow(ctx, `
+		select gateway_id from agent_sessions
+		 where host_id = $1::uuid and ended_at is null
+		 order by epoch desc limit 1`, hostID).Scan(&gateway)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return gateway, nil
+}

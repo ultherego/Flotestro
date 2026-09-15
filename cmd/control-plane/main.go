@@ -33,6 +33,7 @@ import (
 	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
+	managedfiles "github.com/ultherego/flotestro/internal/files"
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
@@ -48,10 +49,12 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/outbox"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/policy"
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/remediation"
 	"github.com/ultherego/flotestro/internal/scheduler"
 	"github.com/ultherego/flotestro/internal/secrets"
+	"github.com/ultherego/flotestro/internal/selector"
 	"github.com/ultherego/flotestro/internal/vuln"
 	debiansource "github.com/ultherego/flotestro/internal/vuln/sources/debian"
 	nvdsource "github.com/ultherego/flotestro/internal/vuln/sources/nvd"
@@ -168,6 +171,17 @@ func run() error {
 	auditRetention := flag.Duration("audit-retention",
 		config.EnvDuration("FLOTESTRO_AUDIT_RETENTION", 0),
 		"how long the audit trail is kept; zero keeps it forever")
+	// The dispatch rate of the document: a queue of thousands after an
+	// outage drains at a pace the fleet and the panel carry, rather than
+	// in one wave. Zero turns the pacing off.
+	dispatchRate := flag.Int("dispatch-rate",
+		config.EnvInt("FLOTESTRO_DISPATCH_RATE", 100),
+		"how many task envelopes this gateway sends per second; zero sends every leased task at once")
+	// The reaction to a copied identity. Read strictly: a word other than
+	// the two is a misconfiguration, not the default.
+	clonePolicyValue := flag.String("clone-policy",
+		config.Env("FLOTESTRO_CLONE_POLICY", ""),
+		"what to do with the same identity alive on two boots: report or quarantine (the default)")
 	stepUpTokens := flag.String("stepup-tokens",
 		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
@@ -433,6 +447,12 @@ func run() error {
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
 		registry, certIssuer, relayStore, log, cfg.GatewayID, cfg.HeartbeatSeconds, cfg.HeartbeatJitter)
+	clonePolicy, err := gateway.ParseClonePolicy(*clonePolicyValue)
+	if err != nil {
+		return fmt.Errorf("FLOTESTRO_CLONE_POLICY: %w", err)
+	}
+	agentService.SetClonePolicy(clonePolicy)
+	log.Info("a copied identity is handled by policy", "clone_policy", string(clonePolicy))
 	// The session rows stay open after a crash of the process and inflate
 	// every measurement that counts connections from the database.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
@@ -723,7 +743,13 @@ func run() error {
 	dispatcher := scheduler.New(jobStore, registry, recorder, directory, log, scheduler.Options{
 		GatewayID:     cfg.GatewayID,
 		LeaseDuration: 5 * time.Minute,
+		DispatchRate:  float64(max(*dispatchRate, 0)),
 	})
+	if *dispatchRate > 0 {
+		log.Info("the dispatch is paced", "envelopes_per_second", *dispatchRate)
+	} else {
+		log.Warn("the dispatch is not paced: every leased task goes out at once")
+	}
 	// The leases of the secrets are created at the moment a job is delivered:
 	// the short window starts when the host starts working.
 	dispatcher.SetSecrets(secretStore)
@@ -749,6 +775,14 @@ func run() error {
 	// previous one has succeeded.
 	go remediation.NewRunner(remediationStore, jobStore, hostStore, recorder,
 		log, 5*time.Second).Run(ctx)
+
+	// The desired-state policies: judged from the inventory at their own
+	// intervals, never by reading a host; a drift becomes a remediation
+	// campaign where the policy's mode asks for one.
+	policyStore := policy.NewStore(pool)
+	go policy.NewLoop(policyStore, policy.NewEvaluator(policyStore, hostStore, inventoryStore,
+		selector.NewStore(pool), packageStore, managedfiles.NewStore(pool), campaignStore,
+		recorder, authzStore, log), log, time.Minute).Run(ctx)
 
 	// The vulnerability correlator: the trackers of the distribution vendors
 	// settle whether the installed version is vulnerable. The panel guesses
