@@ -20,10 +20,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
-          # The newest patch of the module's Go line: the standard library
-          # carries the fixes govulncheck asks for, and go.mod names only
-          # the minimum the code needs.
+          # The current stable toolchain: go.mod names the minimum the code
+          # needs, the standard library of the newest release carries the
+          # fixes govulncheck asks for, and the lab builds with the same.
+          go-version: stable
           check-latest: true
           # The module and build caches are keyed by go.sum by default.
           cache: true
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version: stable
           check-latest: true
           cache: true
 
