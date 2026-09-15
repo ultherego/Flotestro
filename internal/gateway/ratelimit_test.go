@@ -53,3 +53,37 @@ func TestRateLimiterBurstsRefillsAndRecordsOnce(t *testing.T) {
 		t.Fatal("the idle key was not swept")
 	}
 }
+
+// A key that gets its token back after every accepted attempt is never
+// held to the rate: the limit prices guesses, and an accepted attempt was
+// not one. A refund never fills the bucket past its burst, and a key the
+// limiter has not seen has nothing to refund.
+func TestARefundedKeyIsNotHeldToTheRate(t *testing.T) {
+	clock := time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+	limiter := newRateLimiter(3)
+	limiter.now = func() time.Time { return clock }
+
+	for i := 0; i < 100; i++ {
+		allowed, _ := limiter.allow("10.0.0.1")
+		if !allowed {
+			t.Fatalf("accepted attempt %d was refused despite the refunds", i+1)
+		}
+		limiter.refund("10.0.0.1")
+	}
+	if tokens := limiter.buckets["10.0.0.1"].tokens; tokens != 3 {
+		t.Fatalf("the bucket holds %v tokens after the refunds; the burst is 3", tokens)
+	}
+
+	// Refusals are not refunded: three guesses drain the key, and the
+	// fourth waits for the refill like any other.
+	for i := 0; i < 3; i++ {
+		limiter.allow("10.0.0.1")
+	}
+	if allowed, _ := limiter.allow("10.0.0.1"); allowed {
+		t.Fatal("the fourth guess was allowed")
+	}
+	limiter.refund("never-seen")
+	if _, kept := limiter.buckets["never-seen"]; kept {
+		t.Fatal("a refund created a bucket for a key the limiter never saw")
+	}
+}

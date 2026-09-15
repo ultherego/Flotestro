@@ -120,7 +120,15 @@ func (s *EnrollmentService) Enroll(ctx context.Context,
 	if err := s.throttle(ctx, req); err != nil {
 		return nil, err
 	}
-	return s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
+	response, err := s.enrollThroughRelay(ctx, req.Msg, relayAttestation{})
+	if err == nil {
+		// The address paid for a guess and made none: a fleet behind one
+		// NAT registers at the panel's pace, not at ten hosts a minute.
+		// The machine keeps paying - one machine registering over and
+		// over is the case the second limit is for.
+		s.perIP.refund(peerHost(req.Peer().Addr))
+	}
+	return response, err
 }
 
 // enrollThroughRelay handles the registration of a host. The whole operation

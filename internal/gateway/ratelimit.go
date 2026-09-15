@@ -78,6 +78,23 @@ func (l *rateLimiter) allow(key string) (allowed, recordRefusal bool) {
 	return false, false
 }
 
+// refund gives the key its token back. The limit is there to price a
+// guess, and a registration the panel accepted was no guess: a rack of
+// machines behind one address is to register as fast as the panel can
+// issue certificates, while a source that keeps producing refusals is
+// held to the rate all the same.
+func (l *rateLimiter) refund(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b, ok := l.buckets[key]
+	if !ok {
+		return
+	}
+	if b.tokens += 1; b.tokens > l.burst {
+		b.tokens = l.burst
+	}
+}
+
 // sweep forgets the keys that have been idle long enough to be full again.
 // It runs at most once a minute, so a busy endpoint does not scan the map
 // on every call.
