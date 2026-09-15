@@ -568,6 +568,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.enrollDomain(ctx, task, payload.DomainEnroll, false)
 	case opspec.ActionDomainLeave:
 		return e.leaveDomain(ctx, task, payload.DomainLeave)
+	case opspec.ActionIdentityKeytabRenew:
+		return e.renewKeytab(ctx, task, payload.Keytab)
 	default:
 		return e.applyUnitAction(ctx, task, action, payload.Unit)
 	}
@@ -968,6 +970,11 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 				Domain: request.GetDomain(),
 				Realm:  request.GetRealm(),
 			},
+		}, nil
+
+	case *agentv1.TaskEnvelope_KeytabRenew:
+		return opspec.ActionIdentityKeytabRenew, opspec.Payload{
+			Keytab: &opspec.KeytabPayload{Principal: action.KeytabRenew.GetPrincipal()},
 		}, nil
 
 	case *agentv1.TaskEnvelope_PackagesRepair:

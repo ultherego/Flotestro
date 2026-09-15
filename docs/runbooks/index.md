@@ -17,3 +17,6 @@ route or command for a step, the runbook says so rather than describing one.
   `buffer_max_bytes`, what is dropped, `flotestro-relayctl`, re-enrollment of a relay.
 - [Quarantine, identity recovery and decommission](quarantine.md): the host lifecycle, the
   clone policy, release, `flotestro-agentctl identity reset`, the decommission handshake.
+- [Golden image and cloud-init](golden-image.md): what an image may and must not carry, the
+  sanitisation before sealing, the first-boot enrollment through `flotestro-enroll.service`
+  and its credential file, the Ansible alternative, what a clone does to the fleet.

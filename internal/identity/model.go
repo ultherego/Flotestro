@@ -49,6 +49,12 @@ const (
 	// rule. It is never a change and never enters the change store; it is
 	// named here so its permission stands next to the rules it reads.
 	ActionHBACTest ActionType = "identity.hbac.test"
+	// A service keytab rotation has two halves under one consent: the
+	// directory retires the current keytab of the principal, and the fleet
+	// host that carries the service fetches a new one with its own
+	// credentials. No key material passes through the panel; the change
+	// records the retirement and the task it ordered on the host.
+	ActionKeytabRotate ActionType = "identity.keytab.rotate"
 )
 
 // State is the state of a change.
@@ -88,6 +94,21 @@ type Payload struct {
 	DNS       *DNSRecordPayload `json:"dns,omitempty"`
 	HBACRule  *HBACRulePayload  `json:"hbac_rule,omitempty"`
 	SudoRule  *SudoRulePayload  `json:"sudo_rule,omitempty"`
+	Keytab    *KeytabPayload    `json:"keytab,omitempty"`
+}
+
+// KeytabPayload names the service principal whose keytab is rotated, as
+// service/host.example.test with an optional realm. The host is the part
+// after the slash: the renewal is ordered on the fleet host of that name.
+type KeytabPayload struct {
+	Principal string `json:"principal"`
+}
+
+// Host is the FQDN the principal names, the host the renewal runs on.
+func (p KeytabPayload) Host() string {
+	name, _, _ := strings.Cut(p.Principal, "@")
+	_, host, _ := strings.Cut(name, "/")
+	return host
 }
 
 // HostGroupPayload describes a change of a host group's membership. The
@@ -401,6 +422,17 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.SudoRule == nil || !ruleNamePattern.MatchString(payload.SudoRule.Name) {
 			return fmt.Errorf("the operation %s requires naming a rule", action)
 		}
+	case ActionKeytabRotate:
+		if payload.Keytab == nil {
+			return fmt.Errorf("the operation %s requires a keytab payload", action)
+		}
+		// The same check the connector makes before service_disable: a
+		// host principal is refused by name, because retiring it is a
+		// re-join and would cut the host off from the directory it has to
+		// fetch the new key from.
+		if err := freeipa.ValidateServicePrincipal(payload.Keytab.Principal); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unknown type of change %q", action)
 	}
@@ -427,6 +459,11 @@ func (a ActionType) Permission() string {
 	case ActionHBACTest:
 		// A simulation reads the rules; it changes nothing.
 		return "identity.policy.read"
+	case ActionKeytabRotate:
+		// The rotation has a right of its own, the architecture document's
+		// "keytab rotation per separate permission": the same right the
+		// host's half of it asks for, so nobody holds one half alone.
+		return "identity.keytab.rotate"
 	default:
 		return "identity.policy.write"
 	}
@@ -441,7 +478,11 @@ func (a ActionType) ChangesAccess() bool {
 	case ActionUserCreate, ActionUserDisable, ActionUserEnable, ActionGroupMembers, ActionSSHKeys,
 		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset,
 		ActionHostGroupMembers,
-		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
+		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove,
+		// A keytab is the credential a service authenticates with: replacing
+		// it is a change of access in both directions, and the gap between
+		// the retirement and the renewal is an outage of that service.
+		ActionKeytabRotate:
 		return true
 	default:
 		return false
@@ -457,7 +498,8 @@ func (a ActionType) Known() bool {
 		ActionUserExpire, ActionUserPOSIX, ActionUserPreserve, ActionUserPasswordReset,
 		ActionHostGroupMembers,
 		ActionDNSRecordEnsure, ActionDNSRecordRemove,
-		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove:
+		ActionHBACRuleEnsure, ActionHBACRuleRemove, ActionSudoRuleEnsure, ActionSudoRuleRemove,
+		ActionKeytabRotate:
 		return true
 	default:
 		return false

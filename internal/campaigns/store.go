@@ -79,8 +79,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 
 	state := StateQueuedOrApproval(spec.RequiresApproval)
 	// A change computed per host starts with planning: the consent is to
-	// concern the diffs, and those are yet to come into being.
-	if opspec.PlanningAction(opspec.ActionType(spec.ActionType)) != "" {
+	// concern the diffs, and those are yet to come into being - read from
+	// the hosts, or split from the order in the panel.
+	if opspec.CampaignPlans(opspec.ActionType(spec.ActionType)) {
 		state = StatePlanning
 	}
 	campaignID := uuid.NewString()

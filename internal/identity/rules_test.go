@@ -20,6 +20,7 @@ type fakeDirectory struct {
 	hostGroups []freeipa.HostGroup
 	hbac       []freeipa.HBACRule
 	sudo       []freeipa.SudoRule
+	services   []freeipa.Service
 }
 
 func (f *fakeDirectory) Principal() string {
@@ -65,6 +66,10 @@ func (f *fakeDirectory) Zones(context.Context) ([]freeipa.Zone, error) {
 
 func (f *fakeDirectory) Records(context.Context, string) ([]freeipa.Record, error) {
 	return nil, nil
+}
+
+func (f *fakeDirectory) Services(context.Context) ([]freeipa.Service, error) {
+	return f.services, nil
 }
 
 // labDirectory is a small fleet: two web hosts in a group, one database

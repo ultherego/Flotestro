@@ -4794,7 +4794,7 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	// A managed file with fresh content: a plan that always has something
 	// to change, unlike a security update on a fleet that has none waiting.
 	campaign := h.createCampaign(map[string]any{
-		"name": "expired plan", "action": "file.ensure",
+		"name": "expired plan", "action": "file.ensure", "reason": "expired plan test",
 		"payload": map[string]any{"file": map[string]any{
 			"path": "/etc/motd", "content": "expired plan test " + time.Now().Format(time.RFC3339Nano) + "\n", "mode": "0644"}},
 		"selector":                   map[string]any{"host_ids": []string{host.ID}},

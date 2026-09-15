@@ -380,7 +380,8 @@ var queryParameters = map[string][]queryParameter{
 		{"range", "string", "The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups."},
 	},
 	"GET /api/v1/campaigns/preview": {
-		{"action", "string", "The operation type; without it the preview counts hosts and qualifies none."},
+		{"action", "string", "The operation type; without it the preview counts hosts and qualifies none. " +
+			"For an operation the panel splits host by host (system.hostname.set) the answer also lists every ready host under hosts [{id, hostname}], for the mapping to name."},
 		{"site", "string", ""},
 		{"environment", "string", ""},
 		{"os_family", "string", ""},
@@ -564,10 +565,13 @@ var requestSchemas = map[string]map[string]any{
 				"identity.group.members", "identity.hostgroup.members",
 				"identity.hbac.rule.ensure", "identity.hbac.rule.remove", "identity.sudo.rule.ensure", "identity.sudo.rule.remove",
 				"dns.record.ensure", "dns.record.remove",
+				"identity.keytab.rotate",
 			}},
 			"payload": map[string]any{"type": "object", "description": "One field named after the change: user, reference {uid}, " +
 				"expiry {uid, principal_expires_at?, password_expires_at?: RFC 3339, \"\" clears}, posix {uid, uid_number?, gid_number?, shell?, home_directory?}, " +
-				"ssh_keys {uid, keys}, group {group, add?, remove?}, host_group {group, add?, remove?: FQDNs}, hbac_rule, sudo_rule or dns."},
+				"ssh_keys {uid, keys}, group {group, add?, remove?}, host_group {group, add?, remove?: FQDNs}, hbac_rule, sudo_rule, dns, " +
+				"or keytab {principal: service/host.fqdn[@REALM]} for identity.keytab.rotate (permission identity.keytab.rotate; the directory retires the keytab with service_disable " +
+				"and the fleet host of that name gets an identity.keytab.renew task that reports the old and the new key version; the host's own host/ principal is refused)."},
 			"reason": map[string]any{"type": "string", "description": "Required for a change of access: at least 8 characters, kept in the audit trail with the fresh authentication."},
 		},
 		"required": []string{"action", "payload"},
@@ -594,7 +598,8 @@ var requestSchemas = map[string]map[string]any{
 				"description": "Recorded on the host the moment it enrolls."},
 			"tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"},
 				"description": "Added to the host's tags at enrollment; the same shape as PUT /hosts/{id}/tags accepts."},
-			"max_uses":    map[string]any{"type": "integer"},
+			"max_uses": map[string]any{"type": "integer", "minimum": 1,
+				"description": "How many machines the token admits; 1 when left out. More than one is a batch token: it needs host.enroll.batch on top of host.enroll.create (403 permission_denied names it) and fresh authentication with a reason."},
 			"ttl_minutes": map[string]any{"type": "integer"},
 			"reason":      map[string]any{"type": "string", "description": "Required for production, a batch token or a relay."},
 		},
@@ -626,7 +631,9 @@ var requestSchemas = map[string]map[string]any{
 		"properties": map[string]any{
 			"name":                       map[string]any{"type": "string"},
 			"action":                     map[string]any{"type": "string"},
-			"payload":                    ref("Payload"),
+			"payload": map[string]any{"allOf": []any{ref("Payload")},
+				"description": "For system.hostname.set the shared part carries no name: hostname.mapping {host_id: fqdn} names every host's new name, " +
+					"a host it leaves out settles as ineligible with no_hostname_for_host, and a missing, duplicate or invalid entry is refused with invalid_mapping."},
 			"reason":                     map[string]any{"type": "string"},
 			"selector":                   map[string]any{"type": "object"},
 			"canary_size":                map[string]any{"type": "integer"},

@@ -641,6 +641,7 @@ message TaskEnvelope {
     DockerLogs docker_logs = 57;
     HostnameSet hostname_set = 58;
     DomainLeave domain_leave = 59;
+    KeytabRenew keytab_renew = 60;
   }
 }
 
@@ -802,6 +803,15 @@ message DomainEnroll {
 message DomainLeave {
   string domain = 1;
   string realm = 2;
+}
+
+// KeytabRenew is the host's half of a service keytab rotation: the
+// directory has retired the old key of the principal, and the host fetches
+// a new one into its own keytab file with the credentials it holds. No key
+// material travels in either direction through the panel.
+message KeytabRenew {
+  // The principal, service/host.example.test with an optional realm.
+  string principal = 1;
 }
 
 // LocalUserAction manages a local account on the host. The module is meant
@@ -1068,6 +1078,7 @@ message TaskResult {
   SmartResult smart_result = 50;
   DockerLogsResult docker_logs_result = 51;
   HostnameResult hostname_result = 52;
+  KeytabRenewResult keytab_renew_result = 53;
 }
 
 // InventoryRefreshResult carries the proof of the refresh.
@@ -2074,6 +2085,18 @@ message HostnameResult {
   // HostsFileUpdated says whether /etc/hosts named the old hostname and was
   // rewritten; the previous content is kept as /etc/hosts.flotestro-before.
   bool hosts_file_updated = 5;
+}
+
+// KeytabRenewResult carries the proof of a keytab renewal: the key version
+// number of the principal in the host's keytab before and after the
+// fetch. A number that did not go up is a fetch that replaced nothing.
+// Zero before with kvno_before_known false means the number was not read,
+// not that there was none.
+message KeytabRenewResult {
+  string principal = 1;
+  bool kvno_before_known = 2;
+  uint32 kvno_before = 3;
+  uint32 kvno_after = 4;
 }
 
 // SmartResult carries the health and the attributes of one device as

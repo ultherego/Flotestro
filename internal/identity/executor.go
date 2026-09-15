@@ -36,6 +36,12 @@ type Executor struct {
 	audit     *audit.Recorder
 	log       *slog.Logger
 	interval  time.Duration
+	// fleet orders the host's half of a keytab rotation; it reads the
+	// panel's own tables through the pool the change store holds.
+	fleet HostOrderer
+	// retire is the test seam for the directory half of a rotation; nil
+	// means the connector's own call.
+	retire func(ctx context.Context, principal string) error
 }
 
 func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoker,
@@ -43,8 +49,19 @@ func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoke
 	if interval <= 0 {
 		interval = 3 * time.Second
 	}
-	return &Executor{store: store, directory: directory, sessions: sessions,
+	executor := &Executor{store: store, directory: directory, sessions: sessions,
 		audit: recorder, log: log, interval: interval}
+	if store != nil && store.Pool() != nil {
+		executor.fleet = NewFleetOrderer(store.Pool(), recorder)
+	}
+	return executor
+}
+
+// WithHostOrderer replaces the fleet the rotation orders through: a test
+// hands in a fake, and an installation may hand in a narrower one.
+func (e *Executor) WithHostOrderer(fleet HostOrderer) *Executor {
+	e.fleet = fleet
+	return e
 }
 
 // WithProviderLogout makes a disable end the user's sessions at the identity
@@ -131,6 +148,8 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 		phases = e.writeHBACRule(ctx, payload.HBACRule, action == ActionHBACRuleEnsure)
 	case ActionSudoRuleEnsure, ActionSudoRuleRemove:
 		phases = e.writeSudoRule(ctx, payload.SudoRule, action == ActionSudoRuleEnsure)
+	case ActionKeytabRotate:
+		phases = e.rotateKeytab(ctx, change, payload.Keytab)
 	default:
 		e.finish(ctx, change, StateFailed, nil, "unknown type of change", nil)
 		return

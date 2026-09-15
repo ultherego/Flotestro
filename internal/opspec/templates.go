@@ -171,6 +171,13 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 
 	case ActionSystemReboot:
 		return Payload{Reboot: &RebootPayload{DelaySeconds: 15, Reason: "planned maintenance reboot"}}, true
+
+	case ActionSystemHostnameSet:
+		// The shared part of a rename order carries no name on purpose: the
+		// names live in the mapping the wizard builds host by host, and a
+		// template with a name would be the one name every host must not
+		// get. The campaign validation stands in a placeholder for it.
+		return Payload{Hostname: &HostnamePayload{}}, true
 	}
 	return Payload{}, false
 }

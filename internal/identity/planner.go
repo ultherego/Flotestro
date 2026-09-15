@@ -23,6 +23,10 @@ type Directory interface {
 	SudoRules(ctx context.Context) ([]freeipa.SudoRule, error)
 	Zones(ctx context.Context) ([]freeipa.Zone, error)
 	Records(ctx context.Context, zone string) ([]freeipa.Record, error)
+	// Services lists the Kerberos service principals; a keytab rotation
+	// plans against them, so a principal the directory does not know is a
+	// conflict before the approval rather than a failure after it.
+	Services(ctx context.Context) ([]freeipa.Service, error)
 }
 
 // Planner builds a preview of a change's impact. The plan shows the resulting
@@ -71,6 +75,8 @@ func (p *Planner) Build(ctx context.Context, action ActionType, payload Payload)
 		return p.planSudoRule(ctx, payload.SudoRule)
 	case ActionSudoRuleRemove:
 		return p.planSudoRuleRemoval(ctx, payload.SudoRule.Name)
+	case ActionKeytabRotate:
+		return p.planKeytabRotate(ctx, payload.Keytab)
 	default:
 		return Plan{}, fmt.Errorf("unknown type of change %q", action)
 	}

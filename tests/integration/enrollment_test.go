@@ -894,3 +894,65 @@ func enrollmentAttemptStatus(t *testing.T, token string) int {
 	_, _ = io.Copy(io.Discard, response.Body)
 	return response.StatusCode
 }
+
+// TestBatchTokenNeedsItsOwnPermission guards the rule of the lifecycle
+// chapter: a token good for many machines is a standing door, and opening
+// it is a right on top of inviting one host. The operator of a site orders
+// a token per host; a pool of uses is refused with the permission named,
+// so what is missing is a right, not a reason or a session. The
+// administrator holds the right and, with the reason the step-up asks for,
+// gets the pool.
+func TestBatchTokenNeedsItsOwnPermission(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-batch-token"), []map[string]string{
+		{"role": "operator", "site": host.Site, "environment": host.Environment},
+	}))
+	reason := "integration test of the batch token permission"
+
+	// One host: the operator's own right, in their own site.
+	var single orderView
+	operator.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "one host by the operator", "site": host.Site, "environment": host.Environment,
+		"reason": reason,
+	}, &single, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+single.ID+"/revoke",
+			map[string]any{"reason": reason}, nil, 0)
+	})
+	if single.MaxUses != 1 {
+		t.Errorf("the operator's token admits %d machines, expected one", single.MaxUses)
+	}
+
+	// A pool of uses, with the reason the step-up would take: what is
+	// missing is the batch right, and the refusal says so by name.
+	var problem struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	operator.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "a batch by the operator", "site": host.Site, "environment": host.Environment,
+		"max_uses": 3, "reason": reason,
+	}, &problem, http.StatusForbidden)
+	if problem.Code != "permission_denied" {
+		t.Fatalf("code = %q (%s), expected permission_denied", problem.Code, problem.Detail)
+	}
+	if !strings.Contains(problem.Detail, "host.enroll.batch") {
+		t.Errorf("the refusal does not name host.enroll.batch: %s", problem.Detail)
+	}
+
+	// The administrator holds the right; the same order passes with the
+	// reason, and the pool is what was asked for.
+	var batch orderView
+	h.do(http.MethodPost, "/api/v1/enrollment-requests", map[string]any{
+		"description": "a batch by the administrator", "site": host.Site, "environment": host.Environment,
+		"max_uses": 3, "reason": reason,
+	}, &batch, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/enrollment-requests/"+batch.ID+"/revoke",
+			map[string]any{"reason": reason}, nil, 0)
+	})
+	if batch.MaxUses != 3 {
+		t.Errorf("the administrator's batch admits %d machines, expected 3", batch.MaxUses)
+	}
+}

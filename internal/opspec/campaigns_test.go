@@ -24,10 +24,12 @@ func TestAMissingDeclarationMeansRefusal(t *testing.T) {
 
 // TestIrreversibleOperationsDoNotRunInBulk guards that a boundary drawn on a
 // single host holds for the fleet as well: an operation that requires typing
-// the target name has no single target to type in a campaign.
+// the target name has no single target to type in a campaign. The one way
+// through is an order the panel splits host by host: its mapping names
+// every host by itself, which is the typing, one host at a time.
 func TestIrreversibleOperationsDoNotRunInBulk(t *testing.T) {
 	for _, action := range AllActions() {
-		if !action.RequiresTargetConfirmation() {
+		if !action.RequiresTargetConfirmation() || PanelPlanned(action) {
 			continue
 		}
 		if action.CampaignMode() != CampaignNone {
@@ -138,7 +140,7 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 		if action.CampaignMode() != CampaignPerHostPlan {
 			continue
 		}
-		if PlanningAction(action) == "" {
+		if !CampaignPlans(action) {
 			t.Errorf("%s declares a per-host plan and has no planner", action)
 		}
 		if !ExecutableMode(action) {
@@ -235,15 +237,19 @@ func TestARenameSplitsTheMappingPerHost(t *testing.T) {
 	if PanelPlanned(ActionUnitRestart) {
 		t.Fatal("restarting a unit is planned from the order")
 	}
-	// A plan split from the order has no host planner, and the engine opens
-	// its planning phase on a host planner alone: the rename stays refused
-	// in bulk until the engine and the campaign API learn the split, rather
-	// than jumping to execution with no name per host.
+	// A plan split from the order has no host planner: no read on the host
+	// can say which name the operator intends for it. The engine plans it
+	// from the order, so the operation is executable in bulk all the same.
 	if PlanningAction(ActionSystemHostnameSet) != "" {
 		t.Errorf("a rename names a host planner %q", PlanningAction(ActionSystemHostnameSet))
 	}
-	if ExecutableMode(ActionSystemHostnameSet) {
-		t.Error("a rename allowed in bulk although the engine has no panel-side planning phase")
+	if !ExecutableMode(ActionSystemHostnameSet) || ActionSystemHostnameSet.CampaignMode() != CampaignPerHostPlan {
+		t.Error("a rename is refused in bulk although the engine plans it from the order")
+	}
+	// The template is the shared part alone: a name in it would be the one
+	// name every host must not get.
+	if template, ok := PayloadTemplate(ActionSystemHostnameSet); !ok || template.Hostname == nil || template.Hostname.Hostname != "" {
+		t.Errorf("the rename template is %+v", template.Hostname)
 	}
 	if !CampaignPlans(ActionSystemHostnameSet) || CampaignPlans(ActionUnitRestart) {
 		t.Error("CampaignPlans does not follow the panel-side plan")

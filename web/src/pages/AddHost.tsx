@@ -133,6 +133,10 @@ export function AddHost() {
   });
   const permissions = whoami.data?.permissions ?? [];
   const canEnrollRelay = permissions.includes("relay.enroll.create");
+  // A token for many machines is a separate right on top of inviting
+  // one; without it the field is not shown, so the order is not refused
+  // after the form is filled in.
+  const canEnrollBatch = permissions.includes("host.enroll.batch");
 
   const list = useQuery({
     queryKey: ["enrollment-requests"],
@@ -389,19 +393,27 @@ export function AddHost() {
               <input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="role=web tier=gold" />
             </Field>
             {/* A batch token admits several machines; the reason it asks
-                for is the same one the audit trail keeps. */}
-            <Field
-              label={t("Uses")}
-              hint={t("1 for one host; more for a batch of identical machines, with a reason.")}
-            >
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={maxUses}
-                onChange={(e) => setMaxUses(Math.max(1, Number(e.target.value)))}
-              />
-            </Field>
+                for is the same one the audit trail keeps. The field is
+                for holders of host.enroll.batch: everyone else orders a
+                token per host, which the document prefers anyway. */}
+            {canEnrollBatch ? (
+              <Field
+                label={t("Uses")}
+                hint={t("1 for one host; more for a batch of identical machines, with a reason.")}
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={maxUses}
+                  onChange={(e) => setMaxUses(Math.max(1, Number(e.target.value)))}
+                />
+              </Field>
+            ) : (
+              <Field label={t("Uses")} hint={t("One host per token. A token for a batch of machines needs the host.enroll.batch permission.")}>
+                <input type="number" value={1} disabled />
+              </Field>
+            )}
             {/* A short deadline is a safeguard, not an inconvenience: a token
                 that lies around for hours is a secret waiting to leak. */}
             <Field label={t("Token valid for (minutes, at most 24 h)")}>

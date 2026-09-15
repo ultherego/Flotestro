@@ -403,6 +403,11 @@ var contracts = map[ActionType]contract{
 	// back is a new join with a new credential, and the host's own
 	// verification - configuration and keytab gone - settles the result.
 	ActionDomainLeave: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	// A keytab renewal is one fetch that replaces the key once it lands:
+	// the old key is already retired in the directory, so there is no way
+	// back, only another renewal; the host's own verification - the
+	// principal's key version number went up - settles the result.
+	ActionIdentityKeytabRenew: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
 	// Local accounts. Each change is one call on the account database and
 	// has a compensating change: lock after create, unlock after lock, the

@@ -254,3 +254,71 @@ func (e *TaskExecutor) leaveDomain(ctx context.Context, task *agentv1.TaskEnvelo
 		Detail:   &agentv1.TaskResult_DomainEnroll{DomainEnroll: detail},
 	}
 }
+
+// renewKeytab asks the helper to fetch a new key of a service principal
+// into the host's own keytab. The principal is checked here the way the
+// panel checked it, because an envelope is not trusted for its shape; the
+// helper checks it once more before the argument reaches ipa-getkeytab.
+// The key version number before and after is the result: a fetch that
+// left the number where it was replaced nothing, and the helper says so.
+func (e *TaskExecutor) renewKeytab(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.KeytabPayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"the keytab payload is missing")
+	}
+	if err := opspec.ValidateServicePrincipal(payload.Principal); err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
+	}
+	timeout := timeoutOf(task, opspec.ActionIdentityKeytabRenew)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
+	defer cancel()
+
+	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		MaxOutputBytes: task.GetLimits().GetMaxOutputBytes(),
+		Action: &helperv1.HelperRequest_KeytabRenew{
+			KeytabRenew: &helperv1.KeytabRenewRequest{Principal: payload.Principal},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	var detail *agentv1.KeytabRenewResult
+	if renewed := response.GetKeytabRenewResult(); renewed != nil {
+		detail = &agentv1.KeytabRenewResult{
+			Principal:       renewed.GetPrincipal(),
+			KvnoBeforeKnown: renewed.GetKvnoBeforeKnown(),
+			KvnoBefore:      renewed.GetKvnoBefore(),
+			KvnoAfter:       renewed.GetKvnoAfter(),
+		}
+	}
+	if !response.GetAccepted() {
+		// A refusal before the fetch - a held guard, a principal the helper
+		// would not pass on - is a rejection: nothing changed. A failure of
+		// the fetch itself is not: the directory has retired the old key
+		// already, and the panel must not read the service as untouched.
+		status := agentv1.TaskResult_STATUS_FAILED
+		if response.GetErrorCode() == "locked" || response.GetErrorCode() == "malformed_request" {
+			status = agentv1.TaskResult_STATUS_REJECTED
+		}
+		result := rejected(status, response.GetErrorCode(), response.GetMessage())
+		result.TaskId = task.GetTaskId()
+		result.Stderr = response.GetStderr()
+		result.KeytabRenewResult = detail
+		return result
+	}
+	message := "the keytab of " + payload.Principal + " was renewed"
+	if detail != nil {
+		message += ": key version " + strconv.FormatUint(uint64(detail.GetKvnoBefore()), 10) +
+			" became " + strconv.FormatUint(uint64(detail.GetKvnoAfter()), 10)
+	}
+	return &agentv1.TaskResult{
+		TaskId:            task.GetTaskId(),
+		Status:            agentv1.TaskResult_STATUS_SUCCEEDED,
+		Message:           message,
+		KeytabRenewResult: detail,
+	}
+}

@@ -869,10 +869,12 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 	return nil
 }
 
-// campaignPlans says whether the hosts of this campaign computed a plan
-// step of their own before the change. A plan handed in with the order -
-// a fleet remediation - is no step of the host, so the change of such a
-// campaign follows nothing on the host's strip.
+// campaignPlans says whether the targets of this campaign have a plan step
+// of their own before the change: computed on the host, or split from the
+// order in the panel, which opens and closes the step without a task. A
+// plan set handed in whole with the order - a fleet remediation - is no
+// step of the host, so the change of such a campaign follows nothing on
+// the host's strip.
 func campaignPlans(campaign Campaign) bool {
-	return opspec.PlanningAction(opspec.ActionType(campaign.ActionType)) != ""
+	return opspec.CampaignPlans(opspec.ActionType(campaign.ActionType))
 }

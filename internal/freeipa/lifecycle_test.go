@@ -323,3 +323,53 @@ func TestHealthReportsTheCallsWithoutAskingTheDirectory(t *testing.T) {
 		t.Fatal("the health view asked the directory")
 	}
 }
+
+// TestRetireServiceKeytabSendsServiceDisableAndNothingElse checks the one
+// write the rotation makes in the directory: service_disable on the
+// principal named, with no option that could issue or export key material,
+// and a refusal for the host's own principal and for shapes that are not a
+// service principal - before any request is built.
+func TestRetireServiceKeytabSendsServiceDisableAndNothingElse(t *testing.T) {
+	fake, client := newFakeDirectory(t)
+	if err := client.RetireServiceKeytab(context.Background(), "HTTP/web1.example.test@EXAMPLE.TEST"); err != nil {
+		t.Fatalf("retiring: %v", err)
+	}
+	call, ok := fake.find("service_disable")
+	if !ok {
+		t.Fatal("no service_disable was sent")
+	}
+	if len(call.Args) != 1 || call.Args[0] != "HTTP/web1.example.test@EXAMPLE.TEST" {
+		t.Fatalf("service_disable named %v", call.Args)
+	}
+	// Every call carries the API version the client speaks; the command
+	// itself takes no option.
+	for name := range call.Options {
+		if name != "version" {
+			t.Fatalf("service_disable was sent with the option %s; the command takes none", name)
+		}
+	}
+	if methods := fake.methods(); len(methods) != 1 {
+		t.Fatalf("the rotation sent %v; the directory sees one command", methods)
+	}
+	for name, principal := range map[string]string{
+		"the host's own": "host/web1.example.test@EXAMPLE.TEST",
+		"no host":        "HTTP",
+		"a short host":   "HTTP/web1",
+		"a shell":        "HTTP/web1.example.test;rm",
+		"empty":          "",
+	} {
+		if err := client.RetireServiceKeytab(context.Background(), principal); err == nil {
+			t.Errorf("%s: %q was accepted", name, principal)
+		}
+	}
+	if fake.count("service_disable") != 1 {
+		t.Fatalf("a refused principal reached the directory: %d service_disable calls", fake.count("service_disable"))
+	}
+	// The commands that would issue or export a keytab stay outside the
+	// closed list: the host fetches its own.
+	for _, method := range []string{"service_add", "service_del", "service_mod", "service_add_host", "service_allow_retrieve_keytab"} {
+		if allowedMethod(method) {
+			t.Errorf("%s entered the closed list", method)
+		}
+	}
+}

@@ -80,6 +80,10 @@ message HelperRequest {
     // serial numbers and the UUID, and /etc/sudoers with its drop-ins.
     // The scope is a closed list of facts, not a path.
     SystemRequest system = 53;
+    // Renewing a service keytab: ipa-getkeytab into the host's own keytab
+    // file, with the host's own credentials. The directory has already
+    // retired the old key; nothing is issued or carried by the panel.
+    KeytabRenewRequest keytab_renew = 54;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -275,6 +279,7 @@ message HelperResponse {
   SmartResult smart_result = 39;
   FinalWipeResult final_wipe_result = 40;
   SystemResult system_result = 41;
+  KeytabRenewResult keytab_renew_result = 42;
 }
 
 // SystemRequest names the facts of the system module the helper is to
@@ -1133,6 +1138,28 @@ message FinalWipeResult {
   repeated string removed = 1;
   bool service_disabled = 2;
   bool stop_scheduled = 3;
+}
+
+// KeytabRenewRequest fetches a new key of a service principal into
+// /etc/krb5.keytab with ipa-getkeytab, authenticated with the host's own
+// keytab. The file is always the host's own: the request names no path.
+// The old key is already retired in the directory, so ipa-getkeytab
+// issuing a new one is the only thing that brings the service back.
+message KeytabRenewRequest {
+  // The principal, service/host.example.test with an optional realm.
+  string principal = 1;
+}
+
+// KeytabRenewResult says what klist -k reported for the principal before
+// and after the fetch. The key version number is the proof: a fetch that
+// left the number where it was replaced nothing. Zero before means the
+// principal had no key in the file yet; kvno_before_known says whether
+// the number was read at all, because unknown is not zero.
+message KeytabRenewResult {
+  string principal = 1;
+  bool kvno_before_known = 2;
+  uint32 kvno_before = 3;
+  uint32 kvno_after = 4;
 }
 
 // SmartResult carries what smartctl reports about one device. A device

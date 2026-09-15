@@ -33,6 +33,12 @@ const (
 	PermHostEnrollCreate Permission = "host.enroll.create"
 	PermHostEnrollRead   Permission = "host.enroll.read"
 	PermHostEnrollRevoke Permission = "host.enroll.revoke"
+	// PermHostEnrollBatch is the right to issue one token good for many
+	// machines. It comes on top of inviting hosts: a token per host is the
+	// preferred order, and a pool of uses is a standing door that a
+	// separate right keeps narrow, next to the fresh authentication such
+	// an order asks for anyway.
+	PermHostEnrollBatch Permission = "host.enroll.batch"
 	// PermRelayEnrollCreate is separate from inviting hosts: a relay carries
 	// the traffic of a whole site, so the right to add one is its own role.
 	PermRelayEnrollCreate Permission = "relay.enroll.create"
@@ -318,6 +324,11 @@ const (
 	// directory account off the host, and bringing hosts in does not imply
 	// the right to do that.
 	PermIdentityHostLeave Permission = "identity.host.leave"
+	// Rotating a service keytab is a right of its own, as the architecture
+	// document asks: the directory retires the credential a service
+	// authenticates with, and the host fetches a new one. Both halves ask
+	// for this one permission, so nobody holds one half alone.
+	PermIdentityKeytabRotate Permission = "identity.keytab.rotate"
 
 	// Local accounts are a separate path of access to the host, independent
 	// of the directory. Creating an account and changing SSH keys means
@@ -470,6 +481,11 @@ var rolePermissions = map[Role][]Permission{
 		// Tags and groups are how the operator names the targets of a
 		// campaign, so they go with the right to order one.
 		PermHostTagWrite, PermHostGroupWrite,
+		// The operator invites a machine into their own site, one token per
+		// host, sees the pending installations and closes a token that
+		// leaked. A token for a batch of machines is a separate right and
+		// stays with the administrator.
+		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke,
 		// The operator sees local accounts but does not create them: granting
 		// access to a host is an administrative decision rather than part of
 		// handling an outage. The groups and the expiry of an existing
@@ -504,7 +520,7 @@ var rolePermissions = map[Role][]Permission{
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
-		PermIdentityHostLeave,
+		PermIdentityHostLeave, PermIdentityKeytabRotate,
 		PermDNSDirectoryWrite,
 		PermUnitStatus,
 		// Local accounts are an alternative to the directory, so they belong
@@ -553,10 +569,10 @@ var rolePermissions = map[Role][]Permission{
 		PermPolicyRead, PermPolicyWrite, PermPolicyPublish, PermPolicyRemediateAuto,
 		PermIdentityRead, PermIdentityPolicyRead, PermIdentityUserWrite,
 		PermIdentityGroupWrite, PermIdentityPolicyWrite, PermIdentityHostEnroll,
-		PermIdentityHostLeave,
+		PermIdentityHostLeave, PermIdentityKeytabRotate,
 		PermDNSDirectoryWrite,
-		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermRelayEnrollCreate,
-		PermRelayManage,
+		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke, PermHostEnrollBatch,
+		PermRelayEnrollCreate, PermRelayManage,
 		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
 		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,

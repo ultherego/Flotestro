@@ -1297,6 +1297,22 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// A keytab renewal names the principal and the key versions on both
+	// sides of it; an unknown version before stays unknown, not zero.
+	if keytab := result.GetKeytabRenewResult(); keytab != nil && keytab.GetPrincipal() != "" {
+		detail := map[string]any{
+			"kind":       "keytab_renew",
+			"principal":  keytab.GetPrincipal(),
+			"kvno_after": keytab.GetKvnoAfter(),
+		}
+		if keytab.GetKvnoBeforeKnown() {
+			detail["kvno_before"] = keytab.GetKvnoBefore()
+		}
+		if encoded, err := json.Marshal(detail); err == nil {
+			return encoded
+		}
+	}
+
 	// A SMART report is a reading from one moment, and a device the tool
 	// cannot read reports unsupported with the tool's own words: the panel
 	// shows that reason, never an invented healthy disk.

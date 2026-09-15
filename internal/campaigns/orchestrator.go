@@ -393,9 +393,12 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 
 	// A change computed per host travels with that host's plan digest. The
 	// host compares it with the state it has now and refuses when the plan
-	// has gone stale - the consent concerned that diff, not this one.
+	// has gone stale - the consent concerned that diff, not this one. A
+	// plan split from the order carries the host's own part of it the
+	// same way: the name the approver read for this host is the only one
+	// that may reach it.
 	var planHash string
-	if opspec.PlanningAction(action) != "" {
+	if opspec.CampaignPlans(action) {
 		hash, plan, computedAt, err := o.store.HostPlan(ctx, campaign.ID, target.HostID)
 		if err != nil {
 			return "", "", err
@@ -407,7 +410,9 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 		// plan described is a day old: a plan computed before a weekend of
 		// vendor updates would carry a different change than the approver
 		// read. The host compares digests too; this is the bound in time.
-		if age := time.Since(computedAt); age > PlanTTL {
+		// A plan that came with the order describes no state of the host,
+		// so there is nothing on it to go stale.
+		if age := time.Since(computedAt); age > PlanTTL && !opspec.PanelPlanned(action) {
 			return "", "", fmt.Errorf("%w: computed %s ago, the limit is %s",
 				ErrPlanExpired, age.Round(time.Minute), PlanTTL)
 		}

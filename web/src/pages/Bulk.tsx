@@ -42,6 +42,8 @@ export function Bulk() {
     unit: "",
     securityOnly: true,
     payloadText: prefill.get("payload") ?? "",
+    mapping: {},
+    pretty: "",
     compensates: prefill.get("compensates") ?? "",
     hostIDs: prefill.getAll("host_id"),
     site: "",
@@ -182,7 +184,7 @@ export function Bulk() {
         />
       )}
       {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} />}
-      {step === 2 && <EligibilityStep preview={preview.data} checking={preview.isLoading} />}
+      {step === 2 && <EligibilityStep order={order} preview={preview.data} checking={preview.isLoading} />}
       {step === 3 && (
         <RolloutStep
           order={order}
@@ -217,6 +219,12 @@ type Order = {
   // The payload of an operation without a form of its own, as JSON text
   // the operator edits; it starts from the template the server gives.
   payloadText: string;
+  // A rename in bulk: the new name of every host, by host identifier. The
+  // server splits it host by host and a host it does not name is
+  // ineligible - there is no shared name, on purpose.
+  mapping: Record<string, string>;
+  // The pretty name a rename sets everywhere; empty leaves it alone.
+  pretty: string;
   // The campaign this order undoes, when it came from "Plan the rollback"
   // on a finished campaign. Empty for an ordinary campaign. The server
   // holds the rules: the reverse operation, the hosts that changed.
@@ -451,6 +459,15 @@ export function ContractChips({ contract }: { contract: OperationContract }) {
 function orderPayload(order: Order): Record<string, unknown> | null {
   if (UNIT_OPERATIONS.includes(order.action)) return { unit: { unit: order.unit } };
   if (order.action === "packages.upgrade") return { package_upgrade: { security_only: order.securityOnly } };
+  if (order.action === RENAME_OPERATION) {
+    // Only the hosts given a name travel; an order that names nobody is
+    // no order, and the server refuses an empty mapping the same way.
+    const mapping = Object.fromEntries(
+      Object.entries(order.mapping).map(([id, name]) => [id, name.trim()] as const).filter(([, name]) => name !== ""),
+    );
+    if (Object.keys(mapping).length === 0) return null;
+    return { hostname: { pretty: order.pretty.trim() || undefined, mapping } };
+  }
   try {
     const parsed = JSON.parse(order.payloadText);
     return parsed && typeof parsed === "object" ? parsed : null;
@@ -470,6 +487,9 @@ type Preview = {
   notes?: Group[];
   campaign_mode?: string;
   requires_plan?: boolean;
+  // Every ready host by identifier, for an operation whose order names
+  // each host by itself; absent for every other operation.
+  hosts?: { id: string; hostname: string }[];
   // The distribution of the snapshot: thirty hosts from one site are a
   // different change than thirty spread over three.
   distribution?: Record<string, Group[]>;
@@ -514,7 +534,9 @@ function stepGates(
   const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
   return [
     { open: hasAction && exclusionsExplained, reason: exclusionsExplained
-      ? t("pick an operation, name the campaign and give it a valid payload")
+      ? order.action === RENAME_OPERATION
+        ? t("pick an operation, name the campaign and give at least one host its new name")
+        : t("pick an operation, name the campaign and give it a valid payload")
       : t("give the exclusions a reason") },
     { open: hasAction && hasTargets, reason: t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
@@ -591,7 +613,9 @@ function ScopeBar({
 
 /** The operations the wizard can build a payload for. */
 const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload", "unit.reset_failed"];
-const WIZARD_OPERATIONS = [...UNIT_OPERATIONS, "packages.upgrade"];
+/** A rename in bulk: the payload is a mapping the wizard builds host by host. */
+const RENAME_OPERATION = "system.hostname.set";
+const WIZARD_OPERATIONS = [...UNIT_OPERATIONS, "packages.upgrade", RENAME_OPERATION];
 
 function ScopeStep({
   order,
@@ -673,6 +697,9 @@ function ScopeStep({
             {t("security updates only")}
           </label>
         )}
+        {order.action === RENAME_OPERATION && (
+          <MappingEditor order={order} change={change} hosts={preview?.hosts} />
+        )}
         {generic && (
           <Field
             label={t("Payload (JSON, the same shape as a single-host operation)")}
@@ -695,7 +722,9 @@ function ScopeStep({
       <TargetChoice order={order} change={change} />
       {preview?.requires_plan && (
         <p className="subtitle">
-          {t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
+          {order.action === RENAME_OPERATION
+            ? t("The mapping is split host by host: every host's plan is its own new name, and you approve the set of names, not one payload.")
+            : t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
         </p>
       )}
       {refusals.length > 0 && (
@@ -717,6 +746,119 @@ function ScopeStep({
         </details>
       )}
     </Card>
+  );
+}
+
+/**
+ * The mapping of a rename in bulk: one row per host the selector matches,
+ * current name on the left, the new name typed on the right. A paste box
+ * takes the same thing as CSV, "hostname,fqdn" per line, for a list kept
+ * somewhere else. There is no shared name and no default: a host left
+ * without a name is shown as ineligible here and settles so on the server.
+ */
+function MappingEditor({
+  order,
+  change,
+  hosts,
+}: {
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  hosts?: { id: string; hostname: string }[];
+}) {
+  const t = useT();
+  const [pasted, setPasted] = useState("");
+  const rows = hosts ?? [];
+  const named = rows.filter((host) => (order.mapping[host.id] ?? "").trim() !== "").length;
+  const setName = (id: string, name: string) => change({ mapping: { ...order.mapping, [id]: name } });
+  // The paste matches by the current name, full or short: the list the
+  // operator keeps elsewhere rarely spells the names the way the
+  // inventory does. A line that names no matched host is reported, not
+  // dropped: silence would look like a host that was renamed.
+  const applyPaste = () => {
+    const byName = new Map<string, string>();
+    for (const host of rows) {
+      byName.set(host.hostname.toLowerCase(), host.id);
+      byName.set(host.hostname.toLowerCase().split(".")[0], host.id);
+    }
+    const next = { ...order.mapping };
+    const unmatched: string[] = [];
+    for (const line of pasted.split("\n")) {
+      const [current, fqdn] = line.split(/[,;\t]/).map((part) => part.trim());
+      if (!current || !fqdn) continue;
+      const id = byName.get(current.toLowerCase()) ?? byName.get(current.toLowerCase().split(".")[0]);
+      if (!id) {
+        unmatched.push(current);
+        continue;
+      }
+      next[id] = fqdn;
+    }
+    change({ mapping: next });
+    setPasted(unmatched.length ? unmatched.map((name) => `${name},`).join("\n") : "");
+  };
+  return (
+    <>
+      <Field label={t("Pretty name")} hint={t("Optional; set on every host the same. The static name comes from the mapping below.")}>
+        <input value={order.pretty} onChange={(e) => change({ pretty: e.target.value })} placeholder={t("e.g. Web node")} />
+      </Field>
+      {/* A table of inputs is not one field: a label around it would
+          send every click to the first input, so the frame is drawn by
+          hand with the field classes. */}
+      <div className="field wide">
+        <span className="field-label">{t("New names, one host at a time")}</span>
+        <table>
+          <thead><tr><th>{t("Current hostname")}</th><th>{t("New FQDN")}</th><th></th></tr></thead>
+          <tbody>
+            {rows.map((host) => {
+              const name = order.mapping[host.id] ?? "";
+              return (
+                <tr key={host.id}>
+                  <td className="mono">{host.hostname}</td>
+                  <td>
+                    <input
+                      className="mono"
+                      value={name}
+                      placeholder={t("new.fqdn.example")}
+                      onChange={(e) => setName(host.id, e.target.value)}
+                      spellCheck={false}
+                    />
+                  </td>
+                  <td>
+                    {name.trim() === ""
+                      ? <span className="badge error">{t("no new name")}</span>
+                      : name.trim().toLowerCase() === host.hostname.toLowerCase()
+                        ? <span className="badge">{t("unchanged")}</span>
+                        : <span className="badge ok">{t("renames")}</span>}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <span className="field-hint">
+          {rows.length === 0
+            ? t("Pick the targets first: the rows come from the hosts the selector matches.")
+            : t("{named} of {n} matched hosts have a new name. A host without one stays in the snapshot as ineligible; nothing is renamed to a default.", { named, n: rows.length })}
+        </span>
+      </div>
+      <div className="field wide">
+        <span className="field-label">{t("Paste as CSV")}</span>
+        <textarea
+          rows={4}
+          value={pasted}
+          onChange={(e) => setPasted(e.target.value)}
+          placeholder={"web01.old.example,web01.new.example\nweb02,web02.new.example"}
+          spellCheck={false}
+        />
+        <span className="field-hint">
+          {t("One host per line: hostname,fqdn. The hostname is matched to the rows above, full or short; a line that matches no host stays in the box.")}
+        </span>
+        <Actions>
+          <button type="button" className="secondary" onClick={applyPaste} disabled={!pasted.trim()}>
+            {t("Apply the pasted names")}
+          </button>
+        </Actions>
+      </div>
+    </>
   );
 }
 
@@ -927,11 +1069,24 @@ function Distribution({ preview }: { preview?: Preview }) {
   );
 }
 
-function EligibilityStep({ preview, checking }: { preview?: Preview; checking: boolean }) {
+function EligibilityStep({ order, preview, checking }: { order: Order; preview?: Preview; checking: boolean }) {
   const t = useT();
   if (checking) return <Empty>{t("Checking every matched host…")}</Empty>;
-  const excluded = preview?.excluded ?? [];
+  // A rename names every host in its mapping; a matched host the mapping
+  // leaves out will settle as ineligible on the server, and is listed so
+  // here, before the order, under the code the server will give it.
+  const unnamed = order.action === RENAME_OPERATION
+    ? (preview?.hosts ?? []).filter((host) => (order.mapping[host.id] ?? "").trim() === "")
+    : [];
+  const excluded = [...(preview?.excluded ?? [])];
+  if (unnamed.length > 0) {
+    excluded.push({ reason: "no_hostname_for_host", count: unnamed.length, sample: unnamed.slice(0, 12).map((host) => host.hostname) });
+  }
   const notes = preview?.notes ?? [];
+  const eligible = Math.max(0, (preview?.eligible ?? 0) - unnamed.length);
+  const sample = unnamed.length > 0
+    ? (preview?.hosts ?? []).filter((host) => (order.mapping[host.id] ?? "").trim() !== "").slice(0, 12).map((host) => host.hostname)
+    : preview?.sample ?? [];
   return (
     <Card
       title={`3. ${t("Eligibility")}`}
@@ -948,8 +1103,8 @@ function EligibilityStep({ preview, checking }: { preview?: Preview; checking: b
         <tbody>
           <tr>
             <td><span className="badge ok">{t("eligible")}</span></td>
-            <td className="num">{preview?.eligible ?? 0}</td>
-            <td className="source">{(preview?.sample ?? []).join(", ")}</td>
+            <td className="num">{eligible}</td>
+            <td className="source">{sample.join(", ")}</td>
           </tr>
           {excluded.map((group) => (
             <tr key={group.reason}>
@@ -983,6 +1138,7 @@ function reasonName(t: (text: string) => string, reason: string): string {
     out_of_scope: t("out of your scope"),
     conflict: t("in another campaign"),
     offline: t("offline"),
+    no_hostname_for_host: t("no new name in the mapping"),
   };
   return names[reason] ?? reason;
 }
@@ -1387,5 +1543,6 @@ function blockerName(t: (text: string) => string, target: CampaignTarget): strin
   if (target.error_code === "resource_busy") return t("resource lock");
   if (target.error_code === "capability_missing") return t("capability");
   if (target.error_code === "maintenance") return t("maintenance");
+  if (target.error_code === "no_hostname_for_host") return t("no new name in the mapping");
   return target.error_code;
 }

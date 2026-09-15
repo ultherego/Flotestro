@@ -433,3 +433,148 @@ func preserveRefusedByTheDirectory(t *testing.T, h *harness, changeID string) bo
 	return false
 }
 
+
+// TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost guards the
+// rotation the architecture document names as "keytab rotation per
+// separate permission": an operator of the fleet is refused with the
+// permission named, the plan names the two halves and the host, and - on
+// a fleet with a service principal to rotate - the directory retires the
+// keytab while the host of that name fetches a new one and reports the
+// key version going up.
+//
+// The lab rarely has such a principal on a fleet host: the directory's own
+// services live on the directory server, and the panel's principal is the
+// connector's, which the test must not retire from under itself. The test
+// then ends after the refusal and the plan, with the reason.
+func TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost(t *testing.T) {
+	h := newHarness(t)
+	if !directoryAvailable(t, h) {
+		t.Skip("this installation has no directory connection")
+	}
+	reason := "integration test of the service keytab rotation"
+
+	// The operator runs hosts and orders campaigns, and holds no half of
+	// a rotation: the refusal names the right that is missing.
+	operator := h.withToken(h.createPrincipal(uniqueSubject("operator-keytab"),
+		[]map[string]string{{"role": "operator", "scope": "*"}}))
+	var problem struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	operator.do(http.MethodPost, "/api/v1/identity/changes", map[string]any{
+		"action": "identity.keytab.rotate", "reason": reason,
+		"payload": map[string]any{"keytab": map[string]any{"principal": "HTTP/nobody.flotestro.test"}},
+	}, &problem, http.StatusForbidden)
+	if problem.Code != "permission_denied" || !strings.Contains(problem.Detail, "identity.keytab.rotate") {
+		t.Fatalf("the operator's order: code=%q detail=%q, expected permission_denied naming identity.keytab.rotate", problem.Code, problem.Detail)
+	}
+
+	// The host's own principal is refused by name, before any plan: its
+	// keytab is replaced by a re-join.
+	h.do(http.MethodPost, "/api/v1/identity/changes", map[string]any{
+		"action": "identity.keytab.rotate", "reason": reason,
+		"payload": map[string]any{"keytab": map[string]any{"principal": "host/nobody.flotestro.test"}},
+	}, &problem, http.StatusBadRequest)
+	if problem.Code != "invalid_payload" {
+		t.Errorf("the host principal: code=%q, expected invalid_payload", problem.Code)
+	}
+
+	// The plan of a principal the directory does not know: the two halves
+	// and the host are named, and the conflict blocks the approval.
+	var blocked ruleChange
+	h.do(http.MethodPost, "/api/v1/identity/changes", map[string]any{
+		"action": "identity.keytab.rotate", "reason": reason,
+		"payload": map[string]any{"keytab": map[string]any{"principal": "HTTP/nobody.flotestro.test"}},
+	}, &blocked, http.StatusCreated)
+	t.Cleanup(func() {
+		h.do(http.MethodPost, "/api/v1/identity/changes/"+blocked.ID+"/cancel",
+			map[string]any{"reason": "the plan was the point of the test"}, nil, 0)
+	})
+	if len(blocked.Plan.Steps) != 2 || !strings.Contains(blocked.Plan.Steps[0], "retiring") ||
+		!strings.Contains(blocked.Plan.Steps[1], "identity.keytab.renew") {
+		t.Errorf("the plan steps: %v", blocked.Plan.Steps)
+	}
+	if !slices.Contains(blocked.Plan.ReachableHosts, "nobody.flotestro.test") {
+		t.Errorf("the plan names the hosts %v", blocked.Plan.ReachableHosts)
+	}
+	if len(blocked.Plan.Conflicts) == 0 || !strings.Contains(blocked.Plan.Conflicts[0], "HTTP/nobody.flotestro.test") {
+		t.Errorf("an unknown principal is not a conflict: %v", blocked.Plan.Conflicts)
+	}
+	if !strings.Contains(strings.Join(blocked.Plan.Warnings, "\n"), "cannot authenticate") {
+		t.Errorf("the plan does not warn about the gap: %v", blocked.Plan.Warnings)
+	}
+
+	// A principal to rotate for real: a service of a connected fleet host
+	// that is neither the host's own nor the panel's connector.
+	var status struct {
+		Connector struct {
+			Principal string `json:"principal"`
+		} `json:"connector"`
+	}
+	h.get("/api/v1/identity/status", &status)
+	var services struct {
+		Items []struct {
+			Principal string `json:"principal"`
+			Service   string `json:"service"`
+			Host      string `json:"host"`
+			HasKeytab *bool  `json:"has_keytab"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/identity/services", &services)
+	fleet := map[string]hostView{}
+	for _, host := range h.hosts() {
+		if host.ConnectionState == "online" {
+			fleet[strings.ToLower(host.Hostname)] = host
+		}
+	}
+	principal, hostname := "", ""
+	for _, service := range services.Items {
+		if strings.EqualFold(service.Service, "host") || strings.EqualFold(service.Service, "flotestro") ||
+			strings.EqualFold(service.Principal, status.Connector.Principal) {
+			continue
+		}
+		if service.HasKeytab == nil || !*service.HasKeytab {
+			continue
+		}
+		if host, ok := fleet[strings.ToLower(service.Host)]; ok {
+			principal, hostname = service.Principal, host.Hostname
+			break
+		}
+	}
+	if principal == "" {
+		t.Skip("no connected fleet host carries a service principal with a keytab beyond host/ and the panel's own; the rotation itself is not exercised")
+	}
+
+	approver := secondPerson(t, h)
+	final := orderAndRun(t, h, approver, "identity.keytab.rotate",
+		map[string]any{"keytab": map[string]any{"principal": principal}})
+	var detail struct {
+		Phases []struct {
+			Name    string `json:"name"`
+			Status  string `json:"status"`
+			Message string `json:"message"`
+		} `json:"phases"`
+	}
+	h.get("/api/v1/identity/changes/"+final.ID, &detail)
+	if len(detail.Phases) != 3 {
+		t.Fatalf("the rotation ran %d phases: %+v", len(detail.Phases), detail.Phases)
+	}
+	if !strings.Contains(detail.Phases[0].Message, hostname) {
+		t.Errorf("the first phase does not name the fleet host: %q", detail.Phases[0].Message)
+	}
+	// The last phase names the task on the host; the task's own result
+	// carries the key versions.
+	fields := strings.Fields(strings.TrimPrefix(detail.Phases[2].Message, "task "))
+	if len(fields) == 0 {
+		t.Fatalf("the ordering phase names no task: %q", detail.Phases[2].Message)
+	}
+	jobID := strings.TrimSuffix(fields[0], ":")
+	job := h.awaitTerminal(jobID, 3*time.Minute)
+	if job.State != "succeeded" {
+		t.Fatalf("the renewal on %s ended as %s", hostname, job.State)
+	}
+	attempts := h.attempts(jobID)
+	if len(attempts) == 0 || !strings.Contains(attempts[len(attempts)-1].Message, "key version") {
+		t.Errorf("the renewal does not report the key versions: %+v", attempts)
+	}
+}

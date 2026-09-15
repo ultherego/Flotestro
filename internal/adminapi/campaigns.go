@@ -123,7 +123,11 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// bulk. The target name is there the only gate between a click and an
 	// irreversible change, and a campaign by definition has no single target
 	// to type: wiping a disk or powering off a whole wave has no way back.
-	if action.RequiresTargetConfirmation() {
+	// An order the panel splits host by host is the exception: its mapping
+	// names every host one by one, so the typing is there - checked below,
+	// once the payload is read - and a host the mapping leaves out gets
+	// nothing rather than a shared value.
+	if action.RequiresTargetConfirmation() && !opspec.PanelPlanned(action) {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action",
 			"this operation is irreversible and needs its target named; run it host by host")
 		return
@@ -170,6 +174,15 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 	// speak) keeps that code; a malformed payload stays invalid_payload.
 	if err := opspec.ValidateCampaignRequest(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
+		return
+	}
+	// The per-host part of an order the panel splits itself: a rename
+	// names every host's new name in the mapping, and the typed payload
+	// does not carry it. A mapping that is missing, names a host twice or
+	// gives two hosts one name is refused before any host is resolved,
+	// because the mapping is the whole intent of the campaign.
+	if err := opspec.ValidateCampaignMapping(action, request.Payload); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())
 		return
 	}
 	// A rollback to an earlier file version carries only the digest, as on
@@ -733,8 +746,15 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	response["excluded"] = assessment.Exclusions()
 	response["notes"] = assessment.Notes
 	response["campaign_mode"] = string(action.CampaignMode())
-	response["requires_plan"] = opspec.PlanningAction(action) != ""
+	response["requires_plan"] = opspec.CampaignPlans(action)
 	response["distribution"] = distribution(assessment.Ready, action)
+	// An order the panel splits host by host needs every ready host in
+	// view before the order, not a sample: the mapping names them by
+	// identifier, and the wizard shows a host it does not name as
+	// ineligible before anything is created.
+	if opspec.PanelPlanned(action) {
+		response["hosts"] = hostEntries(assessment.Ready)
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -798,6 +818,21 @@ func hostNames(list []hosts.Host) []string {
 		names = append(names, host.Hostname)
 	}
 	return names
+}
+
+// hostEntry is a host of the preview named by identifier, for an order
+// that has to name every host by itself.
+type hostEntry struct {
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+}
+
+func hostEntries(list []hosts.Host) []hostEntry {
+	entries := make([]hostEntry, 0, len(list))
+	for _, host := range list {
+		entries = append(entries, hostEntry{ID: host.ID, Hostname: host.Hostname})
+	}
+	return entries
 }
 
 // previewSampleSize bounds the sample shown in the preview.

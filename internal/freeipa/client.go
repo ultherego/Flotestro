@@ -516,6 +516,13 @@ var allowedMethods = map[string]bool{
 	// disabling the entry revokes the keytab and the certificates, and the
 	// entry stays. It is used only for a host the operator is joining anew.
 	"host_disable": true,
+	// A service principal's keytab is retired the same way: disabling the
+	// entry revokes the keytab and the certificates issued to the service,
+	// and the entry stays. It never issues a keytab - the host fetches its
+	// own new one with ipa-getkeytab, through the typed operation, with the
+	// credentials it already holds. There is no service_add, service_del or
+	// any command that exports key material.
+	"service_disable": true,
 
 	// The access and sudo rules. A rule is declared as a whole and brought to
 	// that state member kind by member kind; the panel writes only the rules
@@ -629,7 +636,40 @@ var (
 	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 	groupNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
 	hostNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
+	// servicePrincipalPattern is service/host.fqdn with an optional realm:
+	// the shape ipa-getkeytab and service_disable both take. A host
+	// principal is a service principal in form and is refused apart, by
+	// name, because retiring it is a re-join and not a rotation.
+	servicePrincipalPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$`)
 )
+
+// ValidateServicePrincipal checks that a principal names a service of a
+// host and not the host itself.
+func ValidateServicePrincipal(principal string) error {
+	if !servicePrincipalPattern.MatchString(principal) {
+		return fmt.Errorf("invalid service principal %q: expected service/host.example.test", principal)
+	}
+	if strings.HasPrefix(strings.ToLower(principal), "host/") {
+		return fmt.Errorf("the principal %s is the host's own; its keytab is replaced by a re-join, not a rotation", principal)
+	}
+	return nil
+}
+
+// RetireServiceKeytab asks the directory to retire the keytab of a service
+// principal: service_disable revokes the keytab and the certificates issued
+// to the service, and the entry stays. Nothing is issued here - the host
+// fetches its own new keytab with ipa-getkeytab, and until it does the
+// service cannot authenticate. That gap is the caller's to plan for.
+func (c *Client) RetireServiceKeytab(ctx context.Context, principal string) error {
+	if err := ValidateServicePrincipal(principal); err != nil {
+		return err
+	}
+	if _, err := c.call(ctx, "service_disable", []string{principal}, map[string]any{}); err != nil {
+		return fmt.Errorf("retiring the keytab of %s: %w", principal, err)
+	}
+	c.invalidate()
+	return nil
+}
 
 // validateSSHPublicKey rejects material that is not a public key.
 // A private key must never reach the directory or the logs.

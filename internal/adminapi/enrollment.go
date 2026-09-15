@@ -72,6 +72,16 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	if !ok {
 		return
 	}
+	// A token good for many machines is a right on top of inviting one:
+	// a pool of uses is a standing door, and the document prefers a token
+	// per host. The refusal names the permission, so the operator learns
+	// what is missing rather than reading "forbidden" on an order they
+	// may place for one machine.
+	if req.MaxUses > 1 && req.Kind != enrollment.KindRelay {
+		if _, ok := s.authorize(w, r, authz.PermHostEnrollBatch, scope, "enrollment_request", ""); !ok {
+			return
+		}
+	}
 	// Identity recovery has its own entry on the host and its own
 	// permission: only orders for new machines and relays are accepted
 	// here.

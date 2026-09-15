@@ -112,15 +112,14 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionTimeConfigApply:        CampaignPerHostPlan,
 	ActionComposeDeploy:          CampaignPerHostPlan,
 	ActionKernelModuleBlacklist:  CampaignPerHostPlan,
-	// A rename (system.hostname.set) is a per-host plan of the other kind:
-	// the diff is not read from the host but comes with the order, as a
-	// mapping of host to new name, and the panel splits it host by host
-	// (HostnameMapping, PanelPlanned). Its row is CampaignPerHostPlan and is
-	// not here yet: the campaign API refuses every operation whose target
-	// name is typed by hand, and a rename is one - the mapping is that
-	// typing, host by host, but the gate has to learn it before the row
-	// opens the operation. The same payload would give every host the same
-	// name, which is the one thing a rename must never do.
+	// A rename is a per-host plan of the other kind: the diff is not read
+	// from the host but comes with the order, as a mapping of host to new
+	// name, and the panel splits it host by host (HostnameMapping,
+	// PanelPlanned). The same payload would give every host the same name,
+	// which is the one thing a rename must never do. The target name a
+	// single rename requires typed by hand is the mapping here: every host
+	// is named in it, one by one, and a host it does not name gets nothing.
+	ActionSystemHostnameSet: CampaignPerHostPlan,
 
 	// Operations with their own state machine. A reboot is settled by the
 	// host coming back with a new boot ID, not by the command being sent.
@@ -458,13 +457,11 @@ func ExecutableMode(action ActionType) bool {
 	case CampaignSamePayload:
 		return true
 	case CampaignPerHostPlan:
-		// A per-host plan needs something to come from. Without a planning
-		// operation the campaign would approve a change whose diff nobody
-		// computed. A plan split from the order in the panel (PanelPlanned)
-		// is not executable yet either: the engine opens its planning phase
-		// on a host planner alone, and until it learns about a panel-side
-		// plan the campaign would jump to execution with no name per host.
-		return PlanningAction(action) != ""
+		// A per-host plan needs something to come from: a planning operation
+		// on the host, or an order the panel splits host by host. Without
+		// either the campaign would approve a change whose diff nobody
+		// computed.
+		return CampaignPlans(action)
 	case CampaignSpecialized:
 		// A reboot has its own phase in the engine: a new boot ID and a check
 		// of the units after the host comes back. A fleet remediation has

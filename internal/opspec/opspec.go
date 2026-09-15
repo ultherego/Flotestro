@@ -235,6 +235,11 @@ const (
 	// Leaving the domain is a decision of its own, not the join undone: it
 	// cuts every directory user off the host at once.
 	ActionDomainLeave ActionType = "identity.host.leave"
+	// Renewing a service keytab is the host's half of a rotation: the
+	// directory has retired the old keytab of the principal, and the host
+	// fetches a new one into its own keytab file with the credentials it
+	// already holds. No key material travels through the panel.
+	ActionIdentityKeytabRenew ActionType = "identity.keytab.renew"
 
 	ActionLocalUserCreate ActionType = "localuser.create"
 	ActionLocalUserLock   ActionType = "localuser.lock"
@@ -1020,6 +1025,13 @@ var actionSpecs = map[ActionType]actionSpec{
 	// own - the right to bring hosts in is not the right to take them out.
 	ActionDomainLeave: {mutating: true, capability: "systemd", permission: "identity.host.leave",
 		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
+	// A keytab renewal replaces the credential a service authenticates
+	// with: until it lands, the service the principal names cannot prove
+	// who it is. Critical, the identity lock, and the rotation's own
+	// permission - the same one the directory half of the change asks for,
+	// so nobody holds one half without the other.
+	ActionIdentityKeytabRenew: {mutating: true, capability: "systemd", permission: "identity.keytab.rotate",
+		timeoutSeconds: 180, risk: RiskCritical, lockClass: LockIdentity},
 
 	// Local accounts depend neither on systemd nor on a directory: the module
 	// works also where the customer stays with plain SSH authorisation.
@@ -1649,6 +1661,7 @@ type Payload struct {
 	UnitStatus      *UnitStatusPayload      `json:"unit_status,omitempty"`
 	DomainEnroll    *DomainEnrollPayload    `json:"domain_enroll,omitempty"`
 	DomainLeave     *DomainLeavePayload     `json:"domain_leave,omitempty"`
+	Keytab          *KeytabPayload          `json:"keytab,omitempty"`
 	LocalUser       *LocalUserPayload       `json:"local_user,omitempty"`
 	PackageRepair   *PackageRepairPayload   `json:"package_repair,omitempty"`
 	DockerRead      *DockerReadPayload      `json:"docker_read,omitempty"`
@@ -2358,6 +2371,15 @@ type DomainLeavePayload struct {
 	Realm  string `json:"realm"`
 }
 
+// KeytabPayload names the service principal whose keytab the host renews,
+// as service/host.example.test with an optional realm. The keytab file is
+// always the host's own (/etc/krb5.keytab): the payload carries no path
+// and no key material, and the host proves itself with the credentials it
+// holds.
+type KeytabPayload struct {
+	Principal string `json:"principal"`
+}
+
 // LocalUserPayload describes a change to a local account.
 //
 // The payload contains neither a password nor a hash. An account created by
@@ -2540,6 +2562,12 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("invalid domain name %q", payload.DomainEnroll.Domain)
 		}
 		return nil
+
+	case ActionIdentityKeytabRenew:
+		if payload.Keytab == nil {
+			return fmt.Errorf("the operation %s requires a keytab payload", action)
+		}
+		return ValidateServicePrincipal(payload.Keytab.Principal)
 
 	case ActionDomainLeave:
 		if payload.DomainLeave == nil {
@@ -3481,6 +3509,26 @@ var debconfTypePattern = regexp.MustCompile(`^(select|multiselect|boolean|string
 
 // domainPattern rejects names that cannot be a DNS domain.
 var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
+
+// servicePrincipalPattern is service/host.fqdn with an optional realm: the
+// shape ipa-getkeytab takes. The principal reaches a command line as one
+// argument, so the shape is the second line of defence after the argv
+// call that never sees a shell.
+var servicePrincipalPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$`)
+
+// ValidateServicePrincipal checks that a principal names a service of a
+// host and not the host itself: the host's own keytab is replaced by a
+// re-join, and a renewal of host/ would leave the host unable to talk to
+// the directory it is fetching from.
+func ValidateServicePrincipal(principal string) error {
+	if !servicePrincipalPattern.MatchString(principal) {
+		return fmt.Errorf("invalid service principal %q: expected service/host.example.test", principal)
+	}
+	if strings.HasPrefix(strings.ToLower(principal), "host/") {
+		return fmt.Errorf("the principal %s is the host's own; its keytab is replaced by a re-join, not a renewal", principal)
+	}
+	return nil
+}
 
 var packageNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9+._-]*$`)
 

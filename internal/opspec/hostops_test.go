@@ -40,7 +40,7 @@ func TestContainerLogsValidation(t *testing.T) {
 
 // A rename changes the identity of the host towards everything that knows
 // it by name: critical, the whole host as the lock, the target name typed
-// by hand, and never in bulk.
+// by hand, and in bulk only as a mapping that names every host by itself.
 func TestHostnameSetContract(t *testing.T) {
 	if err := Validate(ActionSystemHostnameSet, Payload{Hostname: &HostnamePayload{Hostname: "web02.example.internal", Pretty: "Web 02"}}); err != nil {
 		t.Fatalf("a valid rename was rejected: %v", err)
@@ -67,8 +67,11 @@ func TestHostnameSetContract(t *testing.T) {
 	if ActionSystemHostnameSet.LockClass() != LockHost {
 		t.Errorf("a rename locks %q, expected the whole host", ActionSystemHostnameSet.LockClass())
 	}
-	if ActionSystemHostnameSet.CampaignMode() != CampaignNone {
-		t.Error("a rename must not run in bulk")
+	// In bulk the order is split host by host in the panel: the mode is a
+	// per-host plan, and the plan comes from the mapping, not from a read
+	// on the host.
+	if ActionSystemHostnameSet.CampaignMode() != CampaignPerHostPlan || !PanelPlanned(ActionSystemHostnameSet) {
+		t.Error("a rename in bulk is a per-host plan split from the order")
 	}
 	if ActionSystemHostnameSet.OfflinePolicy() != OfflineRequireOnline {
 		t.Error("a rename requires the host online")

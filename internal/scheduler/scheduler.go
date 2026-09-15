@@ -595,6 +595,14 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			},
 		}
 
+	case opspec.ActionIdentityKeytabRenew:
+		// The envelope carries the principal alone: the host fetches the
+		// new key itself with the credentials it holds, and no key material
+		// passes through the panel in either direction.
+		envelope.Action = &agentv1.TaskEnvelope_KeytabRenew{
+			KeytabRenew: &agentv1.KeytabRenew{Principal: payload.Keytab.Principal},
+		}
+
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet,
 		opspec.ActionLocalUserGroupsSet, opspec.ActionLocalUserExpirySet,

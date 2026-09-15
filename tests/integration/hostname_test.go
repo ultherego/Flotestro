@@ -83,8 +83,10 @@ func TestHostnameSetIsGuarded(t *testing.T) {
 		if item.LockClass != "host" {
 			t.Errorf("lock_class = %q, expected host", item.LockClass)
 		}
-		if item.CampaignMode != "none" {
-			t.Errorf("campaign_mode = %q, expected none: a rename has one target", item.CampaignMode)
+		// A rename runs in a campaign only with a name per host: the plan
+		// of every target is the name the order gave it.
+		if item.CampaignMode != "per_host_plan" {
+			t.Errorf("campaign_mode = %q, expected per_host_plan: a rename names every host", item.CampaignMode)
 		}
 	}
 	if !found {
