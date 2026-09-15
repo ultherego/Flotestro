@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import { absoluteTime } from "../lib/format";
-import { isHostPlan, PlanSummary, type HostPlan } from "../components/plan";
+import { isHostPlan, PlanChanges, PlanFacts, PlanSummary, planWords, type HostPlan, type PackagePlanFacts } from "../components/plan";
 import type { Attempt, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
@@ -96,8 +96,12 @@ export function JobPage() {
   // The plan the host computed, from the last attempt that carries one:
   // a planning operation ends with it, and an apply that replans first
   // carries it too.
-  const planned = [...(attempts.data?.items ?? [])].reverse().find((item) => isHostPlan(item.detail?.kind as string));
-  const plan = planned?.detail?.plan as HostPlan | undefined;
+  // A package plan is the detail itself: its packages and facts sit at the
+  // top level, next to the kind, not under a "plan" of their own.
+  const planned = [...(attempts.data?.items ?? [])].reverse()
+    .find((item) => isHostPlan(item.detail?.kind as string) || item.detail?.kind === "package_plan");
+  const packagePlan = planned?.detail?.kind === "package_plan";
+  const plan = (packagePlan ? planned?.detail : planned?.detail?.plan) as (HostPlan & PackagePlanFacts) | undefined;
   const planHash = (planned?.detail?.plan_hash as string | undefined) || plan?.plan_hash;
   const report = progress.get(id);
 
@@ -280,8 +284,13 @@ export function JobPage() {
             <>
               <Pairs>
                 <Pair label={t("Plan hash")}><span className="mono">{planHash || "—"}</span></Pair>
-                <Pair label={t("Summary")}><PlanSummary plan={plan} /></Pair>
+                {/* A package plan reads as a table of packages below; the
+                    summary line of a host plan names its action and change. */}
+                <Pair label={t("Summary")}>
+                  {packagePlan ? <><span>{planWords(plan, t)}</span><PlanFacts plan={plan} /></> : <PlanSummary plan={plan} />}
+                </Pair>
               </Pairs>
+              {packagePlan && <PlanChanges changes={plan.changes} />}
               <pre>{prettyJSON(planned?.detail)}</pre>
             </>
           ) : attempts.isLoading ? (

@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { changesSummary, isHostPlan, JobPlan, PlanSummary, type HostPlan } from "./plan";
+import { changesSummary, isHostPlan, JobPlan, PlanChanges, PlanFacts, PlanGroupView, PlanSummary, type HostPlan } from "./plan";
 
 /* The attempts of a job come from the API; the client is replaced by a
    function each test programs. The mock is hoisted with the module,
@@ -165,5 +165,103 @@ describe("changesSummary", () => {
     expect(summary.startsWith("openssl 3.0.1 → 3.0.2 (security), a sentence of a file plan, pkg0 1.0")).toBe(true);
     expect(summary.endsWith(" +2")).toBe(true);
     expect(summary).not.toContain("[object Object]");
+  });
+});
+
+describe("PlanChanges", () => {
+  const packages = [
+    { name: "openssl", current_version: "3.0.1", candidate_version: "3.0.2", security: true, origin: "bookworm-security" },
+    { name: "base-files", current_version: "13.1", candidate_version: "13.2" },
+    { name: "zsh", candidate_version: "5.9" },
+    { name: "libc6", current_version: "2.41-12", candidate_version: "2.41-13", security: true },
+  ];
+
+  it("lays a package plan out as a table sorted by name, with the versions in columns", () => {
+    const { container } = render(<PlanChanges changes={packages} />);
+    const rows = [...container.querySelectorAll("tbody tr")];
+    expect(rows.map((row) => row.querySelector("td")?.textContent)).toEqual(["base-files", "libc6", "openssl", "zsh"]);
+    const cells = (row: Element) => [...row.querySelectorAll("td")].map((cell) => cell.textContent);
+    expect(cells(rows[2])).toEqual(["openssl", "3.0.1", "3.0.2", "securitybookworm-security"]);
+    // A package new on the host has no version now; a dash says so.
+    expect(cells(rows[3])).toEqual(["zsh", "—", "5.9", ""]);
+    expect(container.querySelectorAll(".badge.warn")).toHaveLength(2);
+    expect(container.querySelector(".plan-changes-foot")).toHaveTextContent("4 packages · 2 security");
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("ul")).toBeNull();
+  });
+
+  it("folds a long plan to the first rows and opens the rest on request", () => {
+    const many = Array.from({ length: 20 }, (_, i) => ({ name: `pkg${String(i).padStart(2, "0")}`, candidate_version: "1" }));
+    const { container } = render(<PlanChanges changes={many} />);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(8);
+    const button = container.querySelector("button") as HTMLButtonElement;
+    expect(button).toHaveTextContent("Show all 20");
+    fireEvent.click(button);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(20);
+    expect(button).toHaveTextContent("Show fewer");
+    fireEvent.click(button);
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(8);
+    expect(container.querySelector(".plan-changes-foot .source")).toHaveTextContent(/^20 packages$/);
+  });
+
+  it("lists the changes of a file plan as sentences, and nothing for an empty plan", () => {
+    const { container } = render(<PlanChanges changes={["content", "mode 0644 → 0600"]} />);
+    expect(container.querySelector("table")).toBeNull();
+    expect([...container.querySelectorAll("li")].map((item) => item.textContent)).toEqual(["content", "mode 0644 → 0600"]);
+    const { container: none } = render(<PlanChanges changes={[]} />);
+    expect(none.innerHTML).toBe("");
+  });
+});
+
+describe("PlanFacts", () => {
+  it("names the reboot, the download and a file system short of room", () => {
+    const { container } = render(<PlanFacts plan={{
+      reboot_predicted: true, download_bytes: 3 * 1048576,
+      space: [
+        { path: "/var", purpose: "download", basis: "measured", needed_bytes: 100, available_bytes: 1024 },
+        { path: "/boot", purpose: "boot", basis: "boot_files", needed_bytes: 2048, available_bytes: 1024 },
+      ],
+    }} />);
+    expect(container).toHaveTextContent("reboot predicted");
+    expect(container).toHaveTextContent("download 3.0 MiB");
+    expect(container).toHaveTextContent("/var (download cache): needs 100 B, 1.0 KiB free");
+    // The short file system is a warning, the roomy one a plain fact.
+    expect(container.querySelectorAll(".badge.warn")).toHaveLength(2);
+    const { container: none } = render(<PlanFacts plan={{}} />);
+    expect(none.innerHTML).toBe("");
+  });
+});
+
+describe("PlanGroupView", () => {
+  it("puts the hosts, the fingerprint and the expiry in a header and the packages in a table", () => {
+    const group = {
+      plan_hash: "abcdef0123456789abcdef0123456789",
+      count: 2,
+      hosts: ["web-1", "web-2"],
+      expires_at: new Date(Date.now() + 3600_000).toISOString(),
+      plan: {
+        kind: "package_plan", mode: "upgrade", manager: "apt", reboot_predicted: true,
+        changes: [{ name: "libc6", current_version: "2.41-12", candidate_version: "2.41-13", security: true }],
+      },
+    };
+    const { container } = render(<PlanGroupView group={group} action="packages.upgrade" />);
+    const head = container.querySelector(".plan-group-head");
+    expect(head).toHaveTextContent("2 hosts web-1, web-2");
+    expect(head).toHaveTextContent("abcdef0123456789");
+    expect(head).toHaveTextContent("Valid until");
+    expect(container.querySelector(".plan-group-words")).toHaveTextContent("packages.upgrade · packages will be upgraded (apt)");
+    expect(container).toHaveTextContent("reboot predicted");
+    expect(container.querySelector("tbody tr")).toHaveTextContent("libc6");
+  });
+
+  it("shows a host plan with its words and a refusal as the badge alone", () => {
+    const base = { plan_hash: "0123456789abcdef", count: 1, hosts: ["db-1"], expires_at: "2026-01-01T00:00:00Z" };
+    const { container } = render(<PlanGroupView group={{ ...base, plan: { kind: "file_plan", plan: { action: "update", changes: ["content"], document: "x=1" } } }} />);
+    expect(container.querySelector(".plan-group-words")).toHaveTextContent("will change");
+    expect(container.querySelector("li")).toHaveTextContent("content");
+    expect(container.querySelector("pre.hm-log")?.textContent).toBe("x=1");
+    const { container: refused } = render(<PlanGroupView group={{ ...base, plan: { kind: "file_plan", plan: { action: "update", refusal: "symlink" } } }} />);
+    expect(refused.querySelector(".badge.error")).toHaveTextContent("refused: symlink");
+    expect(refused.querySelector(".plan-group-words")).toBeNull();
   });
 });

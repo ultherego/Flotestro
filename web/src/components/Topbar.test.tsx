@@ -6,10 +6,14 @@ import type { Host, Whoami } from "../lib/types";
 import { SCALES, useScale, type Scale } from "../lib/scale";
 import { Topbar, type Trail } from "./Topbar";
 
-/* The host search in the bar queries the API and needs a query client; it
-   is not what these tests look at, so it is replaced by a marker. */
+/* The host selector and the search in the bar query the API and need a
+   query client; they are not what these tests look at, so each is
+   replaced by a marker. */
 vi.mock("./HostPicker", () => ({
   HostPicker: () => <div data-testid="host-picker" />,
+}));
+vi.mock("./HostSelect", () => ({
+  HostSelect: () => <div data-testid="host-select" />,
 }));
 
 const KEY = "flotestro.scale";

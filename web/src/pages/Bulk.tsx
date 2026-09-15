@@ -9,7 +9,7 @@ import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
-import { PlanSummary } from "../components/plan";
+import { PlanGroupView, type PlanGroup } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { loadedTargets, REBOOT_TIMEOUT, useTargets } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
@@ -1923,28 +1923,15 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
         : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
       flush
     >
+      {/* One group is one shape of the change: its hosts, fingerprint and
+          expiry in a header line, then the change itself as a table the
+          operator can read package by package. */}
       {groups.length > 0 && (
-        <table>
-          <thead>
-            <tr><th>{t("Change")}</th><th>{t("Hosts")}</th><th>{t("Plan fingerprint")}</th><th>{t("Valid until")}</th></tr>
-          </thead>
-          <tbody>
-            {groups.map((group) => (
-              <tr key={group.plan_hash}>
-                <td><PlanSummary plan={(group.plan?.plan ?? group.plan ?? {}) as Record<string, any>} /></td>
-                <td>
-                  {group.count}
-                  <div className="source">{group.hosts.join(", ")}</div>
-                </td>
-                <td className="mono source">{group.plan_hash.slice(0, 16)}</td>
-                {/* A plan is bound in time as well as by its digest: past the
-                    expiry the hosts are not started on it and the campaign is
-                    planned again. */}
-                <td><Time value={group.expires_at} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="plan-groups">
+          {groups.map((group) => (
+            <PlanGroupView key={group.plan_hash} group={group} action={campaign?.action_type} />
+          ))}
+        </div>
       )}
       <TargetTable targets={targets} action={campaign?.action_type ?? ""} />
     </Card>
@@ -1953,14 +1940,7 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
 
 /** The plans of a campaign grouped by fingerprint, as the panel serves them. */
 export type PlanGroups = {
-  items: {
-    plan_hash: string;
-    count: number;
-    hosts: string[];
-    // The plan content arrives in the shape of a job result: kind and plan.
-    plan?: { plan?: Record<string, unknown> } & Record<string, unknown>;
-    expires_at: string;
-  }[];
+  items: PlanGroup[];
   plan_set_hash?: string;
   plan_ttl_seconds?: number;
 };

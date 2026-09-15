@@ -6,6 +6,7 @@ import { THEMES, type Theme } from "../lib/theme";
 import { SCALES, type Scale } from "../lib/scale";
 import { usePreferences } from "../lib/preferences";
 import { HostPicker } from "./HostPicker";
+import { HostSelect } from "./HostSelect";
 import { Icon } from "./icons";
 
 /**
@@ -26,10 +27,11 @@ export type Trail = {
 };
 
 /**
- * The top bar: the sidebar fold, the trail, the host search and the user
- * menu, across the whole width above the content. The navigation stays in
- * the sidebar; everything about the session and the person at the screen
- * lives here, so the sidebar can be only a list of places.
+ * The top bar: the sidebar fold, the trail, the host selector, the search
+ * and the user menu, across the whole width above the content. The
+ * navigation stays in the sidebar; everything about the session and the
+ * person at the screen lives here, so the sidebar can be only a list of
+ * places.
  */
 export function Topbar({
   trail, user, collapsed, onToggleCollapsed, onOpenDrawer, onSignOut, theme, setTheme, scale, setScale,
@@ -99,6 +101,11 @@ export function Topbar({
         )}
       </nav>
 
+      {/* Two boxes of one look: the host selector, which lists hosts and
+          nothing else, and the palette, which finds anything. */}
+      <div className="topbar-search topbar-host-select">
+        <HostSelect />
+      </div>
       <div className="topbar-search">
         <HostPicker />
       </div>

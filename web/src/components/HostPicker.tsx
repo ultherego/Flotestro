@@ -372,7 +372,7 @@ export function HostPicker() {
   // listener is all.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") {
         event.preventDefault();
         show();
       }
