@@ -115,6 +115,12 @@ func parseField(field string, min, max int) (map[int]bool, error) {
 		if from < min || to > max || from > to {
 			return nil, fmt.Errorf("value outside the range %d-%d", min, max)
 		}
+		// The step is bounded by the range: "59/9223372036854775806" wrapped
+		// the sum around the largest integer and let negative values into
+		// the set. A step beyond the range means one run, the first value.
+		if step > max-min {
+			step = max - min + 1
+		}
 		for value := from; value <= to; value += step {
 			allowed[value] = true
 		}

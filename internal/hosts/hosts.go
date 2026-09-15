@@ -1469,7 +1469,7 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 	const query = `
 		select count(*)
 		from hosts h
-		where h.lifecycle_state <> 'decommissioned'
+		where h.lifecycle_state <> 'retired'
 		  and not exists (
 		      select 1 from agent_certificates c
 		      where c.host_id = h.id and c.revoked_at is null and c.created_at >= $1

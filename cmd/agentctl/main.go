@@ -37,6 +37,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 		return statusCommand(args[1:], out, errOut)
 	case "diagnose":
 		return diagnoseCommand(args[1:], out, errOut)
+	case "support-bundle":
+		return supportBundleCommand(args[1:], out, errOut)
 	case "enroll":
 		return enrollmentCommand(args[1:], in_, out, errOut)
 	case "renew":
@@ -73,6 +75,8 @@ func usage(where io.Writer) {
   config migrate  [--write]         converts the environment file of the service into agent.yaml
   status          [--config FILE]   the identity, the certificate, a pending attempt, the session and the helper
   diagnose        [--json]          the config, machine-id, clock, DNS, TLS, identity, socket, capabilities
+  support-bundle  [--output FILE]   writes the diagnosis, the status, the config, the journal and the
+                                    identity metadata (never the key) into a tar.gz, secrets redacted
   version                           the version of the tool
 
 Exit codes: 0 ready, 1 a problem to fix, 2 a usage error or a refused request.

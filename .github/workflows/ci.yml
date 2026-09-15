@@ -1,0 +1,121 @@
+# Continuous integration: what every push and every pull request must pass.
+#
+# Only what runs without the fleet is here. The integration suite carries
+# the "integration" build tag and the Playwright screenshots need the panel
+# VM; both run from the lab, not from a runner.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # The module and build caches are keyed by go.sum by default.
+          cache: true
+
+      - name: gofmt
+        # gofmt prints the files that differ and exits 0, so the output is
+        # the verdict.
+        run: |
+          unformatted="$(gofmt -l cmd internal db)"
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt-formatted:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: govulncheck
+        # Known vulnerabilities in the modules the binaries actually call
+        # into; the release carries a CycloneDX bill for the rest.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          "$(go env GOPATH)/bin/govulncheck" ./...
+
+  fuzz:
+    name: Fuzz the decoders
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Go runs one fuzz target per invocation, so each target is a step.
+      # The seed corpus of every target runs with the unit tests above; the
+      # short budget here is a smoke run, not a campaign.
+      - name: CSR decoder (internal/pki)
+        run: go test -run='^$' -fuzz='^FuzzSignAgentCSR$' -fuzztime=20s ./internal/pki
+      - name: Agent configuration (internal/agentconfig)
+        run: go test -run='^$' -fuzz='^FuzzRead$' -fuzztime=20s ./internal/agentconfig
+      - name: JCS canonicaliser (internal/jcs)
+        run: go test -run='^$' -fuzz='^FuzzTransform$' -fuzztime=20s ./internal/jcs
+      - name: Cron expressions (internal/modules/schedules)
+        run: go test -run='^$' -fuzz='^FuzzParseExpression$' -fuzztime=20s ./internal/modules/schedules
+      - name: Systemd calendar preview (internal/modules/schedules)
+        run: go test -run='^$' -fuzz='^FuzzParseCalendarPreview$' -fuzztime=20s ./internal/modules/schedules
+      - name: Sudoers (internal/modules/sudoers)
+        run: go test -run='^$' -fuzz='^FuzzParse$' -fuzztime=20s ./internal/modules/sudoers
+      - name: Human-readable sizes (internal/packages)
+        run: go test -run='^$' -fuzz='^FuzzParseHumanSize$' -fuzztime=20s ./internal/packages
+      - name: DNF transaction summary (internal/packages)
+        run: go test -run='^$' -fuzz='^FuzzParseDNFTransactionSizes$' -fuzztime=20s ./internal/packages
+
+  web:
+    name: Panel
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lock file
+        id: lock
+        # setup-node caches only against a lock file and fails without one,
+        # so the cache is switched on only when the file is there.
+        run: |
+          if [ -f package-lock.json ]; then
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          else
+            echo "cache=" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: ${{ steps.lock.outputs.cache }}
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        # npm ci refuses to run without a lock file; until one is committed
+        # the install resolves the ranges of package.json.
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        # Vitest only: the Playwright suite drives the panel of the lab.
+        run: npm test

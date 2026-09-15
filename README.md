@@ -138,6 +138,8 @@ systemctl enable --now flotestro-agent
 flotestro-agentctl diagnose                  # explains a host that does not show up
 ```
 
+Runbooks for CA rotation, database restore, queue backlog, a full relay buffer and quarantine are in [docs/runbooks](docs/runbooks/index.md).
+
 A whole inventory with Ansible:
 
 ```
@@ -164,6 +166,8 @@ make lint                                    # gofmt and go vet
 packaging/build-release.sh all 1.0.0 dist    # packages for amd64 and arm64 with a CycloneDX SBOM
 packaging/sign-repo.sh dist <gpg-key> repo   # signed apt, dnf and pacman repositories
 ```
+
+GitHub Actions in `.github/workflows` run the same checks, the vulnerability scan and the fuzz targets on every push, and build the packages of a `v*` tag.
 
 ## Repository layout
 

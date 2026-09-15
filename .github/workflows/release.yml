@@ -1,0 +1,79 @@
+# Release: a tag v* becomes the packages, the bills of materials, the
+# checksums and the provenance, attached to the GitHub release of the tag.
+#
+# The script signs nothing: signing is a separate step with a separate
+# key, and the runner does not hold it.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  packages:
+    name: Packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The provenance carries "git describe": it needs the tags, not
+          # only the commit.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Packaging tools
+        # dpkg-deb packs the .deb for any architecture; rpmbuild builds
+        # only for the machine it runs on, so the arm64 .rpm is left to an
+        # arm64 machine and the script records that in missing-rpm.txt.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends dpkg-dev rpm
+
+      - name: Panel
+        working-directory: web
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+          npm run build
+
+      - name: Build
+        env:
+          FLOTESTRO_WEB: ${{ github.workspace }}/web/dist
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          packaging/build-release.sh all "$version" dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The release is created when the tag was pushed without one; the
+        # files replace what an earlier run of the same tag attached.
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --generate-notes
+          fi
+          assets=()
+          for file in dist/*.deb dist/*.rpm dist/*.cdx.json dist/SHA256SUMS dist/provenance.json dist/modules-*.txt dist/missing-rpm.txt; do
+            [ -f "$file" ] && assets+=("$file")
+          done
+          gh release upload "$tag" "${assets[@]}" --clobber

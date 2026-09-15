@@ -3,6 +3,7 @@ package packages
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -387,7 +388,14 @@ func ParseHumanSize(text string) (uint64, bool) {
 	if !ok {
 		return 0, false
 	}
-	return uint64(value * float64(multiplier)), true
+	// "inf M" and "nan k" pass strconv as numbers, and a product past the
+	// largest integer has no defined conversion: each came out as a size
+	// that was neither refused nor real.
+	total := value * float64(multiplier)
+	if math.IsNaN(total) || math.IsInf(total, 0) || total >= math.MaxUint64 {
+		return 0, false
+	}
+	return uint64(total), true
 }
 
 // sizeMultipliers maps the letter of a unit, with any "B" or "iB" trimmed,
