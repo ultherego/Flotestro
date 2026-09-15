@@ -204,6 +204,9 @@ export function FleetSecurity() {
                       <button
                         className="expander"
                         aria-expanded={expanded === check.check_id}
+                        aria-label={expanded === check.check_id
+                          ? t("Hide the hosts failing {check}", { check: check.check_id })
+                          : t("Show the hosts failing {check}", { check: check.check_id })}
                         onClick={() =>
                           setExpanded((current) =>
                             current === check.check_id ? "" : check.check_id,

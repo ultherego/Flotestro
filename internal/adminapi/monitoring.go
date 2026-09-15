@@ -30,6 +30,10 @@ func (s *Server) monitoringRoutes(mux *http.ServeMux) {
 	s.route(mux, "PUT /api/v1/monitoring/rules/{id}", s.handleUpdateAlertRule)
 	s.route(mux, "DELETE /api/v1/monitoring/rules/{id}", s.handleDeleteAlertRule)
 	s.route(mux, "GET /api/v1/monitoring/alerts", s.handleListAlerts)
+	// Taking an alert and writing on it: the sensor stays on, the counts
+	// of what waits for a person leave it out.
+	s.route(mux, "POST /api/v1/monitoring/alerts/{id}/acknowledge", s.handleAcknowledgeAlert)
+	s.route(mux, "POST /api/v1/monitoring/alerts/{id}/annotate", s.handleAnnotateAlert)
 	s.route(mux, "GET /api/v1/monitoring/silences", s.handleListSilences)
 	// The host view: its charts, its alerts and its silences.
 	s.route(mux, "GET /api/v1/hosts/{id}/metrics", s.handleHostMetrics)
@@ -161,6 +165,10 @@ type alertCounts struct {
 	// Silenced counts the firing alerts an active silence covers; they are
 	// counted in their severity as well.
 	Silenced int `json:"silenced"`
+	// Acknowledged counts the firing alerts somebody took. They are not
+	// counted in their severity: the severities are what waits for a
+	// person, and a taken alert has one.
+	Acknowledged int `json:"acknowledged"`
 	// Pending counts the episodes whose window is still filling.
 	Pending int `json:"pending"`
 }
@@ -205,6 +213,10 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	view := fleetMonitoringView{Firing: firing, GeneratedAt: time.Now().UTC()}
 	for _, alert := range firing {
+		if alert.Acknowledged() {
+			view.Counts.Acknowledged++
+			continue
+		}
 		switch alert.Severity {
 		case "critical":
 			view.Counts.Critical++
@@ -450,12 +462,21 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		// export's, and a longer history is narrowed by state or host.
 		limit = alertHistoryCeiling
 	}
+	var acknowledged *bool
+	switch query.Get("acknowledged") {
+	case "true":
+		acknowledged = new(bool)
+		*acknowledged = true
+	case "false":
+		acknowledged = new(bool)
+	}
 	alerts, err := s.monitoring.ListAlerts(r.Context(), monitoring.AlertFilter{
-		State:    query.Get("state"),
-		Severity: query.Get("severity"),
-		HostID:   query.Get("host_id"),
-		Scopes:   principal.ScopesFor(authz.PermMonitoringRead),
-		Limit:    limit,
+		State:        query.Get("state"),
+		Severity:     query.Get("severity"),
+		HostID:       query.Get("host_id"),
+		Scopes:       principal.ScopesFor(authz.PermMonitoringRead),
+		Acknowledged: acknowledged,
+		Limit:        limit,
 	})
 	if err != nil {
 		s.fail(w, err)
@@ -476,7 +497,7 @@ const alertHistoryCeiling = 500
 // a sheet built against one export reads the next one.
 var alertsCSVColumns = []string{
 	"id", "hostname", "host_id", "rule_name", "rule_id", "metric", "severity", "state", "value", "detail",
-	"started_at", "fired_at", "resolved_at", "silenced",
+	"started_at", "fired_at", "resolved_at", "silenced", "acknowledged_by", "acknowledged_at", "note",
 }
 
 // writeAlertsCSV streams the alert history as a file, newest first as the
@@ -499,7 +520,151 @@ func alertCSVRow(alert monitoring.Alert) []string {
 		alert.ID, alert.Hostname, alert.HostID, alert.RuleName, alert.RuleID, alert.Metric, alert.Severity, alert.State,
 		csvFloat(alert.Value), alert.Detail, csvInstant(alert.StartedAt), formatTime(alert.FiredAt),
 		formatTime(alert.ResolvedAt), strconv.FormatBool(alert.Silenced),
+		alert.AcknowledgedBy, formatTime(alert.AcknowledgedAt), alert.Note,
 	}
+}
+
+// alertNoteRequest is the body of an acknowledgement or a note. The
+// acknowledgement takes the note as its reason: "I am on it" is not
+// enough for the trail, so it wants the same eight characters a silence
+// does. A note on its own may be empty - that is how one is removed.
+type alertNoteRequest struct {
+	Note string `json:"note"`
+	// Reason is accepted in place of the note, so a client that sends
+	// every mutation the same way is not refused.
+	Reason string `json:"reason"`
+}
+
+func (request alertNoteRequest) text() string {
+	if strings.TrimSpace(request.Note) != "" {
+		return strings.TrimSpace(request.Note)
+	}
+	return strings.TrimSpace(request.Reason)
+}
+
+// maxAlertNote bounds a note: a longer one is a report, not a note.
+const maxAlertNote = 2000
+
+// alertForWrite reads the alert and checks the permission of taking it
+// in the scope of its host. The permission is the one of a silence:
+// both are a decision about a sensor of one host, and whoever may switch
+// it off may say they are looking at it. The answer has been written
+// when the second result is false.
+func (s *Server) alertForWrite(w http.ResponseWriter, r *http.Request) (*monitoring.Alert, authz.Principal, bool) {
+	id := r.PathValue("id")
+	alert, err := s.monitoring.Alert(r.Context(), id)
+	if errors.Is(err, monitoring.ErrNotFound) {
+		problem(w, http.StatusNotFound, "alert_not_found", "no such alert")
+		return nil, authz.Principal{}, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return nil, authz.Principal{}, false
+	}
+	_, scope, ok := s.hostScope(w, r, alert.HostID)
+	if !ok {
+		return nil, authz.Principal{}, false
+	}
+	principal, ok := s.authorize(w, r, authz.PermMonitoringSilence, scope, "alert", id)
+	if !ok {
+		return nil, authz.Principal{}, false
+	}
+	return alert, principal, true
+}
+
+// readAlertNote decodes the body of an acknowledgement or a note; the
+// answer has been written when the second result is false.
+func readAlertNote(w http.ResponseWriter, r *http.Request) (alertNoteRequest, bool) {
+	var request alertNoteRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return request, false
+	}
+	if len([]rune(request.text())) > maxAlertNote {
+		problem(w, http.StatusBadRequest, "note_too_long",
+			"a note has at most "+strconv.Itoa(maxAlertNote)+" characters")
+		return request, false
+	}
+	return request, true
+}
+
+// handleAcknowledgeAlert marks a firing alert as taken by the caller.
+func (s *Server) handleAcknowledgeAlert(w http.ResponseWriter, r *http.Request) {
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	alert, principal, ok := s.alertForWrite(w, r)
+	if !ok {
+		return
+	}
+	request, ok := readAlertNote(w, r)
+	if !ok {
+		return
+	}
+	note := request.text()
+	if len([]rune(note)) < minimalStepUpReason {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"an acknowledgement needs a note (field note, min. 8 characters): what is being done about the alert")
+		return
+	}
+	updated, err := s.monitoring.Acknowledge(r.Context(), alert.ID, principal.Subject, note)
+	switch {
+	case errors.Is(err, monitoring.ErrNotFiring):
+		problem(w, http.StatusConflict, "alert_not_firing",
+			"only a firing alert can be taken; this one is "+alert.State)
+		return
+	case errors.Is(err, monitoring.ErrNotFound):
+		problem(w, http.StatusNotFound, "alert_not_found", "no such alert")
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.alert.acknowledge", TargetType: "host", TargetID: alert.HostID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"alert_id": alert.ID, "rule_id": alert.RuleID, "rule_name": alert.RuleName,
+			"severity": alert.Severity, "note": note, "previously_by": alert.AcknowledgedBy,
+		},
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleAnnotateAlert writes a note on an alert of any state.
+func (s *Server) handleAnnotateAlert(w http.ResponseWriter, r *http.Request) {
+	if !s.monitoringEnabled(w) {
+		return
+	}
+	alert, principal, ok := s.alertForWrite(w, r)
+	if !ok {
+		return
+	}
+	request, ok := readAlertNote(w, r)
+	if !ok {
+		return
+	}
+	note := request.text()
+	updated, err := s.monitoring.Annotate(r.Context(), alert.ID, note)
+	if errors.Is(err, monitoring.ErrNotFound) {
+		problem(w, http.StatusNotFound, "alert_not_found", "no such alert")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "monitoring.alert.annotate", TargetType: "host", TargetID: alert.HostID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"alert_id": alert.ID, "rule_id": alert.RuleID, "rule_name": alert.RuleName,
+			"note": note, "previous_note": alert.Note,
+		},
+	})
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // handleListSilences returns the silences in force on the visible hosts.

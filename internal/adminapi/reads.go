@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 // A diagnostic read fan-out.
@@ -61,7 +63,8 @@ const (
 	// is asked for now: a host that comes back in a quarter of an hour
 	// answers a question nobody is looking at any more.
 	fanOutTTL = 5 * time.Minute
-	// maxReadsListed is the page of the operator's fan-out list.
+	// maxReadsListed is the default page of the operator's fan-out list;
+	// the screen asks for more with limit, up to the panel's ceiling.
 	maxReadsListed = 50
 )
 
@@ -402,10 +405,32 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 
 // handleListReads lists the operator's own fan-outs, newest first, with
 // the picture of their hosts by state.
+//
+// The list is paged by the key of its last row - the moment of the order
+// and the identifier - like the other lists of the panel: an operator who
+// orders reads while browsing would see a row twice under an offset. The
+// page asks for one row more than it shows, so it knows whether there is
+// a next page without counting the whole table.
 func (s *Server) handleListReads(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermJobRead, "read")
 	if !ok {
 		return
+	}
+	query := r.URL.Query()
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	limit = paging.Limit(limit, maxReadsListed, maxListPage)
+	var after *time.Time
+	var afterID *string
+	if parts, err := paging.Decode(query.Get("cursor"), 2); err != nil {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	} else if parts != nil {
+		at, err := paging.ParseTime(parts[0])
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+			return
+		}
+		after, afterID = &at, &parts[1]
 	}
 	rows, err := s.pool.Query(r.Context(), `
 		select f.id::text, f.action, f.payload, f.created_by, f.reason, f.created_at, f.host_count,
@@ -413,9 +438,10 @@ func (s *Server) handleListReads(w http.ResponseWriter, r *http.Request) {
 		  from read_fanouts f
 		  left join jobs j on j.fanout_id = f.id
 		 where f.created_by = $1
+		   and ($3::timestamptz is null or (f.created_at, f.id) < ($3::timestamptz, $4::uuid))
 		 group by f.id
 		 order by f.created_at desc, f.id desc
-		 limit $2`, principal.Subject, maxReadsListed)
+		 limit $2`, principal.Subject, limit+1, after, afterID)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -439,7 +465,15 @@ func (s *Server) handleListReads(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+	nextCursor := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		nextCursor = paging.Encode(paging.FormatTime(last.CreatedAt), last.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items, "count": len(items), "next_cursor": nextCursor, "limit": limit,
+	})
 }
 
 // handleGetRead returns a fan-out with its hosts and the merged result.

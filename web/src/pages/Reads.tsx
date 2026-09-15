@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { api, ApiError, type Collection } from "../lib/api";
-import type { ReadFanOut, ReadFanOutHost, ReadFanOutView } from "../lib/types";
+import { api, ApiError, LIST_PAGE, loadedItems, type Page } from "../lib/api";
+import type { ReadFanOut, ReadFanOutHost, ReadFanOutView, Whoami } from "../lib/types";
 import { bytes } from "../lib/format";
 import { ErrorBox, ErrorCode, Time, Empty, JobState } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar } from "../components/widgets";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
 import { FacetList, useFleetFacets, useOperations, type Operation } from "./Bulk";
@@ -40,14 +42,24 @@ function ReadsList() {
   // A link from a host page opens the form already filled in; the plain
   // page opens on the list.
   const [building, setBuilding] = useState(prefill.has("action"));
-  const { data, error } = useQuery({
-    queryKey: ["reads"],
-    queryFn: () => api.get<Collection<ReadFanOut>>("/api/v1/reads"),
+  // The list grows page by page from the newest read: an operator who
+  // reads a lot keeps the old fan-outs one click away rather than losing
+  // them past a fixed ceiling.
+  const list = useInfiniteQuery({
+    queryKey: ["reads", "list"],
+    queryFn: ({ pageParam }) => {
+      const params = new URLSearchParams({ limit: String(LIST_PAGE) });
+      if (pageParam) params.set("cursor", pageParam);
+      return api.get<Page<ReadFanOut>>(`/api/v1/reads?${params}`);
+    },
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     refetchInterval: OPERATIONS_INTERVAL * 5,
   });
+  const { data, error } = list;
   if (error) return <ErrorBox error={error} />;
 
-  const reads = data?.items ?? [];
+  const reads = loadedItems(data);
   const sum = (key: keyof ReadFanOut["counts"]) => (data ? reads.reduce((n, read) => n + read.counts[key], 0) : undefined);
   const listed = t("among the {n} listed", { n: reads.length });
   const operations = Object.entries(
@@ -85,22 +97,31 @@ function ReadsList() {
               {t("No reads yet.")}
             </EmptyState>
           ) : (
-            <table>
-              <thead>
-                <tr><th>{t("Operation")}</th><th className="num">{t("Hosts")}</th><th>{t("Progress")}</th><th>{t("Reason")}</th><th>{t("Created")}</th></tr>
-              </thead>
-              <tbody>
-                {reads.map((read) => (
-                  <tr key={read.id}>
-                    <td><Link to={`/reads/${read.id}`} className="mono">{read.action}</Link></td>
-                    <td className="num">{read.host_count}</td>
-                    <td><CountChips counts={read.counts} /></td>
-                    <td>{read.reason || "—"}</td>
-                    <td><Time value={read.created_at} /></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <table>
+                <thead>
+                  <tr><th>{t("Operation")}</th><th className="num">{t("Hosts")}</th><th>{t("Progress")}</th><th>{t("Reason")}</th><th>{t("Created")}</th></tr>
+                </thead>
+                <tbody>
+                  {reads.map((read) => (
+                    <tr key={read.id}>
+                      <td><Link to={`/reads/${read.id}`} className="mono">{read.action}</Link></td>
+                      <td className="num">{read.host_count}</td>
+                      <td><CountChips counts={read.counts} /></td>
+                      <td>{read.reason || "—"}</td>
+                      <td><Time value={read.created_at} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {list.hasNextPage && (
+                <p>
+                  <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+                    {t("Load more")}
+                  </button>
+                </p>
+              )}
+            </>
           )}
         </Card>
 
@@ -337,6 +358,12 @@ function FanOutPage({ id }: { id: string }) {
   const t = useT();
   const [selected, setSelected] = useState<string>("");
   const [grouping, setGrouping] = useState<"timeline" | "host">("timeline");
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const canCancel = (whoami.data?.permissions ?? []).includes("job.cancel");
   const read = useQuery({
     queryKey: ["read", id],
     queryFn: () => api.get<ReadFanOutView>(`/api/v1/reads/${id}`),
@@ -369,7 +396,10 @@ function FanOutPage({ id }: { id: string }) {
           </>
         }
         actions={
-          <Link className="button" to={readsPrefill(view.action, view.payload)}>{t("Order the same again")}</Link>
+          <>
+            {canCancel && open > 0 && <CancelFanOut view={view} />}
+            <Link className="button" to={readsPrefill(view.action, view.payload)}>{t("Order the same again")}</Link>
+          </>
         }
       />
 
@@ -482,6 +512,58 @@ function FanOutPage({ id }: { id: string }) {
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * Withdrawing the hosts that have not answered. A fan-out is nothing but
+ * its jobs, so the cancel goes to each open job through the job's own
+ * route, with one reason for all of them; a host already running a read
+ * the agent cannot stop is refused by that route and counted here, not
+ * hidden. The finished hosts keep their answers.
+ */
+function CancelFanOut({ view }: { view: ReadFanOutView }) {
+  const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const open = view.hosts.filter((host) => host.state === "queued" || host.state === "running");
+
+  const cancel = useMutation({
+    mutationFn: async (reason: string) => {
+      const outcomes = await Promise.allSettled(
+        open.map((host) => api.post(`/api/v1/jobs/${host.job_id}/cancel`, { reason })),
+      );
+      return outcomes.filter((outcome) => outcome.status === "rejected").length;
+    },
+    onSuccess: (refused) => {
+      queryClient.invalidateQueries({ queryKey: ["read", view.id] });
+      queryClient.invalidateQueries({ queryKey: ["reads"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      if (refused === 0) {
+        toast.success(t("{n} hosts withdrawn from the read.", { n: open.length }));
+      } else {
+        toast.error(t("{n} of {total} hosts could not be withdrawn; see their jobs.", { n: refused, total: open.length }));
+      }
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : String(error)),
+  });
+
+  const ask = async () => {
+    const { ok, reason } = await confirm({
+      title: t("Withdraw the {n} hosts still to answer?", { n: open.length }),
+      body: <p>{t("Each open job of this read is cancelled; a host already running a read the agent cannot stop stays until it answers. The reason goes to the audit trail with every job.")}</p>,
+      confirmLabel: t("Withdraw"),
+      danger: true,
+      reason: { required: true },
+    });
+    if (ok && reason) cancel.mutate(reason);
+  };
+
+  return (
+    <button className="danger" onClick={ask} disabled={cancel.isPending}>
+      {cancel.isPending ? t("Withdrawing…") : t("Withdraw the open hosts")}
+    </button>
   );
 }
 

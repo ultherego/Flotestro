@@ -7,6 +7,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/config"
+	"github.com/ultherego/flotestro/internal/housekeeping"
 )
 
 // The settings screen: what this panel was started with, read-only. An
@@ -55,6 +56,15 @@ func secretFact(key string, set bool) settingsFact {
 	}
 	configured := set
 	return settingsFact{Key: key, Value: value, Secret: true, Configured: &configured}
+}
+
+// switchable renders a duration whose zero is a switch turned off, so
+// the screen says "off" rather than leaving the row empty as if unset.
+func switchable(value time.Duration) string {
+	if value <= 0 {
+		return "off"
+	}
+	return value.String()
 }
 
 func durationFact(key string, value time.Duration) settingsFact {
@@ -122,6 +132,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{},
 	})
 
+	// The switches the gateway, the scheduler and the sweeper run with come
+	// from the process rather than from the effective configuration; a
+	// panel started without them shows the rows empty rather than made up.
+	var process Process
+	if s.process != nil {
+		process = *s.process
+	}
+	var sweeps housekeeping.Options
+	if process.Housekeeping != nil {
+		sweeps = process.Housekeeping.Options()
+	}
+
 	vulnerabilities := effective.Vulnerabilities
 	areas := []settingsArea{
 		{Key: "build", Title: "Build", Facts: []settingsFact{
@@ -147,6 +169,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			fact("heartbeat_jitter", effective.HeartbeatJitter),
 			durationFact("stale_after", effective.StaleAfter),
 			durationFact("agent_cert_ttl", effective.AgentCertTTL),
+			fact("clone_policy", process.ClonePolicy),
+			fact("dispatch_rate", process.DispatchRate),
 		}},
 		{Key: "identity", Title: "Identity provider", Facts: []settingsFact{
 			fact("issuer", effective.Identity.IssuerURL),
@@ -155,6 +179,8 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			fact("groups_claim", effective.Identity.GroupsClaim),
 			durationFact("session_idle", effective.SessionIdle),
 			durationFact("session_absolute", effective.SessionAbsolute),
+			fact("session_group_refresh", switchable(process.SessionGroupRefresh)),
+			fact("oidc_admin_logout", process.OIDCAdminLogout),
 		}},
 		{Key: "directory", Title: "Directory", Facts: []settingsFact{
 			fact("configured", effective.Directory.Configured),
@@ -191,10 +217,18 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			durationFact("nvd_interval", vulnerabilities.NVDInterval),
 			feedAge("nvd", vulnerabilities.NVDURL),
 		}},
+		// The audit retention stands apart from the working record: the
+		// trail is evidence and is kept forever unless the installation
+		// decides otherwise, while the jobs, the campaigns and the
+		// delivered events are always swept after their retention.
 		{Key: "retention", Title: "Retention", Facts: []settingsFact{
 			durationFact("metrics_raw", effective.MetricsRawRetention),
 			durationFact("metrics_rollup", effective.MetricsRollupRetention),
 			durationFact("audit", effective.AuditRetention),
+			durationFact("agent_sessions", sweeps.Sessions),
+			durationFact("jobs", sweeps.Jobs),
+			durationFact("campaigns", sweeps.Campaigns),
+			durationFact("outbox_events", sweeps.Outbox),
 			fact("secrets_key_file", effective.SecretsKeyFile),
 		}},
 	}

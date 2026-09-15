@@ -357,3 +357,39 @@ func nullable(value string) any {
 	}
 	return value
 }
+
+// ReadCurrent returns the current value of a secret for the panel's own
+// use - the password of the mail relay a notification channel names. The
+// value goes to the panel's own client and to no host, so no lease is
+// issued and no issuance is recorded: none happened. A retired or
+// destroyed secret is refused with the same errors a host gets.
+func (s *Store) ReadCurrent(ctx context.Context, name string) ([]byte, error) {
+	var secretID string
+	var version int
+	var retired *time.Time
+	err := s.pool.QueryRow(ctx, `select id, current_version, retired_at from secrets where name = $1`, name).
+		Scan(&secretID, &version, &retired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if retired != nil || version == 0 {
+		return nil, ErrRetired
+	}
+	var nonce, ciphertext []byte
+	var destroyed *time.Time
+	if err := s.pool.QueryRow(ctx, `
+		select nonce, ciphertext, destroyed_at from secret_versions
+		 where secret_id = $1 and version = $2`, secretID, version).Scan(&nonce, &ciphertext, &destroyed); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if destroyed != nil || len(ciphertext) == 0 {
+		return nil, ErrDestroyed
+	}
+	return s.cipher.Decrypt(nonce, ciphertext, secretID, version)
+}

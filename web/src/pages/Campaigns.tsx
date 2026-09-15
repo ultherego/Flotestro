@@ -5,6 +5,9 @@ import { api } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
+import {
+  ColumnChooser, PageSizeSelect, Td, Th, useColumns, usePageSize, useSort, type ColumnDef,
+} from "../components/SortableTable";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
 import { useDebounced } from "../lib/debounce";
 import { toInstant } from "../lib/format";
@@ -36,7 +39,7 @@ const CAMPAIGN_STATES = [
   "completed", "completed_with_issues", "failed", "plan_failed", "expired", "canceled",
 ];
 
-/** How many rows one page holds. */
+/** How many rows one page holds unless the operator chose otherwise. */
 const PAGE = 50;
 
 /**
@@ -57,6 +60,11 @@ export function Campaigns() {
   const [offset, setOffset] = useState(Math.max(0, Number(params.get("offset")) || 0));
   const settledRequester = useDebounced(requester.trim());
   const sinceInstant = toInstant(since);
+  // The page size is the operator's preference, kept in the browser; a
+  // change of it starts from the first page, because an offset measured
+  // in pages of fifty means nothing in pages of two hundred.
+  const [pageSize, setStoredPageSize] = usePageSize("campaigns", PAGE);
+  const setPageSize = (next: number) => { setStoredPageSize(next); setOffset(0); };
 
   // The address follows the filter, not the other way round: what the
   // operator narrowed the list to is what the link they copy carries.
@@ -70,7 +78,7 @@ export function Campaigns() {
     if (next.toString() !== params.toString()) setParams(next, { replace: true });
   }, [state, action, settledRequester, since, offset, params, setParams]);
 
-  const query = new URLSearchParams({ limit: String(PAGE) });
+  const query = new URLSearchParams({ limit: String(pageSize) });
   if (state) query.set("state", state);
   if (action) query.set("action", action);
   if (settledRequester) query.set("requester", settledRequester);
@@ -86,6 +94,31 @@ export function Campaigns() {
   const actions = (operations.data?.items ?? []).filter((item) => item.campaign_ready).map((item) => item.action);
   if (action && !actions.includes(action)) actions.push(action);
   actions.sort();
+  // The page comes newest first from the server; a click on a heading
+  // reorders the rows of this page in the browser, and a cleared sort
+  // goes back to the server's order. The list is one page of at most two
+  // hundred rows, so the browser can afford it.
+  const columns = useColumns("campaigns", [
+    { key: "name", label: t("Name"), sort: "name", fixed: true },
+    { key: "state", label: t("State"), sort: "state" },
+    { key: "operation", label: t("Operation"), sort: "operation" },
+    { key: "progress", label: t("Progress") },
+    { key: "canary", label: t("Canary/wave"), sort: "canary", className: "num", secondary: true },
+    { key: "requested_by", label: t("Requested by"), sort: "requested_by", secondary: true },
+    { key: "approved_by", label: t("Approved by"), sort: "approved_by", secondary: true },
+    { key: "created", label: t("Created"), sort: "created" },
+  ] satisfies ColumnDef[]);
+  const { sort, setSort, sorted } = useSort(data?.items ?? [], (campaign, column) => {
+    switch (column) {
+      case "name": return campaign.name;
+      case "state": return campaign.state;
+      case "operation": return campaign.action_type;
+      case "canary": return campaign.canary_size;
+      case "requested_by": return campaign.created_by;
+      case "approved_by": return campaign.approved_by || null;
+      default: return campaign.created_at;
+    }
+  });
 
   if (error) return <ErrorBox error={error} />;
 
@@ -158,7 +191,11 @@ export function Campaigns() {
           {/* The filter runs on the server and the rows arrive page by
               page: the screen shows what the operator asked about, not
               the newest fifty of everything. */}
-          <Toolbar end={filtering ? <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button> : undefined}>
+          <Toolbar end={<>
+            {filtering && <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button>}
+            <PageSizeSelect value={pageSize} onChange={setPageSize} />
+            <ColumnChooser columns={columns} />
+          </>}>
             <select value={state} onChange={(e) => narrow(() => setState(e.target.value))}>
               <option value="">{t("state: any")}</option>
               {CAMPAIGN_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -182,37 +219,41 @@ export function Campaigns() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th>{t("Progress")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
+                <tr>
+                  {columns.visible.map((column) => (
+                    <Th key={column.key} columns={columns} name={column.key} sort={sort} onSort={setSort} />
+                  ))}
+                </tr>
               </thead>
               <tbody>
-                {data.items.map((campaign) => (
+                {sorted.map((campaign) => (
                   <tr key={campaign.id}>
-                    <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
-                    <td><JobState state={campaign.state} /></td>
-                    <td className="mono">{campaign.action_type}</td>
+                    <Td columns={columns} name="name"><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></Td>
+                    <Td columns={columns} name="state"><JobState state={campaign.state} /></Td>
+                    <Td columns={columns} name="operation" className="mono">{campaign.action_type}</Td>
                     {/* The tally of the hosts, the same colours as the
                         campaign's own bar: unknown is its own number and
                         never folded into failed or succeeded. */}
-                    <td>
+                    <Td columns={columns} name="progress">
                       {campaign.progress ? (
                         <ProgressCells progress={campaign.progress} />
                       ) : (
                         "—"
                       )}
-                    </td>
-                    <td className="num">{campaign.canary_size} / {campaign.wave_size}</td>
-                    <td>{campaign.created_by}</td>
-                    <td>{campaign.approved_by || "—"}</td>
-                    <td><Time value={campaign.created_at} /></td>
+                    </Td>
+                    <Td columns={columns} name="canary">{campaign.canary_size} / {campaign.wave_size}</Td>
+                    <Td columns={columns} name="requested_by">{campaign.created_by}</Td>
+                    <Td columns={columns} name="approved_by">{campaign.approved_by || "—"}</Td>
+                    <Td columns={columns} name="created"><Time value={campaign.created_at} /></Td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {data && data.total > PAGE && (
+          {data && data.total > pageSize && (
             <Toolbar end={<span>{t("{shown} of {total} shown", { shown: Math.min(offset + campaigns.length, data.total), total: data.total })}</span>}>
-              <button className="secondary" onClick={() => setOffset(Math.max(0, offset - PAGE))} disabled={offset === 0}>{t("Newer")}</button>
-              <button className="secondary" onClick={() => setOffset(offset + PAGE)} disabled={lastPage}>{t("Older")}</button>
+              <button className="secondary" onClick={() => setOffset(Math.max(0, offset - pageSize))} disabled={offset === 0}>{t("Newer")}</button>
+              <button className="secondary" onClick={() => setOffset(offset + pageSize)} disabled={lastPage}>{t("Older")}</button>
             </Toolbar>
           )}
         </Card>

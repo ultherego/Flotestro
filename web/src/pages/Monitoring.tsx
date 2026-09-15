@@ -126,6 +126,38 @@ export function AlertStateBadge({ state, silenced }: { state: AlertState; silenc
     : <span className="badge error">{t("firing")}</span>;
 }
 
+/**
+ * An alert with what an operator wrote on it. The acknowledgement says
+ * somebody took it: the alert keeps firing, the counts of what waits for
+ * a person leave it out, and the row names who and what they wrote.
+ */
+export type NotedAlert = Alert & {
+  acknowledged_by?: string;
+  acknowledged_at?: string | null;
+  note?: string;
+};
+
+/** The filter of the firing table: everything, what waits, or what somebody took. */
+export type FiringFilter = "" | "waiting" | "acknowledged";
+
+/** The firing alerts the filter keeps. */
+export function filterFiring<T extends NotedAlert>(alerts: T[], filter: FiringFilter): T[] {
+  if (filter === "waiting") return alerts.filter((alert) => !alert.acknowledged_at);
+  if (filter === "acknowledged") return alerts.filter((alert) => Boolean(alert.acknowledged_at));
+  return alerts;
+}
+
+/** Who took the alert, as a chip; nothing for an alert nobody took. */
+export function AcknowledgedChip({ alert }: { alert: NotedAlert }) {
+  const t = useT();
+  if (!alert.acknowledged_at) return null;
+  return (
+    <span className="badge ok" title={alert.acknowledged_by ? t("taken by {who}", { who: alert.acknowledged_by }) : undefined}>
+      {t("acknowledged")}
+    </span>
+  );
+}
+
 function usePermissions(): Set<string> {
   const whoami = useQuery({
     queryKey: ["whoami"],
@@ -153,8 +185,13 @@ export function FleetMonitoring() {
   const queryClient = useQueryClient();
   const permissions = usePermissions();
   const canWrite = permissions.has("monitoring.rules.write");
+  // Taking an alert is the right of a silence: both are a decision about
+  // a sensor of one host.
+  const canAcknowledge = permissions.has("monitoring.silence.write");
   const [editing, setEditing] = useState<AlertRule | "new" | null>(null);
   const [historyState, setHistoryState] = useState<AlertState | "">("");
+  const [historyTaken, setHistoryTaken] = useState<FiringFilter>("");
+  const [firingFilter, setFiringFilter] = useState<FiringFilter>("");
   const [message, setMessage] = useState("");
   const confirm = useConfirm();
   const toast = useToast();
@@ -169,12 +206,15 @@ export function FleetMonitoring() {
     queryFn: () => api.get<RuleCatalogue>("/api/v1/monitoring/rules"),
     retry: false,
   });
+  const historyParams = new URLSearchParams();
+  if (historyState) historyParams.set("state", historyState);
+  if (historyTaken) historyParams.set("acknowledged", historyTaken === "acknowledged" ? "true" : "false");
   const history = useQuery({
-    queryKey: ["monitoring", "alerts", historyState],
+    queryKey: ["monitoring", "alerts", historyState, historyTaken],
     queryFn: () => {
-      const params = new URLSearchParams({ limit: "50" });
-      if (historyState) params.set("state", historyState);
-      return api.get<Collection<Alert>>(`/api/v1/monitoring/alerts?${params}`);
+      const params = new URLSearchParams(historyParams);
+      params.set("limit", "50");
+      return api.get<Collection<NotedAlert>>(`/api/v1/monitoring/alerts?${params}`);
     },
     refetchInterval: 30000,
   });
@@ -232,8 +272,8 @@ export function FleetMonitoring() {
   const data = overview.data;
   // The counts are unknown until the server answers: the bar shows dashes
   // then, not a fleet with nothing firing.
-  const counts = data?.counts;
-  const firing = data?.firing ?? [];
+  const counts = data?.counts as (FleetView["counts"] & { acknowledged?: number }) | undefined;
+  const firing = filterFiring((data?.firing ?? []) as NotedAlert[], firingFilter);
   const ruleItems = rules.data?.items ?? [];
   const silenceItems = silences.data?.items ?? [];
 
@@ -251,12 +291,13 @@ export function FleetMonitoring() {
         <Card
           className="span-8"
           title={t("Firing now")}
-          description={t("Alerts by severity across the hosts you can see; the silenced ones and the ones still pending counted apart.")}
+          description={t("Alerts by severity across the hosts you can see, without the ones somebody took; the taken, silenced and pending ones counted apart.")}
         >
           <StatusBar segments={[
             { label: t("Critical"), value: counts?.critical, tone: "error" },
             { label: t("Warning"), value: counts?.warning, tone: "warn" },
             { label: t("Info"), value: counts?.info, tone: "info" },
+            { label: t("Acknowledged"), value: counts?.acknowledged, tone: "ok" },
             { label: t("Pending"), value: counts?.pending, tone: "unknown" },
             { label: t("Silenced"), value: counts?.silenced, tone: "neutral" },
           ]} />
@@ -278,13 +319,25 @@ export function FleetMonitoring() {
           </div>
         )}
 
-        <Card className="span-12" title={t("Firing alerts")} description={t("Each one names the rule and the value that tripped it; a silence here covers that rule on that host.")} flush>
+        <Card
+          className="span-12"
+          title={t("Firing alerts")}
+          description={t("Each one names the rule and the value that tripped it; a silence here covers that rule on that host, and an acknowledgement says somebody is on it while the sensor stays on.")}
+          actions={
+            <select value={firingFilter} onChange={(e) => setFiringFilter(e.target.value as FiringFilter)}>
+              <option value="">{t("every firing alert")}</option>
+              <option value="waiting">{t("waiting for somebody")}</option>
+              <option value="acknowledged">{t("acknowledged")}</option>
+            </select>
+          }
+          flush
+        >
           {!data ? (
             <Empty>{t("Reading alerts…")}</Empty>
           ) : firing.length === 0 ? (
-            <Empty>{t("Nothing is firing on the hosts you can see.")}</Empty>
+            <Empty>{firingFilter ? t("No firing alert matches the filter.") : t("Nothing is firing on the hosts you can see.")}</Empty>
           ) : (
-            <FiringTable alerts={firing} onChanged={refresh} onMessage={setMessage} />
+            <FiringTable alerts={firing} canAcknowledge={canAcknowledge} onChanged={refresh} onMessage={setMessage} />
           )}
         </Card>
 
@@ -384,7 +437,12 @@ export function FleetMonitoring() {
                 <option value="pending">{t("pending")}</option>
                 <option value="resolved">{t("resolved")}</option>
               </select>
-              <ExportButton path="/api/v1/monitoring/alerts" params={new URLSearchParams(historyState ? { state: historyState } : {})} />
+              <select value={historyTaken} onChange={(e) => setHistoryTaken(e.target.value as FiringFilter)}>
+                <option value="">{t("taken or not")}</option>
+                <option value="waiting">{t("not acknowledged")}</option>
+                <option value="acknowledged">{t("acknowledged")}</option>
+              </select>
+              <ExportButton path="/api/v1/monitoring/alerts" params={historyParams} />
             </>
           }
           flush
@@ -398,7 +456,7 @@ export function FleetMonitoring() {
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Severity")}</th><th>{t("State")}</th><th className="num">{t("Value")}</th><th>{t("Started")}</th><th>{t("Resolved")}</th></tr>
+                <tr><th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Severity")}</th><th>{t("State")}</th><th className="num">{t("Value")}</th><th>{t("Started")}</th><th>{t("Resolved")}</th><th>{t("Note")}</th></tr>
               </thead>
               <tbody>
                 {history.data.items.map((alert) => (
@@ -406,10 +464,11 @@ export function FleetMonitoring() {
                     <td><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
                     <td>{alert.rule_name}</td>
                     <td><SeverityBadge severity={alert.severity} /></td>
-                    <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /></td>
+                    <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /> <AcknowledgedChip alert={alert} /></td>
                     <td className="num">{metricValue(alert.metric, alert.value)}</td>
                     <td><Time value={alert.started_at} /></td>
                     <td>{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="source">—</span>}</td>
+                    <td className="source">{alert.note || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -527,11 +586,59 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
  * in the row itself: the operator silences what they are looking at, and
  * the audit trail gets a sentence about why.
  */
-function FiringTable({ alerts, onChanged, onMessage }: { alerts: Alert[]; onChanged: () => void; onMessage: (text: string) => void }) {
+function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
+  alerts: NotedAlert[]; canAcknowledge: boolean; onChanged: () => void; onMessage: (text: string) => void;
+}) {
   const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [silencing, setSilencing] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [minutes, setMinutes] = useState("60");
+
+  // The acknowledgement and the note go through the dialog: the note is
+  // the reason of the acknowledgement, and the trail keeps it.
+  const acknowledge = useMutation({
+    mutationFn: ({ alert, note }: { alert: NotedAlert; note: string }) =>
+      api.post<NotedAlert>(`/api/v1/monitoring/alerts/${alert.id}/acknowledge`, { note }),
+    onSuccess: (taken) => {
+      const text = t("{host}: {rule} is acknowledged; it keeps firing until the host says otherwise.", { host: taken.hostname, rule: taken.rule_name });
+      onMessage(text);
+      toast.success(text);
+      onChanged();
+    },
+    onError: (error) => {
+      onMessage(errorText(error));
+      toast.error(errorText(error));
+    },
+  });
+  const annotate = useMutation({
+    mutationFn: ({ alert, note }: { alert: NotedAlert; note: string }) =>
+      api.post<NotedAlert>(`/api/v1/monitoring/alerts/${alert.id}/annotate`, { note }),
+    onSuccess: (noted) => {
+      onMessage(noted.note ? t("The note on {rule} at {host} is saved.", { rule: noted.rule_name, host: noted.hostname }) : t("The note on {rule} at {host} is removed.", { rule: noted.rule_name, host: noted.hostname }));
+      onChanged();
+    },
+    onError: (error) => onMessage(errorText(error)),
+  });
+  const askToAcknowledge = async (alert: NotedAlert) => {
+    const answer = await confirm({
+      title: t("Acknowledge {rule} on {host}", { rule: alert.rule_name, host: alert.hostname }),
+      body: <p>{t("The alert keeps firing - only the host ends it - but it leaves the counts of what waits for a person, under your name. Write what is being done about it.")}</p>,
+      confirmLabel: t("Acknowledge"),
+      reason: { required: true, label: t("Note (at least 8 characters)"), placeholder: t("what is being done about it") },
+    });
+    if (answer.ok && answer.reason) acknowledge.mutate({ alert, note: answer.reason });
+  };
+  const askToAnnotate = async (alert: NotedAlert) => {
+    const answer = await confirm({
+      title: t("Note on {rule} at {host}", { rule: alert.rule_name, host: alert.hostname }),
+      body: <p>{t("The note stays with the alert in its history; an empty one removes it.")}</p>,
+      confirmLabel: t("Save the note"),
+      input: { label: t("Note"), initial: alert.note ?? "", placeholder: t("where the cause was found, which change is on its way") },
+    });
+    if (answer.ok) annotate.mutate({ alert, note: answer.value ?? "" });
+  };
 
   const silence = useMutation({
     mutationFn: (alert: Alert) =>
@@ -556,7 +663,7 @@ function FiringTable({ alerts, onChanged, onMessage }: { alerts: Alert[]; onChan
       <thead>
         <tr>
           <th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Severity")}</th><th className="num">{t("Value")}</th>
-          <th>{t("Detail")}</th><th>{t("Since")}</th><th>{t("Silenced")}</th><th></th>
+          <th>{t("Detail")}</th><th>{t("Since")}</th><th>{t("Silenced")}</th><th>{t("Taken")}</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -566,6 +673,10 @@ function FiringTable({ alerts, onChanged, onMessage }: { alerts: Alert[]; onChan
             alert={alert}
             open={silencing === alert.id}
             onOpen={() => setSilencing(silencing === alert.id ? null : alert.id)}
+            canAcknowledge={canAcknowledge}
+            busy={acknowledge.isPending || annotate.isPending}
+            onAcknowledge={() => askToAcknowledge(alert)}
+            onAnnotate={() => askToAnnotate(alert)}
           >
             <Toolbar end={
               <>
@@ -599,7 +710,10 @@ function FiringTable({ alerts, onChanged, onMessage }: { alerts: Alert[]; onChan
   );
 }
 
-function FiringRow({ alert, open, onOpen, children }: { alert: Alert; open: boolean; onOpen: () => void; children: ReactNode }) {
+function FiringRow({ alert, open, onOpen, canAcknowledge, busy, onAcknowledge, onAnnotate, children }: {
+  alert: NotedAlert; open: boolean; onOpen: () => void; canAcknowledge: boolean; busy: boolean;
+  onAcknowledge: () => void; onAnnotate: () => void; children: ReactNode;
+}) {
   const t = useT();
   return (
     <>
@@ -613,16 +727,37 @@ function FiringRow({ alert, open, onOpen, children }: { alert: Alert; open: bool
         </td>
         <td><SeverityBadge severity={alert.severity} /></td>
         <td className="num">{metricValue(alert.metric, alert.value)}</td>
-        <td className="source">{alert.detail}</td>
+        <td className="source">
+          {alert.detail}
+          {alert.note && <div className="source">{t("note:")} {alert.note}</div>}
+        </td>
         <td><Time value={alert.fired_at || alert.started_at} /></td>
         <td>{alert.silenced ? <span className="badge">{t("silenced")}</span> : <span className="source">{t("no")}</span>}</td>
         <td>
-          <button className="secondary" onClick={onOpen} disabled={alert.silenced}>{open ? t("Close") : t("Silence")}</button>
+          {alert.acknowledged_at ? (
+            <div className="fp-host-cell">
+              <AcknowledgedChip alert={alert} />
+              <span className="source">{alert.acknowledged_by} · <Time value={alert.acknowledged_at} /></span>
+            </div>
+          ) : <span className="source">{t("no")}</span>}
+        </td>
+        <td>
+          <Actions>
+            <button className="secondary" onClick={onOpen} disabled={alert.silenced}>{open ? t("Close") : t("Silence")}</button>
+            {canAcknowledge && (
+              <>
+                <button className="secondary" onClick={onAcknowledge} disabled={busy}>
+                  {alert.acknowledged_at ? t("Take over") : t("Acknowledge")}
+                </button>
+                <button className="secondary" onClick={onAnnotate} disabled={busy}>{t("Note")}</button>
+              </>
+            )}
+          </Actions>
         </td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={8}>{children}</td>
+          <td colSpan={9}>{children}</td>
         </tr>
       )}
     </>

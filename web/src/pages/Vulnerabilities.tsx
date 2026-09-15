@@ -371,10 +371,11 @@ export function FleetVulnerabilities() {
             </div>
             <input
               placeholder={filters.view === "cves" ? t("CVE number or package name") : t("Search hostname")}
+              aria-label={filters.view === "cves" ? t("CVE number or package name") : t("Search hostname")}
               value={filters.q}
               onChange={(e) => change({ q: e.target.value })}
             />
-            <select value={filters.severity} onChange={(e) => change({ severity: e.target.value })}>
+            <select value={filters.severity} onChange={(e) => change({ severity: e.target.value })} aria-label={t("Severity")}>
               <option value="">{t("any severity")}</option>
               {SEVERITIES.map((severity) => <option key={severity} value={severity}>{severity}</option>)}
             </select>
@@ -384,7 +385,7 @@ export function FleetVulnerabilities() {
                 {t("vendor fix available")}
               </label>
             ) : (
-              <select value={filters.sort} onChange={(e) => change({ sort: e.target.value })}>
+              <select value={filters.sort} onChange={(e) => change({ sort: e.target.value })} aria-label={t("Sort")}>
                 <option value="">{t("most open findings first")}</option>
                 <option value="fixable">{t("most vendor fixes first")}</option>
                 <option value="hostname">{t("by hostname")}</option>

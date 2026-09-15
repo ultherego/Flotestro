@@ -45,6 +45,7 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/monitoring"
+	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/outbox"
@@ -171,6 +172,18 @@ func run() error {
 	auditRetention := flag.Duration("audit-retention",
 		config.EnvDuration("FLOTESTRO_AUDIT_RETENTION", 0),
 		"how long the audit trail is kept; zero keeps it forever")
+	// The working record of the fleet, unlike the trail, is always swept:
+	// a finished job, a finished campaign and a delivered event are read
+	// for a while and then only take room. Zero means the built-in default.
+	jobRetention := flag.Duration("job-retention",
+		config.EnvDuration("FLOTESTRO_JOB_RETENTION", housekeeping.JobRetention),
+		"how long finished jobs are kept")
+	campaignRetention := flag.Duration("campaign-retention",
+		config.EnvDuration("FLOTESTRO_CAMPAIGN_RETENTION", housekeeping.CampaignRetention),
+		"how long finished campaigns are kept, with their targets, steps and approvals")
+	outboxRetention := flag.Duration("outbox-retention",
+		config.EnvDuration("FLOTESTRO_OUTBOX_RETENTION", housekeeping.OutboxRetention),
+		"how long the delivered events of the durable trail are kept")
 	// The dispatch rate of the document: a queue of thousands after an
 	// outage drains at a pace the fleet and the panel carry, rather than
 	// in one wave. Zero turns the pacing off.
@@ -645,6 +658,30 @@ func run() error {
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)
 	agentService.SetSecretLeases(secretStore)
+
+	// The notification channels: a second consumer of the durable trail,
+	// with a cursor of its own beside the webhook from the environment, so
+	// the legacy webhook keeps working as an implicit channel and neither
+	// holds the other back. The router reads the mail passwords from the
+	// secret store at the moment of sending; the links in the messages
+	// point at the public address of the panel.
+	notificationStore := notify.NewStore(pool)
+	notifier := notify.NewRouter(pool, notificationStore, secretStore, *publicURL, log)
+	panelServer.SetNotifications(notificationStore, notifier)
+	notifications := outbox.NewConsumer(pool, "notifications", notifier, log, 2*time.Second)
+	go notifications.Run(ctx)
+	go func() {
+		wakes, unsubscribe := eventBus.Subscribe(events.ForOutbox())
+		defer unsubscribe()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wakes:
+				notifications.Wake()
+			}
+		}
+	}()
 	// The settings screen shows what this process resolved, with the
 	// secrets reduced to "set" or "not set": the values themselves stay in
 	// the environment file.
@@ -722,7 +759,12 @@ func run() error {
 	// the expired browser sessions with their abandoned logins alongside.
 	// A role binding past its validity is noted on the trail by the same
 	// sweep; it stopped granting anything the moment it expired.
-	go housekeeping.New(pool, log, housekeeping.Options{Audit: *auditRetention}).
+	sweeper := housekeeping.New(pool, log, housekeeping.Options{
+		Audit:     *auditRetention,
+		Jobs:      *jobRetention,
+		Campaigns: *campaignRetention,
+		Outbox:    *outboxRetention,
+	}).
 		WithAudit(recorder).
 		Also("web sessions", authzStore.PurgeExpired).
 		// A host whose recovery order expired unused comes back to active on
@@ -733,10 +775,24 @@ func run() error {
 				log.Info("hosts came back from a lapsed recovery", "hosts", len(lapsed))
 			}
 			return err
-		}).Run(ctx)
+		})
+	go sweeper.Run(ctx)
 	if *auditRetention > 0 {
 		log.Info("the audit trail has a retention", "retention", auditRetention.String())
 	}
+	log.Info("the working record has a retention",
+		"jobs", sweeper.Options().Jobs.String(),
+		"campaigns", sweeper.Options().Campaigns.String(),
+		"outbox_events", sweeper.Options().Outbox.String())
+	// The status and settings screens read the loops and the switches of
+	// this process that the effective configuration does not carry.
+	panelServer.SetProcess(adminapi.Process{
+		Housekeeping:        sweeper,
+		DispatchRate:        max(*dispatchRate, 0),
+		ClonePolicy:         string(clonePolicy),
+		SessionGroupRefresh: *sessionGroupRefresh,
+		OIDCAdminLogout:     *oidcAdminLogout,
+	})
 
 	// The scheduler delivers approved jobs to the hosts connected to this
 	// gateway and watches over the leases and the TTLs.

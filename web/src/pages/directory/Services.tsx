@@ -55,7 +55,7 @@ export function Services() {
       </p>
 
       <Toolbar end={<span>{t("{n} services", { n: items.length })}</span>}>
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("filter by principal or host")} />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("filter by principal or host")} aria-label={t("Filter by principal or host")} />
       </Toolbar>
 
       {rotating && (

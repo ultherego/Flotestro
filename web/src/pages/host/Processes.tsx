@@ -261,9 +261,9 @@ export function Processes() {
                     </td>
                     <td>
                       <div className="operations">
-                        <button onClick={() => setToSignal({ process, signal: "TERM" })}>Term</button>
+                        <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
                         <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
-                        <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>Kill</button>
+                        <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
                       </div>
                     </td>
                   </tr>

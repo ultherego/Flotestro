@@ -116,6 +116,26 @@ export function Dashboard() {
         description={<>{t("Only what needs a decision.")} <Refreshed at={summary.dataUpdatedAt} fetching={summary.isFetching} onRefresh={() => summary.refetch()} /></>}
       />
 
+      {/* An empty fleet is a panel on its first run, not a fleet with
+          nothing wrong: the card says what comes first and leads to the
+          checklist, so the empty tiles below are not the whole answer. */}
+      {s?.hosts === 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Card
+            tone="warn"
+            title={t("No host is enrolled yet")}
+            description={t("A fresh panel is set up in this order; the checklist tracks every step.")}
+            actions={<Link className="button primary" to="/setup">{t("Open the first-run checklist")}</Link>}
+          >
+            <ol className="steps">
+              <li>{t("Test the identity provider and map the first group to a role, so the team can sign in.")}</li>
+              <li>{t("Revoke the bootstrap token once a mapped administrator has signed in.")}</li>
+              <li>{t("Enrol the first host with the one-line installation from the add-host screen.")}</li>
+            </ol>
+          </Card>
+        </div>
+      )}
+
       {/* The two bars are the state of the fleet read from across the
           room: where the hosts are, and what is wrong. */}
       <div className="widgets">

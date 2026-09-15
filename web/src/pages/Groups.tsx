@@ -228,7 +228,7 @@ function GroupList() {
         <Card className="span-12" flush>
           {items.length > 0 && (
             <Toolbar end={<span>{t("{n} of {total} groups", { n: shown.length, total: items.length })}</span>}>
-              <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} />
+              <input placeholder={t("Search by name or description")} aria-label={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} />
               <select value={sort} onChange={(e) => setSort(e.target.value as GroupSort)} aria-label={t("Sort")}>
                 <option value="name">{t("sort by name")}</option>
                 <option value="size">{t("sort by size")}</option>
@@ -414,7 +414,7 @@ export function HostChooser({ selected, onChange }: { selected: Set<string>; onC
     <>
       <h4 className="widget-subhead">{t("Members")}</h4>
       <Toolbar end={<span>{t("{n} chosen", { n: selected.size })}</span>}>
-        <input placeholder={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input placeholder={t("Search hostname, address, machine ID or owner")} aria-label={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
         <button type="button" className="secondary" onClick={() => onChange(new Set([...selected, ...rows.map((host) => host.id)]))}>
           {t("Choose every listed host")}
         </button>
@@ -980,7 +980,7 @@ function GroupPage({ id }: { id: string }) {
 
         <Card className="span-12" flush>
           <Toolbar end={hosts.data && <span>{t("{n} hosts", { n: total })}</span>}>
-            <input placeholder={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input placeholder={t("Search hostname, address, machine ID or owner")} aria-label={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
             {message && !editingMembers && <span className="page-error">{message}</span>}
           </Toolbar>
           {hosts.error ? <ErrorBox error={hosts.error} /> : hosts.isLoading ? (

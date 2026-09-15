@@ -1,0 +1,242 @@
+package reports
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"time"
+)
+
+// The compliance report: where the visible hosts stand against the
+// declared policies at the end of the period.
+//
+// The panel keeps one verdict per policy, host and rule - the latest
+// evaluation - so a verdict recorded after the end of the period has
+// overwritten the one that stood then. Such a host is counted as unknown
+// for the period rather than under its later verdict: the report says
+// what was known at its end, and what it cannot know it says it does not
+// know. A period that ends now has nothing unknown for this reason.
+
+// The verdicts a policy rule gives, and the one the report adds.
+const (
+	VerdictCompliant     = "compliant"
+	VerdictDrift         = "drift"
+	VerdictError         = "error"
+	VerdictNotApplicable = "not_applicable"
+	// VerdictUnknown is the report's own: the verdict that stood at the
+	// end of the period has been overwritten since.
+	VerdictUnknown = "unknown"
+)
+
+// HostRef names a host of a report.
+type HostRef struct {
+	HostID   string `json:"host_id"`
+	Hostname string `json:"hostname"`
+	Site     string `json:"site"`
+}
+
+// PolicyRow is one policy of the report with its hosts by verdict.
+//
+// A host has one verdict per policy, the worst of its rules: drift over
+// error over compliant over not applicable, so a host with one rule in
+// drift is a host in drift whatever its other rules say. The rule tally
+// counts the verdicts as the rule results do, one per rule.
+type PolicyRow struct {
+	ID              string     `json:"id"`
+	Name            string     `json:"name"`
+	Version         int        `json:"version"`
+	Enabled         bool       `json:"enabled"`
+	RemediationMode string     `json:"remediation_mode"`
+	LastEvaluatedAt *time.Time `json:"last_evaluated_at,omitempty"`
+	// Hosts counts the visible hosts with a verdict; the verdicts split
+	// them.
+	Hosts         int `json:"hosts"`
+	Compliant     int `json:"compliant"`
+	Drift         int `json:"drift"`
+	Error         int `json:"error"`
+	NotApplicable int `json:"not_applicable"`
+	Unknown       int `json:"unknown"`
+	// Rules tallies the rule results by verdict: what the results list of
+	// the policy counts.
+	Rules map[string]int `json:"rules"`
+	// DriftHosts names the hosts in drift, the first driftHostLimit of
+	// them by name; Drift is the exact count.
+	DriftHosts []HostRef `json:"drift_hosts"`
+}
+
+// DriftHost is one host in drift and how much of it.
+type DriftHost struct {
+	HostRef
+	Environment string `json:"environment"`
+	// Policies counts the policies the host drifts from; Rules the rules.
+	Policies int `json:"policies"`
+	Rules    int `json:"rules"`
+}
+
+// PolicyTotals are the totals over the policies of the report.
+type PolicyTotals struct {
+	Policies int `json:"policies"`
+	// The host verdicts summed over the policies: a host under three
+	// policies counts three times, once per policy.
+	Compliant     int `json:"compliant"`
+	Drift         int `json:"drift"`
+	Error         int `json:"error"`
+	NotApplicable int `json:"not_applicable"`
+	Unknown       int `json:"unknown"`
+	// HostsInDrift counts the distinct hosts in drift from any policy.
+	HostsInDrift int `json:"hosts_in_drift"`
+}
+
+// PolicyCompliance is the policy part of the compliance report.
+type PolicyCompliance struct {
+	Policies   []PolicyRow  `json:"policies"`
+	DriftHosts []DriftHost  `json:"drift_hosts"`
+	Totals     PolicyTotals `json:"totals"`
+}
+
+// driftHostLimit bounds the host names a policy row carries. The count
+// is exact; the names are a sample, and the drift host table lists the
+// rest.
+const driftHostLimit = 50
+
+// hostVerdictsSQL judges every visible host under every policy: the worst
+// verdict of its rules, with the verdicts recorded after the end of the
+// period read as unknown. $1 is the end of the period; the clause is
+// numbered from $2.
+const hostVerdictsSQL = `
+	with verdicts as (
+		select r.policy_id, r.host_id, h.hostname, h.site, h.environment,
+		       case when r.evaluated_at >= $1 then 'unknown' else r.verdict end as verdict
+		  from policy_results r join hosts h on h.id = r.host_id
+		 where %s
+	),
+	judged as (
+		select policy_id, host_id, min(hostname) as hostname, min(site) as site, min(environment) as environment,
+		       case when bool_or(verdict = 'drift') then 'drift'
+		            when bool_or(verdict = 'error') then 'error'
+		            when bool_or(verdict = 'unknown') then 'unknown'
+		            when bool_or(verdict = 'compliant') then 'compliant'
+		            else 'not_applicable' end as verdict,
+		       count(*) filter (where verdict = 'drift') as drift_rules
+		  from verdicts group by policy_id, host_id
+	)`
+
+// Policies computes the policy part of the report over the visible hosts.
+func (s *Store) Policies(ctx context.Context, period Period, filter Filter) (*PolicyCompliance, error) {
+	report := &PolicyCompliance{Policies: []PolicyRow{}, DriftHosts: []DriftHost{}}
+	clause, args := hostClause(filter, 1)
+	args = append([]any{period.To}, args...)
+
+	// Every policy, evaluated or not, with its hosts by verdict; a policy
+	// nobody has judged yet is a row of zeros, not a missing row.
+	rows, err := s.pool.Query(ctx, `
+		select p.id::text, p.name, p.version, p.enabled, p.remediation_mode, p.last_evaluated_at,
+		       count(j.host_id),
+		       count(j.host_id) filter (where j.verdict = 'compliant'),
+		       count(j.host_id) filter (where j.verdict = 'drift'),
+		       count(j.host_id) filter (where j.verdict = 'error'),
+		       count(j.host_id) filter (where j.verdict = 'not_applicable'),
+		       count(j.host_id) filter (where j.verdict = 'unknown')
+		  from policies p
+		  left join (`+fmt.Sprintf(hostVerdictsSQL, clause)+` select * from judged) j on j.policy_id = p.id
+		 group by p.id
+		 order by p.name, p.id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	index := map[string]int{}
+	for rows.Next() {
+		row := PolicyRow{Rules: map[string]int{}, DriftHosts: []HostRef{}}
+		if err := rows.Scan(&row.ID, &row.Name, &row.Version, &row.Enabled, &row.RemediationMode, &row.LastEvaluatedAt,
+			&row.Hosts, &row.Compliant, &row.Drift, &row.Error, &row.NotApplicable, &row.Unknown); err != nil {
+			return nil, err
+		}
+		for _, verdict := range []string{VerdictCompliant, VerdictDrift, VerdictError, VerdictNotApplicable, VerdictUnknown} {
+			row.Rules[verdict] = 0
+		}
+		index[row.ID] = len(report.Policies)
+		report.Policies = append(report.Policies, row)
+		report.Totals.Policies++
+		report.Totals.Compliant += row.Compliant
+		report.Totals.Drift += row.Drift
+		report.Totals.Error += row.Error
+		report.Totals.NotApplicable += row.NotApplicable
+		report.Totals.Unknown += row.Unknown
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// The rule results by verdict, as the results list of a policy counts
+	// them.
+	rules, err := s.pool.Query(ctx, `
+		select r.policy_id::text, case when r.evaluated_at >= $1 then 'unknown' else r.verdict end, count(*)
+		  from policy_results r join hosts h on h.id = r.host_id
+		 where `+clause+`
+		 group by 1, 2`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rules.Close()
+	for rules.Next() {
+		var policyID, verdict string
+		var count int
+		if err := rules.Scan(&policyID, &verdict, &count); err != nil {
+			return nil, err
+		}
+		if i, ok := index[policyID]; ok {
+			report.Policies[i].Rules[verdict] = count
+		}
+	}
+	if err := rules.Err(); err != nil {
+		return nil, err
+	}
+
+	// The hosts in drift: named under their policies, a sample per policy,
+	// and listed once each with how many policies they drift from.
+	drift, err := s.pool.Query(ctx, fmt.Sprintf(hostVerdictsSQL, clause)+`
+		select policy_id::text, host_id::text, hostname, site, environment, drift_rules
+		  from judged where verdict = 'drift'
+		 order by hostname, host_id, policy_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer drift.Close()
+	hosts := map[string]*DriftHost{}
+	for drift.Next() {
+		var policyID string
+		var host DriftHost
+		var driftRules int
+		if err := drift.Scan(&policyID, &host.HostID, &host.Hostname, &host.Site, &host.Environment, &driftRules); err != nil {
+			return nil, err
+		}
+		if i, ok := index[policyID]; ok && len(report.Policies[i].DriftHosts) < driftHostLimit {
+			report.Policies[i].DriftHosts = append(report.Policies[i].DriftHosts, host.HostRef)
+		}
+		listed, ok := hosts[host.HostID]
+		if !ok {
+			listed = &host
+			hosts[host.HostID] = listed
+		}
+		listed.Policies++
+		listed.Rules += driftRules
+	}
+	if err := drift.Err(); err != nil {
+		return nil, err
+	}
+	for _, host := range hosts {
+		report.DriftHosts = append(report.DriftHosts, *host)
+	}
+	// By name, then by identifier, the way the host list orders itself.
+	sort.Slice(report.DriftHosts, func(i, j int) bool {
+		a, b := report.DriftHosts[i], report.DriftHosts[j]
+		if a.Hostname != b.Hostname {
+			return a.Hostname < b.Hostname
+		}
+		return a.HostID < b.HostID
+	})
+	report.Totals.HostsInDrift = len(report.DriftHosts)
+	return report, nil
+}

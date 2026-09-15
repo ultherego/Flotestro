@@ -6,6 +6,8 @@ import type { Budget, BudgetLimit, Whoami } from "../lib/types";
 import { ErrorBox, Empty, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /* ---------------------------------------------------------------------- */
@@ -187,6 +189,18 @@ async function writeLimit(key: string, body: { capacity: number; note: string },
   await api.put<unknown>(budgetPath(key), body, { headers: etag ? { "If-Match": etag } : {} });
 }
 
+/**
+ * Takes a configured budget away on the version named by the tag. The
+ * server refuses while somebody holds tokens of it: a ceiling is not
+ * pulled from under running work.
+ */
+async function deleteLimit(key: string, reason: string, etag: string): Promise<void> {
+  await api.del<unknown>(budgetPath(key), { reason }, { headers: etag ? { "If-Match": etag } : {} });
+}
+
+/** The shape of a key the store reads: three colon-separated parts, or global:<resource>. */
+const KEY_PATTERN = /^(global:[a-z0-9_-]+|(site|domain|gateway|backend):([a-z0-9_.-]+|\*):[a-z0-9_-]+)$/;
+
 /* ---------------------------------------------------------------------- */
 /* The page.                                                               */
 /* ---------------------------------------------------------------------- */
@@ -205,6 +219,7 @@ const BUDGETS_INTERVAL = 10 * 1000;
  */
 export function Budgets() {
   const t = useT();
+  const [creating, setCreating] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["budgets"],
     queryFn: () => api.get<{ items: BudgetState[] }>("/api/v1/budgets"),
@@ -246,7 +261,14 @@ export function Budgets() {
         icon="overview"
         title={t("Budgets")}
         description={t("The capacity of the fleet, in tokens: how many operations the fleet, a site or a backup backend carries at once. A campaign or a job that finds no free token waits here, and the free tokens are divided fairly between everyone asking.")}
+        actions={canWrite && (
+          <button className={creating ? "secondary" : ""} onClick={() => setCreating(!creating)}>
+            {creating ? t("Hide the form") : t("New budget")}
+          </button>
+        )}
       />
+
+      {creating && <NewBudget existing={budgets.map((budget) => budget.key)} onDone={() => setCreating(false)} />}
 
       <div className="widgets">
         <Card className="span-6" title={t("Capacity")} description={t("{n} budgets, {jobs} jobs and {hosts} campaign hosts waiting", { n: budgets.length, jobs: waitingJobs, hosts: waitingTargets })}>
@@ -285,7 +307,9 @@ export function Budgets() {
             <Empty>{t("Loading…")}</Empty>
           ) : budgets.length === 0 ? (
             <Empty>
-              {t("No budget is configured. Without one the fleet carries whatever is asked of it; a capacity is set with the API under a key such as global:mutations or site:*:packages.")}
+              {canWrite
+                ? t("No budget is configured. Without one the fleet carries whatever is asked of it; set a capacity under a key such as global:mutations or site:*:packages with the button above.")
+                : t("No budget is configured. Without one the fleet carries whatever is asked of it; a capacity is set with the API under a key such as global:mutations or site:*:packages.")}
             </Empty>
           ) : (
             <BudgetTable budgets={budgets} canWrite={canWrite} />
@@ -449,6 +473,7 @@ function BudgetRows({ budget, described, tone, canWrite, open, onEdit, onDone }:
           <td>
             <Actions>
               <button className="secondary" onClick={onEdit} aria-expanded={open}>{open ? t("Close") : t("Edit")}</button>
+              <DeleteBudget budget={budget} />
             </Actions>
           </td>
         )}
@@ -513,6 +538,140 @@ function holderName(label: string, t: Translate): string {
     case "job": return t("job");
     default: return t("read");
   }
+}
+
+/**
+ * Taking one budget away. The key then falls back to the pattern of its
+ * family or to no limit at all, which the dialog says; the reason goes
+ * to the trail. A budget with tokens held is refused by the server, and
+ * the refusal is shown as what it is - work in flight - rather than as
+ * an error of the page.
+ */
+function DeleteBudget({ budget }: { budget: BudgetState }) {
+  const t = useT();
+  const confirm = useConfirm();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const described = describeBudgetKey(budget.key);
+  const remove = useMutation({
+    mutationFn: async (reason: string) => {
+      const { etag } = await readLimit(budget.key);
+      await deleteLimit(budget.key, reason, etag);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      toast.success(t("Budget {key} deleted.", { key: budget.key }));
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 409) {
+        toast.error(t("{key} holds tokens of running work; wait for it to finish or cancel it, then delete the budget.", { key: budget.key }));
+        return;
+      }
+      if (error instanceof ApiError && error.forbidden) {
+        toast.error(t("You may not change this budget: a site budget needs the right in its site, the rest in the whole fleet."));
+        return;
+      }
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+  const ask = async () => {
+    const { ok, reason } = await confirm({
+      title: t("Delete the budget {key}?", { key: budget.key }),
+      body: (
+        <>
+          <p>
+            {described.pattern
+              ? t("The default of this family goes away: a site nobody described separately is then unlimited for this resource.")
+              : t("The key falls back to the default of its family, or to no limit at all when no default describes it. A deleted budget is not a budget of zero.")}
+          </p>
+          {budget.used > 0 && <p className="page-error">{t("{n} tokens are held right now; the server will refuse until the work finishes.", { n: budget.used })}</p>}
+        </>
+      ),
+      confirmLabel: t("Delete"),
+      danger: true,
+      reason: { required: true },
+    });
+    if (ok && reason) remove.mutate(reason);
+  };
+  return (
+    <button className="danger" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
+      {t("Delete")}
+    </button>
+  );
+}
+
+/**
+ * A budget configured for the first time: the key, its capacity and the
+ * note. The key is typed, because the families and their resources are
+ * the store's vocabulary and a menu of every combination would be longer
+ * than the explanation; the field checks the shape before the request
+ * leaves and refuses a key that is already on the list, which is edited
+ * in place instead.
+ */
+function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => void }) {
+  const t = useT();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [key, setKey] = useState("");
+  const [capacity, setCapacity] = useState("1");
+  const [note, setNote] = useState("");
+  const [message, setMessage] = useState("");
+
+  const trimmed = key.trim();
+  const validKey = KEY_PATTERN.test(trimmed);
+  const duplicate = existing.includes(trimmed);
+  const parsed = Number(capacity);
+  const validCapacity = Number.isInteger(parsed) && parsed >= 1;
+  const ready = validKey && !duplicate && validCapacity;
+
+  const create = useMutation({
+    mutationFn: () => writeLimit(trimmed, { capacity: parsed, note: note.trim() }, ""),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["budgets"] });
+      toast.success(t("Budget {key} set to {n} tokens.", { key: trimmed, n: parsed }));
+      onDone();
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.forbidden) {
+        setMessage(t("You may not change this budget: a site budget needs the right in its site, the rest in the whole fleet."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  return (
+    <Card
+      title={t("New budget")}
+      description={t("A capacity under a key the store reads: global:<resource> for the whole fleet, or site, domain, gateway or backend, a scope or an asterisk for the family's default, and the resource - mutations, reads, packages, reboot, units, backup.")}
+      footer={
+        <Actions>
+          <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>{create.isPending ? t("saving…") : t("Set the capacity")}</button>
+          <button className="secondary" onClick={onDone} disabled={create.isPending}>{t("Cancel")}</button>
+          {message && <span className="page-error">{message}</span>}
+        </Actions>
+      }
+    >
+      <FieldGrid>
+        <Field
+          label={t("Key")}
+          hint={duplicate
+            ? t("This key is already configured; edit it in the list.")
+            : trimmed && !validKey
+              ? t("Not a budget key: global:mutations, site:warsaw:packages, site:*:reads, domain:rack-1:units, backend:offsite:backup.")
+              : t("Exact for one scope, or with an asterisk as the default every scope of the family gets.")}
+        >
+          <input className="mono" value={key} placeholder="site:*:packages" onChange={(e) => setKey(e.target.value)} autoFocus aria-invalid={Boolean(trimmed) && (!validKey || duplicate)} data-testid="new-budget-key" />
+        </Field>
+        <Field label={t("Capacity")} hint={t("Tokens at once under this key; at least 1. To stop the work, pause the campaign instead.")}>
+          <input type="number" min={1} step={1} value={capacity} onChange={(e) => setCapacity(e.target.value)} aria-invalid={!validCapacity} data-testid="new-budget-capacity" />
+        </Field>
+        <Field label={t("Note (kept in the audit trail)")} hint={t("Why this capacity: the link of the site, the disk of the backend.")} wide>
+          <input value={note} onChange={(e) => setNote(e.target.value)} />
+        </Field>
+      </FieldGrid>
+    </Card>
+  );
 }
 
 /**

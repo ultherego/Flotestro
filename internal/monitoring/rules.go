@@ -449,7 +449,16 @@ type Alert struct {
 	Silenced bool   `json:"silenced"`
 	HostID   string `json:"host_id"`
 	Hostname string `json:"hostname"`
+	// AcknowledgedBy and AcknowledgedAt say somebody took the alert: it
+	// keeps firing, and the counts of what waits for a person leave it
+	// out. Note is what the operator wrote on it.
+	AcknowledgedBy string     `json:"acknowledged_by,omitempty"`
+	AcknowledgedAt *time.Time `json:"acknowledged_at,omitempty"`
+	Note           string     `json:"note,omitempty"`
 }
+
+// Acknowledged says somebody took the alert.
+func (a Alert) Acknowledged() bool { return a.AcknowledgedAt != nil }
 
 // AlertFilter narrows the alert history.
 type AlertFilter struct {
@@ -458,7 +467,10 @@ type AlertFilter struct {
 	HostID   string
 	// Scopes narrow to the hosts the caller may read; nil narrows nothing.
 	Scopes []authz.Scope
-	Limit  int
+	// Acknowledged narrows to the alerts somebody took, or to the ones
+	// nobody did; nil narrows nothing.
+	Acknowledged *bool
+	Limit        int
 }
 
 // alertColumns is the projection every alert query shares; a is the
@@ -470,7 +482,7 @@ const alertColumns = `
 	        where s.expired_at is null and s.until > now()
 	          and (s.host_id is null or s.host_id = a.host_id)
 	          and (s.rule_id is null or s.rule_id = a.rule_id)),
-	a.host_id, h.hostname`
+	a.host_id, h.hostname, coalesce(a.acknowledged_by, ''), a.acknowledged_at, a.note`
 
 // ListAlerts reads the alert history, newest first.
 func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, error) {
@@ -497,6 +509,13 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 			args = append(args, extra...)
 		}
 	}
+	if filter.Acknowledged != nil {
+		if *filter.Acknowledged {
+			conditions = append(conditions, "a.acknowledged_at is not null")
+		} else {
+			conditions = append(conditions, "a.acknowledged_at is null")
+		}
+	}
 	where := ""
 	if len(conditions) > 0 {
 		where = "where " + strings.Join(conditions, " and ")
@@ -514,8 +533,9 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 		limit $`+fmt.Sprint(len(args)), args...)
 }
 
-// Firing reads the firing alerts of the visible hosts: the most severe
-// first, then the oldest, as on-call reads them.
+// Firing reads the firing alerts of the visible hosts: the ones nobody
+// took first, then the most severe, then the oldest, as on-call reads
+// them.
 func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, error) {
 	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
 	if condition == "" {
@@ -525,8 +545,74 @@ func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, erro
 		select `+alertColumns+`
 		from alerts a join hosts h on h.id = a.host_id
 		where a.state = 'firing' and `+condition+`
-		order by case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end,
+		order by a.acknowledged_at is not null,
+		         case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end,
 		         a.fired_at, a.id`, args...)
+}
+
+// ErrNotFiring says the alert is not firing, so it cannot be taken: a
+// pending one is not yet an alert, a resolved one is history.
+var ErrNotFiring = errors.New("the alert is not firing")
+
+// Acknowledge marks a firing alert as taken by somebody, with what they
+// wrote. The alert keeps firing: the condition on the host has not
+// ended, and only the host ends it. A second acknowledgement replaces
+// the first - the alert changed hands - and the trail says so.
+func (s *Store) Acknowledge(ctx context.Context, id, by, note string) (*Alert, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrNotFound
+	}
+	tag, err := s.pool.Exec(ctx, `
+		update alerts set acknowledged_by = $2, acknowledged_at = now(), note = $3
+		where id = $1 and state = 'firing'`, id, by, strings.TrimSpace(note))
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		alert, err := s.Alert(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if alert.State != "firing" {
+			return nil, ErrNotFiring
+		}
+		return nil, ErrNotFound
+	}
+	return s.Alert(ctx, id)
+}
+
+// Annotate writes a note on an alert of any state: the cause found after
+// it resolved is worth keeping with it.
+func (s *Store) Annotate(ctx context.Context, id, note string) (*Alert, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrNotFound
+	}
+	tag, err := s.pool.Exec(ctx, `update alerts set note = $2 where id = $1`, id, strings.TrimSpace(note))
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Alert(ctx, id)
+}
+
+// Alert reads one alert.
+func (s *Store) Alert(ctx context.Context, id string) (*Alert, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return nil, ErrNotFound
+	}
+	alerts, err := s.queryAlerts(ctx, `
+		select `+alertColumns+`
+		from alerts a join hosts h on h.id = a.host_id
+		where a.id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(alerts) == 0 {
+		return nil, ErrNotFound
+	}
+	return &alerts[0], nil
 }
 
 // Pending counts the pending alerts of the visible hosts.
@@ -651,7 +737,7 @@ func (s *Store) queryAlerts(ctx context.Context, query string, args ...any) ([]A
 		if err := rows.Scan(&alert.ID, &alert.RuleID, &alert.RuleName, &alert.Metric,
 			&alert.Severity, &alert.State, &value, &alert.Detail, &alert.StartedAt,
 			&alert.FiredAt, &alert.ResolvedAt, &alert.Silenced, &alert.HostID,
-			&alert.Hostname); err != nil {
+			&alert.Hostname, &alert.AcknowledgedBy, &alert.AcknowledgedAt, &alert.Note); err != nil {
 			return nil, err
 		}
 		alert.Value = float64(value)

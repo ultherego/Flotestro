@@ -382,12 +382,12 @@ function SecretRow({
               {copied ? t("Copied") : t("Copy reference")}
             </button>
             {!secret.retired_at && canRotate && (
-              <button className="secondary" aria-expanded={open === "rotate"} onClick={() => onToggle("rotate")} disabled={busy}>
+              <button className="secondary" aria-expanded={open === "rotate"} aria-label={open === "rotate" ? undefined : t("Rotate {name}", { name: secret.name })} onClick={() => onToggle("rotate")} disabled={busy}>
                 {open === "rotate" ? t("Close") : t("Rotate")}
               </button>
             )}
             {!secret.retired_at && canRetire && (
-              <button className="secondary" aria-expanded={open === "retire"} onClick={() => onToggle("retire")} disabled={busy}>
+              <button className="secondary" aria-expanded={open === "retire"} aria-label={open === "retire" ? undefined : t("Retire {name}", { name: secret.name })} onClick={() => onToggle("retire")} disabled={busy}>
                 {open === "retire" ? t("Close") : t("Retire")}
               </button>
             )}

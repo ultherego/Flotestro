@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -1161,6 +1162,125 @@ type ListFilter struct {
 	// right to read. An empty list narrows nothing; an empty scope inside the
 	// list means a global permission.
 	Scopes []Scope
+	// Sort is the order of the list; the zero value is the creation time,
+	// newest first, the order the list always had.
+	Sort Sort
+}
+
+// ErrInvalidSort means a sort a caller asked for that names no column of
+// the list, or a direction that is neither asc nor desc.
+var ErrInvalidSort = errors.New("invalid sort")
+
+// Sort is the order of the task list: a column of the whitelist below and
+// a direction. The zero value stands for the default order, the creation
+// time descending.
+type Sort struct {
+	Column     string
+	Descending bool
+}
+
+// ParseSort reads a sort as the API carries it: column, column:asc or
+// column:desc. An empty value is the default order; a bare created_at is
+// read as created_at:desc, because a list of tasks is read newest first
+// and a caller naming the column without a direction means that.
+func ParseSort(value string) (Sort, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return Sort{}, nil
+	}
+	column, direction, _ := strings.Cut(value, ":")
+	if _, ok := sortColumns[column]; !ok {
+		return Sort{}, fmt.Errorf("%w: %q is not a column of the task list", ErrInvalidSort, column)
+	}
+	switch direction {
+	case "":
+		return Sort{Column: column, Descending: column == "created_at"}, nil
+	case "asc":
+		return Sort{Column: column}, nil
+	case "desc":
+		return Sort{Column: column, Descending: true}, nil
+	}
+	return Sort{}, fmt.Errorf("%w: the direction must be asc or desc, not %q", ErrInvalidSort, direction)
+}
+
+// normalized is the sort with the default spelled out.
+func (s Sort) normalized() Sort {
+	if s.Column == "" {
+		return Sort{Column: "created_at", Descending: true}
+	}
+	return s
+}
+
+// String renders the sort with its direction always named, so a cursor
+// carries one spelling of an order however the caller spelled it.
+func (s Sort) String() string {
+	s = s.normalized()
+	if s.Descending {
+		return s.Column + ":desc"
+	}
+	return s.Column + ":asc"
+}
+
+// sortColumn is one column the list can be ordered by: the SQL expression
+// that carries its order, the type the cursor's value is cast back to, the
+// rendering of a row's value for the cursor and the check of a value that
+// came back in one.
+type sortColumn struct {
+	expression string
+	kind       string
+	key        func(Job) string
+	valid      func(string) bool
+}
+
+// sortColumns are the columns the task list can be ordered by. Every
+// expression is free of nulls, so the pair (expression, id) is a total
+// order a cursor can stand on: a task not finished yet sorts as the
+// earliest possible moment, apart from every task that did finish, and a
+// task whose host is gone sorts under an empty name.
+var sortColumns = map[string]sortColumn{
+	"created_at": {
+		"created_at", "timestamptz", func(j Job) string { return paging.FormatTime(j.CreatedAt) }, validTimeKey,
+	},
+	"finished_at": {
+		"coalesce(finished_at, '-infinity'::timestamptz)", "timestamptz",
+		func(j Job) string { return timeKey(j.FinishedAt) }, validTimeKey,
+	},
+	"state":       {"state", "text", func(j Job) string { return string(j.State) }, anyText},
+	"action_type": {"action_type", "text", func(j Job) string { return j.ActionType }, anyText},
+	"hostname": {
+		"coalesce((select h.hostname from hosts h where h.id = jobs.host_id), '')", "text",
+		func(j Job) string { return j.Hostname }, anyText,
+	},
+}
+
+// SortColumns lists the columns the list can be ordered by, for the API's
+// description of itself.
+func SortColumns() []string {
+	names := make([]string, 0, len(sortColumns))
+	for name := range sortColumns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func anyText(string) bool { return true }
+
+// timeKey renders a timestamp the way the expression coalesces it: the
+// earliest possible moment for a task that has no such moment yet.
+func timeKey(at *time.Time) string {
+	if at == nil {
+		return "-infinity"
+	}
+	return paging.FormatTime(*at)
+}
+
+func validTimeKey(value string) bool {
+	if value == "-infinity" {
+		return true
+	}
+	_, err := paging.ParseTime(value)
+	return err == nil
 }
 
 // Scope is a site-environment pair. An empty field means "any".
@@ -1229,7 +1349,8 @@ func (f ListFilter) conditions() ([]string, []any) {
 	return conditions, args
 }
 
-// List returns the tasks matching the filter, newest first.
+// List returns the tasks matching the filter, in the order of its Sort -
+// newest first by default.
 func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	page, err := s.ListPaged(ctx, filter, Cursor{}, filter.Limit)
 	if err != nil {
@@ -1238,37 +1359,50 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	return page.Items, nil
 }
 
-// Cursor is the key of the last task of the previous page. The list is
-// read newest first, so the next page holds the tasks created before it.
+// Cursor is the key of the last task of the previous page: the order the
+// page was read in, the value of the sorted column on that task and its
+// identifier. The order travels with the cursor so a token issued for one
+// order is refused under another, rather than read as a key of nothing.
 type Cursor struct {
-	CreatedAt time.Time
-	ID        string
-	Set       bool
+	Sort  Sort
+	Value string
+	ID    string
+	Set   bool
 }
 
 // ParseCursor reads a cursor issued by ListPaged. An empty value is the
 // first page.
 func ParseCursor(value string) (Cursor, error) {
-	parts, err := paging.Decode(value, 2)
+	parts, err := paging.Decode(value, 3)
 	if err != nil {
 		return Cursor{}, err
 	}
 	if parts == nil {
 		return Cursor{}, nil
 	}
-	at, err := paging.ParseTime(parts[0])
+	order, err := ParseSort(parts[0])
 	if err != nil {
-		return Cursor{}, err
-	}
-	if _, err := uuid.Parse(parts[1]); err != nil {
 		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
 	}
-	return Cursor{CreatedAt: at, ID: parts[1], Set: true}, nil
+	if !sortColumns[order.normalized().Column].valid(parts[1]) {
+		return Cursor{}, fmt.Errorf("%w: the key %q is not a %s", paging.ErrInvalidCursor, parts[1], order.normalized().Column)
+	}
+	if _, err := uuid.Parse(parts[2]); err != nil {
+		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return Cursor{Sort: order, Value: parts[1], ID: parts[2], Set: true}, nil
 }
 
 // String renders the cursor for the next request.
 func (c Cursor) String() string {
-	return paging.Encode(paging.FormatTime(c.CreatedAt), c.ID)
+	return paging.Encode(c.Sort.String(), c.Value, c.ID)
+}
+
+// Matches says whether the cursor was issued for the given order. A page
+// asked for under another order with this cursor would start from a key
+// of the wrong kind, so the caller refuses the request instead.
+func (c Cursor) Matches(order Sort) bool {
+	return !c.Set || c.Sort.String() == order.String()
 }
 
 // ListPage is one page of the task list.
@@ -1278,18 +1412,41 @@ type ListPage struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// ListPaged reads the tasks matching the filter page by page, newest first.
-// The key is (created_at, id): two tasks ordered in the same microsecond
-// still have an order, so a page boundary between them loses neither.
+// ListPaged reads the tasks matching the filter page by page, in the order
+// the filter's Sort names - newest first by default. The key is (sorted
+// column, id): two tasks ordered in the same microsecond, or in the same
+// state, still have an order, so a page boundary between them loses
+// neither.
+//
+// The paging stays keyset under a sort rather than falling back to an
+// offset: the cursor carries the sorted column's value on the last row
+// and the order itself, so the next page starts after that row whatever
+// tasks arrived or changed state in the meantime - and on a list sorted
+// by state they change state all the time.
 func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
+	order := filter.Sort.normalized()
+	column, ok := sortColumns[order.Column]
+	if !ok {
+		return ListPage{}, fmt.Errorf("%w: %q", ErrInvalidSort, order.Column)
+	}
+	if !cursor.Matches(order) {
+		return ListPage{}, fmt.Errorf("%w: issued for the order %s, not %s", paging.ErrInvalidCursor, cursor.Sort, order)
+	}
+	direction, comparison := "asc", ">"
+	if order.Descending {
+		direction, comparison = "desc", "<"
+	}
 	conditions, args := filter.conditions()
 	if cursor.Set {
-		args = append(args, cursor.CreatedAt, cursor.ID)
-		conditions = append(conditions,
-			fmt.Sprintf("(created_at, id) < ($%d, $%d::uuid)", len(args)-1, len(args)))
+		// The key comes back as text and is cast to the column's type in
+		// the query, so one cursor format serves a name, a state and a
+		// timestamp alike.
+		args = append(args, cursor.Value, cursor.ID)
+		conditions = append(conditions, fmt.Sprintf("(%s, id) %s ($%d::%s, $%d::uuid)",
+			column.expression, comparison, len(args)-1, column.kind, len(args)))
 	}
 	clause := ""
 	if len(conditions) > 0 {
@@ -1298,7 +1455,7 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 	// One row more than the page says whether there is a next page without
 	// a count over the whole table.
 	args = append(args, limit+1)
-	clause += fmt.Sprintf(" order by created_at desc, id desc limit $%d", len(args))
+	clause += fmt.Sprintf(" order by %s %s, id %s limit $%d", column.expression, direction, direction, len(args))
 
 	items, err := s.queryJobs(ctx, s.pool, clause, args...)
 	if err != nil {
@@ -1311,7 +1468,7 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 	if len(page.Items) > limit {
 		page.Items = page.Items[:limit]
 		last := page.Items[limit-1]
-		page.NextCursor = Cursor{CreatedAt: last.CreatedAt, ID: last.ID, Set: true}.String()
+		page.NextCursor = Cursor{Sort: order, Value: column.key(last), ID: last.ID, Set: true}.String()
 	}
 	return page, nil
 }

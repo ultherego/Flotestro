@@ -52,7 +52,7 @@ export function Hosts() {
       </p>
 
       <Toolbar end={<span>{t("{n} hosts", { n: items.length })}</span>}>
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("filter by name")} />
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("filter by name")} aria-label={t("Filter by name")} />
       </Toolbar>
 
       <Card flush>

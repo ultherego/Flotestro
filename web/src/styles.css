@@ -1707,3 +1707,17 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
   .toasts { right: 12px; left: 12px; bottom: 12px; width: auto; }
   .modal-backdrop { align-items: flex-end; }
 }
+
+/* Sortable headings, the column chooser and the columns a narrow screen
+   leaves out: a column marked secondary is one a phone can do without. */
+th[aria-sort] .sort-button:hover { color: var(--text); }
+th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
+.sort-arrow { font-size: 10px; line-height: 1; }
+.column-chooser-popover .toggle { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 900px) {
+  th.col-secondary, td.col-secondary { display: none; }
+}
+
+/* The link a keyboard user takes past the navigation. */
+.skip-link { position: absolute; left: -999px; top: 8px; z-index: 100; padding: 8px 12px; background: var(--accent); color: var(--accent-contrast); border-radius: 6px; }
+.skip-link:focus { left: 8px; }

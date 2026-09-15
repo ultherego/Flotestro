@@ -28,7 +28,7 @@ import (
 // refuse every honest write.
 func hostFactsTag(host *hosts.Host) string {
 	return etagOf("facts", host.Owner, host.ManagementAddress, host.ManagementAddressSource,
-		host.FailureDomain, host.Site, host.Environment)
+		host.FailureDomain, host.Site, host.Environment, host.Notes)
 }
 
 type hostOwnerRequest struct {

@@ -60,6 +60,8 @@ type Provider struct {
 	verifier *coreoidc.IDTokenVerifier
 	oauth    oauth2.Config
 	client   *http.Client
+	// probeState remembers the last connection test for the checklist.
+	probeState
 }
 
 // Discover fetches the configuration of the provider together with the

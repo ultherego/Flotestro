@@ -23,7 +23,11 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusUnauthorized, "unauthenticated", "no valid token")
 		return
 	}
+	// The identifier goes with the subject: it is what the principal
+	// routes are keyed by, and the profile screen needs it to name its
+	// own identity there.
 	writeJSON(w, http.StatusOK, map[string]any{
+		"id":           principal.ID,
 		"subject":      principal.Subject,
 		"display_name": principal.DisplayName,
 		"kind":         principal.Kind,

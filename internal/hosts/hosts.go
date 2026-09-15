@@ -11,6 +11,7 @@ import (
 	"net"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -265,6 +266,10 @@ type Host struct {
 	// beta. It is a policy recorded in the panel, always set - a host on no
 	// channel would follow nothing.
 	ReleaseChannel string `json:"release_channel"`
+	// Notes are what an operator wrote about the host that fits no other
+	// field: the ticket, the quirk, whom to call. Absent when nobody wrote
+	// any; the list of hosts carries them too, so a search can find them.
+	Notes string `json:"notes,omitempty"`
 	// Empty fields mean an undetermined state, not zero.
 	RebootRequired           *bool  `json:"reboot_required"`
 	FailedUnits              *int   `json:"failed_units"`
@@ -937,6 +942,186 @@ type ListFilter struct {
 	// itself or has the global one.
 	Scopes []authz.Scope
 	Limit  int
+	// Sort is the order of a paged list; the zero value is the hostname,
+	// ascending. Only ListPaged reads it: a sweep and Page walk the fleet by
+	// the key (hostname, id) whatever the operator's screen is sorted by,
+	// because a sweep needs a key that does not move under it.
+	Sort Sort
+}
+
+// ErrInvalidSort means a sort a caller asked for that names no column of
+// the list, or a direction that is neither asc nor desc.
+var ErrInvalidSort = errors.New("invalid sort")
+
+// Sort is the order of the host list: a column of the whitelist below and
+// a direction. The zero value stands for the default order, the hostname
+// ascending, so a caller that never heard of sorting gets the list it
+// always got.
+type Sort struct {
+	Column     string
+	Descending bool
+}
+
+// ParseSort reads a sort as the API carries it: column, column:asc or
+// column:desc. An empty value is the default order.
+func ParseSort(value string) (Sort, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return Sort{}, nil
+	}
+	column, direction, _ := strings.Cut(value, ":")
+	if _, ok := sortColumns[column]; !ok {
+		return Sort{}, fmt.Errorf("%w: %q is not a column of the host list", ErrInvalidSort, column)
+	}
+	switch direction {
+	case "", "asc":
+		return Sort{Column: column}, nil
+	case "desc":
+		return Sort{Column: column, Descending: true}, nil
+	}
+	return Sort{}, fmt.Errorf("%w: the direction must be asc or desc, not %q", ErrInvalidSort, direction)
+}
+
+// column names the sorted column, the default made explicit.
+func (s Sort) column() string {
+	if s.Column == "" {
+		return "hostname"
+	}
+	return s.Column
+}
+
+// String renders the sort the way ParseSort reads it; the default order
+// renders as "hostname" so a cursor carries the same spelling either way.
+func (s Sort) String() string {
+	if s.Descending {
+		return s.column() + ":desc"
+	}
+	return s.column()
+}
+
+// sortColumn is one column the list can be ordered by: the SQL expression
+// that carries its order, the type the cursor's value is cast back to, the
+// rendering of a row's value for the cursor and the check of a value that
+// came back in one.
+type sortColumn struct {
+	expression string
+	kind       string
+	key        func(Host) string
+	valid      func(string) bool
+}
+
+// sortColumns are the columns the host list can be ordered by. Every
+// expression is free of nulls, so the pair (expression, id) is a total
+// order a cursor can stand on without the special cases nulls bring to a
+// row comparison. A fact the host has not reported still stays a group of
+// its own rather than being read as a value: an unreported count sorts as
+// -1, apart from the zeros, and a host never seen as the earliest possible
+// moment, apart from the ones seen long ago. The agent version is ordered
+// part by part, like the dashboard orders it, so 0.10.0 comes after 0.9.0.
+var sortColumns = map[string]sortColumn{
+	"hostname": {"h.hostname", "text", func(h Host) string { return h.Hostname }, anyText},
+	"site":     {"h.site", "text", func(h Host) string { return h.Site }, anyText},
+	"environment": {
+		"h.environment", "text", func(h Host) string { return h.Environment }, anyText,
+	},
+	"owner": {"coalesce(h.owner, '')", "text", func(h Host) string { return h.Owner }, anyText},
+	"lifecycle_state": {
+		"h.lifecycle_state", "text", func(h Host) string { return h.LifecycleState }, anyText,
+	},
+	"connection_state": {
+		"h.connection_state", "text", func(h Host) string { return h.ConnectionState }, anyText,
+	},
+	"agent_version": {
+		"coalesce(" + versionParts("h") + ", '{}'::int[])", "int[]",
+		func(h Host) string { return versionKey(h.AgentVersion) }, validVersionKey,
+	},
+	"last_seen_at": {
+		"coalesce(h.last_seen_at, '-infinity'::timestamptz)", "timestamptz",
+		func(h Host) string { return timeKey(h.LastSeenAt) }, validTimeKey,
+	},
+	"pending_updates": {
+		"coalesce(h.pending_updates, -1)", "integer",
+		func(h Host) string { return countKey(h.PendingUpdates) }, validCountKey,
+	},
+	"pending_security_updates": {
+		"coalesce(h.pending_security_updates, -1)", "integer",
+		func(h Host) string { return countKey(h.PendingSecurityUpdates) }, validCountKey,
+	},
+	"failed_units": {
+		"coalesce(h.failed_units, -1)", "integer",
+		func(h Host) string { return countKey(h.FailedUnits) }, validCountKey,
+	},
+}
+
+// SortColumns lists the columns the list can be ordered by, for the API's
+// description of itself.
+func SortColumns() []string {
+	names := make([]string, 0, len(sortColumns))
+	for name := range sortColumns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// The cursor value of each kind of key, rendered from the row the way the
+// database renders the expression, and checked on the way back so that a
+// token somebody edited fails as an invalid cursor rather than as a query
+// the database refuses.
+
+func anyText(string) bool { return true }
+
+// timeKey renders a timestamp the way the expression coalesces it: the
+// earliest possible moment when the host has never been seen.
+func timeKey(at *time.Time) string {
+	if at == nil {
+		return "-infinity"
+	}
+	return paging.FormatTime(*at)
+}
+
+func validTimeKey(value string) bool {
+	if value == "-infinity" {
+		return true
+	}
+	_, err := paging.ParseTime(value)
+	return err == nil
+}
+
+// countKey renders a count the way the expression coalesces it: -1 for a
+// count the host has not reported.
+func countKey(count *int) string {
+	if count == nil {
+		return "-1"
+	}
+	return strconv.Itoa(*count)
+}
+
+func validCountKey(value string) bool {
+	_, err := strconv.Atoi(value)
+	return err == nil
+}
+
+// versionPattern is the Go spelling of the pattern versionParts reads the
+// version with: the two must agree, or the cursor names a key the database
+// never computed.
+var versionPattern = regexp.MustCompile(`^v?(\d+(?:\.\d+)*)`)
+
+// versionKey renders an agent version as the array literal the database
+// compares: {0,49,0} for 0.49.0, an empty array for a version that does
+// not parse or was never reported.
+func versionKey(version string) string {
+	match := versionPattern.FindStringSubmatch(version)
+	if match == nil {
+		return "{}"
+	}
+	return "{" + strings.ReplaceAll(match[1], ".", ",") + "}"
+}
+
+var versionKeyPattern = regexp.MustCompile(`^\{(\d{1,10}(,\d{1,10})*)?\}$`)
+
+func validVersionKey(value string) bool {
+	return versionKeyPattern.MatchString(value)
 }
 
 // conditions renders the filter as SQL over the alias h. Every list of
@@ -1128,7 +1313,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 // hosts has to mean a thousand hosts, not the first five hundred sorted
 // alphabetically. Paging goes by the key (hostname, id) rather than by an
 // offset - the fleet changes while it is being browsed, and an offset then
-// loses hosts in the middle.
+// loses hosts in the middle. The filter's Sort is not read here: a sweep
+// keys on the name whatever order an operator's screen is in, and the
+// sorted pages of the screen come from ListPaged.
 //
 // The first page is taken with an empty key.
 func (s *Store) Page(ctx context.Context, filter ListFilter,
@@ -1176,33 +1363,50 @@ func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 	return count, nil
 }
 
-// Cursor is the key of the last host of the previous page: its name and its
-// identifier, the same key a sweep pages by.
+// Cursor is the key of the last host of the previous page: the order the
+// page was read in, the value of the sorted column on that host and its
+// identifier. The order travels with the cursor so a token issued for one
+// order is refused under another, rather than read as a key of nothing.
 type Cursor struct {
-	Hostname string
-	ID       string
-	Set      bool
+	Sort  Sort
+	Value string
+	ID    string
+	Set   bool
 }
 
 // ParseCursor reads a cursor issued by ListPaged. An empty value is the
 // first page.
 func ParseCursor(value string) (Cursor, error) {
-	parts, err := paging.Decode(value, 2)
+	parts, err := paging.Decode(value, 3)
 	if err != nil {
 		return Cursor{}, err
 	}
 	if parts == nil {
 		return Cursor{}, nil
 	}
-	if _, err := uuid.Parse(parts[1]); err != nil {
+	order, err := ParseSort(parts[0])
+	if err != nil {
 		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
 	}
-	return Cursor{Hostname: parts[0], ID: parts[1], Set: true}, nil
+	if !sortColumns[order.column()].valid(parts[1]) {
+		return Cursor{}, fmt.Errorf("%w: the key %q is not a %s", paging.ErrInvalidCursor, parts[1], order.column())
+	}
+	if _, err := uuid.Parse(parts[2]); err != nil {
+		return Cursor{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+	}
+	return Cursor{Sort: order, Value: parts[1], ID: parts[2], Set: true}, nil
 }
 
 // String renders the cursor for the next request.
 func (c Cursor) String() string {
-	return paging.Encode(c.Hostname, c.ID)
+	return paging.Encode(c.Sort.String(), c.Value, c.ID)
+}
+
+// Matches says whether the cursor was issued for the given order. A page
+// asked for under another order with this cursor would start from a key
+// of the wrong kind, so the caller refuses the request instead.
+func (c Cursor) Matches(order Sort) bool {
+	return !c.Set || c.Sort.String() == order.String()
 }
 
 // ListPage is one page of the host list.
@@ -1217,29 +1421,67 @@ type ListPage struct {
 }
 
 // ListPaged reads the hosts matching the filter page by page, in the order
-// of (hostname, id). The count comes with the page, so the screen can say
-// how many hosts stand behind a filter without a second request.
+// the filter's Sort names - the hostname by default. The count comes with
+// the page, so the screen can say how many hosts stand behind a filter
+// without a second request.
+//
+// The paging stays keyset under a sort: the key is (sorted column, id),
+// and the cursor carries the column's value on the last row together with
+// the order, so the next page starts after that row whatever enrolled or
+// changed in the meantime. An offset would have been simpler to carry but
+// skips a host or shows one twice as soon as the fleet moves under the
+// operator, and a screen sorted by "last seen" moves all the time.
 func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	page := ListPage{Items: []Host{}}
+	column, ok := sortColumns[filter.Sort.column()]
+	if !ok {
+		return page, fmt.Errorf("%w: %q", ErrInvalidSort, filter.Sort.Column)
+	}
+	if !cursor.Matches(filter.Sort) {
+		return page, fmt.Errorf("%w: issued for the order %s, not %s", paging.ErrInvalidCursor, cursor.Sort, filter.Sort)
+	}
 	total, err := s.Count(ctx, filter)
 	if err != nil {
 		return page, err
 	}
 	page.Total = total
 
+	conditions, args, err := filter.conditions()
+	if err != nil {
+		return page, err
+	}
+	direction, comparison := "asc", ">"
+	if filter.Sort.Descending {
+		direction, comparison = "desc", "<"
+	}
+	if cursor.Set {
+		// The key comes back as text and is cast to the column's type in
+		// the query, so one cursor format serves a name, a count and a
+		// timestamp alike.
+		args = append(args, cursor.Value, cursor.ID)
+		conditions = append(conditions, fmt.Sprintf("(%s, h.id) %s ($%d::%s, $%d::uuid)",
+			column.expression, comparison, len(args)-1, column.kind, len(args)))
+	}
 	if limit <= 0 {
 		limit = PageSize
 	}
 	// One row more than the page says whether there is a next page without
 	// a second count.
-	items, err := s.Page(ctx, filter, cursor.Hostname, cursor.ID, limit+1)
+	args = append(args, limit+1)
+	clause := ""
+	if len(conditions) > 0 {
+		clause = "where " + strings.Join(conditions, " and ")
+	}
+	clause += fmt.Sprintf(" order by %s %s, h.id %s limit $%d", column.expression, direction, direction, len(args))
+
+	items, err := s.query(ctx, clause, args...)
 	if err != nil {
 		return page, err
 	}
 	if len(items) > limit {
 		items = items[:limit]
 		last := items[limit-1]
-		page.NextCursor = Cursor{Hostname: last.Hostname, ID: last.ID, Set: true}.String()
+		page.NextCursor = Cursor{Sort: filter.Sort, Value: column.key(last), ID: last.ID, Set: true}.String()
 	}
 	if items != nil {
 		page.Items = items
@@ -1305,7 +1547,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, h.placement_changed_at,
 		       coalesce(h.owner, ''), h.tags,
-		       coalesce(h.failure_domain, ''), h.release_channel,
+		       coalesce(h.failure_domain, ''), h.release_channel, h.notes,
 		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at, h.lifecycle_changed_by,
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
@@ -1356,7 +1598,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var identityObservedAt *time.Time
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment,
 			&h.PlacementChangedAt, &h.Owner, &h.Tags,
-			&h.FailureDomain, &h.ReleaseChannel,
+			&h.FailureDomain, &h.ReleaseChannel, &h.Notes,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt, &h.LifecycleChangedBy,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
@@ -1644,6 +1886,114 @@ func NormalizeTags(tags []string) ([]string, error) {
 	return normalized, nil
 }
 
+// TagCount is one tag of the catalogue with the hosts carrying it.
+type TagCount struct {
+	Tag string `json:"tag"`
+	// Hosts counts the visible hosts carrying the tag, the retired ones
+	// too: a tag on a retired host is still a tag somebody has to know
+	// about before renaming it.
+	Hosts int `json:"hosts"`
+}
+
+// TagCatalogue lists every tag any visible host carries, with the number
+// of hosts carrying it, most used first. Scopes narrow the hosts counted
+// the way the host list is narrowed; nil narrows nothing.
+func (s *Store) TagCatalogue(ctx context.Context, scopes []authz.Scope) ([]TagCount, error) {
+	query := `
+		select tag, count(*)
+		  from hosts h, unnest(h.tags) as tag`
+	var args []any
+	if scopes != nil {
+		if condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", 0); condition != "" {
+			query += " where " + condition
+			args = append(args, extra...)
+		}
+	}
+	query += " group by tag order by count(*) desc, tag"
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listing the tags: %w", err)
+	}
+	defer rows.Close()
+	catalogue := make([]TagCount, 0)
+	for rows.Next() {
+		var entry TagCount
+		if err := rows.Scan(&entry.Tag, &entry.Hosts); err != nil {
+			return nil, err
+		}
+		catalogue = append(catalogue, entry)
+	}
+	return catalogue, rows.Err()
+}
+
+// TagChange is one host whose tags a rename touched, with both lists for
+// the trail.
+type TagChange struct {
+	HostID   string
+	Hostname string
+	Before   []string
+	After    []string
+}
+
+// RenameTag replaces one tag by another on every visible host carrying
+// it, in one transaction on the given handle: half a fleet renamed is a
+// selector that matches half a fleet. A host that already carries the new
+// tag ends up with it once. The changes come back host by host, so the
+// caller can put each host's before and after on the trail; a host
+// outside the scopes is not touched and not listed.
+func (s *Store) RenameTag(ctx context.Context, tx pgx.Tx, from, to string, scopes []authz.Scope) ([]TagChange, error) {
+	query := `select id, hostname, tags from hosts h where $1 = any(h.tags)`
+	args := []any{from}
+	if scopes != nil {
+		if condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", len(args)); condition != "" {
+			query += " and " + condition
+			args = append(args, extra...)
+		}
+	}
+	// The rows are locked in a fixed order, so two renames running at
+	// once take the hosts in the same order rather than each other.
+	query += " order by id for update"
+	rows, err := tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("finding the hosts with the tag: %w", err)
+	}
+	var changes []TagChange
+	for rows.Next() {
+		var change TagChange
+		if err := rows.Scan(&change.HostID, &change.Hostname, &change.Before); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		changes = append(changes, change)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range changes {
+		after := make([]string, 0, len(changes[i].Before))
+		for _, tag := range changes[i].Before {
+			if tag == from {
+				tag = to
+			}
+			after = append(after, tag)
+		}
+		// The normalisation is the same one a single host's tags go
+		// through: it drops the duplicate a host carrying both tags would
+		// end up with, and sorts.
+		normalized, err := NormalizeTags(after)
+		if err != nil {
+			return nil, err
+		}
+		changes[i].After = normalized
+		if _, err := tx.Exec(ctx, `update hosts set tags = $2, updated_at = now() where id = $1`,
+			changes[i].HostID, normalized); err != nil {
+			return nil, fmt.Errorf("renaming the tag on host %s: %w", changes[i].HostID, err)
+		}
+	}
+	return changes, nil
+}
+
 // The release channels a host may follow. The list is the same one the
 // host table constrains.
 const (
@@ -1695,6 +2045,49 @@ func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Hos
 	tag, err := s.pool.Exec(ctx, `update hosts set tags = $2, updated_at = now() where id = $1`, hostID, tags)
 	if err != nil {
 		return nil, fmt.Errorf("setting the tags: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, ErrNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
+// MaxNotesLength bounds the notes of a host. A note is a few paragraphs
+// an operator reads on the host page, not a runbook; a longer text
+// belongs in the documentation the note can link to.
+const MaxNotesLength = 4000
+
+// ErrInvalidNotes means notes the panel does not accept; the message says
+// what is wrong with them.
+var ErrInvalidNotes = errors.New("invalid notes")
+
+// NormalizeNotes checks the notes of a host. Empty notes are allowed and
+// mean nobody wrote any. Line breaks and tabs are kept - a note has
+// paragraphs - but the other control characters are refused, because the
+// notes are printed in the trail and on the screen.
+func NormalizeNotes(notes string) (string, error) {
+	notes = strings.TrimSpace(strings.ReplaceAll(notes, "\r\n", "\n"))
+	if len([]rune(notes)) > MaxNotesLength {
+		return "", fmt.Errorf("%w: longer than %d characters", ErrInvalidNotes, MaxNotesLength)
+	}
+	for _, r := range notes {
+		if (r < ' ' && r != '\n' && r != '\t') || r == 0x7f {
+			return "", fmt.Errorf("%w: control characters are not allowed", ErrInvalidNotes)
+		}
+	}
+	return notes, nil
+}
+
+// SetNotes records the notes of a host. Empty notes clear the field.
+func (s *Store) SetNotes(ctx context.Context, hostID, notes string) (*Host, error) {
+	normalized, err := NormalizeNotes(notes)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := s.pool.Exec(ctx,
+		`update hosts set notes = $2, updated_at = now() where id = $1`, hostID, normalized)
+	if err != nil {
+		return nil, fmt.Errorf("setting the notes: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		return nil, ErrNotFound

@@ -9,6 +9,10 @@ import type { Attempt, FleetActivity, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
+import {
+  ColumnChooser, PageSizeSelect, Td, Th, formatSort, parseSort, toggleSort, useColumns, usePageSize,
+  type ColumnDef, type SortValue,
+} from "../components/SortableTable";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { OPERATIONS_INTERVAL, REFRESH_INTERVAL, useProgress } from "../lib/stream";
 import { bulkPrefill } from "./Bulk";
@@ -23,11 +27,18 @@ export const REORDERABLE_STATES = ["failed", "timed_out", "canceled", "expired"]
 /** The shortest reason the API records with a cancel. */
 export const MIN_REASON = 8;
 
+/** The columns the server can order the list by, as it names them. */
+const SORT_COLUMNS = ["created_at", "finished_at", "state", "action_type", "hostname"];
+
+/** The order the server lists in when none is asked for: the newest first. */
+export const DEFAULT_SORT: NonNullable<SortValue> = { column: "created_at", descending: true };
+
 /**
  * The filters of the list, as they stand in the address bar. Every one of
  * them is a string so the address and the screen say the same thing; the
  * instants stay in the local form the datetime input speaks and turn into
- * RFC 3339 only for the request.
+ * RFC 3339 only for the request. The sort travels with them, though it
+ * narrows nothing: a link to "the failed ones, oldest first" is one view.
  */
 export type JobFilters = {
   state: string;
@@ -40,15 +51,31 @@ export type JobFilters = {
   error_code: string;
   since: string;
   until: string;
+  sort: string;
 };
 
 const FILTER_KEYS: (keyof JobFilters)[] = [
-  "state", "action", "actor", "hostname", "host_id", "fanout_id", "campaign_id", "error_code", "since", "until",
+  "state", "action", "actor", "hostname", "host_id", "fanout_id", "campaign_id", "error_code", "since", "until", "sort",
 ];
 
 export const EMPTY_FILTERS: JobFilters = {
-  state: "", action: "", actor: "", hostname: "", host_id: "", fanout_id: "", campaign_id: "", error_code: "", since: "", until: "",
+  state: "", action: "", actor: "", hostname: "", host_id: "", fanout_id: "", campaign_id: "", error_code: "", since: "", until: "", sort: "",
 };
+
+/**
+ * The sort after a click on a column, as the address carries it. The
+ * list's own order is a column's - the creation time, newest first - so
+ * that column goes round between newest and oldest first rather than
+ * through a "no order" that would look the same as its start; any other
+ * column goes ascending, descending, then back to the list's own order,
+ * which the address spells as nothing.
+ */
+export function nextSort(current: string, column: string): string {
+  const effective = parseSort(current) ?? DEFAULT_SORT;
+  const next = toggleSort(effective, column);
+  if (next === null) return column === DEFAULT_SORT.column ? `${column}:asc` : "";
+  return formatSort(next) === formatSort(DEFAULT_SORT) ? "" : formatSort(next);
+}
 
 /** The filters read off the address: a link from a tile, a read fan-out or a bookmark sets them. */
 export function readFilters(params: URLSearchParams): JobFilters {
@@ -66,9 +93,9 @@ export function filterParams(filters: JobFilters): URLSearchParams {
   return params;
 }
 
-/** Whether any filter narrows the list. */
+/** Whether any filter narrows the list; the sort orders it and does not count. */
 export function anyFilter(filters: JobFilters): boolean {
-  return FILTER_KEYS.some((key) => filters[key] !== "");
+  return FILTER_KEYS.some((key) => key !== "sort" && filters[key] !== "");
 }
 
 /**
@@ -160,14 +187,32 @@ export function Jobs() {
   const [batchReason, setBatchReason] = useState("");
   const [batchError, setBatchError] = useState<string>("");
   const queryClient = useQueryClient();
+  // The columns of the table; the box and the actions stand outside the
+  // set, at either end, whatever the operator hides.
+  const columns = useColumns("jobs", [
+    { key: "operation", label: t("Operation"), sort: "action_type", fixed: true },
+    { key: "host", label: t("Host"), sort: "hostname" },
+    { key: "state", label: t("State"), sort: "state" },
+    { key: "requested_by", label: t("Requested by"), secondary: true },
+    { key: "approved_by", label: t("Approved by"), secondary: true },
+    { key: "result", label: t("Result") },
+    { key: "created", label: t("Created"), sort: "created_at" },
+    { key: "finished", label: t("Finished"), sort: "finished_at", hidden: true },
+  ] satisfies ColumnDef[]);
   // The typed filters reach the server after a pause, not per keystroke.
   const settledAction = useDebounced(filters.action.trim());
   const settledActor = useDebounced(filters.actor.trim());
   const settledHostname = useDebounced(filters.hostname.trim());
   const settledCampaign = useDebounced(filters.campaign_id.trim());
   const settledError = useDebounced(filters.error_code.trim());
+  // The order of the list as the server reads it; a sort naming a column
+  // the server has not got is left out rather than sent to be refused.
+  const sort = parseSort(filters.sort);
+  const sortSent = sort && SORT_COLUMNS.includes(sort.column) ? formatSort(sort) : "";
+  const [pageSize, setPageSize] = usePageSize("jobs", LIST_PAGE);
 
-  const params = new URLSearchParams({ limit: String(LIST_PAGE) });
+  const params = new URLSearchParams({ limit: String(pageSize) });
+  if (sortSent) params.set("sort", sortSent);
   if (filters.state) params.set("state", filters.state);
   if (settledAction) params.set("action", settledAction);
   if (settledActor) params.set("actor", settledActor);
@@ -290,7 +335,10 @@ export function Jobs() {
     if (copy.has(id)) copy.delete(id); else copy.add(id);
     return copy;
   });
-  const columns = 9;
+  // The cells of a detail row span the visible columns and the two
+  // outside the set.
+  const span = columns.visible.length + 2;
+  const shownSort = sort ?? DEFAULT_SORT;
 
   return (
     <>
@@ -343,7 +391,12 @@ export function Jobs() {
         </Card>
 
         <Card className="span-12" flush>
-          <Toolbar end={<><span>{t("{n} listed", { n: jobs.length })}</span><ExportButton path="/api/v1/jobs" params={params} /></>}>
+          <Toolbar end={<>
+            <span>{t("{n} listed", { n: jobs.length })}</span>
+            <PageSizeSelect value={pageSize} onChange={setPageSize} />
+            <ColumnChooser columns={columns} />
+            <ExportButton path="/api/v1/jobs" params={params} />
+          </>}>
             <select value={filters.state} onChange={(e) => setFilter("state", e.target.value)}>
               <option value="">{t("state: any")}</option>
               {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
@@ -383,7 +436,7 @@ export function Jobs() {
               </span>
             )}
             {anyFilter(filters) && (
-              <button type="button" className="secondary" onClick={() => setFilters({ ...EMPTY_FILTERS })}>{t("Clear filters")}</button>
+              <button type="button" className="secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })}>{t("Clear filters")}</button>
             )}
           </Toolbar>
 
@@ -431,8 +484,16 @@ export function Jobs() {
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label={t("Select every job awaiting approval")} />
                     )}
                   </th>
-                  <th>{t("Operation")}</th><th>{t("Host")}</th><th>{t("State")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th>
-                  <th>{t("Result")}</th><th>{t("Created")}</th><th></th>
+                  {columns.visible.map((column) => (
+                    <Th
+                      key={column.key}
+                      columns={columns}
+                      name={column.key}
+                      sort={shownSort}
+                      onSort={(_next, sortColumn) => setFilter("sort", nextSort(filters.sort, sortColumn))}
+                    />
+                  ))}
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -444,7 +505,7 @@ export function Jobs() {
                           <input type="checkbox" checked={selected.has(job.id)} onChange={() => toggle(job.id)} aria-label={t("Select job {id}", { id: job.id.slice(0, 8) })} />
                         )}
                       </td>
-                      <td>
+                      <Td columns={columns} name="operation">
                         <button
                           className="expander"
                           aria-expanded={expanded === job.id}
@@ -461,11 +522,11 @@ export function Jobs() {
                             </Link>
                           </>
                         )}
-                      </td>
-                      <td>
+                      </Td>
+                      <Td columns={columns} name="host">
                         <Link to={`/hosts/${job.host_id}/overview`}>{job.hostname || job.host_id.slice(0, 8)}</Link>
-                      </td>
-                      <td>
+                      </Td>
+                      <Td columns={columns} name="state">
                         <JobState state={job.state} />
                         {/* A queued job the budgets refused says so next to its
                             state: without the key it stands in the queue for no
@@ -486,12 +547,12 @@ export function Jobs() {
                             caption={progress.get(job.id)?.message}
                           />
                         )}
-                      </td>
-                      <td>{job.created_by}</td>
+                      </Td>
+                      <Td columns={columns} name="requested_by">{job.created_by}</Td>
                       {/* For a destructive operation one approval starts nothing:
                           the operator is to see whom we are still waiting for,
                           instead of clicking "Approve" and seeing nothing happen. */}
-                      <td>
+                      <Td columns={columns} name="approved_by">
                         {job.required_approvals > 1 ? (
                           <>
                             {t("{collected} of {required} approvals", { collected: job.collected_approvals, required: job.required_approvals })}
@@ -500,9 +561,10 @@ export function Jobs() {
                         ) : (
                           job.approved_by || "—"
                         )}
-                      </td>
-                      <td>{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</td>
-                      <td><Time value={job.created_at} /></td>
+                      </Td>
+                      <Td columns={columns} name="result">{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</Td>
+                      <Td columns={columns} name="created"><Time value={job.created_at} /></Td>
+                      <Td columns={columns} name="finished"><Time value={job.finished_at} /></Td>
                       <td className="actions-cell">
                         {job.state === "awaiting_approval" && (
                           <div className="row-actions">
@@ -536,7 +598,7 @@ export function Jobs() {
                         binds the consent to its hash stands under it. */}
                     {reviewing === job.id && job.state === "awaiting_approval" && (
                       <tr className="detail-row">
-                        <td colSpan={columns}>
+                        <td colSpan={span}>
                           <p className="source">
                             {t("You approve exactly this payload for {operation} on {host}; the consent is bound to hash {hash}.", {
                               operation: job.action_type, host: job.hostname || job.host_id.slice(0, 8), hash: job.payload_hash.slice(0, 12),
@@ -553,7 +615,7 @@ export function Jobs() {
                     )}
                     {canceling === job.id && job.state === "awaiting_approval" && (
                       <tr className="detail-row">
-                        <td colSpan={columns}>
+                        <td colSpan={span}>
                           <Actions>
                             <input
                               autoFocus
@@ -577,7 +639,7 @@ export function Jobs() {
                     )}
                     {expanded === job.id && (
                       <tr className="detail-row">
-                        <td colSpan={columns}>
+                        <td colSpan={span}>
                           <Attempts jobId={job.id} />
                           <p className="source"><Link to={`/jobs/${job.id}`}>{t("Open the job: full payload, plan and output")}</Link></p>
                         </td>

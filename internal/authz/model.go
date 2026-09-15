@@ -209,6 +209,12 @@ const (
 	PermMonitoringProbe      Permission = "monitoring.probe"
 	PermMonitoringSilence    Permission = "monitoring.silence.write"
 	PermMonitoringRulesWrite Permission = "monitoring.rules.write"
+	// Notifications. A channel carries what the fleet says to the people
+	// who are not looking at the panel: reading the channels goes with
+	// reading what they carry, writing one names an address the whole
+	// fleet reports to, so it is the platform administrator's alone.
+	PermNotificationRead   Permission = "notification.read"
+	PermNotificationManage Permission = "notification.manage"
 
 	// A maintenance window belongs to running operations rather than to
 	// changing a host: it is declared by whoever watches the campaigns and
@@ -507,7 +513,7 @@ var rolePermissions = map[Role][]Permission{
 		// decision, because it unpacks old state onto a running system.
 		PermBackupRead, PermBackupRun, PermBackupVerify,
 		// On-call reads alerts, probes from the host and silences during a repair.
-		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence,
+		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence, PermNotificationRead,
 	},
 	RoleApprover: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermAuditRead,
@@ -528,6 +534,7 @@ var rolePermissions = map[Role][]Permission{
 		// the hosts.
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
+		PermNotificationRead,
 	},
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermInventoryRefresh, PermJobRead, PermAuditRead,
@@ -585,6 +592,7 @@ var rolePermissions = map[Role][]Permission{
 		PermCertificateTrustWrite, PermCertificateTrustRemove,
 		PermBackupRead, PermBackupRun, PermBackupVerify, PermBackupRestore,
 		PermMonitoringRead, PermMonitoringProbe, PermMonitoringSilence, PermMonitoringRulesWrite,
+		PermNotificationRead, PermNotificationManage,
 		PermVulnerabilityRead,
 		PermSettingsRead,
 	},

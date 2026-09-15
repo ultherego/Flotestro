@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -169,6 +170,103 @@ func (s *Server) handleSetBudget(w http.ResponseWriter, r *http.Request) {
 		setETag(w, etagOfTime(saved.UpdatedAt))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"key": key, "capacity": request.Capacity})
+}
+
+// handleDeleteBudget takes a configured budget away.
+//
+// A deleted budget is not a budget of zero: the key falls back to the
+// pattern of its family, or to no limit at all when no pattern describes
+// it - which is why the deletion has the write permission and goes to
+// the trail like a raise. A budget somebody holds tokens of is refused:
+// the leases were admitted under this capacity, and taking the ceiling
+// away from under a running campaign is a decision for after it has
+// finished, not a side effect of tidying the list. A pattern key counts
+// the leases of every key it describes.
+func (s *Server) handleDeleteBudget(w http.ResponseWriter, r *http.Request) {
+	key := r.PathValue("key")
+	if key == "" {
+		problem(w, http.StatusBadRequest, "invalid_request", "budget key is required")
+		return
+	}
+	principal, ok := s.authorize(w, r, authz.PermBudgetWrite, budgetScope(key), "budget", key)
+	if !ok {
+		return
+	}
+	if s.budgets == nil {
+		problem(w, http.StatusNotImplemented, "budgets_disabled",
+			"budgets are disabled in this installation")
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	current, err := s.configuredBudget(r.Context(), key)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if current == nil {
+		problem(w, http.StatusNotFound, "budget_not_found", "no budget is configured under this key")
+		return
+	}
+	if !requireMatch(w, r, etagOfTime(current.UpdatedAt)) {
+		return
+	}
+
+	tx, err := s.pool.Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	// The row is locked first, so a lease admitted under this capacity
+	// while the check runs is seen by the check or waits for the delete.
+	if _, err := tx.Exec(r.Context(), `select 1 from budget_limits where key = $1 for update`, key); err != nil {
+		s.fail(w, err)
+		return
+	}
+	var held int
+	if err := tx.QueryRow(r.Context(), `
+		select coalesce(sum(weight), 0) from budget_leases
+		 where lease_until > now() and (key = $1 or key like $2)`,
+		key, likeOfPattern(key)).Scan(&held); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if held > 0 {
+		problem(w, http.StatusConflict, "budget_in_use",
+			"the budget holds "+strconv.Itoa(held)+" tokens of running work; wait for it to finish or cancel it first")
+		return
+	}
+	if _, err := tx.Exec(r.Context(), `delete from budget_limits where key = $1`, key); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "budget.delete", TargetType: "budget", TargetID: key,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"capacity": current.Capacity, "note": current.Note, "reason": strings.TrimSpace(reason)},
+		Before: map[string]any{"capacity": current.Capacity, "note": current.Note},
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// likeOfPattern renders a budget key as a LIKE pattern: the asterisk of
+// a pattern key stands for any site, and the other characters stand for
+// themselves. An exact key has no asterisk and matches only itself,
+// which the equality beside it already does.
+func likeOfPattern(key string) string {
+	escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(key)
+	return strings.ReplaceAll(escaped, "*", "%")
 }
 
 // budgetScope is the authorisation scope of a budget key. A key of the

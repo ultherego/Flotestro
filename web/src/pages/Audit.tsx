@@ -197,16 +197,16 @@ export function Audit() {
             </div>
           )}
           <Toolbar end={<span>{t("{n} events", { n: events.length })}</span>}>
-            <select value={outcome} onChange={(e) => setOutcome(e.target.value)}>
+            <select value={outcome} onChange={(e) => setOutcome(e.target.value)} aria-label={t("Outcome")}>
               <option value="">{t("outcome: any")}</option>
               <option value="denied">{t("denials only")}</option>
               <option value="failure">{t("failures only")}</option>
               <option value="success">{t("successes only")}</option>
             </select>
-            <input placeholder={t("actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
-            <input placeholder={t("operation, e.g. job.create")} value={action} onChange={(e) => setAction(e.target.value)} />
-            <input placeholder={t("target type, e.g. host")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
-            <input placeholder={t("target identifier")} value={targetID} onChange={(e) => setTargetID(e.target.value)} />
+            <input placeholder={t("actor")} aria-label={t("Actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
+            <input placeholder={t("operation, e.g. job.create")} aria-label={t("Operation")} value={action} onChange={(e) => setAction(e.target.value)} />
+            <input placeholder={t("target type, e.g. host")} aria-label={t("Target type")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
+            <input placeholder={t("target identifier")} aria-label={t("Target identifier")} value={targetID} onChange={(e) => setTargetID(e.target.value)} />
             <label className="toggle">
               {t("Since")}{" "}
               <input type="datetime-local" value={since} onChange={(e) => setSince(e.target.value)} />

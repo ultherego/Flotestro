@@ -14,6 +14,7 @@ import (
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/policy"
 )
@@ -109,6 +110,8 @@ func (s *Server) openAPI() map[string]any {
 	register("HostAccess", hostAccessView{})
 	register("HostPackageList", hostPackageList{})
 	register("CampaignSchedule", campaigns.Schedule{})
+	register("NotificationChannel", notify.Channel{})
+	register("NotificationDelivery", notify.Delivery{})
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
 	describe(schemas, "HostAccess", "local_sudo_rules",
@@ -365,6 +368,7 @@ var csvExports = map[string]bool{
 	"/api/v1/vulnerabilities": true, "/api/v1/certificates": true, "/api/v1/backups": true,
 	"/api/v1/policies/{id}/results": true, "/api/v1/monitoring/alerts": true,
 	"/api/v1/campaigns/{id}/report": true, "/api/v1/access/review": true,
+	"/api/v1/reports/{name}": true, "/api/v1/notifications/deliveries": true,
 }
 
 var queryParameters = map[string][]queryParameter{
@@ -390,6 +394,7 @@ var queryParameters = map[string][]queryParameter{
 		{"failure_domain", "string", "The failure domain an operator placed the host in."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
 		{"connection_refusal", "string", "The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_<state>."},
+		{"sort", "string", "The order of the list as column or column:desc; the columns are " + strings.Join(hosts.SortColumns(), ", ") + ". The hostname ascending by default; an unknown column is refused with invalid_sort, and a cursor issued under one order is refused under another. A count the host has not reported sorts below zero, a host never seen before every host seen."},
 	}, pagingParameters...),
 	"GET /api/v1/jobs": append([]queryParameter{
 		{"host_id", "string", "The host the tasks belong to."},
@@ -403,6 +408,7 @@ var queryParameters = map[string][]queryParameter{
 		{"error_code", "string", "The result error code the task ended with."},
 		{"since", "string", "RFC 3339; tasks created at or after this moment."},
 		{"until", "string", "RFC 3339; tasks created before this moment."},
+		{"sort", "string", "The order of the list as column, column:asc or column:desc; the columns are " + strings.Join(jobs.SortColumns(), ", ") + ". Newest first by default; an unknown column is refused with invalid_sort, and a cursor issued under one order is refused under another. A task not finished yet sorts before every finished one under finished_at."},
 	}, pagingParameters...),
 	"GET /api/v1/installation-profiles": {
 		{"site", "string", "The site the host will live in; \"default\" when empty."},
@@ -436,6 +442,21 @@ var queryParameters = map[string][]queryParameter{
 		{"from", "string", "RFC 3339; the start of the range."},
 		{"to", "string", "RFC 3339; the end of the range, a year after from at most."},
 	},
+	"GET /api/v1/reports/{name}": {
+		{"from", "string", "RFC 3339; the start of the period. Both bounds or neither: without them the last thirty days."},
+		{"to", "string", "RFC 3339; the end of the period, a year after from at most."},
+		{"site", "string", "Narrows the report to one site."},
+		{"environment", "string", "Narrows the report to one environment."},
+		{"limit", "integer", "patch-status only: the most host rows in JSON, 1000 by default and 5000 at most; the file carries them all."},
+		{"section", "string", "compliance with format=csv: policies (default), hosts or security."},
+	},
+	"GET /api/v1/notifications/deliveries": {
+		{"channel_id", "string", "One channel's deliveries."},
+		{"status", "string", "sent or failed."},
+		{"since", "string", "RFC 3339; deliveries at or after this moment."},
+		{"limit", "integer", "100 by default, 500 at most."},
+	},
+	"GET /api/v1/reads": pagingParameters,
 	"GET /api/v1/search": {
 		{"q", "string", "The beginning of a name: a hostname, machine identifier or management address, a campaign, policy, group, relay or secret name, an identity's subject or display name, at least eight characters of a job identifier, or a CVE identifier in full. Fewer than two characters answer with nothing; a kind the caller may not read is left out."},
 		{"limit", "integer", "The hits per kind: 8 by default, 25 at most."},
@@ -474,6 +495,7 @@ var queryParameters = map[string][]queryParameter{
 	},
 	"GET /api/v1/monitoring/alerts": {
 		{"state", "string", "pending, firing or resolved."},
+		{"acknowledged", "string", "true keeps the alerts somebody took, false the ones still waiting."},
 		{"severity", "string", "critical, warning or info."},
 		{"host_id", "string", ""},
 		{"limit", "integer", "The most alerts to return: 100 by default, 500 at most."},
@@ -626,6 +648,14 @@ var requestSchemas = map[string]map[string]any{
 	},
 	"POST /api/v1/campaign-schedules":     campaignScheduleSchema,
 	"PUT /api/v1/campaign-schedules/{id}": campaignScheduleSchema,
+	"PUT /api/v1/hosts/{id}/notes": {
+		"type": "object",
+		"properties": map[string]any{
+			"notes":  map[string]any{"type": "string", "maxLength": hosts.MaxNotesLength, "description": "Free-form notes about the host; empty clears them."},
+			"reason": map[string]any{"type": "string", "description": "Kept in the audit trail."},
+		},
+		"required": []string{"notes"},
+	},
 	"PUT /api/v1/hosts/{id}/placement": {
 		"type": "object",
 		"properties": map[string]any{

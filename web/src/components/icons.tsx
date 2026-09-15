@@ -7,7 +7,7 @@
 export type IconName =
   | "dashboard" | "hosts" | "add-host" | "groups" | "relays" | "jobs" | "bulk" | "campaigns" | "reads"
   | "security" | "vulnerabilities" | "certificates" | "secrets"
-  | "backups" | "monitoring" | "directory" | "access" | "audit" | "settings"
+  | "backups" | "monitoring" | "notifications" | "directory" | "access" | "audit" | "settings"
   | "chevron" | "menu" | "collapse" | "expand" | "search" | "sign-out" | "server" | "user" | "back" | "star"
   // The host modules.
   | "overview" | "packages" | "services" | "processes" | "schedules" | "kernel" | "time" | "power"
@@ -35,6 +35,8 @@ const PATHS: Record<IconName, string> = {
   secrets: "M8 11V7a4 4 0 0 1 8 0v4M5 11h14v10H5zM12 15v3",
   backups: "M12 3a9 9 0 1 0 9 9M21 3v6h-6M12 7v5l3 3",
   monitoring: "M3 12h4l3-7 4 14 3-7h4",
+  // A bell: what the fleet says to people who are not looking at it.
+  notifications: "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4",
   directory: "M4 5h6l2 2h8v12H4zM8 13h8",
   access: "M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM3 20a5 5 0 0 1 10 0M14 9h7M17 9v3M20 9v2",
   audit: "M6 3h9l4 4v14H6zM9 12h6M9 16h6M9 8h3",

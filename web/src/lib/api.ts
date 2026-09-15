@@ -26,6 +26,19 @@ export class ApiError extends Error {
   }
 }
 
+/** The key under which the login screen keeps a bootstrap token for this tab. */
+export const BEARER_TOKEN_KEY = "flotestro.token";
+
+// A bootstrap token pasted on the login screen lives in this tab alone;
+// the server takes it only when no session cookie came along.
+function bearerToken(): string {
+  try {
+    return sessionStorage.getItem(BEARER_TOKEN_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
 function csrfToken(): string {
   const match = document.cookie
     .split("; ")
@@ -60,6 +73,8 @@ async function requestWithMeta<T>(
     const token = csrfToken();
     if (token) headers[CSRF_HEADER] = token;
   }
+  const bearer = bearerToken();
+  if (bearer) headers["Authorization"] = `Bearer ${bearer}`;
 
   const response = await fetch(path, {
     method,

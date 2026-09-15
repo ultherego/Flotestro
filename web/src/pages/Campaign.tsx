@@ -700,11 +700,11 @@ export function Campaign() {
         flush
       >
         <Toolbar end={<span>{t("{shown} of {total} shown", { shown: events.length, total: timeline.data?.items.length ?? 0 })}</span>}>
-          <select value={eventKind} onChange={(e) => setEventKind(e.target.value)}>
+          <select value={eventKind} onChange={(e) => setEventKind(e.target.value)} aria-label={t("Event kind")}>
             <option value="">{t("event: any")}</option>
             {eventKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
           </select>
-          <input placeholder={t("Filter by hostname")} value={eventHost} onChange={(e) => setEventHost(e.target.value)} />
+          <input placeholder={t("Filter by hostname")} aria-label={t("Filter by hostname")} value={eventHost} onChange={(e) => setEventHost(e.target.value)} />
         </Toolbar>
         {!timeline.data?.items.length ? (
           <Empty>{t("No recorded events yet.")}</Empty>
@@ -744,11 +744,11 @@ export function Campaign() {
             the screen shows what the operator asked about, not the whole
             fleet at once. */}
         <Toolbar end={<span>{t("{shown} of {total} shown", { shown: loaded.length, total })}</span>}>
-          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)}>
+          <select value={stateFilter} onChange={(e) => setStateFilter(e.target.value)} aria-label={t("State")}>
             <option value="">{t("state: any")}</option>
             {TARGET_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
           </select>
-          <input placeholder={t("Filter by hostname")} value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input placeholder={t("Filter by hostname")} aria-label={t("Filter by hostname")} value={search} onChange={(e) => setSearch(e.target.value)} />
         </Toolbar>
         {!loaded.length ? (
           <Empty>{t("No targets.")}</Empty>

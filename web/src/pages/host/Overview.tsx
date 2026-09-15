@@ -209,6 +209,17 @@ export function Overview() {
           )}
         </Section>
 
+        {/* What fits no other field: the ticket, the quirk, whom to call.
+            Recorded under the tag right like the owner, and kept whole in
+            the trail on every change. */}
+        <Section
+          title={t("Notes")}
+          description={t("What an operator wrote about this host that fits no other field. Free text; every change goes to the audit trail with the previous text.")}
+          span={12}
+        >
+          <HostNotes host={host} editable={canEditFacts} />
+        </Section>
+
         {/* The trust in the host: its state, the decision behind it, and
             the one change that cannot be undone. */}
         <Section
@@ -354,6 +365,110 @@ function HostFact({ host, editable, value, shown, label, help, placeholder, path
       </Fields>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending ? t("saving…") : t("Save")}</button>
+        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+      </FormActions>
+      <Message text={message} error />
+    </Form>
+  );
+}
+
+/** The longest note the API takes; the field says so before the request leaves. */
+const MAX_NOTES_LENGTH = 4000;
+
+/**
+ * The notes of the host, shown whole and edited in place.
+ *
+ * The editor is the owner's, grown to a paragraph: the write goes back
+ * with the tag of the host read when the editor opened, so two people
+ * writing the same note at once do not lose one text without a word.
+ * The reason is optional and kept in the trail next to both texts.
+ */
+function HostNotes({ host, editable }: { host: Host; editable: boolean }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [reason, setReason] = useState("");
+  const [etag, setEtag] = useState("");
+  const [message, setMessage] = useState("");
+  // The notes ride on the host view; a host nobody wrote about has none.
+  const notes = (host as Host & { notes?: string }).notes ?? "";
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Host>(`/api/v1/hosts/${host.id}/notes`, { notes: draft, reason: reason.trim() },
+        { headers: etag ? { "If-Match": etag } : {} }),
+    onSuccess: () => {
+      setEditing(false);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.status === 412) {
+        setMessage(t("Somebody changed this host since you opened the editor; close it and open it again to see the current value."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const open = async () => {
+    setDraft(notes);
+    setReason("");
+    setMessage("");
+    setEditing(true);
+    try {
+      const fresh = await api.getWithMeta<Host>(`/api/v1/hosts/${host.id}`);
+      setEtag(fresh.etag);
+    } catch {
+      setEtag("");
+    }
+  };
+
+  const tooLong = draft.length > MAX_NOTES_LENGTH;
+  const changed = draft.trim() !== notes;
+
+  if (!editing) {
+    return (
+      <div data-testid="fact-notes">
+        {notes
+          ? <p className="hm-notes" style={{ whiteSpace: "pre-wrap", margin: 0 }}>{notes}</p>
+          : <span className="badge unknown">{t("no notes")}</span>}
+        {editable && (
+          <p style={{ margin: "8px 0 0" }}>
+            <button type="button" className="link" onClick={open}>{notes ? t("edit") : t("write a note")}</button>
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <Form>
+      <Fields>
+        <Field
+          label={t("Notes")}
+          help={tooLong
+            ? t("At most {max} characters; {n} typed.", { max: MAX_NOTES_LENGTH, n: draft.length })
+            : t("Free text, at most {max} characters; empty clears the notes.", { max: MAX_NOTES_LENGTH })}
+          wide
+        >
+          <textarea
+            rows={6}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
+            autoFocus
+            aria-invalid={tooLong}
+            data-testid="edit-notes"
+          />
+        </Field>
+        <Field label={t("Reason")} help={t("Optional; kept in the audit trail.")}>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("change ticket, handover")} />
+        </Field>
+      </Fields>
+      <FormActions>
+        <button onClick={() => save.mutate()} disabled={save.isPending || tooLong || !changed}>{save.isPending ? t("saving…") : t("Save")}</button>
         <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
       </FormActions>
       <Message text={message} error />

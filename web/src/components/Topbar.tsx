@@ -4,6 +4,7 @@ import type { Host, Whoami } from "../lib/types";
 import { LOCALES, useLocale, useT } from "../i18n";
 import { THEMES, type Theme } from "../lib/theme";
 import { SCALES, type Scale } from "../lib/scale";
+import { usePreferences } from "../lib/preferences";
 import { HostPicker } from "./HostPicker";
 import { Icon } from "./icons";
 
@@ -192,6 +193,10 @@ function UserMenu({ user, onSignOut, theme, setTheme, scale, setScale }: {
             <ScaleSwitch scale={scale} setScale={setScale} />
           </div>
           <div className="user-menu-session">
+            {/* The rest of the person's settings - the zone, the page size,
+                the landing page - and their roles, sessions and tokens
+                need a page, not a popover. */}
+            <Link to="/profile" onClick={() => setOpen(false)}>{t("Profile and preferences")}</Link>
             {/* The identity provider may have an active session of another
                 user and sign in with it quietly. Without this link there is
                 no way out of that other than clearing the browser cookies. */}
@@ -214,9 +219,15 @@ function initial(name: string): string {
   return letter ? letter.toUpperCase() : "?";
 }
 
-/** The interface language; the choice is remembered in the browser. */
+/**
+ * The interface language; the choice is remembered in the browser and,
+ * for a signed-in person, under their identity on the server, so it
+ * follows them to the next browser. A server that cannot take the write
+ * changes nothing here: the browser's copy already applies.
+ */
 export function LanguageSwitch() {
   const { locale, setLocale } = useLocale();
+  const { save } = usePreferences();
   const t = useT();
   return (
     <div className="language-switch" role="group" aria-label={t("Language")}>
@@ -226,7 +237,10 @@ export function LanguageSwitch() {
           type="button"
           className={entry.code === locale ? "active" : ""}
           aria-pressed={entry.code === locale}
-          onClick={() => setLocale(entry.code)}
+          onClick={() => {
+            setLocale(entry.code);
+            save({ language: entry.code }).catch(() => {});
+          }}
         >
           {entry.label}
         </button>
@@ -235,9 +249,10 @@ export function LanguageSwitch() {
   );
 }
 
-/** The colour theme; the choice is remembered in the browser. */
+/** The colour theme; the choice is remembered in the browser and on the server, like the language. */
 export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
   const t = useT();
+  const { save } = usePreferences();
   return (
     <div className="theme-switch" role="group" aria-label={t("Theme")}>
       {THEMES.map((entry) => (
@@ -247,7 +262,10 @@ export function ThemeSwitch({ theme, setTheme }: { theme: Theme; setTheme: (them
           className={entry.code === theme ? "active" : ""}
           aria-pressed={entry.code === theme}
           title={t(entry.description)}
-          onClick={() => setTheme(entry.code)}
+          onClick={() => {
+            setTheme(entry.code);
+            save({ theme: entry.code }).catch(() => {});
+          }}
         >
           <span className={`theme-swatch ${entry.code}`} aria-hidden="true" />
           {t(entry.label)}

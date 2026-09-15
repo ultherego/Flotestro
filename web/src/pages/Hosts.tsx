@@ -9,6 +9,9 @@ import { relativeTime } from "../lib/format";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
+import {
+  ColumnChooser, PageSizeSelect, Td, Th, formatSort, parseSort, useColumns, usePageSize, type ColumnDef, type SortValue,
+} from "../components/SortableTable";
 import { Breakdown, Meter, StatusBar } from "../components/widgets";
 import { HostsMetadata } from "./HostsMetadata";
 import { useT } from "../i18n";
@@ -27,9 +30,24 @@ const ADDRESS_SOURCES: Record<string, string> = {
 };
 
 /**
+ * The columns the server can order the list by, as it names them. A sort
+ * the address carries that names another column is not sent: the server
+ * would refuse it and the whole list would turn into an error.
+ */
+const SORT_COLUMNS = [
+  "hostname", "site", "environment", "owner", "lifecycle_state", "connection_state", "agent_version",
+  "last_seen_at", "pending_updates", "pending_security_updates", "failed_units",
+];
+
+/** The order the server lists in when none is asked for. */
+const DEFAULT_SORT: SortValue = { column: "hostname", descending: false };
+
+/**
  * The filters of the list, each under the name it carries in the address
  * and in the query to the server. The tags are one text of words; every
- * other filter is one value, and an empty value does not narrow.
+ * other filter is one value, and an empty value does not narrow. The sort
+ * travels with them: it is part of the view a link hands on, though it
+ * narrows nothing and stands on no chip.
  */
 type HostFilters = {
   q: string;
@@ -53,13 +71,14 @@ type HostFilters = {
   agent_behind: string;
   relay: string;
   failure_domain: string;
+  sort: string;
 };
 
 const EMPTY_FILTERS: HostFilters = {
   q: "", site: "", environment: "", os_family: "", connection_state: "", lifecycle_state: "",
   owner: "", maintenance: "", capability: "", channel: "", reboot_required: "", security_updates: "",
   identity_domain: "", connection_refusal: "", tags: "", failed_units: "", package_db_broken: "",
-  sssd_offline: "", agent_behind: "", relay: "", failure_domain: "",
+  sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", sort: "",
 };
 
 /**
@@ -169,17 +188,27 @@ export function Hosts() {
   // typed, or pasted with a stray character - is not sent, because the
   // server would refuse it and the whole list would turn into an error.
   const settledRelay = useDebounced(filters.relay.trim());
-  const params = filterParams({
+  // The order of the list, as the server reads it; a sort naming a column
+  // the server has not got is left out rather than sent to be refused.
+  const sort = parseSort(filters.sort);
+  const sortSent = sort && SORT_COLUMNS.includes(sort.column) ? formatSort(sort) : "";
+  const [pageSize, setPageSize] = usePageSize("hosts", LIST_PAGE);
+  const narrowing = filterParams({
     ...filters,
     q: settledSearch, owner: settledOwner, tags: settledTags, identity_domain: settledDomain,
     site: settledSite, environment: settledEnvironment, failure_domain: settledFailureDomain,
-    relay: RELAY_ID.test(settledRelay) ? settledRelay : "",
+    relay: RELAY_ID.test(settledRelay) ? settledRelay : "", sort: "",
   });
-  params.set("limit", String(LIST_PAGE));
+  const params = new URLSearchParams(narrowing);
+  if (sortSent) params.set("sort", sortSent);
+  params.set("limit", String(pageSize));
   const filterKey = params.toString();
+  // The selection drops with the narrowing, not with the order or the
+  // page size: the rows it named are still on the screen after a sort.
+  const narrowingKey = narrowing.toString();
   useEffect(() => {
     setSelected(new Set());
-  }, [filterKey]);
+  }, [narrowingKey]);
 
   const hosts = useInfiniteQuery({
     queryKey: ["hosts", filterKey],
@@ -213,6 +242,31 @@ export function Hosts() {
     staleTime: 60 * 1000,
   });
 
+  // The columns of the table. The name stays whatever the operator hides;
+  // the columns a phone screen can do without are marked secondary, and
+  // the ones few operators need stay off the screen until chosen.
+  const columns = useColumns("hosts", [
+    { key: "host", label: t("Host"), sort: "hostname", fixed: true },
+    { key: "state", label: t("State"), sort: "connection_state" },
+    { key: "address", label: t("Management address"), secondary: true },
+    { key: "owner", label: t("Owner"), sort: "owner", secondary: true },
+    { key: "system", label: t("System"), secondary: true },
+    { key: "site", label: t("Site"), sort: "site" },
+    { key: "environment", label: t("Environment"), sort: "environment" },
+    { key: "lifecycle", label: t("Lifecycle"), sort: "lifecycle_state", hidden: true },
+    { key: "agent", label: t("Agent"), sort: "agent_version", hidden: true },
+    { key: "domain", label: t("Domain"), secondary: true },
+    { key: "updates", label: t("Updates"), sort: "pending_updates" },
+    { key: "security", label: t("Security updates"), sort: "pending_security_updates", className: "num", hidden: true },
+    { key: "failed_units", label: t("Failed units"), sort: "failed_units", className: "num" },
+    { key: "reboot", label: t("Reboot"), secondary: true },
+    { key: "last_seen", label: t("Last seen"), sort: "last_seen_at" },
+  ] satisfies ColumnDef[]);
+  // A click on a heading asks for the next order of that column; the
+  // list's own order is the hostname, so a sort cleared is a sort by name.
+  const onSort = (next: SortValue) => setFilter("sort", formatSort(next));
+  const shownSort = sort ?? DEFAULT_SORT;
+
   if (hosts.error) return <ErrorBox error={hosts.error} />;
 
   const rows = loadedItems(hosts.data);
@@ -241,7 +295,7 @@ export function Hosts() {
   // its own way off. The refusal has no control of its own - the
   // dashboard's expired-certificates tile links here with it set - so the
   // chip is the only place it can be seen and cleared.
-  const chipLabels: Record<keyof HostFilters, string> = {
+  const chipLabels: Record<Exclude<keyof HostFilters, "sort">, string> = {
     q: t("search"), site: t("site"), environment: t("environment"), os_family: t("OS"),
     connection_state: t("state"), lifecycle_state: t("lifecycle"), owner: t("owner"),
     maintenance: t("maintenance"), capability: t("capability"), channel: t("channel"),
@@ -257,7 +311,7 @@ export function Hosts() {
     return value;
   };
   const activeFilters = (Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[])
-    .filter((key) => filters[key].trim() !== "");
+    .filter((key): key is Exclude<keyof HostFilters, "sort"> => key !== "sort" && filters[key].trim() !== "");
   // The meter measures each host against the busiest one on the list; a
   // host whose count is unknown does not set the scale.
   const mostUpdates = Math.max(0, ...rows.map((host) => host.pending_updates ?? 0));
@@ -305,7 +359,12 @@ export function Hosts() {
         </Card>
 
         <Card className="span-9" flush>
-          <Toolbar end={<>{hosts.data && <span>{t("{n} hosts", { n: total })}</span>}<ExportButton path="/api/v1/hosts" params={params} /></>}>
+          <Toolbar end={<>
+            {hosts.data && <span>{t("{n} hosts", { n: total })}</span>}
+            <PageSizeSelect value={pageSize} onChange={setPageSize} />
+            <ColumnChooser columns={columns} />
+            <ExportButton path="/api/v1/hosts" params={params} />
+          </>}>
             <input
               placeholder={t("Search hostname, address, machine ID or owner")}
               value={filters.q}
@@ -432,7 +491,7 @@ export function Hosts() {
                   </button>
                 </span>
               ))}
-              <button type="button" className="secondary" onClick={() => setFilters(EMPTY_FILTERS)} data-testid="clear-filters">
+              <button type="button" className="secondary" onClick={() => setFilters({ ...EMPTY_FILTERS, sort: filters.sort })} data-testid="clear-filters">
                 {t("Clear filters")}
               </button>
             </div>
@@ -458,10 +517,9 @@ export function Hosts() {
                       />
                     </th>
                   )}
-                  <th>{t("Host")}</th><th>{t("State")}</th><th>{t("Management address")}</th><th>{t("Owner")}</th>
-                  <th>{t("System")}</th><th>{t("Site")}</th>
-                  <th>{t("Environment")}</th><th>{t("Domain")}</th><th>{t("Updates")}</th>
-                  <th className="num">{t("Failed units")}</th><th>{t("Reboot")}</th><th>{t("Last seen")}</th>
+                  {columns.visible.map((column) => (
+                    <Th key={column.key} columns={columns} name={column.key} sort={shownSort} onSort={onSort} />
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -479,7 +537,7 @@ export function Hosts() {
                     )}
                     {/* The name and, under it, the tags. The address has a
                         column of its own, with its origin. */}
-                    <td>
+                    <Td columns={columns} name="host">
                       <div className="fp-host-cell">
                         <Link to={`/hosts/${host.id}/overview`}>{host.hostname}</Link>
                         {/* The tags as chips; a chip narrows the list to
@@ -501,13 +559,13 @@ export function Hosts() {
                           </span>
                         )}
                       </div>
-                    </td>
+                    </Td>
                     {/* An offline host with a refusal on record is not
                         merely away: the gateway turned it down, and the
                         reason stands under the badge rather than in a
                         trail nobody reads for a host that looks switched
                         off. */}
-                    <td>
+                    <Td columns={columns} name="state">
                       <ConnectionState state={host.connection_state} />
                       {host.last_connection_refusal && host.connection_state !== "online" && (
                         <div className="source" title={host.last_connection_refusal.detail}>
@@ -517,12 +575,12 @@ export function Hosts() {
                           })}
                         </div>
                       )}
-                    </td>
+                    </Td>
                     {/* The management address - not just any first address
                         of the host - with where it came from: what the panel
                         saw, what the host declared, or what an operator set.
                         Undetermined is shown as undetermined. */}
-                    <td data-testid="host-address">
+                    <Td columns={columns} name="address" data-testid="host-address">
                       {host.management_address ? (
                         <span className="fp-host-cell">
                           <span className="fp-host-address">{host.management_address}</span>
@@ -533,27 +591,36 @@ export function Hosts() {
                           </span>
                         </span>
                       ) : <span className="badge unknown">{t("unknown")}</span>}
-                    </td>
+                    </Td>
                     {/* The owner as recorded; a click narrows the list to
                         their hosts, like a tag chip does. */}
-                    <td data-testid="host-owner">
+                    <Td columns={columns} name="owner" data-testid="host-owner">
                       {host.owner
                         ? <button type="button" className="link" onClick={() => setFilter("owner", host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
                         : <span className="source">—</span>}
-                    </td>
-                    <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
-                    <td>{host.site}</td>
-                    <td>{host.environment}</td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="system">{host.os_distribution || host.os_family || "—"} {host.os_version}</Td>
+                    <Td columns={columns} name="site">{host.site}</Td>
+                    <Td columns={columns} name="environment">{host.environment}</Td>
+                    {/* The lifecycle and the agent build are off the screen
+                        until chosen: a click narrows the list to the state,
+                        the way the composition widget does. */}
+                    <Td columns={columns} name="lifecycle">
+                      <button type="button" className="link" onClick={() => setFilter("lifecycle_state", host.lifecycle_state)} title={t("show only these hosts")}>
+                        {host.lifecycle_state}
+                      </button>
+                    </Td>
+                    <Td columns={columns} name="agent">{host.agent_version || <span className="badge unknown">{t("unknown")}</span>}</Td>
+                    <Td columns={columns} name="domain">
                       {host.identity.enrolled
                         ? <button type="button" className="link" onClick={() => setFilter("identity_domain", host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
                         : <span className="badge">{t("not in domain")}</span>}
-                    </td>
+                    </Td>
                     {/* The bar is the host's share of the busiest host on the
                         list; the security part is named, because it is the
                         part that cannot wait. An unknown count stays a badge,
                         not an empty bar. */}
-                    <td className="fp-meter-cell" data-testid="host-updates">
+                    <Td columns={columns} name="updates" className="fp-meter-cell" data-testid="host-updates">
                       {host.pending_updates === null ? (
                         <OptionalNumber value={host.pending_updates} warnFrom={1} />
                       ) : (
@@ -568,10 +635,11 @@ export function Hosts() {
                           )}
                         </>
                       )}
-                    </td>
-                    <td className="num"><OptionalNumber value={host.failed_units} warnFrom={1} /></td>
-                    <td><OptionalFlag value={host.reboot_required} /></td>
-                    <td><Time value={host.last_seen_at} /></td>
+                    </Td>
+                    <Td columns={columns} name="security"><OptionalNumber value={host.pending_security_updates} warnFrom={1} /></Td>
+                    <Td columns={columns} name="failed_units"><OptionalNumber value={host.failed_units} warnFrom={1} /></Td>
+                    <Td columns={columns} name="reboot"><OptionalFlag value={host.reboot_required} /></Td>
+                    <Td columns={columns} name="last_seen"><Time value={host.last_seen_at} /></Td>
                   </tr>
                 ))}
               </tbody>

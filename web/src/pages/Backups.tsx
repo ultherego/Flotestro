@@ -2,8 +2,9 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
+import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
+import { ColumnChooser, Td, Th, useColumns, useSort, type ColumnDef } from "../components/SortableTable";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -69,6 +70,28 @@ export function FleetBackups() {
     queryKey: ["backups", "fleet"],
     queryFn: () => api.get<View>("/api/v1/backups"),
   });
+  // The list comes with the worst rows on top and is bounded, so a click
+  // on a heading reorders it in the browser; a cleared sort goes back to
+  // the server's order. The age of a copy that never ran is unknown, not
+  // zero, and sorts apart from the fresh ones.
+  const columns = useColumns("backups", [
+    { key: "age", label: t("Age"), sort: "age" },
+    { key: "host", label: t("Host"), sort: "host", fixed: true },
+    { key: "definition", label: t("Definition"), sort: "definition" },
+    { key: "tool", label: t("Tool"), sort: "tool", secondary: true },
+    { key: "destination", label: t("Destination"), sort: "destination", secondary: true },
+    { key: "verified", label: t("Verified"), sort: "verified" },
+  ] satisfies ColumnDef[]);
+  const { sort, setSort, sorted } = useSort(data?.items ?? [], (item, column) => {
+    switch (column) {
+      case "age": return item.age_hours ?? null;
+      case "host": return item.hostname;
+      case "definition": return item.definition;
+      case "tool": return item.tool;
+      case "destination": return item.repository ?? null;
+      default: return !item.unverified;
+    }
+  });
 
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Empty>{t("Reading backup state…")}</Empty>;
@@ -124,6 +147,9 @@ export function FleetBackups() {
         <Repositories repositories={data.repositories ?? []} />
 
         <Card className="span-9" flush>
+          <Toolbar end={<ColumnChooser columns={columns} />}>
+            <span className="source">{t("The worst rows on top; a heading reorders the listed rows.")}</span>
+          </Toolbar>
           {!data.items.length ? (
             <Empty>
               {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
@@ -132,26 +158,27 @@ export function FleetBackups() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Age")}</th><th>{t("Host")}</th><th>{t("Definition")}</th><th>{t("Tool")}</th>
-                  <th>{t("Destination")}</th><th>{t("Verified")}</th>
+                  {columns.visible.map((column) => (
+                    <Th key={column.key} columns={columns} name={column.key} sort={sort} onSort={setSort} />
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((item) => (
+                {sorted.map((item) => (
                   <tr key={`${item.host_id}-${item.definition}`}>
-                    <td>
+                    <Td columns={columns} name="age">
                       <AgeBadge status={item.status} age={item.age_hours} />
                       {item.last_success_at && (
                         <div className="source"><Time value={item.last_success_at} /></div>
                       )}
-                    </td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="host">
                       <Link to={`/hosts/${item.host_id}/backups`}>{item.hostname}</Link>
-                    </td>
-                    <td>{item.definition}</td>
-                    <td className="source">{item.tool}</td>
-                    <td className="source mono">{item.repository}</td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="definition">{item.definition}</Td>
+                    <Td columns={columns} name="tool" className="source">{item.tool}</Td>
+                    <Td columns={columns} name="destination" className="source mono">{item.repository}</Td>
+                    <Td columns={columns} name="verified">
                       {item.unverified ? (
                         <span className="badge warn">{t("not verified")}</span>
                       ) : (
@@ -164,7 +191,7 @@ export function FleetBackups() {
                           t("never restored")
                         )}
                       </div>
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>

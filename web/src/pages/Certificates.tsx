@@ -2,8 +2,9 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader } from "../components/layout";
+import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
+import { ColumnChooser, Td, Th, useColumns, useSort, type ColumnDef } from "../components/SortableTable";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
@@ -59,6 +60,27 @@ export function FleetCertificates() {
     queryKey: ["certificates", "fleet"],
     queryFn: () => api.get<View>("/api/v1/certificates"),
   });
+  // The list comes sorted from the nearest deadline and is bounded, so a
+  // click on a heading reorders it in the browser; the server's order is
+  // the one a cleared sort goes back to. A deadline nobody could read
+  // sorts as unknown, apart from the far ones.
+  const columns = useColumns("certificates", [
+    { key: "expires", label: t("Expires"), sort: "expires" },
+    { key: "host", label: t("Host"), sort: "host", fixed: true },
+    { key: "path", label: t("Path"), sort: "path" },
+    { key: "subject", label: t("Subject"), secondary: true },
+    { key: "issuer", label: t("Issuer"), sort: "issuer", secondary: true },
+    { key: "renewal", label: t("Renewal"), sort: "renewal" },
+  ] satisfies ColumnDef[]);
+  const { sort, setSort, sorted } = useSort(data?.items ?? [], (item, column) => {
+    switch (column) {
+      case "expires": return item.not_after ?? null;
+      case "host": return item.hostname;
+      case "path": return item.path;
+      case "issuer": return item.issuer ?? null;
+      default: return item.renewal;
+    }
+  });
 
   if (error) return <ErrorBox error={error} />;
   if (!data) return <Empty>{t("Reading certificates…")}</Empty>;
@@ -113,6 +135,9 @@ export function FleetCertificates() {
             <p>{t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}</p>
           )}
         >
+          <Toolbar end={<ColumnChooser columns={columns} />}>
+            <span className="source">{t("Sorted from the nearest deadline; a heading reorders the listed rows.")}</span>
+          </Toolbar>
           {!data.items.length ? (
             <Empty>
               {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
@@ -121,35 +146,36 @@ export function FleetCertificates() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Expires")}</th><th>{t("Host")}</th><th>{t("Path")}</th><th>{t("Subject")}</th>
-                  <th>{t("Issuer")}</th><th>{t("Renewal")}</th>
+                  {columns.visible.map((column) => (
+                    <Th key={column.key} columns={columns} name={column.key} sort={sort} onSort={setSort} />
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {data.items.map((item) => (
+                {sorted.map((item) => (
                   <tr key={`${item.host_id}-${item.path}`}>
-                    <td>
+                    <Td columns={columns} name="expires">
                       <ExpiryBadge status={item.status} days={item.days_to_expiry} />
                       {item.not_after && (
                         <div className="source"><Time value={item.not_after} /></div>
                       )}
-                    </td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="host">
                       <Link to={`/hosts/${item.host_id}/certificates`}>{item.hostname}</Link>
-                    </td>
-                    <td className="source mono">
+                    </Td>
+                    <Td columns={columns} name="path" className="source mono">
                       {item.path}
                       {item.owner_service && <div>{item.owner_service}</div>}
-                    </td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="subject">
                       {item.unavailable_reason ? (
                         <span className="badge unknown">{item.unavailable_reason}</span>
                       ) : (
                         item.subject
                       )}
-                    </td>
-                    <td className="source">{item.issuer}</td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="issuer" className="source">{item.issuer}</Td>
+                    <Td columns={columns} name="renewal">
                       {/* "Manual" is a finding, "unknown" a missing answer - and
                           the two must not look the same. */}
                       {item.renewal === "tracked" ? (
@@ -159,7 +185,7 @@ export function FleetCertificates() {
                       ) : (
                         <span className="badge unknown">{t("unknown")}</span>
                       )}
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>

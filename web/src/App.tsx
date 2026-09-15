@@ -1,7 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { Navigate, Route, Routes, useLocation, useMatch } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { api, ApiError } from "./lib/api";
+import { api, BEARER_TOKEN_KEY, ApiError } from "./lib/api";
 import type { Host, Whoami } from "./lib/types";
 import { useCapabilities } from "./lib/capabilities";
 import { useTheme } from "./lib/theme";
@@ -59,6 +59,13 @@ import { Jobs } from "./pages/Jobs";
 import { JobPage } from "./pages/Job";
 import { Vulnerability } from "./pages/Vulnerability";
 import { Schedules as CampaignSchedules } from "./pages/Schedules";
+import { Setup } from "./pages/Setup";
+import { Status } from "./pages/Status";
+import { Reports } from "./pages/Reports";
+import { Notifications } from "./pages/Notifications";
+import { Profile } from "./pages/Profile";
+import { Tags } from "./pages/Tags";
+import { PreferencesProvider, usePreferences } from "./lib/preferences";
 import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
@@ -120,6 +127,7 @@ export function App() {
   const seesCertificates = permissions.has("certificate.read");
   const seesBackups = permissions.has("backup.read");
   const seesMonitoring = permissions.has("monitoring.read");
+  const seesNotifications = permissions.has("notification.read");
   const seesVulnerabilities = permissions.has("vulnerability.read");
   const addsHosts = permissions.has("host.enroll.create");
   // The settings screen is read by whoever administers the panel: the
@@ -152,9 +160,11 @@ export function App() {
         // fleet, because that is what it describes, not with the campaigns
         // that use it.
         { to: "/groups", label: "Groups", icon: "groups" },
+        { to: "/tags", label: "Tags", icon: "groups" },
         // A relay is a piece of the fleet's plumbing rather than a host: it
         // stands with the fleet, because a silent one is a site cut off.
         ...(seesRelays ? [{ to: "/relays", label: "Relays", icon: "relays" as const }] : []),
+        { to: "/reports", label: "Reports", icon: "audit" as const },
       ],
     },
     {
@@ -197,6 +207,7 @@ export function App() {
       items: [
         ...(seesBackups ? [{ to: "/backups", label: "Backups", icon: "backups" as const }] : []),
         ...(seesMonitoring ? [{ to: "/monitoring", label: "Monitoring", icon: "monitoring" as const }] : []),
+        ...(seesNotifications ? [{ to: "/notifications", label: "Notifications", icon: "notifications" as const }] : []),
       ],
     },
     {
@@ -217,7 +228,9 @@ export function App() {
     // the fleet, and they are read rarely.
     {
       key: "settings",
-      items: seesSettings ? [{ to: "/settings", label: "Settings", icon: "settings" as const }] : [],
+      items: seesSettings
+        ? [{ to: "/status", label: "Status", icon: "settings" as const }, { to: "/settings", label: "Settings", icon: "settings" as const }]
+        : [],
     },
   ];
 
@@ -227,7 +240,9 @@ export function App() {
   return (
     <ToastProvider>
       <ModalProvider>
+        <PreferencesProvider applyTheme={setTheme}>
         <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
+          <a href="#main-content" className="skip-link">{t("Skip to content")}</a>
           {/* The shell is two panels: the sidebar down the left edge with the
               places to go, and the top bar across the rest with where the
               operator is and who they are. On a narrow screen the sidebar
@@ -251,14 +266,18 @@ export function App() {
             scale={scale}
             setScale={setScale}
           />
-          <main className="content">
+          <main className="content" id="main-content" tabIndex={-1}>
             {/* The page keeps a reading width and sits in the middle of the
                 content area: on a wide screen a full-width page hugs the left
                 edge and leaves the rest empty. */}
             <div className="page">
             <Routes>
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/" element={<Landing />} />
+              <Route path="/profile" element={<Profile theme={theme} setTheme={setTheme} />} />
+              <Route path="/tags" element={<Tags />} />
+              <Route path="/reports" element={<Reports />} />
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/setup" element={<Setup />} />
               <Route path="/hosts" element={<Hosts />} />
               {/* The path is before the host route, because "new" is not an identifier. */}
               <Route path="/hosts/new" element={<AddHost />} />
@@ -272,6 +291,7 @@ export function App() {
               <Route path="/certificates" element={<FleetCertificates />} />
               <Route path="/backups" element={<FleetBackups />} />
               <Route path="/monitoring" element={<FleetMonitoring />} />
+              {seesNotifications && <Route path="/notifications" element={<Notifications />} />}
               <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
               <Route path="/vulnerabilities/:cve" element={<Vulnerability />} />
               <Route path="/secrets" element={<Secrets />} />
@@ -323,11 +343,13 @@ export function App() {
               {managesAccess && <Route path="/access" element={<Access />} />}
               {seesAudit && <Route path="/audit" element={<Audit />} />}
               {seesSettings && <Route path="/settings" element={<Settings />} />}
+              {seesSettings && <Route path="/status" element={<Status />} />}
               <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
             </Routes>
             </div>
           </main>
         </div>
+        </PreferencesProvider>
       </ModalProvider>
     </ToastProvider>
   );
@@ -337,6 +359,7 @@ async function signOut(event: MouseEvent) {
   event.preventDefault();
   // Invalidating the panel session is not enough: without signing out at
   // the provider the next visit would sign the user in without asking.
+  try { sessionStorage.removeItem(BEARER_TOKEN_KEY); } catch { /* nothing kept */ }
   const result = await api.post<{ logout_url: string }>("/auth/logout");
   window.location.href = result.logout_url || "/";
 }
@@ -366,8 +389,42 @@ function LoginScreen({ provider }: { provider: boolean }) {
             {t("No identity provider is configured in this installation. Access to the panel uses an API token passed in the Authorization header.")}
           </p>
         )}
+        <BootstrapTokenEntry />
       </div>
     </div>
+  );
+}
+
+/** The first page: the one the operator chose, the dashboard until then. */
+function Landing() {
+  const { preferences, settled } = usePreferences();
+  if (!settled) return null;
+  return <Navigate to={preferences.landing_page || "/dashboard"} replace />;
+}
+
+/**
+ * The way in before the identity provider lets anybody in: the bootstrap
+ * token from the state directory. It is kept for this tab alone and sent
+ * as the Authorization header by the API client; the first-run checklist
+ * warns as long as it still works.
+ */
+function BootstrapTokenEntry() {
+  const t = useT();
+  const [token, setToken] = useState("");
+  return (
+    <details style={{ marginTop: 18, textAlign: "left" }}>
+      <summary className="subtitle" style={{ cursor: "pointer" }}>{t("Sign in with a bootstrap token")}</summary>
+      <p className="source">
+        {t("The bootstrap token is printed at the first start and lies in the state directory. It is for the first group mapping only: the first-run checklist warns while it still works.")}
+      </p>
+      <input type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="flta…" autoComplete="off" style={{ width: "100%", marginBottom: 8 }} />
+      <button className="secondary" disabled={token.trim() === ""} onClick={() => {
+        try { sessionStorage.setItem(BEARER_TOKEN_KEY, token.trim()); } catch { /* a window without storage: the token is simply not kept */ }
+        window.location.href = "/setup";
+      }}>
+        {t("Continue to the first run")}
+      </button>
+    </details>
   );
 }
 

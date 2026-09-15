@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  anyFilter, EMPTY_FILTERS, filterParams, hoursAgo, localInput, orderAgainAddress, prettyJSON, readFilters, reasonAccepted,
+  anyFilter, EMPTY_FILTERS, filterParams, hoursAgo, localInput, nextSort, orderAgainAddress, prettyJSON, readFilters, reasonAccepted,
 } from "./Jobs";
 import { hasContent, outputFilename } from "./Job";
 
@@ -27,6 +27,26 @@ describe("job filters in the address", () => {
   it("survives the round trip through the address", () => {
     const filters = { ...EMPTY_FILTERS, action: "unit.restart", actor: "ops", campaign_id: "c-1", until: "2026-09-15T12:30" };
     expect(readFilters(filterParams(filters))).toEqual(filters);
+  });
+});
+
+describe("the sort in the address", () => {
+  it("travels with the filters without counting as one", () => {
+    const filters = readFilters(new URLSearchParams("state=failed&sort=hostname"));
+    expect(filters.sort).toBe("hostname");
+    expect(filterParams(filters).get("sort")).toBe("hostname");
+    expect(anyFilter({ ...EMPTY_FILTERS, sort: "hostname:desc" })).toBe(false);
+  });
+
+  it("turns the creation time round and takes every other column through three states", () => {
+    // The list's own order is the newest first; a click on that column
+    // asks for the oldest first, and the next click is the default again.
+    expect(nextSort("", "created_at")).toBe("created_at:asc");
+    expect(nextSort("created_at:asc", "created_at")).toBe("");
+    expect(nextSort("", "state")).toBe("state");
+    expect(nextSort("state", "state")).toBe("state:desc");
+    expect(nextSort("state:desc", "state")).toBe("");
+    expect(nextSort("state:desc", "hostname")).toBe("hostname");
   });
 });
 

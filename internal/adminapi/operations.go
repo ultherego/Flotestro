@@ -610,6 +610,15 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	for _, scope := range scopes {
 		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
 	}
+	// The order of the list: one of the columns the store whitelists,
+	// newest first unless the value names another column or direction. A
+	// column that is not one is the request's fault, named as such.
+	order, err := jobs.ParseSort(query.Get("sort"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_sort", err.Error())
+		return
+	}
+	filter.Sort = order
 	asCSV, ok := exportFormat(w, r)
 	if !ok {
 		return
@@ -621,6 +630,12 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	cursor, err := jobs.ParseCursor(query.Get("cursor"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	// A cursor carries the order it was issued under; one handed back with
+	// another sort would start the page from a key of the wrong kind.
+	if !cursor.Matches(filter.Sort) {
+		problem(w, http.StatusBadRequest, "invalid_cursor", "the cursor was issued for another sort order")
 		return
 	}
 	limit, _ := strconv.Atoi(query.Get("limit"))

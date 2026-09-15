@@ -33,6 +33,7 @@ import (
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/monitoring"
+	"github.com/ultherego/flotestro/internal/notify"
 	"github.com/ultherego/flotestro/internal/oidc"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/pki"
@@ -110,6 +111,10 @@ type Server struct {
 	// secrets holds the values that must not pass through tasks. Nil means
 	// an installation without a store.
 	secrets *secrets.Store
+	// notifications holds the channels and notifier sends through them.
+	// Nil means an installation without notification channels.
+	notifications *notify.Store
+	notifier      *notify.Router
 	// relays is the registry of the site relays; the installation of a host
 	// in an isolated site goes through one of them. Nil means an
 	// installation without relays.
@@ -122,6 +127,10 @@ type Server struct {
 	// settings is the configuration the panel was started with, for the
 	// settings screen. Nil means a panel started without one.
 	settings *config.Effective
+	// process is what the running process resolved that the effective
+	// configuration does not carry: the retention sweeper and the switches
+	// of the gateway and the scheduler. Nil means a panel started without.
+	process *Process
 }
 
 // SetSecrets attaches the secret store.
@@ -287,6 +296,15 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "PUT /api/v1/hosts/{id}/management-address", s.handleSetHostManagementAddress)
 	s.route(mux, "PUT /api/v1/hosts/{id}/failure-domain", s.handleSetHostFailureDomain)
 	s.route(mux, "PUT /api/v1/hosts/{id}/placement", s.handleSetHostPlacement)
+	s.route(mux, "PUT /api/v1/hosts/{id}/notes", s.handleSetHostNotes)
+	// The tag catalogue of the visible fleet, and a rename across it.
+	s.route(mux, "GET /api/v1/tags", s.handleListTags)
+	s.route(mux, "POST /api/v1/tags/rename", s.handleRenameTag)
+	// What the signed-in identity keeps for itself.
+	s.route(mux, "GET /api/v1/me/preferences", s.handleGetPreferences)
+	s.route(mux, "PUT /api/v1/me/preferences", s.handleSetPreferences)
+	s.route(mux, "GET /api/v1/me/sessions", s.handleMySessions)
+	s.route(mux, "GET /api/v1/me/tokens", s.handleMyTokens)
 	// One order for the facts of many hosts, answered host by host.
 	s.route(mux, "POST /api/v1/hosts/bulk-metadata", s.handleBulkHostMetadata)
 	// Host groups: a saved answer to "which hosts", either a fixed member
@@ -325,12 +343,14 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/budgets", s.handleListBudgets)
 	s.route(mux, "GET /api/v1/budgets/{key...}", s.handleGetBudget)
 	s.route(mux, "PUT /api/v1/budgets/{key...}", s.handleSetBudget)
+	s.route(mux, "DELETE /api/v1/budgets/{key...}", s.handleDeleteBudget)
 	s.route(mux, "GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
 	s.route(mux, "GET /api/v1/vulnerabilities/cves", s.handleFleetCVEs)
 	s.route(mux, "GET /api/v1/vulnerabilities/cves/{cve}", s.handleCVE)
 	s.route(mux, "GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)
 
 	s.monitoringRoutes(mux)
+	s.notificationRoutes(mux)
 
 	s.route(mux, "GET /api/v1/backups", s.handleFleetBackups)
 	s.route(mux, "GET /api/v1/hosts/{id}/backups", s.handleHostBackups)
@@ -403,6 +423,9 @@ func (s *Server) Routes() http.Handler {
 	// loop writes, and one evaluation on demand. The only change a policy
 	// sets in motion is a remediation campaign, which waits for its
 	// approval on the campaign routes above.
+	// The management reports: the patch status, the campaigns of a period
+	// and the compliance, as a document to print or a file to open.
+	s.route(mux, "GET /api/v1/reports/{name}", s.handleReport)
 	s.route(mux, "GET /api/v1/policies", s.handleListPolicies)
 	s.route(mux, "POST /api/v1/policies", s.handleCreatePolicy)
 	s.route(mux, "GET /api/v1/policies/{id}", s.handleGetPolicy)
@@ -448,6 +471,12 @@ func (s *Server) Routes() http.Handler {
 	// The effective configuration, secrets masked: what this panel was
 	// started with, for whoever administers it.
 	s.route(mux, "GET /api/v1/settings", s.handleSettings)
+	// The first run: what the installation still lacks, and the two
+	// connection tests the checklist offers in place.
+	s.route(mux, "GET /api/v1/setup", s.handleSetup)
+	s.route(mux, "GET /api/v1/status", s.handleStatus)
+	s.route(mux, "POST /api/v1/setup/test-oidc", s.handleTestOIDC)
+	s.route(mux, "POST /api/v1/setup/test-directory", s.handleTestDirectory)
 	// The identity directory in read-only mode.
 	s.route(mux, "GET /api/v1/identity/status", s.handleIdentityStatus)
 	s.route(mux, "GET /api/v1/identity/users", directoryHandler(s, "users", directoryUsers))
@@ -899,6 +928,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		select count(*), count(*) filter (where a.severity = 'critical')
 		from alerts a join hosts h on h.id = a.host_id
 		where a.state = 'firing'
+		  and a.acknowledged_at is null
 		  and not exists (select 1 from silences s
 		                  where s.expired_at is null and s.until > now()
 		                    and (s.host_id is null or s.host_id = a.host_id)
@@ -1001,6 +1031,16 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	if !attentionFilters(w, query, &filter) {
 		return
 	}
+	// The order of the list: one of the columns the store whitelists,
+	// ascending unless the value says :desc. A column that is not one is
+	// the request's fault, named as such rather than met with the default
+	// order, which would leave a sheet sorted by nothing it asked for.
+	order, err := hosts.ParseSort(query.Get("sort"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_sort", err.Error())
+		return
+	}
+	filter.Sort = order
 	asCSV, ok := exportFormat(w, r)
 	if !ok {
 		return
@@ -1012,6 +1052,12 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	cursor, err := hosts.ParseCursor(query.Get("cursor"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
+	// A cursor carries the order it was issued under; one handed back with
+	// another sort would start the page from a key of the wrong kind.
+	if !cursor.Matches(filter.Sort) {
+		problem(w, http.StatusBadRequest, "invalid_cursor", "the cursor was issued for another sort order")
 		return
 	}
 	limit, _ := strconv.Atoi(query.Get("limit"))

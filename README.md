@@ -138,7 +138,7 @@ systemctl enable --now flotestro-agent
 flotestro-agentctl diagnose                  # explains a host that does not show up
 ```
 
-Runbooks for CA rotation, database restore, queue backlog, a full relay buffer and quarantine are in [docs/runbooks](docs/runbooks/index.md).
+Runbooks for CA rotation, database restore, queue backlog, a full relay buffer and quarantine are in [docs/runbooks](docs/runbooks/index.md); every environment variable of every binary is in [docs/configuration.md](docs/configuration.md).
 
 A whole inventory with Ansible:
 
