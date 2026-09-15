@@ -122,8 +122,14 @@ func TestEveryOnlineHostReportsItsPlatform(t *testing.T) {
 			if payload.Kernel.Release == "" || payload.OS.Kernel == "" {
 				t.Errorf("no kernel release: %+v", payload.Kernel)
 			}
-			if payload.Distribution.ID == "" || payload.Distribution.Version == "" {
+			if payload.Distribution.ID == "" {
 				t.Errorf("no distribution: %+v", payload.Distribution)
+			}
+			// A rolling release carries no VERSION_ID in os-release; Arch is
+			// the one in the lab. Its empty version is the fact, and the host
+			// reports facts - an invented "rolling" would be the panel's word.
+			if payload.Distribution.Version == "" && payload.Distribution.ID != "arch" {
+				t.Errorf("no distribution version: %+v", payload.Distribution)
 			}
 			// The processor and the memory are readable by everyone; a host
 			// without them is a broken read, not a machine without a CPU.
@@ -263,7 +269,10 @@ func TestLocalSudoersReachTheAccessView(t *testing.T) {
 			}
 
 			// The distribution's default: the sudo group on Debian and
-			// Ubuntu, wheel on Fedora and Arch, with every command as root.
+			// Ubuntu, wheel on Fedora, with every command as root. Arch
+			// ships the wheel line commented out, so its only root-equivalent
+			// rule is the one the lab image adds for its own user; the proof
+			// is the same - a rule with every command is marked as such.
 			groupRule := -1
 			for index, rule := range policy.Rules {
 				if !rule.AllCommands || rule.Source != "/etc/sudoers" {
@@ -274,8 +283,19 @@ func TestLocalSudoersReachTheAccessView(t *testing.T) {
 					break
 				}
 			}
-			if groupRule < 0 {
+			if groupRule < 0 && host.OSFamily != "arch" {
 				t.Fatalf("no %%sudo or %%wheel rule with every command in /etc/sudoers: %+v", policy.Rules)
+			}
+			if groupRule < 0 {
+				for index, rule := range policy.Rules {
+					if rule.AllCommands && !slices.Contains(rule.Users, "root") {
+						groupRule = index
+						break
+					}
+				}
+				if groupRule < 0 {
+					t.Fatalf("no rule with every command besides root's own: %+v", policy.Rules)
+				}
 			}
 			if !policy.Rules[groupRule].RootEquivalent || !policy.Rules[groupRule].Critical {
 				t.Errorf("the group rule is not marked root-equivalent: %+v", policy.Rules[groupRule])

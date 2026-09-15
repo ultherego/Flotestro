@@ -5,8 +5,8 @@ import type { Host, HostAccess, Job, LocalSudoRule, OfflineVerdict } from "../..
 import { Time, OptionalFlag } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import {
-  Fact, Facts, Foot, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, Unknown,
-  useHost, useModule,
+  Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, JobNotice, Message, ModuleFreshness, ModuleHeader,
+  ModulePage, Section, Table, Unknown, useHost, useModule, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -85,8 +85,281 @@ export function Identity() {
 
       <EffectiveAccess host={host} />
 
+      {!host.identity.enrolled && <JoinDomain host={host} />}
+      {host.identity.enrolled && <RenewKeytab host={host} />}
       {host.identity.enrolled && <LeaveDomain host={host} />}
     </ModulePage>
+  );
+}
+
+/** One precondition of the join as the helper checked it: passed, failed or could not be established. */
+type PreflightCheck = { name: string; detail?: string; blocking: boolean; passed: boolean | null };
+
+/** The typed detail of a join or a preflight, as the attempt carries it. */
+type EnrollDetail = {
+  kind?: string;
+  enrolled?: boolean;
+  host_principal?: string;
+  checks?: PreflightCheck[];
+  verifications?: PreflightCheck[];
+};
+
+/** A name that reaches the directory: at least two labels, as the API requires. */
+const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
+
+/**
+ * Joining the host to a domain.
+ *
+ * The order carries the domain, the realm, an optional server and the
+ * host's FQDN; it carries no password. The one-time password is fetched
+ * from the directory connector of the panel when the task is delivered
+ * and travels in the envelope alone - it is never typed here, and it
+ * reaches neither the database nor the trail. A panel without a connector
+ * lets the order through and the host refuses it as missing_credential.
+ * The preflight runs the same checks the join starts with and changes
+ * nothing, so it is ordered first and read before the critical order.
+ */
+function JoinDomain({ host }: { host: Host }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<{ permissions: string[] }>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = whoami.data?.permissions ?? [];
+  const mayJoin = permissions.includes("identity.host.enroll");
+  const mayPreflight = permissions.includes("identity.read");
+  const [domain, setDomain] = useState(host.identity.domain ?? "");
+  const [realm, setRealm] = useState(host.identity.realm ?? "");
+  const [server, setServer] = useState("");
+  const [hostname, setHostname] = useState(host.hostname);
+  const [confirming, setConfirming] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [message, setMessage] = useState("");
+  const preflight = useReadOperation<EnrollDetail>(host);
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (created) => {
+      setJob(created);
+      setMessage("");
+      setConfirming(false);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => {
+      setConfirming(false);
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  if (!mayJoin && !mayPreflight) return null;
+
+  const payload = {
+    domain_enroll: {
+      domain: domain.trim(), realm: realm.trim().toUpperCase(), server: server.trim(), hostname: hostname.trim(),
+    },
+  };
+  const valid = DOMAIN_PATTERN.test(domain.trim()) && realm.trim() !== "" && DOMAIN_PATTERN.test(hostname.trim());
+  const checks = preflight.attempt?.detail?.checks ?? [];
+  const blocked = checks.filter((check) => check.blocking && check.passed === false);
+
+  return (
+    <Section
+      title={t("Join the domain")}
+      description={t("The host joins with a one-time password the panel fetches from the directory connector when the task is delivered; nothing is typed here and the password reaches neither the database nor the audit trail. A panel without a connector lets the order through and the host refuses it as missing_credential.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Domain")} help={t("The DNS domain of the directory, e.g. example.internal.")}>
+            <input value={domain} placeholder="example.internal" onChange={(e) => setDomain(e.target.value)} />
+          </Field>
+          <Field label={t("Realm")} help={t("The Kerberos realm; usually the domain in capitals.")}>
+            <input value={realm} placeholder="EXAMPLE.INTERNAL" onChange={(e) => setRealm(e.target.value)} />
+          </Field>
+          <Field label={t("Server")} help={t("Optional; the directory server to talk to instead of the one DNS names.")}>
+            <input value={server} placeholder="ipa.example.internal" onChange={(e) => setServer(e.target.value)} />
+          </Field>
+          <Field label={t("Host name in the directory")} help={t("The FQDN the host is entered under; the one-time password is issued for it.")}>
+            <input value={hostname} onChange={(e) => setHostname(e.target.value)} />
+          </Field>
+        </Fields>
+        {domain.trim() !== "" && !valid && (
+          <Message text={t("The domain and the host name must be fully qualified names, and the realm must not be empty.")} error />
+        )}
+        <FormActions>
+          {mayPreflight && (
+            <button
+              className="secondary"
+              disabled={!valid || preflight.busy || host.connection_state !== "online"}
+              onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
+            >
+              {preflight.busy ? t("Checking…") : t("Preflight first")}
+            </button>
+          )}
+          {mayJoin && (
+            <button disabled={!valid || confirming || request.isPending} onClick={() => setConfirming(true)}>
+              {t("Join the domain…")}
+            </button>
+          )}
+        </FormActions>
+        <Message text={preflight.message} error />
+        <Message text={message} error />
+        {job && <JobNotice job={job} hostID={host.id} />}
+      </Form>
+
+      {preflight.attempt && (
+        <PreflightResult attempt={preflight.attempt} blocked={blocked.length} />
+      )}
+
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          label={t("Join the domain")}
+          description={t("{host} joins {realm} as {name}. Authentication for the whole host changes: directory accounts sign in here once SSSD is configured.", {
+            host: host.hostname, realm: payload.domain_enroll.realm, name: payload.domain_enroll.hostname,
+          })}
+          busy={request.isPending}
+          onConfirm={(reason, confirmation) =>
+            request.mutate({ action: "identity.host.enroll", reason, target_confirmation: confirmation, payload })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </Section>
+  );
+}
+
+/**
+ * The checks of a preflight, one row each. A check that could not be
+ * established is neither passed nor failed and is shown as such; a
+ * failed blocking check is what the join would stop at.
+ */
+function PreflightResult({ attempt, blocked }: {
+  attempt: { status?: string; error_code?: string; message?: string; detail?: EnrollDetail };
+  blocked: number;
+}) {
+  const t = useT();
+  const checks = attempt.detail?.checks ?? [];
+  const verdict = attempt.status === "succeeded"
+    ? <span className="badge ok">{t("the host meets the conditions")}</span>
+    : <span className="badge error">{attempt.error_code || attempt.status}</span>;
+  return (
+    <div data-testid="preflight-result">
+      <p className="hm-message">
+        {verdict} {attempt.message}
+      </p>
+      {checks.length > 0 && (
+        <Table>
+          <thead><tr><th>{t("Check")}</th><th>{t("Result")}</th><th>{t("Detail")}</th></tr></thead>
+          <tbody>
+            {checks.map((check) => (
+              <tr key={check.name}>
+                <td className="hm-mono">{check.name}{check.blocking && <> <span className="badge">{t("blocking")}</span></>}</td>
+                <td>
+                  {check.passed === null || check.passed === undefined
+                    ? <Unknown />
+                    : check.passed
+                      ? <span className="badge ok">{t("passed")}</span>
+                      : <span className={check.blocking ? "badge error" : "badge warn"}>{t("failed")}</span>}
+                </td>
+                <td>{check.detail || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+      {blocked > 0 && (
+        <FormNote>{t("{n} blocking check(s) failed: fix the host before ordering the join.", { n: blocked })}</FormNote>
+      )}
+    </div>
+  );
+}
+
+/** A service principal as the renewal takes it: service/host.fqdn with an optional realm, never host/. */
+const SERVICE_PRINCIPAL_PATTERN = /^[a-zA-Z0-9_-]{1,64}\/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$/;
+
+/**
+ * Renewing a service keytab. The host fetches a new key for the principal
+ * with its own credentials and writes it into its keytab; until it lands
+ * the service the principal names cannot prove who it is, which is why the
+ * order is critical. The host's own principal is not renewed here: its
+ * keytab is replaced by a re-join.
+ */
+function RenewKeytab({ host }: { host: Host }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<{ permissions: string[] }>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const mayRenew = (whoami.data?.permissions ?? []).includes("identity.keytab.rotate");
+  const [principal, setPrincipal] = useState(`HTTP/${host.hostname}`);
+  const [confirming, setConfirming] = useState(false);
+  const [job, setJob] = useState<Job | null>(null);
+  const [message, setMessage] = useState("");
+
+  const request = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (created) => {
+      setJob(created);
+      setMessage("");
+      setConfirming(false);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => {
+      setConfirming(false);
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  if (!mayRenew) return null;
+  const name = principal.trim();
+  const valid = SERVICE_PRINCIPAL_PATTERN.test(name) && !name.toLowerCase().startsWith("host/");
+
+  return (
+    <Section
+      title={t("Renew a keytab")}
+      description={t("The host fetches a new key for a service principal with its own credentials and writes it into /etc/krb5.keytab. The old key stops working the moment the new one lands; restart the service that uses it afterwards.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Service principal")} help={t("service/host.fqdn, optionally @REALM. The host's own principal (host/) is replaced by a re-join, not renewed.")} wide>
+            <input value={principal} onChange={(e) => setPrincipal(e.target.value)} placeholder={`HTTP/${host.hostname}`} />
+          </Field>
+        </Fields>
+        {name !== "" && !valid && (
+          <Message text={t("This is not a service principal: expected service/host.example.test, and not host/.")} error />
+        )}
+        <FormActions>
+          <button disabled={!valid || confirming || request.isPending} onClick={() => setConfirming(true)}>
+            {t("Renew the keytab…")}
+          </button>
+        </FormActions>
+        <Message text={message} error />
+        {job && <JobNotice job={job} hostID={host.id} />}
+      </Form>
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          label={t("Renew the keytab")}
+          description={t("The key of {principal} on {host} is replaced. The service cannot authenticate between the fetch and its restart.", { principal: name, host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason, confirmation) =>
+            request.mutate({
+              action: "identity.keytab.renew",
+              reason,
+              target_confirmation: confirmation,
+              payload: { keytab: { principal: name } },
+            })
+          }
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </Section>
   );
 }
 

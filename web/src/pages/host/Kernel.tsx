@@ -41,6 +41,9 @@ type Snapshot = {
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
+/** A module name as the host validates it: lower-case letters, digits, underscores and hyphens. */
+const MODULE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+
 /**
  * Kernel settings and modules.
  *
@@ -59,6 +62,7 @@ export function Kernel() {
   const [filter, setFilter] = useState("");
   const [key, setKey] = useState("");
   const [value, setValue] = useState("");
+  const [moduleName, setModuleName] = useState("");
 
   const request = useMutation({
     mutationFn: (body: Record<string, unknown>) =>
@@ -241,6 +245,37 @@ export function Kernel() {
         {modules.length > 60 && (
           <Foot><span>{t("Showing 60 of {n} modules; narrow the filter to see the rest.", { n: modules.length })}</span></Foot>
         )}
+        {/* Loading is the counterpart of blocking: a module the host needs
+            now, without waiting for whatever would pull it in. A blocked
+            module is not loaded by this - modprobe honours the blacklist
+            file the panel wrote - so the form says so first. */}
+        <div className="hm-section-body">
+          <Form>
+            <Fields>
+              <Field label={t("Module to load")} help={t("The name as modprobe takes it, e.g. br_netfilter. A module blocked by the panel has to be unblocked first.")}>
+                <input value={moduleName} onChange={(e) => setModuleName(e.target.value)} placeholder="br_netfilter" />
+              </Field>
+            </Fields>
+            <FormActions>
+              <button
+                className="secondary"
+                disabled={!MODULE_PATTERN.test(moduleName.trim()) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
+                onClick={() =>
+                  setIntent({
+                    action: "kernel.module.load",
+                    label: t("Load module"),
+                    description: t("{module} will be loaded on {host} now. It stays loaded until the next reboot; whether it comes back then depends on what pulls it in.", {
+                      module: moduleName.trim(), host: host.hostname,
+                    }),
+                    payload: { kernel: { module: moduleName.trim() } },
+                  })
+                }
+              >
+                {t("Load module")}
+              </button>
+            </FormActions>
+          </Form>
+        </div>
       </Section>
       </Widgets>
 

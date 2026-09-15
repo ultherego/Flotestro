@@ -121,6 +121,12 @@ func (s *Server) openAPI() map[string]any {
 	// The reflection reads the shape, not the meaning. A field a program
 	// decides on - whether a rollback can be ordered, and on how many
 	// hosts - gets its sentence here, next to the type it belongs to.
+	describe(schemas, "Campaign", "retried_by",
+		"The campaigns ordered to run this one's failed hosts again, oldest first, each with its state. "+
+			"Read from the retrying campaigns; the record of this one never changes when a retry is ordered.")
+	describe(schemas, "Campaign", "progress",
+		"The tally of the campaign's hosts, on the list only: succeeded (no_change included), failed, unknown, "+
+			"skipped (skipped, canceled, ineligible, excluded) and pending (everything not settled).")
 	describe(schemas, "Campaign", "compensated_by",
 		"The campaigns ordered to undo this one, oldest first, each with its state. "+
 			"Read from the compensating campaigns; the record of this one never changes when a rollback is ordered.")
@@ -350,11 +356,18 @@ var queryParameters = map[string][]queryParameter{
 		{"maintenance", "boolean", "true keeps the hosts inside a maintenance window now, false those outside one."},
 		{"reboot_required", "boolean", "true keeps the hosts that need a reboot, false the ones that reported none; a host that has not reported is in neither."},
 		{"security_updates", "boolean", "true keeps the hosts with a security update waiting, false the ones that reported none; an unknown count is in neither."},
+		{"failed_units", "boolean", "true keeps the hosts with at least one failed unit, false the ones that reported none; a host that has not reported is in neither."},
+		{"package_db_broken", "boolean", "true keeps the hosts (not retired) whose package database the last operation found broken, false the sound ones."},
+		{"sssd_offline", "boolean", "true keeps the domain-joined hosts (not retired) whose SSSD reports itself offline, false those online; a host outside a domain is in neither."},
+		{"agent_behind", "boolean", "true keeps the hosts whose agent is older than the newest version reported in the visible fleet, false those on it; a version that does not parse is in neither."},
+		{"relay", "string", "The identifier of a relay; keeps the hosts whose open session it attested."},
+		{"failure_domain", "string", "The failure domain an operator placed the host in."},
 		{"capability", "string", "An adapter the host must have available, such as packages.apt."},
 		{"connection_refusal", "string", "The reason the gateway last turned the host away since its last session: certificate_expired, certificate_not_yet_valid, unknown_certificate, revoked_certificate, identity_mismatch or lifecycle_<state>."},
 	}, pagingParameters...),
 	"GET /api/v1/jobs": append([]queryParameter{
-		{"host_id", "string", ""},
+		{"host_id", "string", "The host the tasks belong to."},
+		{"hostname", "string", "The beginning of a host name; a full name keeps that host alone."},
 		{"state", "string", ""},
 		{"action", "string", "The operation type."},
 		{"action_prefix", "string", "The beginning of an operation type; packages. keeps every package operation."},
@@ -474,6 +487,7 @@ var responseSchemas = map[string]map[string]any{
 	"POST /api/v1/campaigns/{id}/pause":         ref("Campaign"),
 	"POST /api/v1/campaigns/{id}/resume":        ref("Campaign"),
 	"POST /api/v1/campaigns/{id}/cancel":        ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/retry":         ref("Campaign"),
 	"GET /api/v1/campaigns/{id}/targets":        pagedCollection("CampaignTarget"),
 	"GET /api/v1/campaigns/{id}/timeline":       collection("TimelineEntry"),
 	"GET /api/v1/campaigns/{id}/steps":          cursorCollection("CampaignStep"),

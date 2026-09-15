@@ -433,7 +433,6 @@ func preserveRefusedByTheDirectory(t *testing.T, h *harness, changeID string) bo
 	return false
 }
 
-
 // TestServiceKeytabRotationIsASeparateRightAndRunsOnTheHost guards the
 // rotation the architecture document names as "keytab rotation per
 // separate permission": an operator of the fleet is refused with the

@@ -73,6 +73,7 @@ export type Host = {
   // when it was taken. Absent for a host that has always been active.
   lifecycle_reason?: string;
   lifecycle_changed_at?: string;
+  lifecycle_changed_by?: string;
   os_family?: string;
   os_distribution?: string;
   os_version?: string;

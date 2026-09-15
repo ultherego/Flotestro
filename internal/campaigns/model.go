@@ -299,6 +299,11 @@ type Spec struct {
 	// campaign that is not a compensation. The handler checks the rules
 	// (CheckCompensation) before the order reaches the store.
 	CompensatesCampaignID string
+	// RetriesCampaignID names the finished campaign whose failed hosts
+	// this one runs again with the same order. Empty for a campaign that
+	// is not a retry. The handler picks the hosts (RetryTargets) before
+	// the order reaches the store.
+	RetriesCampaignID string
 	// PolicyID and PolicyVersion name the desired-state policy that
 	// ordered the campaign as its remediation, and the version of the
 	// document that judged the drift. Empty for a campaign an operator
@@ -478,7 +483,12 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 		// decision from the same file write ordered on its own. Absent
 		// from the digest of every other campaign, so theirs stay.
 		Compensates string `json:"compensates_campaign_id,omitempty"`
-		Rollout     struct {
+		// A retry is a decision about a campaign that went wrong, not the
+		// same order twice: "the second go at last night's rollout" is
+		// consented to as that. Absent from every other digest, so theirs
+		// stay.
+		Retries string `json:"retries_campaign_id,omitempty"`
+		Rollout struct {
 			Canary           int          `json:"canary_size"`
 			Wave             int          `json:"wave_size"`
 			Concurrent       int          `json:"max_concurrent"`
@@ -500,7 +510,7 @@ func Fingerprint(spec Spec, targets []TargetHost) (string, error) {
 		} `json:"rollout"`
 	}{Version: CampaignVersion, Action: spec.ActionType, Payload: payload, Targets: hosts,
 		Expression: expression, Excluded: excluded, Reason: spec.Selector.ExcludeReason,
-		Compensates: spec.CompensatesCampaignID}
+		Compensates: spec.CompensatesCampaignID, Retries: spec.RetriesCampaignID}
 	content.Rollout.Canary = spec.CanarySize
 	content.Rollout.Wave = spec.WaveSize
 	content.Rollout.Concurrent = spec.MaxConcurrent
@@ -619,6 +629,18 @@ type Campaign struct {
 	// first. It is read from the compensating campaigns' link, so the
 	// record of the original never changes when a rollback is ordered.
 	CompensatedBy []CampaignLink `json:"compensated_by,omitempty"`
+	// RetriesCampaignID and RetriesCampaignName name the campaign whose
+	// failed hosts this one runs again; both empty for a campaign that is
+	// not a retry. RetriedBy lists the campaigns ordered to retry this
+	// one, oldest first, read from their link so this record never
+	// changes when a retry is ordered.
+	RetriesCampaignID   string         `json:"retries_campaign_id,omitempty"`
+	RetriesCampaignName string         `json:"retries_campaign_name,omitempty"`
+	RetriedBy           []CampaignLink `json:"retried_by,omitempty"`
+	// Progress counts the hosts of the campaign by how they stand, for a
+	// list that shows many campaigns at once. Absent from the single
+	// record: the report carries the totals per state there.
+	Progress *Progress `json:"progress,omitempty"`
 	// ChangedHosts counts the hosts the campaign changed, by the rule
 	// ChangedTargets reads them: the change landed, whatever came after.
 	// It is the number a compensation would run on. Zero until the
@@ -637,6 +659,38 @@ type CampaignLink struct {
 	ID    string `json:"id"`
 	Name  string `json:"name"`
 	State State  `json:"state"`
+}
+
+// Progress is the tally of a campaign's hosts as a list row shows it.
+// Unknown is its own number and never folded into failed or succeeded: a
+// host that ended without a result did not reach the desired state, as
+// far as anyone knows, and did not fail the change either. Skipped covers
+// every host that took no part - skipped, canceled, ineligible, excluded -
+// and pending is every host not settled yet, under way included.
+type Progress struct {
+	Total     int `json:"total"`
+	Succeeded int `json:"succeeded"`
+	Failed    int `json:"failed"`
+	Unknown   int `json:"unknown"`
+	Skipped   int `json:"skipped"`
+	Pending   int `json:"pending"`
+}
+
+// Add counts one host in the state given.
+func (p *Progress) Add(state TargetState, count int) {
+	p.Total += count
+	switch state {
+	case TargetSucceeded, TargetNoChange:
+		p.Succeeded += count
+	case TargetFailed:
+		p.Failed += count
+	case TargetUnknown:
+		p.Unknown += count
+	case TargetSkipped, TargetCanceled, TargetIneligible, TargetExcluded:
+		p.Skipped += count
+	default:
+		p.Pending += count
+	}
 }
 
 // RebootTimeout returns the wait for a rebooted host as a duration.

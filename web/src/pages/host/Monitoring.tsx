@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Alert, HostMetrics, HostMonitoring, MetricPoint, MetricRange, RuleCatalogue, Silence } from "../../lib/types";
+import type { Alert, Host, HostMetrics, HostMonitoring, MetricPoint, MetricRange, RuleCatalogue, Silence } from "../../lib/types";
 import { bytes } from "../../lib/format";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { AreaChart, ChartLegend, Meter, type AreaSeries } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table,
-  Unknown, Widgets, countWhere, usageTone, useHost,
+  Unknown, Widgets, countWhere, usageTone, useHost, useReadOperation,
 } from "./shared";
+import { capability } from "./modules";
 import { AlertStateBadge, SeverityBadge, duration, metricValue } from "../Monitoring";
 import { useT } from "../../i18n";
 
@@ -456,6 +457,8 @@ export function Monitoring() {
           )}
         </Section>
 
+        {capability(host, "monitoring")?.available && <ProbeNow host={host} />}
+
         <Section title={t("Silences in force")} count={state ? silences.length : undefined} span={12} flush>
           {!state ? (
             <Empty>{t("Loading…")}</Empty>
@@ -486,5 +489,122 @@ export function Monitoring() {
         </Section>
       </Widgets>
     </ModulePage>
+  );
+}
+
+/** What the host saw when it probed the target, as the attempt carries it. */
+type ProbeResult = {
+  kind?: string;
+  message?: string;
+  probe?: {
+    kind: string;
+    target: string;
+    reachable: boolean;
+    passed: boolean;
+    status_code?: number;
+    duration_millis: number;
+    body_matched?: boolean;
+    tls_expiry?: string;
+    tls_issuer?: string;
+    error?: string;
+    observed_at?: string;
+  };
+};
+
+/**
+ * A probe on demand: the host checks a service from where it stands and
+ * reports what it saw - reachable or not, the answer it got, and whether
+ * that answer met the expectation. The probe takes an address, not a rule:
+ * the alert rules judge the samples, and this asks a question the samples
+ * do not answer, "does this service answer from this host right now". The
+ * result belongs to the job and is shown here, not in the inventory.
+ */
+function ProbeNow({ host }: { host: Host }) {
+  const t = useT();
+  const [kind, setKind] = useState<"http" | "tcp">("http");
+  const [target, setTarget] = useState("");
+  const [expectStatus, setExpectStatus] = useState("");
+  const [expectBody, setExpectBody] = useState("");
+  const read = useReadOperation<ProbeResult>(host);
+  const result = read.attempt?.detail?.probe;
+  const refused = read.attempt && read.attempt.status !== "succeeded" && !result;
+  const address = target.trim();
+  const valid = address !== "" && !/\s/.test(address)
+    && (kind === "http" ? /^https?:\/\/\S+$/.test(address) : /^\S+:\d{1,5}$/.test(address));
+
+  return (
+    <Section
+      title={t("Run a probe now")}
+      span={12}
+      description={t("The host checks a service from where it stands: an HTTP address or a host:port. The answer is the host's view at this moment and belongs to the job, not to the inventory.")}
+    >
+      <Form>
+        <Fields>
+          <Field label={t("Kind")} narrow>
+            <select value={kind} onChange={(e) => setKind(e.target.value as "http" | "tcp")}>
+              <option value="http">HTTP</option>
+              <option value="tcp">TCP</option>
+            </select>
+          </Field>
+          <Field label={t("Target")} help={kind === "http" ? t("http:// or https://, as the host would reach it.") : t("host:port, as the host would reach it.")} wide>
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={kind === "http" ? "https://app.example.internal/health" : "db.example.internal:5432"} />
+          </Field>
+          {kind === "http" && (
+            <>
+              <Field label={t("Expected status")} help={t("Empty accepts any 2xx or 3xx.")} narrow>
+                <input type="number" min={100} max={599} value={expectStatus} onChange={(e) => setExpectStatus(e.target.value)} />
+              </Field>
+              <Field label={t("Expected body fragment")} help={t("Optional; the answer must contain it.")}>
+                <input value={expectBody} onChange={(e) => setExpectBody(e.target.value)} />
+              </Field>
+            </>
+          )}
+        </Fields>
+        <FormActions>
+          <button
+            disabled={!valid || read.busy || host.connection_state !== "online"}
+            onClick={() =>
+              read.order({
+                action: "monitoring.probe.run",
+                payload: {
+                  monitoring: {
+                    kind, target: address,
+                    ...(kind === "http" && Number(expectStatus) ? { expect_status: Number(expectStatus) } : {}),
+                    ...(kind === "http" && expectBody.trim() ? { expect_body: expectBody.trim() } : {}),
+                  },
+                },
+              })
+            }
+          >
+            {read.busy ? t("Probing…") : t("Run the probe")}
+          </button>
+        </FormActions>
+        <Message text={read.message} error />
+        {refused && (
+          <Message text={read.attempt?.message || read.attempt?.error_code || t("The host refused the probe.")} error />
+        )}
+        {result && (
+          <Facts>
+            <Fact label={t("Verdict")}>
+              {result.passed
+                ? <span className="badge ok">{t("passed")}</span>
+                : result.reachable
+                  ? <span className="badge warn">{t("answered, but not as expected")}</span>
+                  : <span className="badge error">{t("unreachable")}</span>}
+            </Fact>
+            <Fact label={t("Duration")}>{result.duration_millis} ms</Fact>
+            {result.status_code !== undefined && <Fact label={t("Status")}>{result.status_code}</Fact>}
+            {result.body_matched !== undefined && <Fact label={t("Body matched")}>{result.body_matched ? t("yes") : t("no")}</Fact>}
+            {result.tls_expiry && (
+              <Fact label={t("TLS certificate")}>
+                {t("expires")} <Time value={result.tls_expiry} />{result.tls_issuer ? ` · ${result.tls_issuer}` : ""}
+              </Fact>
+            )}
+            {result.error && <Fact label={t("Error")} wide><span className="hm-mono">{result.error}</span></Fact>}
+            {result.observed_at && <Fact label={t("Observed")}><Time value={result.observed_at} /></Fact>}
+          </Facts>
+        )}
+      </Form>
+    </Section>
   );
 }

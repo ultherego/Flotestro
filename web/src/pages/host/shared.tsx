@@ -320,29 +320,76 @@ export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unk
   );
 }
 
+/** The shortest reason the API takes for a critical operation. */
+export const MIN_REASON_LENGTH = 8;
+
+/**
+ * The answer to an order, with the job linked: "waiting for approval" is a
+ * sentence the operator acts on, so the job it names is one click away and
+ * so is the list of this host's jobs. The sentence stays one translated
+ * string; the identifier is spliced into it where the language puts it.
+ */
+export function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
+  const t = useT();
+  // Without parameters the placeholder stays in the sentence, and the
+  // link takes its place.
+  const sentence = job.requires_approval
+    ? t("Job {id} is waiting for approval.")
+    : t("Job {id} has been queued.");
+  const [before, after = ""] = sentence.split("{id}");
+  return (
+    <p className="hm-message" data-testid="job-notice">
+      {before}
+      <Link to={`/jobs/${job.id}`} className="hm-mono">{job.id.slice(0, 8)}</Link>
+      {after}
+      {" "}
+      <Link to={`/hosts/${hostID}/jobs`}>{t("See all jobs")}</Link>
+    </p>
+  );
+}
+
 /**
  * Ordering an operation leads to a plan, not to an immediate change. A
  * mutating operation lands in the awaiting-approval state.
+ *
+ * A critical operation asks for a reason before the button works: the API
+ * refuses the order without one, and the refusal is better read before
+ * the click than after it. The reason of any other operation is optional
+ * and goes to the trail when given.
  */
 export function RequestOperation({
-  host, description, action, payload, label, span,
-}: { host: Host; description: string; action: string; payload: unknown; label: string; span?: Span }) {
+  host, description, action, payload, label, span, critical,
+}: {
+  host: Host;
+  description: string;
+  action: string;
+  payload: unknown;
+  label: string;
+  span?: Span;
+  /** Whether the operation is critical: the reason is then required. */
+  critical?: boolean;
+}) {
   const t = useT();
   const queryClient = useQueryClient();
-  const [result, setResult] = useState<string>("");
+  const [reason, setReason] = useState("");
+  const [job, setJob] = useState<Job | null>(null);
+  const [error, setError] = useState("");
+  const reasonReady = !critical || reason.trim().length >= MIN_REASON_LENGTH;
 
   const mutation = useMutation({
     mutationFn: () =>
-      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, { action, payload }),
-    onSuccess: (job) => {
-      setResult(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action, payload, ...(reason.trim() ? { reason: reason.trim() } : {}),
+      }),
+    onSuccess: (created) => {
+      setJob(created);
+      setError("");
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
-    onError: (error) => setResult(error instanceof Error ? error.message : String(error)),
+    onError: (failure) => {
+      setJob(null);
+      setError(failure instanceof Error ? failure.message : String(failure));
+    },
   });
 
   return (
@@ -354,13 +401,23 @@ export function RequestOperation({
         {host.management_address ? ` · ${host.management_address}` : ` · ${t("address unknown")}`}
         {` · ${host.site} / ${host.environment}`}
       </p>
+      <Fields>
+        <Field
+          label={critical ? t("Reason (at least 8 characters, kept in the audit trail)") : t("Reason")}
+          help={critical ? undefined : t("Optional; kept in the audit trail.")}
+          wide
+        >
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("change ticket, handover")} />
+        </Field>
+      </Fields>
       <FormActions>
-        <button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+        <button onClick={() => mutation.mutate()} disabled={mutation.isPending || !reasonReady}>
           {mutation.isPending ? t("Requesting…") : label}
         </button>
-        <Link to="/jobs">{t("See all jobs")}</Link>
+        {!job && <Link to={`/hosts/${host.id}/jobs`}>{t("See all jobs")}</Link>}
       </FormActions>
-      <Message text={result} />
+      {job && <JobNotice job={job} hostID={host.id} />}
+      <Message text={error} error />
     </Section>
   );
 }

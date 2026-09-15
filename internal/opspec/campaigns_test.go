@@ -156,6 +156,27 @@ func TestExecutableModesAreSamePayloadAndReboot(t *testing.T) {
 	}
 }
 
+// TestARollbackNamedPerHostIsNotOnePayload guards the two reverse operations
+// whose payload names a plan the host itself minted: the identifier differs
+// on every host, so one approved payload cannot mean the same thing on the
+// fleet. They stay declared - the operation is a reverse on one host - and
+// stay refused as a campaign until the engine can split the order host by
+// host; a same_payload declaration here would send one host's identifier
+// to every other.
+func TestARollbackNamedPerHostIsNotOnePayload(t *testing.T) {
+	for _, action := range []ActionType{ActionNetworkRollback, ActionFirewallRulesetRestore} {
+		if mode := action.CampaignMode(); mode != CampaignSpecialized {
+			t.Errorf("%s has the mode %q, expected %q", action, mode, CampaignSpecialized)
+		}
+		if ExecutableMode(action) {
+			t.Errorf("%s allowed in bulk although its payload names a per-host plan", action)
+		}
+		if PlanningAction(action) != "" || PanelPlanned(action) {
+			t.Errorf("%s has a planner although the identifier of the plan comes from the host", action)
+		}
+	}
+}
+
 // TestARestoreDoesNotRunInBulk guards a boundary that is not a missing
 // feature: a restore unpacks old state onto a running system and is meant to
 // require an operator present at every host.

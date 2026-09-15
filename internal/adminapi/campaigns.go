@@ -112,7 +112,15 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
+	s.orderCampaign(w, r, request, "")
+}
 
+// orderCampaign carries an order through every check to the record: the
+// operation and its bulk mode, the payload, the selector, the per-host
+// permissions, the fresh authentication and the audit event. A retry
+// walks the same way with the campaign it retries named, so a retried
+// order is refused exactly where a fresh one would be.
+func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request createCampaignRequest, retriesID string) {
 	action := opspec.ActionType(request.Action)
 	if !action.Known() || !action.Mutating() {
 		problem(w, http.StatusBadRequest, "unknown_action",
@@ -321,6 +329,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		RequestID:                requestIDOf(r),
 		IdempotencyKey:           idempotencyKeyOf(r, request.IdempotencyKey),
 		CompensatesCampaignID:    request.CompensatesCampaignID,
+		RetriesCampaignID:        retriesID,
 	}
 
 	targets := assessment.Targets()
@@ -362,6 +371,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 			"reboot_timeout_seconds":     campaign.RebootTimeoutSeconds,
 			"approval_fingerprint":       campaign.ApprovalFingerprint,
 			"compensates_campaign_id":    campaign.CompensatesCampaignID,
+			"retries_campaign_id":        campaign.RetriesCampaignID,
 		}, stepUpEvidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -372,6 +382,114 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, campaign)
+}
+
+// retryCampaignRequest is the order to run a finished campaign again on
+// the hosts that did not reach the desired state.
+type retryCampaignRequest struct {
+	// Reason justifies the retry and goes to the audit log; a second go
+	// at a change that failed is a decision, and the record says why.
+	Reason string `json:"reason"`
+	// IncludeUnknown takes the hosts that ended without a result as well.
+	// Off by default: what such a host holds is a question to read off the
+	// host first, and the operator who ticks this has read it.
+	IncludeUnknown bool `json:"include_unknown"`
+}
+
+// handleRetryCampaign orders a new campaign with the same order as a
+// finished one, on exactly the hosts that failed - and the unknown ones
+// when asked. The new campaign goes through the ordinary door: the same
+// checks, the same per-host permissions, its own approval. The link to
+// the campaign it retries is written on the new record only.
+//
+// The right is the right to create a campaign, checked in the scope of
+// the original's targets here and host by host in the order below: a
+// retry is a new change on the fleet, not a control of the old one.
+func (s *Server) handleRetryCampaign(w http.ResponseWriter, r *http.Request) {
+	original, ok := s.campaignFor(w, r, authz.PermCampaignCreate)
+	if !ok {
+		return
+	}
+	var request retryCampaignRequest
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+			return
+		}
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	if len([]rune(request.Reason)) < minimalStepUpReason {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"a retry must state its reason (field reason, min. 8 characters)")
+		return
+	}
+	targets, err := s.campaigns.Targets(r.Context(), original.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	picked, err := campaigns.RetryTargets(*original, targets, request.IncludeUnknown)
+	if code := campaigns.RetryCode(err); code != "" {
+		problem(w, http.StatusConflict, code, err.Error())
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	hostIDs := make([]string, 0, len(picked))
+	for _, target := range picked {
+		hostIDs = append(hostIDs, target.HostID)
+	}
+	s.orderCampaign(w, r, retryOrder(*original, hostIDs, request.Reason), original.ID)
+}
+
+// retryOrder is the original's order written out again for the hosts
+// given: the same operation, payload and rollout policy, named as the
+// retry of the original. Two things are not copied as they were. The
+// maintenance window is dropped once it has closed - a retry that could
+// never start would be a campaign standing still with no reason given -
+// and the wait for offline hosts is carried as the length the original
+// asked for, counted again from the new order. Both are on the new
+// campaign's record for the approver to read.
+func retryOrder(original campaigns.Campaign, hostIDs []string, reason string) createCampaignRequest {
+	order := createCampaignRequest{
+		Name:                     campaigns.RetryName(original.Name),
+		Action:                   original.ActionType,
+		Payload:                  original.Payload,
+		Selector:                 campaigns.Selector{HostIDs: hostIDs},
+		CanarySize:               intPointer(original.CanarySize),
+		WaveSize:                 intPointer(original.WaveSize),
+		MaxConcurrent:            intPointer(original.MaxConcurrent),
+		FailureThresholdPercent:  intPointer(original.FailureThresholdPercent),
+		FailureThresholdAbsolute: intPointer(original.FailureThresholdAbsolute),
+		RebootPolicy:             string(original.RebootPolicy),
+		HealthCheckUnits:         original.HealthCheckUnits,
+		JobTimeoutSeconds:        intPointer(original.JobTimeoutSeconds),
+		RebootTimeoutSeconds:     intPointer(original.RebootTimeoutSeconds),
+		OfflinePolicy:            string(original.OfflinePolicy),
+		ManualGate:               &original.ManualGate,
+		ConnectivityLostAbsolute: intPointer(original.ConnectivityLostAbsolute),
+		Reason:                   reason,
+		// A retry of a compensation is still a compensation: the reverse
+		// on hosts the compensated campaign changed, linked so the
+		// compensate step lands on the original's targets.
+		CompensatesCampaignID: original.CompensatesCampaignID,
+	}
+	if original.MaintenanceEnd == nil || original.MaintenanceEnd.After(time.Now().UTC()) {
+		order.MaintenanceStart = original.MaintenanceStart
+		order.MaintenanceEnd = original.MaintenanceEnd
+	}
+	if original.DeadlineAt != nil {
+		if minutes := int(original.DeadlineAt.Sub(original.CreatedAt) / time.Minute); minutes > 0 {
+			order.DeadlineMinutes = intPointer(minutes)
+		}
+	}
+	return order
+}
+
+func intPointer(value int) *int {
+	return &value
 }
 
 // describeExclusions joins the refusal reasons into one sentence.
@@ -843,17 +961,45 @@ func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	items, err := s.campaigns.List(r.Context(), r.URL.Query().Get("state"), limit,
-		campaignScopes(principal))
+	// The list is filtered on the server and read page by page: "the
+	// campaigns this operator ordered since Monday" is a question for an
+	// index, not for a screen holding the newest fifty rows. The offset
+	// is enough here - campaigns are ordered by people, a few a day, and
+	// the list does not move under the reader the way the audit trail does.
+	query := r.URL.Query()
+	filter := campaigns.ListFilter{
+		State:     strings.TrimSpace(query.Get("state")),
+		Action:    strings.TrimSpace(query.Get("action")),
+		CreatedBy: strings.TrimSpace(query.Get("requester")),
+	}
+	if text := strings.TrimSpace(query.Get("since")); text != "" {
+		since, err := time.Parse(time.RFC3339, text)
+		if err != nil {
+			problem(w, http.StatusBadRequest, "invalid_since", "since must be an RFC 3339 timestamp")
+			return
+		}
+		filter.Since = &since
+	}
+	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
+	if filter.Limit <= 0 || filter.Limit > 200 {
+		filter.Limit = 50
+	}
+	if offset, err := strconv.Atoi(query.Get("offset")); err == nil && offset > 0 {
+		filter.Offset = offset
+	}
+	page, err := s.campaigns.List(r.Context(), filter, campaignScopes(principal))
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
+	items := page.Items
 	if items == nil {
 		items = []campaigns.Campaign{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": items, "count": len(items),
+		"total": page.Total, "limit": filter.Limit, "offset": filter.Offset,
+	})
 }
 
 func (s *Server) handleGetCampaign(w http.ResponseWriter, r *http.Request) {

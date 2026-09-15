@@ -55,14 +55,34 @@ func (s *Server) handleListRoles(w http.ResponseWriter, r *http.Request) {
 }
 
 // principalView is an identity as the access screen shows it: with the
-// live tokens, so that one of them can be revoked by its identifier.
+// live tokens, so that one of them can be revoked by its identifier, and
+// with the moment it was disabled when it was.
 type principalView struct {
 	authz.Principal
-	Tokens []authz.Token `json:"tokens"`
+	Tokens     []authz.Token `json:"tokens"`
+	DisabledAt *time.Time    `json:"disabled_at,omitempty"`
 }
 
+// handleListPrincipals lists the enabled identities, or with disabled=true
+// the disabled ones: the two are different questions - who can act, and
+// who could be let back in - and a screen asks one at a time.
 func (s *Server) handleListPrincipals(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", ""); !ok {
+		return
+	}
+	if disabled, _ := strconv.ParseBool(r.URL.Query().Get("disabled")); disabled {
+		principals, err := s.authz.ListDisabledPrincipals(r.Context())
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		items := make([]principalView, 0, len(principals))
+		for _, principal := range principals {
+			disabledAt := principal.DisabledAt
+			// A disabled identity has no live token: they ended with it.
+			items = append(items, principalView{Principal: principal.Principal, Tokens: []authz.Token{}, DisabledAt: &disabledAt})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
 		return
 	}
 	principals, err := s.authz.ListPrincipals(r.Context())
@@ -150,6 +170,143 @@ func (s *Server) handleDisablePrincipal(w http.ResponseWriter, r *http.Request) 
 		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
 		Detail: withStepUp(map[string]any{
 			"subject": target.Subject, "roles": target.Roles(),
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleEnablePrincipal gives a disabled identity its access back. The
+// bindings it had are still on the row, so it holds what it held; the
+// sessions and the tokens that ended with the disabling stay ended, and
+// the identity is issued new ones. Enabling what is not disabled is a
+// conflict, not a no-op: the caller believed something that is not so.
+func (s *Server) handleEnablePrincipal(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.enable", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.authz.EnablePrincipal(r.Context(), tx, target.ID); err != nil {
+		if errors.Is(err, authz.ErrNotFound) {
+			problem(w, http.StatusConflict, "principal_enabled", "the identity is not disabled")
+			return
+		}
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.enable", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "roles": target.Roles(),
+		}, evidence),
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": target.ID, "subject": target.Subject, "kind": target.Kind, "bindings": target.Bindings,
+	})
+}
+
+// handleListSessions lists the live browser sessions of an identity. A
+// token is not a session: an identity that only ever used tokens has none,
+// and the empty list says so.
+func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id")); !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	sessions, err := s.authz.ListSessionsOf(r.Context(), target.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": sessions, "count": len(sessions), "principal_id": target.ID, "subject": target.Subject,
+	})
+}
+
+// handleRevokeSession ends one browser session of an identity. The
+// identity in the path has to own it; a session identifier alone ends
+// nothing. The next request on that cookie is refused.
+func (s *Server) handleRevokeSession(w http.ResponseWriter, r *http.Request) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return
+	}
+	sessionID := r.PathValue("sid")
+	if _, err := uuid.Parse(sessionID); err != nil {
+		problem(w, http.StatusNotFound, "session_not_found", "no such session")
+		return
+	}
+	reason, ok := requestReason(w, r, nil)
+	if !ok {
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.session.revoke", "principal", target.ID)
+	if !ok {
+		return
+	}
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	revoked, err := s.authz.RevokeSessionOf(r.Context(), tx, target.ID, sessionID, "revoked: "+reason)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !revoked {
+		problem(w, http.StatusNotFound, "session_not_found", "no such live session of this identity")
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.session.revoke", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "session_id": sessionID,
 		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -523,6 +680,21 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_subject", "missing identity subject")
 		return
 	}
+	// The kind is what the row admits; a value the table would refuse is
+	// the caller's mistake, not a failure of the store.
+	if request.Kind != "" && request.Kind != "user" && request.Kind != "service" {
+		problem(w, http.StatusBadRequest, "invalid_kind", "kind must be user or service")
+		return
+	}
+	tokenTTL := time.Duration(request.TokenTTLHours) * time.Hour
+	if tokenTTL <= 0 {
+		tokenTTL = 30 * 24 * time.Hour
+	}
+	if request.IssueToken && tokenTTL > maxTokenTTL {
+		problem(w, http.StatusBadRequest, "invalid_ttl",
+			"a token lives at most a year (token_ttl_hours up to 8760)")
+		return
+	}
 	type parsedBinding struct {
 		role       authz.Role
 		scope      authz.Scope
@@ -573,12 +745,8 @@ func (s *Server) handleCreatePrincipal(w http.ResponseWriter, r *http.Request) {
 		"id": principalID, "subject": request.Subject, "roles": granted,
 	}
 	if request.IssueToken {
-		ttl := time.Duration(request.TokenTTLHours) * time.Hour
-		if ttl <= 0 {
-			ttl = 30 * 24 * time.Hour
-		}
 		token, err := s.authz.IssueToken(r.Context(), tx, principalID,
-			"token for "+request.Subject, ttl, actor.Subject)
+			"token for "+request.Subject, tokenTTL, actor.Subject)
 		if err != nil {
 			s.fail(w, err)
 			return

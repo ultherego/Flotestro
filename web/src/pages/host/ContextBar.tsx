@@ -44,6 +44,7 @@ export function ContextBar({ host, segment, campaign }: {
         <MaintenanceWindow host={host} />
       </div>
       <div className="host-header-facts">
+        <HostIdentifier host={host} />
         <ManagementAddress host={host} />
         <span className="chip" title={t("site / environment")}>{host.site} / {host.environment}</span>
         <span className="chip" title={t("operating system")}>
@@ -56,6 +57,7 @@ export function ContextBar({ host, segment, campaign }: {
           {t("seen")} <Time value={host.last_seen_at} />
         </span>
         <RefreshInventory host={host} segment={segment} />
+        <HostActions host={host} />
       </div>
       <Tags host={host} />
     </div>
@@ -161,18 +163,44 @@ function splitTags(text: string): string[] {
  */
 function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
   const t = useT();
-  const queryClient = useQueryClient();
-  const [jobID, setJobID] = useState("");
-  const [message, setMessage] = useState("");
   // The scope is taken from the tab registry: it knows which inventory
   // module the open view lives off. A tab without a module (Jobs,
   // Overview) refreshes the whole host - narrowing to something that does
   // not exist would refresh nothing.
   const scope = findModule(segment)?.inventory;
+  const refresh = useInventoryRefresh(host, scope);
 
-  // The job ends only once the new revision is saved, so the button follows
-  // it to the end. Otherwise "refreshed" would only mean "ordered", and the
-  // operator would look at the old image believing it is new.
+  const description = scope
+    ? t("ask the host to re-read its {module} module now", { module: scope })
+    : t("ask the host to re-read its whole inventory now");
+  return (
+    <span className="chip inventory-refresh">
+      <button
+        type="button"
+        className="link"
+        disabled={refresh.busy || host.connection_state !== "online"}
+        title={host.connection_state === "online" ? description : t("the host is not connected")}
+        onClick={refresh.order}
+      >
+        {refresh.busy ? t("refreshing…") : t("refresh")}
+      </button>
+      {refresh.message && <span className="message">{refresh.message}</span>}
+    </span>
+  );
+}
+
+/**
+ * The order of an inventory refresh and its outcome. The job ends only
+ * once the new revision is saved, so the hook follows it to the end:
+ * otherwise "refreshed" would only mean "ordered", and the operator would
+ * look at the old image believing it is new.
+ */
+function useInventoryRefresh(host: Host, scope?: string) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [jobID, setJobID] = useState("");
+  const [message, setMessage] = useState("");
+
   const state = useQuery({
     queryKey: ["job", jobID],
     queryFn: () => api.get<Job>(`/api/v1/jobs/${jobID}`),
@@ -212,23 +240,73 @@ function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });
 
-  const busy = order.isPending || jobID !== "";
-  const description = scope
-    ? t("ask the host to re-read its {module} module now", { module: scope })
-    : t("ask the host to re-read its whole inventory now");
+  return {
+    busy: order.isPending || jobID !== "",
+    message,
+    order: () => order.mutate(),
+  };
+}
+
+/**
+ * The identifier of the host, short, with a copy of the whole. The panel
+ * knows the host by identifier and so do its API, its jobs and its audit
+ * entries; an operator writing a ticket or a script needs it in the
+ * clipboard, not read off the address bar.
+ */
+function HostIdentifier({ host }: { host: Host }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(host.id);
+    setCopied(true);
+  };
   return (
-    <span className="chip inventory-refresh">
-      <button
-        type="button"
-        className="link"
-        disabled={busy || host.connection_state !== "online"}
-        title={host.connection_state === "online" ? description : t("the host is not connected")}
-        onClick={() => order.mutate()}
-      >
-        {busy ? t("refreshing…") : t("refresh")}
+    <span className="chip inventory-refresh" title={host.id}>
+      <span className="chip-tag">{t("id")}</span>
+      <span className="chip-mono" data-testid="host-id">{host.id.slice(0, 8)}</span>
+      <button type="button" className="link" onClick={copy} title={t("copy the full identifier")}>
+        {copied ? t("copied") : t("copy")}
       </button>
-      {message && <span className="message">{message}</span>}
     </span>
+  );
+}
+
+/**
+ * The actions an operator reaches for from any tab: a whole-host
+ * inventory refresh, the logs, and a reboot - the last one a link to the
+ * power tab, where the order is confirmed, not a button that reboots
+ * from a menu. A disclosure rather than a dropdown component: it needs no
+ * script to close and no class of its own.
+ */
+function HostActions({ host }: { host: Host }) {
+  const t = useT();
+  const refresh = useInventoryRefresh(host);
+  const online = host.connection_state === "online";
+  return (
+    <details className="chip inventory-refresh" style={{ position: "relative" }}>
+      <summary style={{ cursor: "pointer", listStyle: "none" }}>{t("Actions")} ▾</summary>
+      <div
+        style={{
+          position: "absolute", top: "100%", left: 0, zIndex: 5, minWidth: 220, marginTop: 4, padding: 8,
+          display: "flex", flexDirection: "column", gap: 6, background: "var(--bg-panel)",
+          border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", whiteSpace: "normal",
+        }}
+      >
+        <button
+          type="button"
+          className="link"
+          disabled={refresh.busy || !online}
+          title={online ? t("ask the host to re-read its whole inventory now") : t("the host is not connected")}
+          onClick={refresh.order}
+        >
+          {refresh.busy ? t("refreshing…") : t("Refresh the whole inventory")}
+        </button>
+        {refresh.message && <span className="message">{refresh.message}</span>}
+        <Link to={`/hosts/${host.id}/logs`}>{t("Open the logs")}</Link>
+        <Link to={`/hosts/${host.id}/power`}>{t("Reboot (power tab)")}</Link>
+        <Link to={`/hosts/${host.id}/jobs`}>{t("Jobs of this host")}</Link>
+      </div>
+    </details>
   );
 }
 

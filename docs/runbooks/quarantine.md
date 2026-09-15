@@ -29,8 +29,10 @@ every change carries a reason.
 - `FLOTESTRO_CLONE_POLICY` is `quarantine` (the default) or `report`. A clone is the same
   certificate alive on a different boot id and address while the previous session still
   heartbeats; a reconnect from the same address is not one.
-- Quarantine and release are API calls without a panel button; identity recovery and
-  decommission are on the host page ("Order identity recovery…").
+- All four are on the host page, in the lifecycle card of the overview ("Quarantine host…",
+  "Release from quarantine…", "Order identity recovery…", "Decommission host…"); each asks for
+  the reason, the typed hostname and, when the session is stale, a fresh sign-in. The API calls
+  below are what those buttons send.
 
 ## Procedure
 

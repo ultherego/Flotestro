@@ -118,9 +118,10 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		                       approval_fingerprint, idempotency_key,
 		                       offline_policy, deadline_at, manual_gate,
 		                       connectivity_lost_absolute, compensates_campaign_id,
-		                       reboot_timeout_seconds, policy_id, policy_version)
+		                       reboot_timeout_seconds, policy_id, policy_version,
+		                       retries_campaign_id)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27, $28, $29)
+		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27, $28, $29, $30)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
 	// The reboot timeout is recorded resolved, like the deadline: the row
 	// says how long the campaign really waits, and the orchestrator does
@@ -134,7 +135,8 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		fingerprint, nullable(spec.IdempotencyKey),
 		string(spec.OfflinePolicy), int(spec.Deadline()/time.Minute), spec.ManualGate,
 		spec.ConnectivityLostAbsolute, nullable(spec.CompensatesCampaignID),
-		int(spec.RebootTimeout()/time.Second), nullable(spec.PolicyID), nullableInt(spec.PolicyVersion))
+		int(spec.RebootTimeout()/time.Second), nullable(spec.PolicyID), nullableInt(spec.PolicyVersion),
+		nullable(spec.RetriesCampaignID))
 	if err != nil {
 		return nil, fmt.Errorf("creating the campaign: %w", err)
 	}
@@ -824,35 +826,121 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 	return &campaigns[0], nil
 }
 
-// List returns the campaigns, optionally narrowed by state.
 // Scope is a site-environment pair. An empty field means "any".
 type Scope struct {
 	Site        string
 	Environment string
 }
 
+// ListFilter narrows the campaign list. Every field is optional; the
+// page is bounded by Limit and starts at Offset, newest campaign first.
+type ListFilter struct {
+	State string
+	// Action is the operation, as the record names it.
+	Action string
+	// CreatedBy is the subject that ordered the campaign.
+	CreatedBy string
+	// Since keeps the campaigns created at or after the moment.
+	Since  *time.Time
+	Limit  int
+	Offset int
+}
+
+// ListPage is one page of the campaign list with the count of the whole
+// list under the same filter, so a screen can say where the page stands.
+type ListPage struct {
+	Items []Campaign
+	Total int
+}
+
 // List returns the campaigns narrowed to the scopes in which the caller has
-// the right to read.
+// the right to read, and to the filter.
 //
 // A campaign has no scope of its own - it has targets. Visible is therefore
 // the one that touches at least one host from the caller's scope; the
 // operator of one environment sees the campaigns that concern them and does
 // not see anybody else's.
-func (s *Store) List(ctx context.Context, state string, limit int, scopes []Scope) ([]Campaign, error) {
+//
+// Every campaign of the page carries its progress: the tally of its
+// hosts, read with one query over the page's targets rather than one per
+// row, so a list of two hundred campaigns costs the database two reads.
+func (s *Store) List(ctx context.Context, filter ListFilter, scopes []Scope) (ListPage, error) {
+	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	offset := max(filter.Offset, 0)
 	clause := "where 1 = 1"
 	args := []any{}
-	if state != "" {
-		args = append(args, state)
+	if filter.State != "" {
+		args = append(args, filter.State)
 		clause += fmt.Sprintf(" and state = $%d", len(args))
+	}
+	if filter.Action != "" {
+		args = append(args, filter.Action)
+		clause += fmt.Sprintf(" and action_type = $%d", len(args))
+	}
+	if filter.CreatedBy != "" {
+		args = append(args, filter.CreatedBy)
+		clause += fmt.Sprintf(" and created_by = $%d", len(args))
+	}
+	if filter.Since != nil {
+		args = append(args, *filter.Since)
+		clause += fmt.Sprintf(" and created_at >= $%d", len(args))
 	}
 	if warunek, dodatkowe := scopeCondition(scopes, len(args)); warunek != "" {
 		clause += warunek
 		args = append(args, dodatkowe...)
 	}
-	return s.query(ctx, clause+" order by created_at desc limit "+itoa(limit), args...)
+	var total int
+	if err := s.pool.QueryRow(ctx, "select count(*) from campaigns "+clause, args...).Scan(&total); err != nil {
+		return ListPage{}, err
+	}
+	items, err := s.query(ctx, clause+" order by created_at desc limit "+itoa(limit)+" offset "+itoa(offset), args...)
+	if err != nil {
+		return ListPage{}, err
+	}
+	if err := s.attachProgress(ctx, items); err != nil {
+		return ListPage{}, err
+	}
+	return ListPage{Items: items, Total: total}, nil
+}
+
+// attachProgress fills the progress of every campaign given from one
+// grouped read of their targets. A campaign without targets in the
+// answer gets an empty tally rather than none: the row is to show zeros,
+// not a blank that reads as "not known".
+func (s *Store) attachProgress(ctx context.Context, items []Campaign) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	by := make(map[string]*Campaign, len(items))
+	for i := range items {
+		ids = append(ids, items[i].ID)
+		items[i].Progress = &Progress{}
+		by[items[i].ID] = &items[i]
+	}
+	rows, err := s.pool.Query(ctx, `
+		select campaign_id::text, state, count(*)
+		  from campaign_targets
+		 where campaign_id = any($1::uuid[])
+		 group by campaign_id, state`, ids)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var campaignID, state string
+		var count int
+		if err := rows.Scan(&campaignID, &state, &count); err != nil {
+			return err
+		}
+		if campaign, present := by[campaignID]; present {
+			campaign.Progress.Add(TargetState(state), count)
+		}
+	}
+	return rows.Err()
 }
 
 // scopeCondition builds the visibility condition over a campaign's targets.
@@ -890,7 +978,12 @@ const campaignColumns = `
 	            then (select count(*) from campaign_targets t
 	                   where t.campaign_id = campaigns.id and ` + changedTargetCondition + `)
 	            else 0 end,
-	       coalesce(policy_id::text, ''), coalesce(policy_version, 0)
+	       coalesce(policy_id::text, ''), coalesce(policy_version, 0),
+	       coalesce(retries_campaign_id::text, ''),
+	       coalesce((select o.name from campaigns o where o.id = campaigns.retries_campaign_id), ''),
+	       coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'state', c.state)
+	                                  order by c.created_at)
+	                   from campaigns c where c.retries_campaign_id = campaigns.id), '[]'::jsonb)
 	from campaigns `
 
 // changedTargetCondition tells a target whose change landed on the host,
@@ -931,7 +1024,8 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.OfflinePolicy, &c.DeadlineAt, &c.ManualGate, &c.GateAdvancedBy,
 			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute, &c.RebootTimeoutSeconds,
 			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy, &c.ChangedHosts,
-			&c.PolicyID, &c.PolicyVersion); err != nil {
+			&c.PolicyID, &c.PolicyVersion,
+			&c.RetriesCampaignID, &c.RetriesCampaignName, &c.RetriedBy); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)

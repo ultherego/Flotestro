@@ -225,6 +225,9 @@ type Host struct {
 	// host, not a line to dig out of the audit trail.
 	LifecycleReason    string     `json:"lifecycle_reason,omitempty"`
 	LifecycleChangedAt *time.Time `json:"lifecycle_changed_at,omitempty"`
+	// LifecycleChangedBy is who took the decision: an operator's subject,
+	// or the agent or the panel when the state changed by rule.
+	LifecycleChangedBy string     `json:"lifecycle_changed_by,omitempty"`
 	OSFamily           string     `json:"os_family,omitempty"`
 	OSDistribution     string     `json:"os_distribution,omitempty"`
 	OSVersion          string     `json:"os_version,omitempty"`
@@ -879,6 +882,33 @@ type ListFilter struct {
 	// (true) or with a count of none (false); unknown counts are left out
 	// of both, for the same reason.
 	SecurityUpdates *bool
+	// FailedUnits keeps the hosts with at least one failed unit (true) or
+	// with a count of none (false). A host that has not reported its
+	// units is in neither list: unknown is not "none".
+	FailedUnits *bool
+	// PackageDatabaseBroken keeps the hosts whose package database the
+	// last operation found broken (true) or sound (false). The true list
+	// leaves the retired hosts out, as the dashboard's counter does: a
+	// retired host is nobody's concern any more.
+	PackageDatabaseBroken *bool
+	// SSSDOffline keeps the domain-joined hosts whose SSSD reported itself
+	// offline (true) or online (false). A host outside a domain, or one
+	// whose SSSD has not answered, is in neither list; the true list
+	// leaves the retired hosts out, like the dashboard's counter.
+	SSSDOffline *bool
+	// AgentBehind keeps the hosts whose agent is older (true) or as new
+	// (false) as the newest version any visible host reports - the same
+	// yardstick the dashboard's "agents behind" tile counts by, since the
+	// panel has no release feed to name a newer one. A host whose version
+	// does not parse is neither behind nor current, and a retired host is
+	// out of both the yardstick and the lists.
+	AgentBehind *bool
+	// Relay keeps the hosts whose open session the named relay attested.
+	// The session, not the host, says which route it took: a host that
+	// connects directly today is not behind the relay it used yesterday.
+	Relay string
+	// FailureDomain keeps the hosts an operator placed in the named domain.
+	FailureDomain string
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
@@ -971,6 +1001,62 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 			conditions = append(conditions, "h.pending_security_updates = 0")
 		}
 	}
+	if f.FailedUnits != nil {
+		// The count is null for a host that has not reported; the
+		// comparison leaves it out of both answers.
+		if *f.FailedUnits {
+			conditions = append(conditions, "h.failed_units > 0")
+		} else {
+			conditions = append(conditions, "h.failed_units = 0")
+		}
+	}
+	if f.PackageDatabaseBroken != nil {
+		if *f.PackageDatabaseBroken {
+			conditions = append(conditions, "(h.package_database_broken and h.lifecycle_state <> 'retired')")
+		} else {
+			conditions = append(conditions, "not h.package_database_broken")
+		}
+	}
+	if f.SSSDOffline != nil {
+		// Only a host in a domain has an SSSD to be offline; the column is
+		// null until the host has said either way.
+		if *f.SSSDOffline {
+			conditions = append(conditions,
+				"(h.identity_enrolled and h.identity_sssd_online = false and h.lifecycle_state <> 'retired')")
+		} else {
+			conditions = append(conditions, "(h.identity_enrolled and h.identity_sssd_online = true)")
+		}
+	}
+	if f.AgentBehind != nil {
+		// The version is ordered numerically part by part, the way the
+		// dashboard orders it, and the newest one is taken over the hosts
+		// the caller may see: a scoped operator's fleet has a newest of its
+		// own, and the tile they clicked counted against that one.
+		newest := "select max(" + versionParts("n") + ") from hosts n" +
+			" where n.lifecycle_state <> 'retired' and n.agent_version ~ '^v?\\d+(\\.\\d+)*'"
+		if f.Scopes != nil {
+			if condition, extra := authz.ScopeSQL(f.Scopes, "n.site", "n.environment", len(args)); condition != "" {
+				newest += " and " + condition
+				args = append(args, extra...)
+			}
+		}
+		comparison := "<"
+		if !*f.AgentBehind {
+			comparison = "="
+		}
+		conditions = append(conditions,
+			"(h.lifecycle_state <> 'retired' and h.agent_version ~ '^v?\\d+(\\.\\d+)*'"+
+				" and "+versionParts("h")+" "+comparison+" ("+newest+"))")
+	}
+	if f.Relay != "" {
+		// The identifier travels as text and is cast in the query; the
+		// handler has checked that it is one.
+		args = append(args, f.Relay)
+		conditions = append(conditions, fmt.Sprintf(
+			"exists (select 1 from agent_sessions s"+
+				" where s.host_id = h.id and s.ended_at is null and s.relay_id = $%d::uuid)", len(args)))
+	}
+	add("h.failure_domain", f.FailureDomain)
 	if f.Capability != "" {
 		args = append(args, f.Capability)
 		conditions = append(conditions, fmt.Sprintf(
@@ -994,6 +1080,14 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 		}
 	}
 	return conditions, args, nil
+}
+
+// versionParts renders the agent version of the aliased host row as an
+// array of integers, so two versions compare part by part rather than as
+// text - '0.10.0' after '0.9.0', not before it. It reads only a version
+// the caller has already matched against the same pattern.
+func versionParts(alias string) string {
+	return "string_to_array(substring(" + alias + ".agent_version from '^v?(\\d+(?:\\.\\d+)*)'), '.')::int[]"
 }
 
 // escapeLike neutralises the pattern characters of a search. An operator
@@ -1206,7 +1300,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, coalesce(h.owner, ''), h.tags,
 		       coalesce(h.failure_domain, ''), h.release_channel,
-		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at,
+		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at, h.lifecycle_changed_by,
 		       coalesce(h.os_family, ''), coalesce(h.os_distribution, ''),
 		       coalesce(h.os_version, ''), coalesce(h.architecture, ''), coalesce(h.agent_version, ''),
 		       h.connection_state, h.last_seen_at, coalesce(h.boot_id, ''),
@@ -1256,7 +1350,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var identityObservedAt *time.Time
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment, &h.Owner, &h.Tags,
 			&h.FailureDomain, &h.ReleaseChannel,
-			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt,
+			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt, &h.LifecycleChangedBy,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
 			&h.AgentVersion, &h.ConnectionState, &h.LastSeenAt, &h.BootID,
 			&h.AgentBuildCommit, &h.AgentProtocolMin, &h.AgentProtocolMax,

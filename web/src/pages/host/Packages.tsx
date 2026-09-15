@@ -70,6 +70,7 @@ export function Packages() {
   const [toRemove, setToRemove] = useState<string[] | null>(null);
   const [sourceIntent, setSourceIntent] = useState<SourceIntent | null>(null);
   const [agentVersion, setAgentVersion] = useState("");
+  const [repairing, setRepairing] = useState(false);
   const [message, setMessage] = useState("");
 
   // The release channel is a policy recorded in the panel, not an operation:
@@ -94,6 +95,7 @@ export function Packages() {
           : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
       );
       setToRemove(null);
+      setRepairing(false);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
@@ -167,7 +169,19 @@ export function Packages() {
             <Fact label={t("Manager")}>{packages?.manager || "—"}</Fact>
             <Fact label={t("Package database")}>
               {host.package_database_broken
-                ? <span className="badge error">{t("needs repair")}</span>
+                ? (
+                  <>
+                    <span className="badge error">{t("needs repair")}</span>
+                    {/* Every other package operation is refused while the
+                        database is broken, so the repair stands where the
+                        verdict is. Critical: it finishes a transaction
+                        somebody interrupted, with a reason and an approval. */}
+                    {" "}
+                    <button type="button" className="link" onClick={() => setRepairing(true)} disabled={repairing}>
+                      {t("Repair the package database…")}
+                    </button>
+                  </>
+                )
                 : <span className="badge ok">{t("healthy")}</span>}
             </Fact>
             <Fact label={t("Repositories")}>{knownSources ? knownSources.length : <Unknown />}</Fact>
@@ -367,6 +381,23 @@ export function Packages() {
             })
           }
           onCancel={() => setSourceIntent(null)}
+        />
+      )}
+
+      {repairing && (
+        <TargetConfirmation
+          host={host}
+          label={t("Repair the package database")}
+          description={t("The host finishes the interrupted package transaction on {host} and configures what was left half-way. Package operations are refused until this succeeds.", { host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason) =>
+            request.mutate({
+              action: "packages.repair",
+              reason,
+              payload: { package_repair: {} },
+            })
+          }
+          onCancel={() => setRepairing(false)}
         />
       )}
 

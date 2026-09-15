@@ -9,6 +9,8 @@ import type {
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Stat, StatGrid, Toolbar } from "../components/layout";
 import { StatusBar } from "../components/widgets";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { bytes } from "../lib/format";
 import { t as translate, useT } from "../i18n";
 
@@ -130,6 +132,8 @@ export function FleetMonitoring() {
   const [editing, setEditing] = useState<AlertRule | "new" | null>(null);
   const [historyState, setHistoryState] = useState<AlertState | "">("");
   const [message, setMessage] = useState("");
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const overview = useQuery({
     queryKey: ["monitoring", "fleet"],
@@ -166,14 +170,30 @@ export function FleetMonitoring() {
     },
     onError: (error) => setMessage(errorText(error)),
   });
+  // The rule table is below the message strip, so the outcome of a delete
+  // is also announced where the button was pressed.
   const removeRule = useMutation({
     mutationFn: (rule: AlertRule) => api.del(`/api/v1/monitoring/rules/${rule.id}`),
     onSuccess: (_, rule) => {
-      setMessage(t("Rule {name} is deleted; its alerts resolve on the next evaluation.", { name: rule.name }));
+      const text = t("Rule {name} is deleted; its alerts resolve on the next evaluation.", { name: rule.name });
+      setMessage(text);
+      toast.success(text);
       refresh();
     },
-    onError: (error) => setMessage(errorText(error)),
+    onError: (error) => {
+      setMessage(errorText(error));
+      toast.error(errorText(error));
+    },
   });
+  const askToDeleteRule = async (rule: AlertRule) => {
+    const answer = await confirm({
+      title: t("Delete the rule"),
+      body: t("Delete the rule {name}? Its alerts resolve on the next evaluation.", { name: rule.name }),
+      confirmLabel: t("Delete"),
+      danger: true,
+    });
+    if (answer.ok) removeRule.mutate(rule);
+  };
   const endSilence = useMutation({
     mutationFn: (silence: Silence) =>
       api.del(`/api/v1/hosts/${silence.host_id}/monitoring/silences/${encodeURIComponent(silence.id)}`),
@@ -314,9 +334,7 @@ export function FleetMonitoring() {
                           <button
                             className="secondary"
                             disabled={removeRule.isPending}
-                            onClick={() => {
-                              if (window.confirm(t("Delete the rule {name}? Its alerts resolve on the next evaluation.", { name: rule.name }))) removeRule.mutate(rule);
-                            }}
+                            onClick={() => askToDeleteRule(rule)}
                           >
                             {t("Delete")}
                           </button>

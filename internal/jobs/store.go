@@ -1137,7 +1137,11 @@ func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 // ListFilter describes the filters of a task list.
 type ListFilter struct {
 	HostID string
-	State  string
+	// HostnamePrefix keeps the tasks of the hosts whose name begins with
+	// it: the operator knows a host by its name, and a name typed in full
+	// is a prefix of itself.
+	HostnamePrefix string
+	State          string
 	// Action keeps one operation type; ActionPrefix a family of them, by
 	// the beginning of the name (packages. is every package operation);
 	// Actor the identity that ordered it; CampaignID the rollout the tasks
@@ -1193,6 +1197,15 @@ func (f ListFilter) conditions() ([]string, []any) {
 		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
 	add("host_id", f.HostID)
+	// The name is compared as a string, like the operation prefix: a
+	// hostname carries dots and dashes, and an underscore typed by mistake
+	// must not turn into a wildcard.
+	if f.HostnamePrefix != "" {
+		args = append(args, f.HostnamePrefix)
+		conditions = append(conditions, fmt.Sprintf(
+			"exists (select 1 from hosts h where h.id = jobs.host_id and left(h.hostname, length($%d)) = $%d)",
+			len(args), len(args)))
+	}
 	add("state", f.State)
 	add("action_type", f.Action)
 	// The prefix is compared as a string, not as a pattern: an operation

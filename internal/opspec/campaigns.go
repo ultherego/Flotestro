@@ -123,9 +123,17 @@ var campaignModes = map[ActionType]CampaignMode{
 
 	// Operations with their own state machine. A reboot is settled by the
 	// host coming back with a new boot ID, not by the command being sent.
-	ActionSystemReboot:           CampaignSpecialized,
-	ActionDomainEnroll:           CampaignSpecialized,
-	ActionPackageRepair:          CampaignSpecialized,
+	ActionSystemReboot:  CampaignSpecialized,
+	ActionDomainEnroll:  CampaignSpecialized,
+	ActionPackageRepair: CampaignSpecialized,
+	// The rollback of a network profile and the restore of a firewall rule
+	// set name a plan the host kept under an identifier it minted from its
+	// own clock at the time of the change - a different one on every host,
+	// and gone from the host the moment the change was confirmed. One
+	// payload could name one host's plan at most, so neither runs as
+	// same_payload; a bulk rollback would need the engine to split the
+	// order host by host from the identifiers the original tasks reported,
+	// and that sequence does not exist yet.
 	ActionNetworkRollback:        CampaignSpecialized,
 	ActionFirewallRulesetRestore: CampaignSpecialized,
 	// A fleet remediation: every host gets its own plan of typed steps,

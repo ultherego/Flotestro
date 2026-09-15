@@ -534,6 +534,10 @@ func nonCancelable(state jobs.State, action opspec.ActionType) (opspec.CancelMod
 // type is made of.
 var actionPrefixPattern = regexp.MustCompile(`^[a-z][a-z0-9_.]{0,63}$`)
 
+// hostnamePrefixPattern bounds the hostname filter to the characters a
+// host name is made of; the length is what a DNS name may reach.
+var hostnamePrefixPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$`)
+
 // requiresSecondPerson says whether the environment requires approval by a
 // person other than the requester.
 func (s *Server) requiresSecondPerson(environment string) bool {
@@ -550,14 +554,30 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	// a host query for every job separately.
 	scopes := principal.ScopesFor(authz.PermJobRead)
 	filter := jobs.ListFilter{
-		HostID:       query.Get("host_id"),
-		State:        query.Get("state"),
-		Action:       query.Get("action"),
-		ActionPrefix: query.Get("action_prefix"),
-		Actor:        query.Get("actor"),
-		CampaignID:   query.Get("campaign_id"),
-		FanoutID:     query.Get("fanout_id"),
-		ErrorCode:    query.Get("error_code"),
+		HostID:         query.Get("host_id"),
+		HostnamePrefix: query.Get("hostname"),
+		State:          query.Get("state"),
+		Action:         query.Get("action"),
+		ActionPrefix:   query.Get("action_prefix"),
+		Actor:          query.Get("actor"),
+		CampaignID:     query.Get("campaign_id"),
+		FanoutID:       query.Get("fanout_id"),
+		ErrorCode:      query.Get("error_code"),
+	}
+	// The identifiers are typed columns: a value that is not one would
+	// fail in the database and come back as a server fault, when it is
+	// the request that is wrong.
+	if filter.HostID != "" {
+		if _, err := uuid.Parse(filter.HostID); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_filter", "host_id must be a host identifier")
+			return
+		}
+	}
+	// A hostname is what a host is called on the wire; the filter takes
+	// the beginning of one, so a typed name narrows the list as it grows.
+	if filter.HostnamePrefix != "" && !hostnamePrefixPattern.MatchString(filter.HostnamePrefix) {
+		problem(w, http.StatusBadRequest, "invalid_filter", "hostname must be the beginning of a host name")
+		return
 	}
 	// A family of operations is named by its prefix, packages. for the
 	// package history of a host; the prefix is an operation name cut short,

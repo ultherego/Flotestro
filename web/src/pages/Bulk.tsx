@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
 import type {
-  Campaign, CampaignTarget, OperationContract, ResourceClaim, SelectorExpression,
+  Campaign, CampaignTarget, Facet, FleetActivity, OperationContract, ResourceClaim, SelectorExpression,
 } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
@@ -26,54 +26,45 @@ import { useT } from "../i18n";
  */
 export function Bulk() {
   const t = useT();
-  const [step, setStep] = useState(0);
+  // Another screen may open the workspace with an order half written - the
+  // certificate view hands over a rotation stage this way. The address
+  // carries the operation, a name and a payload; everything else is
+  // decided here. An address with nothing in it reopens the draft the
+  // browser kept, so a reload halfway through does not start over.
+  const [prefill] = useSearchParams();
+  const [draft] = useState(() => prefilledOrder(prefill) ?? loadDraft(sessionStorageOrNull()));
+  const [step, setStep] = useState(draft?.step ?? 0);
   // The campaign comes into being halfway through. Until then we work on an
   // order, afterwards - on a campaign that computes its plans itself and
   // waits for consent.
   const [campaignID, setCampaignID] = useState("");
-  // Another screen may open the workspace with an order half written - the
-  // certificate view hands over a rotation stage this way. The address
-  // carries the operation, a name and a payload; everything else is
-  // decided here.
-  const [prefill] = useSearchParams();
-  const [order, setOrder] = useState<Order>({
-    name: prefill.get("name") ?? "",
-    action: prefill.get("action") ?? "",
-    unit: "",
-    securityOnly: true,
-    payloadText: prefill.get("payload") ?? "",
-    mapping: {},
-    pretty: "",
-    compensates: prefill.get("compensates") ?? "",
-    hostIDs: prefill.getAll("host_id"),
-    site: "",
-    environment: "",
-    osFamily: "",
-    targetMode: "filters",
-    group: "",
-    rules: [{ field: "tag", value: "", negated: false }],
-    combine: "all",
-    exclude: [],
-    excludeReason: "",
-    canary: 1,
-    wave: 10,
-    concurrent: 5,
-    thresholdPercent: 20,
-    thresholdCount: 0,
-    rebootPolicy: "never",
-    rebootTimeoutSeconds: REBOOT_TIMEOUT.default,
-    offlinePolicy: "",
-    deadlineMinutes: 24 * 60,
-    manualGate: false,
-    connectivityLost: 0,
-  });
+  const [order, setOrder] = useState<Order>(draft?.order ?? emptyOrder());
 
   const change = (delta: Partial<Order>) =>
     setOrder((previous) => ({ ...previous, ...delta }));
 
+  // The draft follows every change until the campaign exists: after that
+  // the record on the server is the truth, and a stale draft reopening on
+  // the next visit would look like a second order waiting to be placed.
+  useEffect(() => {
+    if (campaignID) return;
+    saveDraft(sessionStorageOrNull(), { order, step });
+  }, [order, step, campaignID]);
+
   const capabilities = useCapabilities();
   const operations = useOperations();
   const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
+  const chosenOperation = bulk.find((item) => item.action === order.action);
+  // An operation that arrived in the address may be one the catalogue
+  // refuses in bulk - a rollback family, a specialised sequence. The
+  // catalogue's reason closes the first gate; the server would refuse the
+  // order anyway, and later.
+  const unready = order.action && operations.data && !chosenOperation
+    ? operations.data.items.find((item) => item.action === order.action)
+    : undefined;
+  const refusal = unready
+    ? unready.campaign_refusal ?? t("the catalogue does not open it to the fleet")
+    : undefined;
   // A prefilled operation without a payload takes the template once the
   // catalogue is in, exactly as choosing it by hand would.
   const prefilledTemplate = order.action && !order.payloadText && !WIZARD_OPERATIONS.includes(order.action)
@@ -125,8 +116,8 @@ export function Bulk() {
   // the preview reads the selector fields, and a compensation narrowed to
   // one host previews the whole set the original changed. The named hosts
   // are what the order carries, so they are what the count says.
-  const eligible = order.hostIDs.length > 0 ? order.hostIDs.length : preview.data?.eligible ?? 0;
-  const gates = stepGates(t, order, preview.data, campaign.data);
+  const eligible = orderTargets(order, preview.data);
+  const gates = stepGates(t, order, preview.data, campaign.data, refusal);
 
   // A backend without a planning phase will not drive any of these changes.
   // A wizard that ends in an error after the form is filled in is worse than
@@ -152,7 +143,7 @@ export function Bulk() {
       />
 
       <ScopeBar order={order} preview={preview.data} campaign={campaign.data}
-        risk={bulk.find((item) => item.action === order.action)?.risk} />
+        targets={eligible} risk={chosenOperation?.risk} />
 
       <ol className="bulk-steps">
         {STEPS.map((title, index) => (
@@ -181,6 +172,7 @@ export function Bulk() {
           bulk={bulk}
           refusals={refusals}
           preview={preview.data}
+          refusal={refusal}
         />
       )}
       {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} />}
@@ -190,25 +182,278 @@ export function Bulk() {
           order={order}
           change={change}
           targets={eligible}
-          declaredPolicy={bulk.find((item) => item.action === order.action)?.offline_policy}
+          declaredPolicy={chosenOperation?.offline_policy}
         />
       )}
-      {step === 4 && (
+      {step === 4 && <WindowStep order={order} change={change} operation={chosenOperation} />}
+      {step === 5 && (
         <CreateStep
           order={order}
+          change={change}
           targets={eligible}
           compensates={preview.data?.compensates}
           campaignID={campaignID}
           onCreated={(id) => {
+            // The order is placed: the draft would only reopen an order
+            // that already became a campaign.
+            clearDraft(sessionStorageOrNull());
             setCampaignID(id);
-            setStep(5);
+            setStep(6);
           }}
         />
       )}
-      {step === 5 && <PlansStep campaignID={campaignID} campaign={campaign.data} />}
-      {step === 6 && <ApprovalStep campaignID={campaignID} campaign={campaign.data} />}
+      {step === 6 && <PlansStep campaignID={campaignID} campaign={campaign.data} />}
+      {step === 7 && <ApprovalStep campaignID={campaignID} campaign={campaign.data} />}
     </>
   );
+}
+
+/** The order as the wizard starts it, before anything is typed. */
+export function emptyOrder(): Order {
+  return {
+    name: "",
+    action: "",
+    unit: "",
+    securityOnly: true,
+    payloadText: "",
+    mapping: {},
+    pretty: "",
+    compensates: "",
+    hostIDs: [],
+    site: "",
+    environment: "",
+    osFamily: "",
+    targetMode: "filters",
+    group: "",
+    rules: [{ field: "tag", value: "", negated: false }],
+    combine: "all",
+    exclude: [],
+    excludeReason: "",
+    canary: 1,
+    wave: 10,
+    concurrent: 5,
+    thresholdPercent: 20,
+    thresholdCount: 0,
+    rebootPolicy: "never",
+    rebootTimeoutSeconds: REBOOT_TIMEOUT.default,
+    offlinePolicy: "",
+    deadlineMinutes: 24 * 60,
+    manualGate: false,
+    connectivityLost: 0,
+    reason: "",
+    maintenanceStart: "",
+    maintenanceEnd: "",
+    healthCheckUnits: "",
+    jobTimeoutSeconds: 0,
+    requiresApproval: true,
+  };
+}
+
+/**
+ * The order another screen handed over in the address, or null when the
+ * address carries no order. A link with an operation in it is a new order
+ * and wins over a draft: the operator followed it on purpose.
+ */
+export function prefilledOrder(params: URLSearchParams): Draft | null {
+  if (!params.has("action") && !params.has("name") && !params.has("reason")) return null;
+  return {
+    order: {
+      ...emptyOrder(),
+      name: params.get("name") ?? "",
+      action: params.get("action") ?? "",
+      payloadText: params.get("payload") ?? "",
+      compensates: params.get("compensates") ?? "",
+      hostIDs: params.getAll("host_id"),
+      reason: params.get("reason") ?? "",
+    },
+    step: 0,
+  };
+}
+
+/** What the browser keeps between reloads: the order and the step it was on. */
+export type Draft = { order: Order; step: number };
+
+/** The key the draft is kept under in the browser's session storage. */
+export const DRAFT_KEY = "flotestro.bulk.draft";
+
+/** The steps a draft may reopen on: anything before the campaign exists. */
+const LAST_DRAFT_STEP = 5;
+
+/**
+ * The session storage of this tab, or null where there is none: a private
+ * window or blocked site data leave the wizard working without a draft
+ * rather than failing on the first keystroke.
+ */
+function sessionStorageOrNull(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The draft the browser kept, laid over an empty order so a field this
+ * release added and an older draft does not know starts from its default
+ * instead of from nothing. A draft that is not an object is ignored.
+ */
+export function loadDraft(storage: Storage | null): Draft | null {
+  if (!storage) return null;
+  try {
+    const raw = storage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Draft> | null;
+    if (!parsed || typeof parsed !== "object" || !parsed.order || typeof parsed.order !== "object") return null;
+    const step = typeof parsed.step === "number" ? Math.min(Math.max(0, Math.floor(parsed.step)), LAST_DRAFT_STEP) : 0;
+    return { order: { ...emptyOrder(), ...parsed.order }, step };
+  } catch {
+    return null;
+  }
+}
+
+export function saveDraft(storage: Storage | null, draft: Draft): void {
+  if (!storage) return;
+  try {
+    storage.setItem(DRAFT_KEY, JSON.stringify({ order: draft.order, step: Math.min(draft.step, LAST_DRAFT_STEP) }));
+  } catch {
+    // A draft that cannot be kept is a reload that starts over - the
+    // wizard itself keeps working.
+  }
+}
+
+export function clearDraft(storage: Storage | null): void {
+  if (!storage) return;
+  try {
+    storage.removeItem(DRAFT_KEY);
+  } catch {
+    // Nothing to clear where nothing could be kept.
+  }
+}
+
+/**
+ * The number of hosts the order is placed on: the hosts the address named,
+ * or what the preview counted as eligible, or what it matched. A host list
+ * from the campaign page is not a filter the preview can count, so the
+ * list itself is the number.
+ */
+export function orderTargets(order: Pick<Order, "hostIDs">, preview?: Pick<Preview, "count" | "eligible">): number {
+  if (order.hostIDs.length > 0) return order.hostIDs.length;
+  return preview?.eligible ?? preview?.count ?? 0;
+}
+
+/** The fewest characters a reason has to have to count as one. */
+export const MIN_REASON = 8;
+
+/** Whether the reason says something: at least MIN_REASON characters after trimming. */
+export function reasonValid(reason: string): boolean {
+  return reason.trim().length >= MIN_REASON;
+}
+
+/**
+ * The risk classes whose campaigns cannot skip the approval gate: an
+ * operation that can cut a host off or destroy what it holds is never one
+ * decision short of running on the fleet.
+ */
+export function approvalForced(risk: string | undefined): boolean {
+  return risk === "critical" || risk === "destructive";
+}
+
+/** What is wrong with the maintenance window, or null when nothing is. */
+export type WindowProblem = "start_invalid" | "end_invalid" | "start_past" | "end_past" | "end_before_start";
+
+/**
+ * The maintenance window as typed, checked against the clock: both ends
+ * are optional, a given end has to lie ahead of the start and of now, and
+ * a given start ahead of now - a window that already closed would create
+ * a campaign that waits forever, with nothing on screen to say so.
+ */
+export function windowProblem(start: string, end: string, now: Date): WindowProblem | null {
+  const from = start ? new Date(start) : null;
+  const to = end ? new Date(end) : null;
+  if (from && Number.isNaN(from.getTime())) return "start_invalid";
+  if (to && Number.isNaN(to.getTime())) return "end_invalid";
+  if (from && from.getTime() <= now.getTime()) return "start_past";
+  if (to && to.getTime() <= now.getTime()) return "end_past";
+  if (from && to && to.getTime() <= from.getTime()) return "end_before_start";
+  return null;
+}
+
+/** The unit names typed one per line or separated by commas, trimmed and deduplicated. */
+export function parseUnits(text: string): string[] {
+  const units: string[] = [];
+  for (const part of text.split(/[\n,;]/)) {
+    const unit = part.trim();
+    if (unit && !units.includes(unit)) units.push(unit);
+  }
+  return units;
+}
+
+/** The bounds of a job timeout the wizard accepts, in seconds. Zero means the operation's own default. */
+export const JOB_TIMEOUT = { min: 30, max: 24 * 3600 };
+
+export function jobTimeoutValid(seconds: number): boolean {
+  return seconds === 0 || (Number.isInteger(seconds) && seconds >= JOB_TIMEOUT.min && seconds <= JOB_TIMEOUT.max);
+}
+
+/**
+ * The instant of a datetime-local value as the API reads it: an RFC 3339
+ * timestamp in UTC. The input gives local wall time without a zone, and
+ * the Date constructor reads it in the browser's zone, which is the zone
+ * the operator meant.
+ */
+export function windowInstant(value: string): string | undefined {
+  if (!value) return undefined;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? undefined : at.toISOString();
+}
+
+/**
+ * The body of the order as the API takes it. A field the operator left at
+ * its default is not sent, so an order that said nothing about it reads
+ * like one on the server as well.
+ */
+export function campaignBody(order: Order, risk: string | undefined): Record<string, unknown> {
+  const expression = expressionOf(order);
+  const units = parseUnits(order.healthCheckUnits);
+  return {
+    name: order.name,
+    action: order.action,
+    reason: order.reason.trim(),
+    payload: orderPayload(order) ?? {},
+    selector: {
+      site: expression ? undefined : order.site || undefined,
+      environment: expression ? undefined : order.environment || undefined,
+      os_family: expression ? undefined : order.osFamily || undefined,
+      // A typed expression would decide over the host list on the
+      // server; the named hosts are the order, so it is not sent.
+      expression: order.hostIDs.length > 0 ? undefined : expression ?? undefined,
+      host_ids: order.hostIDs.length > 0 ? order.hostIDs : undefined,
+      exclude: order.exclude.length > 0 ? order.exclude : undefined,
+      exclude_reason: order.exclude.length > 0 ? order.excludeReason.trim() : undefined,
+    },
+    canary_size: order.canary,
+    wave_size: order.wave,
+    max_concurrent: order.concurrent,
+    failure_threshold_percent: order.thresholdPercent,
+    failure_threshold_absolute: order.thresholdCount,
+    reboot_policy: order.rebootPolicy,
+    // Sent only when it differs from the default, so an order with the
+    // default reads like one that said nothing about it.
+    reboot_timeout_seconds: order.rebootTimeoutSeconds !== REBOOT_TIMEOUT.default
+      ? order.rebootTimeoutSeconds : undefined,
+    offline_policy: order.offlinePolicy || undefined,
+    deadline_minutes: order.deadlineMinutes,
+    manual_gate: order.manualGate && order.canary > 0,
+    connectivity_lost_absolute: order.connectivityLost,
+    maintenance_start: windowInstant(order.maintenanceStart),
+    maintenance_end: windowInstant(order.maintenanceEnd),
+    health_check_units: units.length > 0 ? units : undefined,
+    job_timeout_seconds: order.jobTimeoutSeconds > 0 ? order.jobTimeoutSeconds : undefined,
+    // A critical operation carries the gate whatever the box says; the
+    // box is disabled for it, and the body says the same thing.
+    requires_approval: approvalForced(risk) ? true : order.requiresApproval,
+    compensates_campaign_id: order.compensates || undefined,
+  };
 }
 
 type Order = {
@@ -266,6 +511,24 @@ type Order = {
   manualGate: boolean;
   // How many lost sessions mid-task pause the campaign; zero disables it.
   connectivityLost: number;
+  // Why the change is made, or the change reference it answers to: the
+  // sentence the audit trail keeps next to the order. Required, so the
+  // trail does not fill with the operation name repeated.
+  reason: string;
+  // The maintenance window, as datetime-local values in the browser's
+  // zone; either end may be empty. No host is started outside it.
+  maintenanceStart: string;
+  maintenanceEnd: string;
+  // The units checked on every host once its change is done - after the
+  // reboot when one follows, right after the change when none does. One
+  // per line or comma-separated; empty means nothing is verified.
+  healthCheckUnits: string;
+  // How long one host's task may run, in seconds; zero takes the
+  // operation's own default from the catalogue.
+  jobTimeoutSeconds: number;
+  // Whether the campaign waits for a consent before anything runs. A
+  // critical operation cannot turn it off.
+  requiresApproval: boolean;
 };
 
 /**
@@ -290,6 +553,9 @@ export type Operation = OperationContract & {
   campaign_ready: boolean;
   offline_policy?: string;
   risk?: string;
+  // How long one task of the operation may run when the order says
+  // nothing; the wizard shows it next to the timeout field.
+  default_timeout_seconds?: number;
   payload_template?: Record<string, unknown>;
   needs_material?: boolean;
 };
@@ -316,21 +582,57 @@ export function useOperation(action: string | undefined): Operation | undefined 
 }
 
 /**
+ * The facets of the visible fleet - sites, environments, OS families with
+ * their host counts - counted in the database, under the same key the
+ * host list and the dashboard read them by, so one screen does not fetch
+ * what another just did.
+ */
+export function useFleetFacets() {
+  return useQuery({
+    queryKey: ["fleet-activity"],
+    queryFn: () => api.get<FleetActivity>("/api/v1/fleet/activity?hours=24"),
+    staleTime: 60_000,
+  });
+}
+
+/**
+ * The values a target field may take, offered under an input that still
+ * takes free text: the sites the fleet really has are a hint, not a
+ * boundary - a site with no host yet is a valid selector that matches
+ * nobody, and the preview says so.
+ */
+export function FacetList({ id, facets }: { id: string; facets?: Facet[] }) {
+  return (
+    <datalist id={id}>
+      {(facets ?? []).map((facet) => (
+        <option key={facet.key} value={facet.key} label={`${facet.count}`} />
+      ))}
+    </datalist>
+  );
+}
+
+/**
  * The reverse of a change, where a true one exists: an operation that puts
  * back what the forward one changed, as a new plan the operator approves.
  * A restart or a signal has no reverse, and the list says so by leaving
  * it out.
+ *
+ * A network profile and a firewall rule set have a reverse on one host -
+ * the rollback plan the host kept under the identifier the change
+ * reported - but not as a campaign: the identifier is minted on each host
+ * from its own clock, and the plan leaves the host the moment the change
+ * is confirmed. One payload could name one host's plan at most, and a
+ * settled campaign has already confirmed every host. The families are
+ * left out here on purpose, so the campaign page says there is no reverse
+ * to plan rather than offering an order the engine refuses.
  */
 export const REVERSE_OPERATION: Record<string, string> = {
   "file.ensure": "file.rollback",
-  "network.profile.apply": "network.rollback",
-  "firewall.rule.ensure": "firewall.ruleset.restore",
 };
 
 /**
- * The payload the reverse operation starts from: the same file, the same
- * interface. The version or the rollback identifier is per host and is
- * left for the operator to fill in.
+ * The payload the reverse operation starts from: the same file. The
+ * version is per host and is left for the operator to fill in.
  */
 export function reversePayload(action: string, payload: unknown): Record<string, unknown> {
   const source = payload && typeof payload === "object"
@@ -343,10 +645,6 @@ export function reversePayload(action: string, payload: unknown): Record<string,
   switch (action) {
     case "file.ensure":
       return { file: { path: text("file", "path"), version_sha256: "" } };
-    case "network.profile.apply":
-      return { network: { interface: text("network", "interface"), rollback_id: "" } };
-    case "firewall.rule.ensure":
-      return { firewall: { rollback_id: "" } };
   }
   return {};
 }
@@ -512,6 +810,7 @@ const STEPS = [
   "Targets",
   "Eligibility",
   "Rollout",
+  "Window & verification",
   "Create",
   "Plans",
   "Approval & run",
@@ -520,11 +819,31 @@ const STEPS = [
 /** A transition gate: the next step opens only when there is a reason to. */
 type Gate = { open: boolean; reason: string };
 
+/**
+ * The sentence for what is wrong with the window, or an empty string when
+ * nothing is; the words live here so the gate and the field say the same.
+ */
+function windowWords(t: (text: string) => string, problem: WindowProblem | null): string {
+  switch (problem) {
+    case "start_invalid":
+    case "end_invalid":
+      return t("the maintenance window is not a valid date and time");
+    case "start_past":
+      return t("the maintenance window starts in the past");
+    case "end_past":
+      return t("the maintenance window has already ended");
+    case "end_before_start":
+      return t("the maintenance window ends before it starts");
+  }
+  return "";
+}
+
 function stepGates(
   t: (text: string, params?: Record<string, string | number>) => string,
   order: Order,
   preview?: Preview,
   campaign?: Campaign,
+  refusal?: string,
 ): Gate[] {
   const hasAction = Boolean(order.action && order.name) &&
     (!UNIT_OPERATIONS.includes(order.action) || order.unit !== "") &&
@@ -532,15 +851,20 @@ function stepGates(
   const hasTargets = (preview?.count ?? 0) > 0;
   const hasEligible = (preview?.eligible ?? 0) > 0;
   const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
+  const window = windowWords(t, windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date()));
+  const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
   return [
-    { open: hasAction && exclusionsExplained, reason: exclusionsExplained
-      ? order.action === RENAME_OPERATION
-        ? t("pick an operation, name the campaign and give at least one host its new name")
-        : t("pick an operation, name the campaign and give it a valid payload")
-      : t("give the exclusions a reason") },
+    { open: hasAction && exclusionsExplained && !refusal, reason: refusal
+      ? t("the catalogue refuses this operation in bulk: {reason}", { reason: refusal })
+      : exclusionsExplained
+        ? order.action === RENAME_OPERATION
+          ? t("pick an operation, name the campaign and give at least one host its new name")
+          : t("pick an operation, name the campaign and give it a valid payload")
+        : t("give the exclusions a reason") },
     { open: hasAction && hasTargets, reason: t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
+    { open: window === "" && timeoutFits, reason: window || t("the job timeout is out of bounds") },
     { open: Boolean(campaign), reason: t("the campaign does not exist yet") },
     { open: Boolean(campaign && campaign.state !== "planning"), reason: t("hosts are still planning") },
   ];
@@ -558,11 +882,15 @@ function ScopeBar({
   order,
   preview,
   campaign,
+  targets,
   risk,
 }: {
   order: Order;
   preview?: Preview;
   campaign?: Campaign;
+  // The number the order is placed on: the named hosts when the address
+  // carries them, the preview's count otherwise.
+  targets: number;
   risk?: string;
 }) {
   const t = useT();
@@ -579,10 +907,12 @@ function ScopeBar({
       </div>
       <div className="facts">
         <span>
-          {t("targets")}: <strong>{preview?.eligible ?? preview?.count ?? 0}</strong>
-          {preview && preview.eligible !== undefined && preview.eligible !== preview.count && (
-            <> {t("of {n} matched", { n: preview.count })}</>
-          )}
+          {t("targets")}: <strong>{targets}</strong>
+          {order.hostIDs.length > 0
+            ? <> {t("named by identifier")}</>
+            : preview && preview.eligible !== undefined && preview.eligible !== preview.count && (
+              <> {t("of {n} matched", { n: preview.count })}</>
+            )}
         </span>
         {preview?.campaign_mode && <span>{t("mode")}: {preview.campaign_mode}</span>}
         {/* What the order undoes stays in view for the whole wizard: a
@@ -623,12 +953,17 @@ function ScopeStep({
   bulk,
   refusals,
   preview,
+  refusal,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   bulk: Operation[];
   refusals: Operation[];
   preview?: Preview;
+  // Why the catalogue refuses the operation the address named in bulk,
+  // so the refusal is read here and not from the server after the form
+  // is filled in.
+  refusal?: string;
 }) {
   const t = useT();
   const needsUnit = UNIT_OPERATIONS.includes(order.action);
@@ -640,6 +975,11 @@ function ScopeStep({
       title={`1. ${t("Scope")}`}
       description={t("The registry decides what may run on many hosts at once. An operation with no bulk mode is a deliberate refusal, not a missing screen.")}
     >
+      {refusal && (
+        <p className="page-error">
+          {t("{action} does not run as a campaign: {reason}", { action: order.action, reason: refusal })}
+        </p>
+      )}
       <FieldGrid>
         <Field label={t("Name")}>
           <input
@@ -974,6 +1314,9 @@ function TargetsStep({
   refusal?: unknown;
 }) {
   const t = useT();
+  // The values the fleet really has, offered under each field; free text
+  // still goes through, and the count below says what it matched.
+  const facets = useFleetFacets();
   return (
     <Card
       title={`2. ${t("Targets")}`}
@@ -1011,26 +1354,32 @@ function TargetsStep({
       }
     >
       <FieldGrid>
-        <Field label={t("Site")}>
+        <Field label={t("Site")} hint={t("Pick one the fleet has, or type any.")}>
           <input
             placeholder={t("site")}
             value={order.site}
+            list="bulk-sites"
             onChange={(e) => change({ site: e.target.value })}
           />
+          <FacetList id="bulk-sites" facets={facets.data?.by_site} />
         </Field>
-        <Field label={t("Environment")}>
+        <Field label={t("Environment")} hint={t("Pick one the fleet has, or type any.")}>
           <input
             placeholder={t("environment")}
             value={order.environment}
+            list="bulk-environments"
             onChange={(e) => change({ environment: e.target.value })}
           />
+          <FacetList id="bulk-environments" facets={facets.data?.by_environment} />
         </Field>
-        <Field label={t("OS family")}>
+        <Field label={t("OS family")} hint={t("Pick one the fleet has, or type any.")}>
           <input
             placeholder={t("os family")}
             value={order.osFamily}
+            list="bulk-os-families"
             onChange={(e) => change({ osFamily: e.target.value })}
           />
+          <FacetList id="bulk-os-families" facets={facets.data?.by_os_family} />
         </Field>
       </FieldGrid>
     </Card>
@@ -1251,15 +1600,102 @@ function RolloutStep({
           <input type="number" min={1} value={order.deadlineMinutes}
             onChange={(e) => change({ deadlineMinutes: +e.target.value })} />
         </Field>
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={order.manualGate}
-            disabled={order.canary <= 0}
-            onChange={(e) => change({ manualGate: e.target.checked })}
-          />{" "}
-          {t("stop after the canary until somebody advances the campaign")}
-        </label>
+        {/* A gate after the canary needs a canary to gate on: with none the
+            box is off, and the hint says why rather than leaving a control
+            that does nothing. */}
+        <div className="field">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={order.manualGate && order.canary > 0}
+              disabled={order.canary <= 0}
+              onChange={(e) => change({ manualGate: e.target.checked })}
+            />{" "}
+            {t("stop after the canary until somebody advances the campaign")}
+          </label>
+          {order.canary <= 0 && (
+            <span className="field-hint">{t("A manual gate needs a canary: set the canary above 0 to stop after it.")}</span>
+          )}
+        </div>
+      </FieldGrid>
+    </Card>
+  );
+}
+
+/**
+ * The window the change may run in, and what is checked afterwards. Both
+ * live in the campaign record and enter the approval fingerprint, so they
+ * are settled before the campaign exists - the approver reads them as
+ * part of what is approved.
+ */
+function WindowStep({
+  order,
+  change,
+  operation,
+}: {
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  operation?: Operation;
+}) {
+  const t = useT();
+  const problem = windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date());
+  const units = parseUnits(order.healthCheckUnits);
+  const forced = approvalForced(operation?.risk);
+  const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
+  return (
+    <Card
+      title={`5. ${t("Window and verification")}`}
+      description={t("No host is started outside the maintenance window, and every host is checked once its change is done. Both go into the fingerprint the approver signs.")}
+    >
+      <FieldGrid>
+        <Field label={t("Window opens")}
+          hint={problem === "start_past" || problem === "start_invalid"
+            ? windowWords(t, problem)
+            : t("Optional; hosts wait until then. Local time.")}>
+          <input type="datetime-local" value={order.maintenanceStart}
+            onChange={(e) => change({ maintenanceStart: e.target.value })} />
+        </Field>
+        <Field label={t("Window closes")}
+          hint={problem === "end_past" || problem === "end_before_start" || problem === "end_invalid"
+            ? windowWords(t, problem)
+            : t("Optional; no host is started once it closes - a host still waiting stays held back, and a host still rebooting fails and pauses the campaign.")}>
+          <input type="datetime-local" value={order.maintenanceEnd} min={order.maintenanceStart || undefined}
+            onChange={(e) => change({ maintenanceEnd: e.target.value })} />
+        </Field>
+        <Field label={t("Units to check afterwards")}
+          hint={units.length === 0
+            ? t("One unit per line or comma-separated, e.g. nginx.service. Checked on every host right after the change, or after the reboot when one follows; empty means nothing is verified.")
+            : t("{n} units will be checked on every host once its change is done.", { n: units.length })}
+          wide>
+          <textarea rows={3} className="mono" value={order.healthCheckUnits}
+            placeholder={"nginx.service\nphp-fpm.service"}
+            onChange={(e) => change({ healthCheckUnits: e.target.value })} spellCheck={false} />
+        </Field>
+        <Field label={t("Job timeout (seconds)")}
+          hint={!timeoutFits
+            ? t("Between {min} and {max} seconds, or 0 for the operation's default.", { min: JOB_TIMEOUT.min, max: JOB_TIMEOUT.max })
+            : operation?.default_timeout_seconds
+              ? t("How long one host's task may run; 0 keeps the operation's default of {n} seconds.", { n: operation.default_timeout_seconds })
+              : t("How long one host's task may run; 0 keeps the operation's default.")}>
+          <input type="number" min={0} max={JOB_TIMEOUT.max} step={30} value={order.jobTimeoutSeconds}
+            onChange={(e) => change({ jobTimeoutSeconds: +e.target.value })} />
+        </Field>
+        <div className="field">
+          <label className="toggle">
+            <input
+              type="checkbox"
+              checked={forced || order.requiresApproval}
+              disabled={forced}
+              onChange={(e) => change({ requiresApproval: e.target.checked })}
+            />{" "}
+            {t("requires an approval before anything runs")}
+          </label>
+          <span className="field-hint">
+            {forced
+              ? t("A {risk} operation cannot skip the approval: the consent is what binds the fingerprint of what runs on the fleet.", { risk: operation?.risk ?? "critical" })
+              : t("The approver signs the operation, the payload, the host list, the rollout policy and the set of plans as one fingerprint.")}
+          </span>
+        </div>
       </FieldGrid>
     </Card>
   );
@@ -1267,12 +1703,14 @@ function RolloutStep({
 
 function CreateStep({
   order,
+  change,
   targets,
   compensates,
   campaignID,
   onCreated,
 }: {
   order: Order;
+  change: (delta: Partial<Order>) => void;
   targets: number;
   compensates?: Preview["compensates"];
   campaignID: string;
@@ -1281,41 +1719,11 @@ function CreateStep({
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
+  const operation = useOperation(order.action || undefined);
+  const reasonOK = reasonValid(order.reason);
 
   const create = useMutation({
-    mutationFn: () =>
-      api.post<Campaign>("/api/v1/campaigns", {
-        name: order.name,
-        action: order.action,
-        reason: `bulk workspace: ${order.action}`,
-        payload: orderPayload(order) ?? {},
-        selector: {
-          site: expressionOf(order) ? undefined : order.site || undefined,
-          environment: expressionOf(order) ? undefined : order.environment || undefined,
-          os_family: expressionOf(order) ? undefined : order.osFamily || undefined,
-          // A typed expression would decide over the host list on the
-          // server; the named hosts are the order, so it is not sent.
-          expression: order.hostIDs.length > 0 ? undefined : expressionOf(order) ?? undefined,
-          host_ids: order.hostIDs.length > 0 ? order.hostIDs : undefined,
-          exclude: order.exclude.length > 0 ? order.exclude : undefined,
-          exclude_reason: order.exclude.length > 0 ? order.excludeReason.trim() : undefined,
-        },
-        canary_size: order.canary,
-        wave_size: order.wave,
-        max_concurrent: order.concurrent,
-        failure_threshold_percent: order.thresholdPercent,
-        failure_threshold_absolute: order.thresholdCount,
-        reboot_policy: order.rebootPolicy,
-        // Sent only when it differs from the default, so an order with the
-        // default reads like one that said nothing about it.
-        reboot_timeout_seconds: order.rebootTimeoutSeconds !== REBOOT_TIMEOUT.default
-          ? order.rebootTimeoutSeconds : undefined,
-        offline_policy: order.offlinePolicy || undefined,
-        deadline_minutes: order.deadlineMinutes,
-        manual_gate: order.manualGate && order.canary > 0,
-        connectivity_lost_absolute: order.connectivityLost,
-        compensates_campaign_id: order.compensates || undefined,
-      }),
+    mutationFn: () => api.post<Campaign>("/api/v1/campaigns", campaignBody(order, operation?.risk)),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       onCreated(campaign.id);
@@ -1325,7 +1733,7 @@ function CreateStep({
 
   return (
     <Card
-      title={`5. ${t("Create")}`}
+      title={`6. ${t("Create")}`}
       description={t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
     >
       {/* The link is part of what is created: the operator is to read
@@ -1341,8 +1749,25 @@ function CreateStep({
           {t("The original is linked, never rewritten; its hosts get a compensate step as the reverse change runs on them.")}
         </p>
       )}
+      <FieldGrid>
+        {/* The reason is the one sentence the audit trail keeps next to
+            the order; the operation name repeated there would say nothing
+            the record does not already say. */}
+        <Field label={t("Reason or change reference")}
+          hint={reasonOK
+            ? t("Kept in the audit trail next to the order, and shown to the approver.")
+            : t("Required: at least {n} characters, e.g. the change ticket and what it fixes.", { n: MIN_REASON })}
+          wide>
+          <input
+            value={order.reason}
+            placeholder={t("e.g. CHG-1234: rotate the web tier onto the patched kernel")}
+            onChange={(e) => change({ reason: e.target.value })}
+            disabled={Boolean(campaignID)}
+          />
+        </Field>
+      </FieldGrid>
       <Actions>
-        <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID)}>
+        <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID) || !reasonOK}>
           {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
         </button>
         {errorMessage && <p className="page-error">{errorMessage}</p>}
@@ -1369,7 +1794,7 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
   const groups = plans.data?.items ?? [];
   return (
     <Card
-      title={`6. ${t("Plans")}`}
+      title={`7. ${t("Plans")}`}
       description={planning
         ? t("Each host is computing its own diff. Nothing is applied while this runs.")
         : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
@@ -1444,7 +1869,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
   if (!campaign) return <Empty>{t("No campaign yet.")}</Empty>;
   return (
     <Card
-      title={`7. ${t("Approval and run")}`}
+      title={`8. ${t("Approval and run")}`}
       description={t("You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
       flush
     >
@@ -1453,7 +1878,14 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
       {campaign.state === "awaiting_approval" ? (
         <>
           <FieldGrid>
-            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required for a critical operation, at least 8 characters.")} wide>
+            {/* The consent is what the audit record keeps next to the
+                fingerprint; a consent without a reason is noise there, so
+                the button waits for one whatever the risk class. */}
+            <Field label={t("Reason (kept in the audit trail)")}
+              hint={reasonValid(reason)
+                ? t("Recorded with the fingerprint; a critical operation asks for fresh authentication as well.")
+                : t("Required: at least {n} characters.", { n: MIN_REASON })}
+              wide>
               <input value={reason} onChange={(e) => setReason(e.target.value)} />
             </Field>
             <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
@@ -1461,7 +1893,7 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
             </Field>
           </FieldGrid>
           <p>
-            <button onClick={() => approve.mutate()} disabled={approve.isPending}>
+            <button onClick={() => approve.mutate()} disabled={approve.isPending || !reasonValid(reason)}>
               {approve.isPending ? t("Approving…") : t("Approve and start")}
             </button>
           </p>

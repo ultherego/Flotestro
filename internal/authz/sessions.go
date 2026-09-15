@@ -186,6 +186,75 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) err
 	return err
 }
 
+// SessionView is a live browser session as the access screen lists it: when
+// it began, when it was last seen, when it ends by itself and where it
+// came from. The cookie digest and the provider tokens stay out of it.
+type SessionView struct {
+	ID          string    `json:"id"`
+	PrincipalID string    `json:"principal_id"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastSeenAt  time.Time `json:"last_seen_at"`
+	// ExpiresAt is the absolute end; IdleExpiresAt the earlier end an
+	// unused session meets. Whichever comes first ends it.
+	ExpiresAt     time.Time  `json:"expires_at"`
+	IdleExpiresAt time.Time  `json:"idle_expires_at"`
+	RemoteAddr    string     `json:"remote_addr,omitempty"`
+	UserAgent     string     `json:"user_agent,omitempty"`
+	AuthTime      *time.Time `json:"auth_time,omitempty"`
+	ACR           string     `json:"acr,omitempty"`
+	AMR           []string   `json:"amr"`
+}
+
+// ListSessionsOf returns the live sessions of an identity, the most
+// recently seen first. A revoked or expired session is not a session any
+// more and is not listed: the screen offers to end what is running.
+func (s *Store) ListSessionsOf(ctx context.Context, principalID string) ([]SessionView, error) {
+	const query = `
+		select id, principal_id, created_at, last_seen_at, absolute_expires_at, idle_expires_at,
+		       coalesce(remote_addr, ''), coalesce(user_agent, ''), authenticated_at, coalesce(acr, ''), amr
+		from web_sessions
+		where principal_id = $1
+		  and revoked_at is null
+		  and absolute_expires_at > now()
+		  and idle_expires_at > now()
+		order by last_seen_at desc`
+	rows, err := s.pool.Query(ctx, query, principalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sessions := []SessionView{}
+	for rows.Next() {
+		var session SessionView
+		if err := rows.Scan(&session.ID, &session.PrincipalID, &session.CreatedAt, &session.LastSeenAt,
+			&session.ExpiresAt, &session.IdleExpiresAt, &session.RemoteAddr, &session.UserAgent,
+			&session.AuthTime, &session.ACR, &session.AMR); err != nil {
+			return nil, err
+		}
+		if session.AMR == nil {
+			session.AMR = []string{}
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, rows.Err()
+}
+
+// RevokeSessionOf ends one session of an identity. The identity is part of
+// the key, as with a token: a session identifier read off one identity
+// cannot end the session of another through a mistaken path. False means
+// the identity has no such live session.
+func (s *Store) RevokeSessionOf(ctx context.Context, tx pgx.Tx, principalID, sessionID, reason string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
+		update web_sessions set revoked_at = now(), revocation_reason = $3, refresh_token = null
+		where id = $2 and principal_id = $1 and revoked_at is null
+		  and absolute_expires_at > now() and idle_expires_at > now()`,
+		principalID, sessionID, nullable(reason))
+	if err != nil {
+		return false, fmt.Errorf("ending the session: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // RevokeSessionsOf ends every session of an identity. Used when locking an
 // account: disabling it in the directory alone does not destroy an ongoing
 // panel session.

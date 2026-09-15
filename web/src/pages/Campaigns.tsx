@@ -1,23 +1,95 @@
-import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
-import { api, type Collection } from "../lib/api";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link, useSearchParams } from "react-router-dom";
+import { api } from "../lib/api";
 import type { Campaign } from "../lib/types";
 import { ErrorBox, Time, Empty, JobState } from "../components/ui";
-import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader } from "../components/layout";
+import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
+import { useDebounced } from "../lib/debounce";
+import { toInstant } from "../lib/format";
+import { useOperations } from "./Bulk";
 import { useT } from "../i18n";
 
+/** The tally of a campaign's hosts as the list carries it, per row. */
+type Progress = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  unknown: number;
+  skipped: number;
+  pending: number;
+};
+
+/** One page of the list: the rows and where they stand in the whole. */
+type CampaignPage = {
+  items: (Campaign & { progress?: Progress })[];
+  count: number;
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+/** The states the filter offers, in the order a campaign moves through them. */
+const CAMPAIGN_STATES = [
+  "planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "paused", "canceling",
+  "completed", "completed_with_issues", "failed", "plan_failed", "expired", "canceled",
+];
+
+/** How many rows one page holds. */
+const PAGE = 50;
+
+/**
+ * The campaign list. The filters run on the server and live in the
+ * address, so a page filtered to "the failed ones since Monday" can be
+ * sent as a link; the rows come one page at a time with the count of the
+ * whole. A new campaign is ordered in the Bulk workspace: the wizard there
+ * knows the reason, the offline policy and the typed selector, and a
+ * second, smaller wizard here would order campaigns without them.
+ */
 export function Campaigns() {
   const t = useT();
-  const [building, setBuilding] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const [state, setState] = useState(params.get("state") ?? "");
+  const [action, setAction] = useState(params.get("action") ?? "");
+  const [requester, setRequester] = useState(params.get("requester") ?? "");
+  const [since, setSince] = useState(params.get("since") ?? "");
+  const [offset, setOffset] = useState(Math.max(0, Number(params.get("offset")) || 0));
+  const settledRequester = useDebounced(requester.trim());
+  const sinceInstant = toInstant(since);
+
+  // The address follows the filter, not the other way round: what the
+  // operator narrowed the list to is what the link they copy carries.
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (state) next.set("state", state);
+    if (action) next.set("action", action);
+    if (settledRequester) next.set("requester", settledRequester);
+    if (since) next.set("since", since);
+    if (offset > 0) next.set("offset", String(offset));
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [state, action, settledRequester, since, offset, params, setParams]);
+
+  const query = new URLSearchParams({ limit: String(PAGE) });
+  if (state) query.set("state", state);
+  if (action) query.set("action", action);
+  if (settledRequester) query.set("requester", settledRequester);
+  if (sinceInstant) query.set("since", sinceInstant);
+  if (offset > 0) query.set("offset", String(offset));
   const { data, error } = useQuery({
-    queryKey: ["campaigns"],
-    queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=50"),
+    queryKey: ["campaigns", query.toString()],
+    queryFn: () => api.get<CampaignPage>(`/api/v1/campaigns?${query}`),
   });
+  // The operations the filter offers come from the catalogue, so the
+  // list names what can be ordered rather than what this file knows.
+  const operations = useOperations();
+  const actions = (operations.data?.items ?? []).filter((item) => item.campaign_ready).map((item) => item.action);
+  if (action && !actions.includes(action)) actions.push(action);
+  actions.sort();
+
   if (error) return <ErrorBox error={error} />;
 
-  // The bar counts the listed campaigns: the newest page, not the whole
+  // The bar counts the listed campaigns: this page, not the whole
   // history, and the caption says so. Before the list arrives nothing is
   // known, and the segments show dashes.
   const campaigns = data?.items ?? [];
@@ -34,7 +106,9 @@ export function Campaigns() {
   // A canceling campaign still has hosts at work; it is counted with the
   // canceled ones because its fate is decided, not because it has ended.
   const canceled = count(["canceled", "canceling", "cancelled"]);
-  const listed = t("among the {n} listed", { n: campaigns.length });
+  const listed = data
+    ? t("{shown} of {total} shown", { shown: campaigns.length, total: data.total })
+    : t("among the {n} listed", { n: campaigns.length });
   // How the listed campaigns ended, and what they did: a fleet whose
   // campaigns mostly end canceled has a planning problem, not a rollout
   // problem, and that is read here rather than row by row.
@@ -42,11 +116,15 @@ export function Campaigns() {
     campaigns.reduce<Record<string, number>>((acc, campaign) => { const k = key(campaign); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
   ).sort((x, y) => y[1] - x[1]);
   const outcomes = tally((campaign) => campaign.state);
-  const operations = tally((campaign) => campaign.action_type);
-  const outcomeTone = (state: string): WidgetTone =>
-    state === "completed" ? "ok" : ["failed", "plan_failed", "expired", "partially_applied"].includes(state) ? "error"
-      : ["paused", "manual_gate", "awaiting_approval", "planned", "completed_with_issues"].includes(state) ? "warn"
-        : ["canceled", "canceling", "cancelled"].includes(state) ? "unknown" : "info";
+  const byOperation = tally((campaign) => campaign.action_type);
+  const outcomeTone = (value: string): WidgetTone =>
+    value === "completed" ? "ok" : ["failed", "plan_failed", "expired", "partially_applied"].includes(value) ? "error"
+      : ["paused", "manual_gate", "awaiting_approval", "planned", "completed_with_issues"].includes(value) ? "warn"
+        : ["canceled", "canceling", "cancelled"].includes(value) ? "unknown" : "info";
+  const filtering = Boolean(state || action || settledRequester || since);
+  const resetFilters = () => { setState(""); setAction(""); setRequester(""); setSince(""); setOffset(0); };
+  const narrow = (delta: () => void) => { delta(); setOffset(0); };
+  const lastPage = data ? offset + campaigns.length >= data.total : true;
 
   return (
     <>
@@ -54,13 +132,11 @@ export function Campaigns() {
         title={t("Campaigns")}
         description={t("Campaigns are the main mechanism for fleet-wide change.")}
         actions={
-          <button className={building ? "secondary" : ""} onClick={() => setBuilding(!building)}>
-            {building ? t("Hide the wizard") : t("New campaign")}
-          </button>
+          <Link className="button primary" to="/bulk" title={t("The Bulk workspace: the targets, the reason, the offline policy and the whole rollout, step by step.")}>
+            {t("New campaign")}
+          </Link>
         }
       />
-
-      {building && <Wizard onDone={() => setBuilding(false)} />}
 
       <div className="widgets">
         <Card className="span-12" title={t("State")} description={listed}>
@@ -76,14 +152,34 @@ export function Campaigns() {
         </Card>
 
         <Card className="span-9" title={t("List")} flush>
-          {!data?.items.length ? (
-            <EmptyState action={!building && <button onClick={() => setBuilding(true)}>{t("New campaign")}</button>}>
-              {t("No campaigns.")}
+          {/* The filter runs on the server and the rows arrive page by
+              page: the screen shows what the operator asked about, not
+              the newest fifty of everything. */}
+          <Toolbar end={filtering ? <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button> : undefined}>
+            <select value={state} onChange={(e) => narrow(() => setState(e.target.value))}>
+              <option value="">{t("state: any")}</option>
+              {CAMPAIGN_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+            <select value={action} onChange={(e) => narrow(() => setAction(e.target.value))}>
+              <option value="">{t("operation: any")}</option>
+              {actions.map((value) => <option key={value} value={value}>{value}</option>)}
+            </select>
+            <input placeholder={t("Requested by")} value={requester} onChange={(e) => narrow(() => setRequester(e.target.value))} />
+            <input type="datetime-local" value={since} onChange={(e) => narrow(() => setSince(e.target.value))} title={t("Created since")} />
+          </Toolbar>
+          {!data ? (
+            <Empty>{t("Loading…")}</Empty>
+          ) : !data.items.length ? (
+            <EmptyState action={filtering
+              ? <button className="secondary" onClick={resetFilters}>{t("Clear the filters")}</button>
+              : <Link className="button primary" to="/bulk">{t("New campaign")}</Link>}
+            >
+              {filtering ? t("No campaign matches the filter.") : t("No campaigns.")}
             </EmptyState>
           ) : (
             <table>
               <thead>
-                <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
+                <tr><th>{t("Name")}</th><th>{t("State")}</th><th>{t("Operation")}</th><th>{t("Progress")}</th><th className="num">{t("Canary/wave")}</th><th>{t("Requested by")}</th><th>{t("Approved by")}</th><th>{t("Created")}</th></tr>
               </thead>
               <tbody>
                 {data.items.map((campaign) => (
@@ -91,6 +187,16 @@ export function Campaigns() {
                     <td><Link to={`/campaigns/${campaign.id}`}>{campaign.name}</Link></td>
                     <td><JobState state={campaign.state} /></td>
                     <td className="mono">{campaign.action_type}</td>
+                    {/* The tally of the hosts, the same colours as the
+                        campaign's own bar: unknown is its own number and
+                        never folded into failed or succeeded. */}
+                    <td>
+                      {campaign.progress ? (
+                        <ProgressCells progress={campaign.progress} />
+                      ) : (
+                        "—"
+                      )}
+                    </td>
                     <td className="num">{campaign.canary_size} / {campaign.wave_size}</td>
                     <td>{campaign.created_by}</td>
                     <td>{campaign.approved_by || "—"}</td>
@@ -100,11 +206,16 @@ export function Campaigns() {
               </tbody>
             </table>
           )}
+          {data && data.total > PAGE && (
+            <Toolbar end={<span>{t("{shown} of {total} shown", { shown: Math.min(offset + campaigns.length, data.total), total: data.total })}</span>}>
+              <button className="secondary" onClick={() => setOffset(Math.max(0, offset - PAGE))} disabled={offset === 0}>{t("Newer")}</button>
+              <button className="secondary" onClick={() => setOffset(offset + PAGE)} disabled={lastPage}>{t("Older")}</button>
+            </Toolbar>
+          )}
         </Card>
 
-        {/* The campaigns carry no per-host totals on the list, so the side
-            widget reads their outcomes and operations, not their progress;
-            the progress of one campaign is on its own page. */}
+        {/* The side widget reads the outcomes and operations of the page,
+            not the fleet's history: it is the shape of what is listed. */}
         <Card className="span-3" title={t("Outcomes")} description={listed}>
           {!data ? (
             <Empty>{t("Loading…")}</Empty>
@@ -112,9 +223,9 @@ export function Campaigns() {
             <p className="fp-blank">{t("No campaigns.")}</p>
           ) : (
             <>
-              <Breakdown items={outcomes.map(([state, n]) => ({ label: <JobState state={state} />, value: n, tone: outcomeTone(state) }))} />
+              <Breakdown items={outcomes.map(([value, n]) => ({ label: <JobState state={value} />, value: n, tone: outcomeTone(value) }))} />
               <h4 className="widget-subhead">{t("By operation")}</h4>
-              <Breakdown tone="neutral" items={operations.map(([action, n]) => ({ label: <span className="mono">{action}</span>, value: n }))} />
+              <Breakdown tone="neutral" items={byOperation.map(([value, n]) => ({ label: <span className="mono">{value}</span>, value: n }))} />
             </>
           )}
         </Card>
@@ -123,200 +234,23 @@ export function Campaigns() {
   );
 }
 
-/** An operation in the registry: the server says what may be done in bulk. */
-type Operation = {
-  action: string;
-  mutating: boolean;
-  campaign_mode: string;
-  campaign_ready: boolean;
-};
-
 /**
- * The operations the wizard can build a payload for. The registry may allow
- * more than this form can describe - then the operation is visible but
- * inactive. Hiding it would look like a missing feature.
+ * The progress of one row: succeeded, failed and pending as numbers with
+ * the campaign's colours, the unknown and skipped ones named where there
+ * are any. A row of zeros is a campaign that has not started; a dash
+ * would read as "not known".
  */
-const WIZARD_OPERATIONS = [
-  "unit.start", "unit.stop", "unit.restart", "unit.reload", "packages.upgrade",
-];
-
-/** The operations that take a systemd unit name. */
-const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload"];
-
-/**
- * The campaign wizard. The last step shows exactly how many hosts the change
- * will cover before anything is created.
- */
-function Wizard({ onDone }: { onDone: () => void }) {
+function ProgressCells({ progress }: { progress: Progress }) {
   const t = useT();
-  const queryClient = useQueryClient();
-  const [name, setName] = useState("");
-  const [action, setAction] = useState("unit.restart");
-  const [unit, setUnit] = useState("");
-  const [site, setSite] = useState("");
-  const [environment, setEnvironment] = useState("");
-  const [canary, setCanary] = useState(1);
-  const [wave, setWave] = useState(5);
-  const [concurrent, setConcurrent] = useState(2);
-  const [thresholdPercent, setThresholdPercent] = useState(20);
-  const [thresholdCount, setThresholdCount] = useState(0);
-  const [rebootPolicy, setRebootPolicy] = useState("never");
-  const [securityOnly, setSecurityOnly] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-
-  // The list of bulk operations comes from the server, not from this file.
-  // The operation registry decides what may be done fleet-wide, and it knows
-  // that a new operation does not open itself for bulk use on its own.
-  const operations = useQuery({
-    queryKey: ["actions"],
-    queryFn: () => api.get<{ items: Operation[] }>("/api/v1/actions"),
-  });
-  const bulk = (operations.data?.items ?? []).filter((item) => item.campaign_ready);
-
-  // Target preview: the server counts, not the length of the first page of
-  // the host list. The operator approves a change on as many machines as
-  // they were shown.
-  const params = new URLSearchParams();
-  if (site) params.set("site", site);
-  if (environment) params.set("environment", environment);
-  const preview = useQuery({
-    queryKey: ["campaign-preview", params.toString()],
-    queryFn: () =>
-      api.get<{ count: number; sample: string[]; limit: number }>(
-        `/api/v1/campaigns/preview?${params}`,
-      ),
-  });
-
-  const create = useMutation({
-    mutationFn: () =>
-      api.post<Campaign>("/api/v1/campaigns", {
-        name,
-        action,
-        payload: UNIT_OPERATIONS.includes(action)
-          ? { unit: { unit } }
-          : { package_upgrade: { security_only: securityOnly } },
-        selector: { site: site || undefined, environment: environment || undefined },
-        canary_size: canary,
-        wave_size: wave,
-        max_concurrent: concurrent,
-        failure_threshold_percent: thresholdPercent,
-        failure_threshold_absolute: thresholdCount,
-        reboot_policy: rebootPolicy,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
-      onDone();
-    },
-    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
-  });
-
-  const targetCount = preview.data?.count ?? 0;
-  const sample = preview.data?.sample ?? [];
-  const needsUnit = UNIT_OPERATIONS.includes(action);
-  const ready = name && (!needsUnit || unit) && targetCount > 0;
-
-  // An operation that computes a different plan on every host goes
-  // through a planning phase - it does not pretend to be one payload.
-  // Operations the panel has no planner for yet are not hidden: they
-  // are refused with a reason.
   return (
-    <Card
-      title={t("New campaign")}
-      description={needsUnit
-        ? t("The same payload means the same thing on every host; each host still runs its own preflight.")
-        : t("Every host computes its own plan first. You approve the set of plans, not one payload, and a host whose plan changed in the meantime refuses the change.")}
-      footer={
-        <Actions>
-          <button onClick={() => create.mutate()} disabled={!ready || create.isPending}>
-            {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targetCount })}
-          </button>
-          <button className="secondary" onClick={onDone}>{t("Cancel")}</button>
-          {errorMessage && <p className="page-error">{errorMessage}</p>}
-        </Actions>
-      }
-    >
-      <FieldGrid>
-        <Field label={t("Name")}>
-          <input placeholder={t("campaign name")} value={name} onChange={(e) => setName(e.target.value)} />
-        </Field>
-        <Field label={t("Operation")}>
-          <select value={action} onChange={(e) => setAction(e.target.value)}>
-            {bulk.map((item) => (
-              <option
-                key={item.action}
-                value={item.action}
-                disabled={!WIZARD_OPERATIONS.includes(item.action)}
-              >
-                {item.action}
-                {WIZARD_OPERATIONS.includes(item.action) ? "" : ` — ${t("use the Bulk Workspace")}`}
-              </option>
-            ))}
-          </select>
-        </Field>
-        {needsUnit ? (
-          <Field label={t("Unit")}>
-            <input placeholder={t("unit, e.g. cron.service")} value={unit} onChange={(e) => setUnit(e.target.value)} />
-          </Field>
-        ) : (
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={securityOnly}
-              onChange={(e) => setSecurityOnly(e.target.checked)}
-            />{" "}
-            {t("security updates only")}
-          </label>
-        )}
-      </FieldGrid>
-
-      <h3>{t("Targets")}</h3>
-      <FieldGrid>
-        <Field label={t("Site")}>
-          <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
-        </Field>
-        <Field label={t("Environment")}>
-          <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-        </Field>
-      </FieldGrid>
-      {preview.isLoading ? (
-        <Empty>{t("Counting targets…")}</Empty>
-      ) : (
-        <>
-          <p className="subtitle">
-            {t("The selector matches {n} hosts. The snapshot is taken when the campaign is created; hosts added later will not join it.", { n: targetCount })}
-          </p>
-          <div className="source">
-            {sample.join(", ")}
-            {targetCount > sample.length && ` ${t("and {n} more", { n: targetCount - sample.length })}`}
-          </div>
-        </>
-      )}
-
-      <h3>{t("Rollout")}</h3>
-      <FieldGrid>
-        <Field label={t("Canary")}>
-          <input type="number" min={0} value={canary} onChange={(e) => setCanary(+e.target.value)} />
-        </Field>
-        <Field label={t("Wave")}>
-          <input type="number" min={1} value={wave} onChange={(e) => setWave(+e.target.value)} />
-        </Field>
-        <Field label={t("Concurrent hosts")}>
-          <input type="number" min={1} value={concurrent} onChange={(e) => setConcurrent(+e.target.value)} />
-        </Field>
-        <Field label={t("threshold %")}>
-          <input type="number" min={0} max={100} value={thresholdPercent} onChange={(e) => setThresholdPercent(+e.target.value)} />
-        </Field>
-        <Field label={t("threshold count")}>
-          <input type="number" min={0} value={thresholdCount} onChange={(e) => setThresholdCount(+e.target.value)} />
-        </Field>
-        <Field label={t("Reboot policy")}>
-          <select value={rebootPolicy} onChange={(e) => setRebootPolicy(e.target.value)}>
-            <option value="never">{t("reboot: never")}</option>
-            <option value="if_required">{t("reboot: when required")}</option>
-            <option value="always">{t("reboot: always")}</option>
-          </select>
-        </Field>
-      </FieldGrid>
-    </Card>
+    <span className="mono" title={t("{total} hosts: {succeeded} succeeded, {failed} failed, {unknown} unknown, {skipped} skipped, {pending} pending", progress)}>
+      <span style={{ color: "var(--ok-text)" }}>{progress.succeeded}</span>
+      {" / "}
+      <span style={progress.failed > 0 ? { color: "var(--error-text)" } : undefined}>{progress.failed}</span>
+      {" / "}
+      <span>{progress.pending}</span>
+      {progress.unknown > 0 && <span style={{ color: "var(--warn-text)" }}> · {t("{n} unknown", { n: progress.unknown })}</span>}
+      {progress.skipped > 0 && <span className="source"> · {t("{n} skipped", { n: progress.skipped })}</span>}
+    </span>
   );
 }

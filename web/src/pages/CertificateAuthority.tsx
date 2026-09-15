@@ -5,6 +5,8 @@ import type { Authority } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Field, FieldGrid } from "../components/layout";
 import { Breakdown, StatusBar, type WidgetTone } from "../components/widgets";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
@@ -20,6 +22,8 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   const t = useT();
   const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const query = useQuery({
     queryKey: ["pki"],
@@ -42,11 +46,28 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
     onError,
   });
   const remove = useMutation({
-    mutationFn: ({ fingerprint, reason }: { fingerprint: string; reason: string }) =>
+    mutationFn: ({ fingerprint, reason }: { fingerprint: string; reason: string; serial: string }) =>
       api.del(`/api/v1/pki/${fingerprint}?reason=${encodeURIComponent(reason)}`),
-    onSuccess: refresh,
+    onSuccess: (_, { serial }) => {
+      // The row is gone with the refresh, so the outcome is told elsewhere.
+      toast.success(t("Authority {serial} is removed from the trust set.", { serial }));
+      refresh();
+    },
     onError,
   });
+  // The removal is a step-up operation: the API records the reason and
+  // wants at least eight characters of it, so the dialog holds the confirm
+  // back until there are.
+  const askToRemove = async (ca: Authority) => {
+    const answer = await confirm({
+      title: t("Remove from trust set"),
+      body: t("Authority {serial} leaves the trust set: no host holds a certificate it issued, and the agents stop trusting it as their certificates are renewed.", { serial: ca.serial.slice(0, 14) }),
+      confirmLabel: t("Remove from trust set"),
+      danger: true,
+      reason: { required: true, min: 8 },
+    });
+    if (answer.ok && answer.reason) remove.mutate({ fingerprint: ca.fingerprint, reason: answer.reason, serial: ca.serial.slice(0, 14) });
+  };
 
   if (query.error instanceof ApiError && query.error.forbidden) {
     return <Card><Empty>{t("You do not have permission to view the fleet CA.")}</Empty></Card>;
@@ -126,10 +147,8 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
                     <div className="row-actions">
                       <button
                         className="danger"
-                        onClick={() => {
-                          const reason = window.prompt(t("Reason for removing this CA from the trust set (min. 8 characters):"));
-                          if (reason) remove.mutate({ fingerprint: ca.fingerprint, reason });
-                        }}
+                        disabled={remove.isPending}
+                        onClick={() => askToRemove(ca)}
                       >
                         {t("Remove from trust set")}
                       </button>

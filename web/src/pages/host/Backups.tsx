@@ -9,6 +9,8 @@ import {
   countWhere, useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { useConfirm } from "../../components/Modal";
+import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
 
 type Definition = {
@@ -134,6 +136,8 @@ export function Backups() {
   const [form, setForm] = useState(false);
   const [selected, setSelected] = useState("");
   const [planJob, setPlanJob] = useState("");
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const report = useQuery({
     queryKey: ["backups", host.id],
@@ -168,17 +172,23 @@ export function Backups() {
     mutationFn: (body: Record<string, unknown>) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
     onSuccess: (job, variables) => {
-      setMessage(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      const text = job.requires_approval
+        ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+        : t("Job {id} has been queued.", { id: job.id.slice(0, 8) });
+      setMessage(text);
+      // The message strip is at the top of the module and the copy list
+      // may be far below it; the toast names the job wherever the page is.
+      toast.success(text, { link: { to: `/hosts/${host.id}/jobs`, label: t("Jobs") } });
       if ((variables as { action?: string }).action === "backup.plan") setPlanJob(job.id);
       setIntent(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
       queryClient.invalidateQueries({ queryKey: ["backups", host.id] });
     },
-    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+    onError: (error) => {
+      const text = error instanceof Error ? error.message : String(error);
+      setMessage(text);
+      toast.error(text);
+    },
   });
 
   const save = useMutation({
@@ -232,6 +242,42 @@ export function Backups() {
       : {}),
     ...extra,
   });
+
+  // A restore asks for its target first and for the host and the reason
+  // second: the directory is a detail of the operation, the confirmation
+  // of the target is the decision.
+  const askRestoreTarget = async (snapshot: Snapshot) => {
+    if (!definition) return;
+    const answer = await confirm({
+      title: t("Restore copy"),
+      body: t("Restore into which directory? The panel never restores straight into system directories, and not into /tmp either — the host helper has its own private one, where restored data would vanish with the operation."),
+      confirmLabel: t("Continue"),
+      input: {
+        label: t("Target directory"),
+        initial: "/srv/flotestro-restore",
+        required: true,
+        mono: true,
+        hint: t("An absolute path on {host}; it must be empty.", { host: host.hostname }),
+      },
+    });
+    if (!answer.ok || !answer.value) return;
+    const target = answer.value;
+    setIntent({
+      action: "backup.restore",
+      label: t("Restore copy"),
+      danger: true,
+      description: t("Copy {id} is unpacked into {target} on {host}. The target must be empty; what goes back from there to its place is a separate decision.", {
+        id: snapshot.id, target, host: host.hostname,
+      }),
+      payload: {
+        backup: definitionRequest(definition, {
+          snapshot_id: snapshot.id,
+          target,
+          overwrite: "empty-target",
+        }),
+      },
+    });
+  };
 
   const stale = definitions.filter((item) => item.status !== "ok" && item.status !== "unknown").length;
   const unverified = definitions.filter((item) => item.unverified).length;
@@ -447,28 +493,7 @@ export function Backups() {
                       <button
                         className="danger"
                         disabled={!definition}
-                        onClick={() => {
-                          const target = window.prompt(
-                            t("Restore into which directory? The panel never restores straight into system directories, and not into /tmp either — the host helper has its own private one, where restored data would vanish with the operation."),
-                            "/srv/flotestro-restore",
-                          );
-                          if (!target || !definition) return;
-                          setIntent({
-                            action: "backup.restore",
-                            label: t("Restore copy"),
-                            danger: true,
-                            description: t("Copy {id} is unpacked into {target} on {host}. The target must be empty; what goes back from there to its place is a separate decision.", {
-                              id: snapshot.id, target, host: host.hostname,
-                            }),
-                            payload: {
-                              backup: definitionRequest(definition, {
-                                snapshot_id: snapshot.id,
-                                target,
-                                overwrite: "empty-target",
-                              }),
-                            },
-                          });
-                        }}
+                        onClick={() => askRestoreTarget(snapshot)}
                       >
                         {t("Restore…")}
                       </button>

@@ -10,6 +10,8 @@ import { POLICY_MODES, POLICY_RULE_KINDS, POLICY_VERDICTS } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { StatusBar } from "../components/widgets";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { buildExpression, describeExpression, SelectorBuilder, type Rule, type RuleField } from "./Groups";
 import { Standing, VerdictChip, modeLabel, ruleSummary, verdictLabel } from "./Policies";
 import { useT } from "../i18n";
@@ -148,6 +150,8 @@ export function PolicyPage() {
   const [publishing, setPublishing] = useState(false);
   const [reason, setReason] = useState("");
   const [message, setMessage] = useState<{ text: string; error?: boolean }>({ text: "" });
+  const confirm = useConfirm();
+  const toast = useToast();
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["policy", id] });
@@ -184,10 +188,26 @@ export function PolicyPage() {
     mutationFn: () => api.del<void>(`/api/v1/policies/${id}`, undefined, { headers: policy.data?.etag ? { "If-Match": policy.data.etag } : {} }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["policies"] });
+      // The page is left behind, so the outcome is told where it can
+      // still be seen.
+      toast.success(t("Policy {name} is deleted; its campaigns stay.", { name: policy.data?.data.name ?? "" }));
       navigate("/policies");
     },
-    onError: (error) => setMessage({ text: error instanceof ApiError ? `${error.code}: ${error.message}` : String(error), error: true }),
+    onError: (error) => {
+      const text = error instanceof ApiError ? `${error.code}: ${error.message}` : String(error);
+      setMessage({ text, error: true });
+      toast.error(text);
+    },
   });
+  const askToDelete = async () => {
+    const answer = await confirm({
+      title: t("Delete the policy"),
+      body: t("Delete the policy and its verdicts? Its campaigns stay."),
+      confirmLabel: t("Delete"),
+      danger: true,
+    });
+    if (answer.ok) remove.mutate();
+  };
 
   if (policy.error) return <ErrorBox error={policy.error} />;
   if (!policy.data) return <Empty>{t("Loading…")}</Empty>;
@@ -211,7 +231,7 @@ export function PolicyPage() {
               <button onClick={() => setPublishing(true)}>{record.version === 0 ? t("Publish") : t("Publish a new version")}</button>
             )}
             {canWrite && (
-              <button className="secondary" onClick={() => { if (window.confirm(t("Delete the policy and its verdicts? Its campaigns stay."))) remove.mutate(); }}>{t("Delete")}</button>
+              <button className="secondary" onClick={askToDelete} disabled={remove.isPending}>{t("Delete")}</button>
             )}
           </>
         )}

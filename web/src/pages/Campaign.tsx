@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
-import { api, type Collection } from "../lib/api";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api, ApiError, type Collection } from "../lib/api";
 import type {
-  Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, TimelineEntry,
+  Campaign as CampaignType, CampaignApproval, CampaignReport, CampaignTarget, SelectorExpression, TimelineEntry,
 } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
@@ -17,20 +17,68 @@ import {
 } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
-  bulkPrefill, ContractChips, contractWords, type PlanGroups, REVERSE_OPERATION, reversePayload, useOperation,
+  approvalForced, bulkPrefill, ContractChips, contractWords, MIN_REASON, type PlanGroups, reasonValid,
+  REVERSE_OPERATION, reversePayload, useOperation,
 } from "./Bulk";
+import { describeExpression } from "./Groups";
 import { useT } from "../i18n";
+
+/**
+ * The record as the API returns it. The shared Campaign type names the
+ * fields every screen reads; the order itself - the selector as given,
+ * the window, the units, the timeouts - and the links to other campaigns
+ * are read here through this shape, so the approver reads the whole
+ * order off the page rather than the parts the list needs.
+ */
+type CampaignRecord = CampaignType & CompensationLinks & {
+  selector?: {
+    site?: string;
+    environment?: string;
+    os_family?: string;
+    host_ids?: string[];
+    expression?: SelectorExpression | null;
+    exclude?: string[];
+    exclude_reason?: string;
+  } | null;
+  health_check_units?: string[];
+  maintenance_start?: string;
+  maintenance_end?: string;
+  job_timeout_seconds?: number;
+  reboot_timeout_seconds?: number;
+  approved_at?: string;
+  started_at?: string;
+  finished_at?: string;
+  canceled_by?: string;
+  plan_set_hash?: string;
+  policy_id?: string;
+  policy_version?: number;
+  /** The campaign whose failed hosts this one runs again, and the campaigns ordered to retry this one. */
+  retries_campaign_id?: string;
+  retries_campaign_name?: string;
+  retried_by?: { id: string; name: string; state: string }[];
+};
 
 export function Campaign() {
   const t = useT();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [stateFilter, setStateFilter] = useState("");
   const [search, setSearch] = useState("");
-  // The stop that is being confirmed: pausing and cancelling say what they
-  // do to the hosts under way before anything happens.
-  const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | null>(null);
+  // The timeline is read through a filter of its own: one kind of event,
+  // or one host, out of the trail of a campaign on thousands.
+  const [eventKind, setEventKind] = useState("");
+  const [eventHost, setEventHost] = useState("");
+  // The control that is being confirmed: pausing and cancelling say what
+  // they do to the hosts under way before anything happens, and resuming
+  // is recorded with a reason like they are.
+  const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | "resume" | null>(null);
   const [stopReason, setStopReason] = useState("");
+  // The retry: a new campaign on the hosts that failed, ordered with a
+  // reason and, on request, the hosts that ended unknown as well.
+  const [retrying, setRetrying] = useState(false);
+  const [retryReason, setRetryReason] = useState("");
+  const [includeUnknown, setIncludeUnknown] = useState(false);
   // The approval is a decision with evidence: the reason and the change
   // ticket go into the approval record next to the fingerprint.
   const [approving, setApproving] = useState(false);
@@ -124,6 +172,19 @@ export function Campaign() {
     }
     return { reason: stopReason.trim() || "from the panel" };
   };
+  const retry = useMutation({
+    mutationFn: () => api.post<CampaignRecord>(`/api/v1/campaigns/${id}/retry`, {
+      reason: retryReason.trim(), include_unknown: includeUnknown,
+    }),
+    onSuccess: (created) => {
+      setRetrying(false);
+      setRetryReason("");
+      setIncludeUnknown(false);
+      queryClient.invalidateQueries({ queryKey: ["campaigns"] });
+      queryClient.invalidateQueries({ queryKey: ["campaign", id] });
+      navigate(`/campaigns/${created.id}`);
+    },
+  });
   const control = useMutation({
     mutationFn: (operation: string) =>
       api.post(`/api/v1/campaigns/${id}/${operation}`, controlBody(operation)),
@@ -142,10 +203,10 @@ export function Campaign() {
 
   if (campaign.error) return <ErrorBox error={campaign.error} />;
   if (!campaign.data) return <Empty>{t("Loading…")}</Empty>;
-  const data = campaign.data;
-  // The compensation link travels on the campaign record; the shared
-  // Campaign type does not name it yet, so it is read through its own.
-  const links = data as CampaignType & CompensationLinks;
+  const data = campaign.data as CampaignRecord;
+  // The links to other campaigns travel on the record; the shared
+  // Campaign type does not name them, so they are read through this one.
+  const links = data;
 
   // What a stop does depends on where the hosts are: a host that has not
   // started will not start, a host mid-operation finishes on its own - no
@@ -166,6 +227,18 @@ export function Campaign() {
   const noChange = totals.no_change ?? 0;
   const unknown = totals.unknown ?? 0;
   const failed = (totals.failed ?? 0) + (totals.timed_out ?? 0) + (totals.partially_applied ?? 0);
+  // What a retry would run on: the failed hosts, and the unknown ones on
+  // request. Offered only once the campaign settled - the server refuses
+  // a retry before that, and the counts move until then.
+  const settled = SETTLED_CAMPAIGN_STATES.includes(data.state);
+  const failedHosts = totals.failed ?? 0;
+  const canRetry = settled && report.data !== undefined && failedHosts + unknown > 0;
+  const retryable = canRetry ? failedHosts + (includeUnknown ? unknown : 0) : 0;
+  // The approval of a critical or destructive operation needs a reason
+  // the server accepts: the same rule as the fresh authentication it asks
+  // for, checked here so the button says so instead of the refusal.
+  const reasonForced = approvalForced(operation?.risk);
+  const approvalReady = !reasonForced || reasonValid(approvalReason);
 
   // What the hosts under way do when the campaign stops, from the cancel
   // mode of the operation. The campaign stop itself never interrupts a
@@ -221,6 +294,15 @@ export function Campaign() {
     bulkPrefill(reverseAction ?? "", t("Rollback of {name}", { name: data.name }),
       reversePayload(actionType, data.payload), data.id, hostIDs);
   const rowCompensation = offer.kind === "campaign";
+  // The timeline through its filter: the kinds are read off the trail
+  // itself, so the list offers what happened rather than every kind the
+  // engine knows.
+  const eventKinds = Array.from(new Set((timeline.data?.items ?? []).map((entry) => entry.event_type))).sort();
+  const hostNeedle = eventHost.trim().toLowerCase();
+  const events = (timeline.data?.items ?? []).filter((entry) =>
+    (!eventKind || entry.event_type === eventKind)
+    && (!hostNeedle || eventHostName(entry, loaded).toLowerCase().includes(hostNeedle)
+      || (entry.payload?.host_id ?? "").toLowerCase().includes(hostNeedle)));
 
   return (
     <>
@@ -240,14 +322,64 @@ export function Campaign() {
               <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
             )}
             {data.state === "paused" && (
-              <button onClick={() => control.mutate("resume")}>{t("Resume")}</button>
+              <button onClick={() => setPendingStop("resume")}>{t("Resume")}</button>
             )}
             {!SETTLED_CAMPAIGN_STATES.includes(data.state) && data.state !== "canceling" && (
               <button className="secondary" onClick={() => setPendingStop("cancel")}>{t("Cancel")}</button>
             )}
+            {canRetry && (
+              <button onClick={() => { setPendingStop(null); setRetrying(true); }}>{t("Retry on failed hosts")}</button>
+            )}
+            {/* The same order once more, written into the wizard: the
+                operation, the name and the payload; the targets and the
+                rollout are decided there again. */}
+            <Link className="button" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})} title={t("Opens the Bulk workspace with the same operation, name and payload written in; the targets and the rollout are chosen again.")}>
+              {t("Clone")}
+            </Link>
           </>
         }
       />
+
+      {/* The order itself, before any decision about it: what runs, with
+          what payload, on which hosts as they were named, under which
+          rollout. The approver reads this; the fingerprint below binds the
+          consent to exactly it. */}
+      <OrderCard campaign={data} operation={operation} />
+
+      {retrying && canRetry && (
+        <Card
+          title={t("Retry on failed hosts?")}
+          description={t("A new campaign with the same operation, payload and rollout on exactly the {n} hosts that did not reach the desired state; the hosts that succeeded are not touched. It waits for its own approval and is linked to this one.", { n: retryable })}
+          footer={
+            <Actions>
+              <button onClick={() => retry.mutate()} disabled={retry.isPending || !reasonValid(retryReason) || retryable === 0}>
+                {t("Order the retry on {n} hosts", { n: retryable })}
+              </button>
+              <button className="secondary" onClick={() => setRetrying(false)}>{t("Back")}</button>
+            </Actions>
+          }
+        >
+          <FieldGrid>
+            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required: at least {n} characters.", { n: MIN_REASON })} wide>
+              <input value={retryReason} onChange={(e) => setRetryReason(e.target.value)} />
+            </Field>
+            {/* An unknown host may hold the change half done; running it
+                again blind is the operator's call, made here on purpose. */}
+            <label className="toggle">
+              <input type="checkbox" checked={includeUnknown} onChange={(e) => setIncludeUnknown(e.target.checked)} />{" "}
+              {t("Include the {n} hosts that ended unknown (read what they hold first)", { n: unknown })}
+            </label>
+          </FieldGrid>
+          {retry.error && (
+            <p className="warning">
+              <span>
+                {retry.error instanceof ApiError && <><code>{retry.error.code}</code> · </>}
+                {retry.error instanceof Error ? retry.error.message : String(retry.error)}
+              </span>
+            </p>
+          )}
+        </Card>
+      )}
 
       {approving && data.state === "awaiting_approval" && (
         <Card
@@ -255,7 +387,7 @@ export function Campaign() {
           description={t("The consent covers exactly what is on screen: this operation, this payload, these {count} hosts and this rollout. It is recorded with the fingerprint {fingerprint}, your authentication and the reason.", { count: total, fingerprint: data.approval_fingerprint.slice(0, 12) })}
           footer={
             <Actions>
-              <button onClick={() => control.mutate("approve")} disabled={control.isPending}>
+              <button onClick={() => control.mutate("approve")} disabled={control.isPending || !approvalReady}>
                 {t("Approve")}
               </button>
               <button className="secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
@@ -263,7 +395,13 @@ export function Campaign() {
           }
         >
           <FieldGrid>
-            <Field label={t("Reason (kept in the audit trail)")} hint={t("Required for a critical operation, at least 8 characters.")} wide>
+            <Field
+              label={t("Reason (kept in the audit trail)")}
+              hint={reasonForced
+                ? t("Required: this operation is {risk}, and the approval needs a reason of at least {n} characters.", { risk: operation?.risk ?? "critical", n: MIN_REASON })
+                : t("Optional here; a critical operation requires at least {n} characters.", { n: MIN_REASON })}
+              wide
+            >
               <input value={approvalReason} onChange={(e) => setApprovalReason(e.target.value)} />
             </Field>
             <Field label={t("Change ticket")} hint={t("Optional: the identifier or address of the change request.")}>
@@ -300,11 +438,13 @@ export function Campaign() {
 
       {pendingStop && (
         <Card
-          tone={pendingStop === "pause" ? "warn" : "error"}
-          title={pendingStop === "pause" ? t("Pause the campaign?") : t("Cancel the campaign?")}
+          tone={pendingStop === "pause" ? "warn" : pendingStop === "cancel" ? "error" : undefined}
+          title={pendingStop === "pause" ? t("Pause the campaign?") : pendingStop === "resume" ? t("Resume the campaign?") : t("Cancel the campaign?")}
           description={pendingStop === "pause"
             ? `${t("No further host starts until the campaign is resumed.")} ${underWayFate}`
-            : `${t("{notStarted} hosts that have not started are marked canceled and will not start.", { notStarted })} ${underWayFate} ${rollbackHint}`}
+            : pendingStop === "resume"
+              ? t("The campaign goes back to its queue: {notStarted} hosts that have not started continue in their waves, under the same thresholds. The decision is recorded with your identity and the reason.", { notStarted })
+              : `${t("{notStarted} hosts that have not started are marked canceled and will not start.", { notStarted })} ${underWayFate} ${rollbackHint}`}
           footer={
             <Actions>
               <button
@@ -312,7 +452,7 @@ export function Campaign() {
                 onClick={() => control.mutate(pendingStop)}
                 disabled={control.isPending}
               >
-                {pendingStop === "pause" ? t("Pause") : t("Cancel the campaign")}
+                {pendingStop === "pause" ? t("Pause") : pendingStop === "resume" ? t("Resume") : t("Cancel the campaign")}
               </button>
               <button className="secondary" onClick={() => setPendingStop(null)}>{t("Back")}</button>
             </Actions>
@@ -406,46 +546,41 @@ export function Campaign() {
       <Columns wide>
       <Card title={t("Details")}>
         <Pairs>
-          <Pair label={t("Canary / wave")}>{data.canary_size} / {data.wave_size}</Pair>
-          <Pair label={t("Concurrent hosts")}>{data.max_concurrent}</Pair>
-          <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: data.failure_threshold_percent, count: data.failure_threshold_absolute })}</Pair>
-          <Pair label={t("Reboot policy")}>{data.reboot_policy}</Pair>
-          <Pair label={t("Offline policy")}>{data.offline_policy}</Pair>
-          <Pair label={t("Contract")}>
-            {operation ? <ContractChips contract={operation} /> : "—"}
+          <Pair label={t("Requested by")}>{data.created_by}</Pair>
+          <Pair label={t("Approved by")}>{data.approved_by || "—"}{data.approved_at && <> · <Time value={data.approved_at} /></>}</Pair>
+          <Pair label={t("Approval fingerprint")}>
+            <span className="mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
           </Pair>
-          {/* The class alone here; the offer to plan the way back is the
-              compensation card, which appears once the campaign settled. */}
-          {operation?.rollback && <Pair label={t("Way back")}>{rollbackWord}</Pair>}
-          {/* The compensating campaign names what it undoes; the original's
-              side of the link is on the compensation card, read from the
-              compensating records, so the original's own record stays as
-              it was approved. */}
-          {links.compensates_campaign_id && (
-            <Pair label={t("Compensates")}>
-              <Link to={`/campaigns/${links.compensates_campaign_id}`}>
-                {links.compensates_campaign_name || links.compensates_campaign_id.slice(0, 8)}
-              </Link>
+          {data.plan_set_hash && (
+            <Pair label={t("Plan set fingerprint")}>
+              <span className="mono" title={data.plan_set_hash}>{data.plan_set_hash.slice(0, 16)}</span>
             </Pair>
           )}
-          <Pair label={t("Waits for offline hosts until")}>{data.deadline_at ? <Time value={data.deadline_at} /> : "—"}</Pair>
           <Pair label={t("Manual gate after the canary")}>
             {!data.manual_gate ? t("no") : data.gate_advanced_by
               ? t("advanced by {who}", { who: data.gate_advanced_by })
               : t("yes")}
           </Pair>
-          <Pair label={t("Connectivity loss threshold")}>
-            {data.connectivity_lost_absolute > 0
-              ? t("{count} hosts", { count: data.connectivity_lost_absolute })
-              : t("off")}
-          </Pair>
-          <Pair label={t("Approved by")}>{data.approved_by || "—"}</Pair>
-          <Pair label={t("Approval fingerprint")}>
-            <span className="mono" title={data.approval_fingerprint}>{data.approval_fingerprint.slice(0, 16) || "—"}</span>
-          </Pair>
           <Pair label={t("Paused by")}>{data.paused_by || "—"}</Pair>
           <Pair label={t("Pause reason")}>{data.pause_reason || "—"}</Pair>
+          {data.canceled_by && <Pair label={t("Canceled by")}>{data.canceled_by}</Pair>}
           <Pair label={t("Created")}><Time value={data.created_at} /></Pair>
+          <Pair label={t("Started")}>{data.started_at ? <Time value={data.started_at} /> : "—"}</Pair>
+          <Pair label={t("Finished")}>{data.finished_at ? <Time value={data.finished_at} /> : "—"}</Pair>
+          {/* The retries of this campaign, read from their records: the
+              list informs and never hides the button. */}
+          {settled && (
+            <Pair label={t("Retried by")}>
+              {links.retried_by && links.retried_by.length > 0
+                ? links.retried_by.map((other, index) => (
+                  <span key={other.id}>
+                    {index > 0 && ", "}
+                    <Link to={`/campaigns/${other.id}`}>{other.name}</Link> <JobState state={other.state} />
+                  </span>
+                ))
+                : canRetry ? t("no retry ordered yet") : t("nothing to retry")}
+            </Pair>
+          )}
         </Pairs>
       </Card>
       <div className="stack">
@@ -554,19 +689,41 @@ export function Campaign() {
         )}
       </Card>
 
-      <Card title={t("Timeline")} flush>
+      {/* The trail is filtered in the browser: it is already loaded whole,
+          and one kind of event or one host is what a diagnosis looks for.
+          The export is the filtered rows, built here from the same list. */}
+      <Card
+        title={t("Timeline")}
+        actions={events.length > 0 ? (
+          <a className="button" href={timelineCSV(events, loaded)} download={`campaign-${id}-timeline.csv`}>{t("Download the timeline as CSV")}</a>
+        ) : undefined}
+        flush
+      >
+        <Toolbar end={<span>{t("{shown} of {total} shown", { shown: events.length, total: timeline.data?.items.length ?? 0 })}</span>}>
+          <select value={eventKind} onChange={(e) => setEventKind(e.target.value)}>
+            <option value="">{t("event: any")}</option>
+            {eventKinds.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          </select>
+          <input placeholder={t("Filter by hostname")} value={eventHost} onChange={(e) => setEventHost(e.target.value)} />
+        </Toolbar>
         {!timeline.data?.items.length ? (
           <Empty>{t("No recorded events yet.")}</Empty>
+        ) : events.length === 0 ? (
+          <Empty>{t("No event matches the filter.")}</Empty>
         ) : (
           <table>
             <thead><tr><th>{t("When")}</th><th>{t("Event")}</th><th>{t("Host")}</th><th>{t("Detail")}</th></tr></thead>
             <tbody>
-              {timeline.data.items.map((entry) => (
+              {events.map((entry) => (
                 <tr key={entry.id}>
                   <td><Time value={entry.occurred_at} /></td>
                   <td className="mono">{entry.event_type}</td>
                   <td>{eventHostName(entry, loaded)}</td>
-                  <td>{eventDescription(entry)}</td>
+                  <td>
+                    {eventDescription(entry)}
+                    {/* The task behind the event opens on its own page. */}
+                    {entry.payload?.job_id && <> · <Link className="mono" to={`/jobs/${entry.payload.job_id}`}>{entry.payload.job_id.slice(0, 8)}</Link></>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -751,6 +908,164 @@ export function Campaign() {
   );
 }
 
+/**
+ * The order as it was given: the operation with its contract, the payload
+ * as the hosts will get it, the targets as they were named, and the whole
+ * rollout policy. Every field is the record's - nothing is inferred - and
+ * a value the order left to the default shows resolved, the way it will
+ * apply. A secret in the payload is a reference by name: the value never
+ * travels in the order, and the list says so next to the names.
+ */
+function OrderCard({ campaign, operation }: {
+  campaign: CampaignRecord;
+  operation: ReturnType<typeof useOperation>;
+}) {
+  const t = useT();
+  const selector = campaign.selector ?? {};
+  const secrets = secretReferences(campaign.payload);
+  const units = campaign.health_check_units ?? [];
+  const payloadText = JSON.stringify(campaign.payload ?? {}, null, 2);
+  const [rollbackWord] = contractWords(t, "rollback", operation?.rollback);
+  return (
+    <Card
+      title={t("The order")}
+      description={t("What was ordered, as the approval binds it: this operation, this payload, these targets and this rollout. Read it before deciding; the fingerprint covers exactly this.")}
+    >
+      <Columns wide>
+        <div className="stack">
+          <Pairs>
+            <Pair label={t("Operation")}><span className="mono">{campaign.action_type}</span></Pair>
+            <Pair label={t("Contract")}>{operation ? <ContractChips contract={operation} /> : "—"}</Pair>
+            {operation?.risk && <Pair label={t("Risk")}>{operation.risk}</Pair>}
+            {operation?.rollback && <Pair label={t("Way back")}>{rollbackWord}</Pair>}
+            {/* The targets as the order named them; the snapshot below
+                says what they resolved to. */}
+            <Pair label={t("Targets as ordered")}>
+              {selector.expression
+                ? <span className="mono">{describeExpression(selector.expression)}</span>
+                : selector.host_ids && selector.host_ids.length > 0
+                  ? t("{n} hosts named one by one", { n: selector.host_ids.length })
+                  : [selector.site && `${t("site")}: ${selector.site}`, selector.environment && `${t("environment")}: ${selector.environment}`, selector.os_family && `${t("OS family")}: ${selector.os_family}`].filter(Boolean).join(" · ") || t("the whole visible fleet")}
+            </Pair>
+            {selector.exclude && selector.exclude.length > 0 && (
+              <Pair label={t("Excluded by name")}>
+                {t("{n} hosts", { n: selector.exclude.length })} — {selector.exclude_reason || "—"}
+              </Pair>
+            )}
+            <Pair label={t("Canary / wave")}>{campaign.canary_size} / {campaign.wave_size}</Pair>
+            <Pair label={t("Concurrent hosts")}>{campaign.max_concurrent}</Pair>
+            <Pair label={t("Failure threshold")}>{t("{percent}% or {count} hosts", { percent: campaign.failure_threshold_percent, count: campaign.failure_threshold_absolute })}</Pair>
+            <Pair label={t("Connectivity loss threshold")}>
+              {campaign.connectivity_lost_absolute > 0 ? t("{count} hosts", { count: campaign.connectivity_lost_absolute }) : t("off")}
+            </Pair>
+            <Pair label={t("Reboot policy")}>
+              {campaign.reboot_policy}
+              {campaign.reboot_policy !== "never" && campaign.reboot_timeout_seconds ? ` · ${t("waits {n} s for the host to come back", { n: campaign.reboot_timeout_seconds })}` : ""}
+            </Pair>
+            <Pair label={t("Health-check units")}>{units.length > 0 ? units.map((unit) => <span key={unit} className="chip chip-mono">{unit}</span>) : t("none")}</Pair>
+            <Pair label={t("Task timeout")}>{campaign.job_timeout_seconds ? t("{n} s", { n: campaign.job_timeout_seconds }) : t("the operation's default")}</Pair>
+            <Pair label={t("Offline policy")}>{campaign.offline_policy}</Pair>
+            <Pair label={t("Waits for offline hosts until")}>{campaign.deadline_at ? <Time value={campaign.deadline_at} /> : "—"}</Pair>
+            <Pair label={t("Maintenance window")}>
+              {campaign.maintenance_start || campaign.maintenance_end
+                ? <>{campaign.maintenance_start ? <Time value={campaign.maintenance_start} /> : t("any time")} → {campaign.maintenance_end ? <Time value={campaign.maintenance_end} /> : t("open-ended")}</>
+                : t("none: the campaign may start at any time")}
+            </Pair>
+            <Pair label={t("Manual gate after the canary")}>{campaign.manual_gate ? t("yes") : t("no")}</Pair>
+            {/* The links to the campaigns this order stands on: what it
+                undoes, what it runs again, which policy ordered it. Each
+                is on this record; the other side is read from here too. */}
+            {campaign.compensates_campaign_id && (
+              <Pair label={t("Compensates")}>
+                <Link to={`/campaigns/${campaign.compensates_campaign_id}`}>
+                  {campaign.compensates_campaign_name || campaign.compensates_campaign_id.slice(0, 8)}
+                </Link>
+              </Pair>
+            )}
+            {campaign.retries_campaign_id && (
+              <Pair label={t("Retries")}>
+                <Link to={`/campaigns/${campaign.retries_campaign_id}`}>
+                  {campaign.retries_campaign_name || campaign.retries_campaign_id.slice(0, 8)}
+                </Link>
+                {" · "}
+                {t("the same order on the hosts that failed there")}
+              </Pair>
+            )}
+            {campaign.policy_id && (
+              <Pair label={t("Ordered by policy")}>
+                <Link to={`/policies/${campaign.policy_id}`}>{campaign.policy_id.slice(0, 8)}</Link>
+                {campaign.policy_version ? ` · v${campaign.policy_version}` : ""}
+              </Pair>
+            )}
+          </Pairs>
+        </div>
+        <div className="stack">
+          <h3>{t("Payload")}</h3>
+          <pre data-testid="order-payload">{payloadText}</pre>
+          {secrets.length > 0 && (
+            <p className="subtitle">
+              {t("Secrets referenced by name: {names}. The value never travels in the order; the host fetches it on a short lease when the task runs.", { names: secrets.join(", ") })}
+            </p>
+          )}
+        </div>
+      </Columns>
+    </Card>
+  );
+}
+
+/**
+ * The secrets a payload refers to, as "name" or "name@version". A
+ * reference is an object with a name under a key ending in _secret, or
+ * a map of them under a key ending in _secrets, wherever it sits in the
+ * payload; the panel never carries the value, so there is nothing to
+ * hide - only the names to point out.
+ */
+export function secretReferences(payload: unknown): string[] {
+  const found: string[] = [];
+  const nameOf = (value: unknown) => {
+    if (value && typeof value === "object" && typeof (value as { name?: unknown }).name === "string") {
+      const reference = value as { name: string; version?: number };
+      found.push(reference.version ? `${reference.name}@${reference.version}` : reference.name);
+    }
+  };
+  const walk = (node: unknown) => {
+    if (!node || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key.endsWith("_secret")) {
+        nameOf(value);
+      } else if (key.endsWith("_secrets") && value && typeof value === "object") {
+        Object.values(value as Record<string, unknown>).forEach(nameOf);
+      } else {
+        walk(value);
+      }
+    }
+  };
+  walk(payload);
+  return Array.from(new Set(found));
+}
+
+/**
+ * timelineCSV renders the filtered trail as a file the browser saves: the
+ * same columns as the table, one row per event. A cell that starts like a
+ * spreadsheet formula gets a leading apostrophe, the way the server's
+ * export guards its cells.
+ */
+export function timelineCSV(entries: TimelineEntry[], targets: CampaignTarget[]): string {
+  const cell = (value: string) => {
+    const guarded = /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
+    return `"${guarded.replace(/"/g, '""')}"`;
+  };
+  const rows = [["occurred_at", "event_type", "host", "host_id", "job_id", "detail"].join(",")];
+  for (const entry of entries) {
+    rows.push([
+      entry.occurred_at, entry.event_type, entry.payload?.host_id ? eventHostName(entry, targets) : "",
+      entry.payload?.host_id ?? "",
+      entry.payload?.job_id ?? "", eventDescription(entry),
+    ].map(cell).join(","));
+  }
+  return `data:text/csv;charset=utf-8,${encodeURIComponent(rows.join("\n"))}`;
+}
+
 /** The step names as the strip shows them; the keys are the server's step kinds. */
 const STEP_NAMES: Record<string, string> = {
   plan: "plan", execute: "execute", reboot: "reboot", verify: "verify", compensate: "compensate",
@@ -794,11 +1109,11 @@ function TargetSteps({ campaignID, hostID, compensation }: {
                 <span className="chip" title={step.reason || undefined}>
                   {name}
                   <JobState state={step.state} />
-                  {/* The task carried the step; the task list filtered on
-                      the campaign is where it opens. The short identifier
-                      is enough to find it there; the whole one is on hover. */}
+                  {/* The task carried the step and opens on its own page.
+                      The short identifier is enough to tell it apart; the
+                      whole one is on hover. */}
                   {step.job_id && (
-                    <Link to={`/jobs?campaign_id=${campaignID}`} className="mono" title={step.job_id}>
+                    <Link to={`/jobs/${step.job_id}`} className="mono" title={step.job_id}>
                       {step.job_id.slice(0, 8)}
                     </Link>
                   )}

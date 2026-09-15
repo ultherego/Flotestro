@@ -371,6 +371,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/campaigns/{id}/pause", s.handlePauseCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/resume", s.handleResumeCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/cancel", s.handleCancelCampaign)
+	// A retry is a new order for the hosts the campaign lost, under a new
+	// approval; the settled campaign itself never changes.
+	s.route(mux, "POST /api/v1/campaigns/{id}/retry", s.handleRetryCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
 
 	// Desired-state policies: a draft, its publications, the verdicts the
@@ -402,6 +405,12 @@ func (s *Server) Routes() http.Handler {
 	// An identity is disabled rather than deleted: the trail keeps naming
 	// it. The tokens and the bindings are managed one by one.
 	s.route(mux, "DELETE /api/v1/principals/{id}", s.handleDisablePrincipal)
+	// Enabling gives a disabled identity its roles back; the sessions and
+	// the tokens that ended with the disabling stay ended.
+	s.route(mux, "POST /api/v1/principals/{id}/enable", s.handleEnablePrincipal)
+	// The live browser sessions of an identity, ended one at a time.
+	s.route(mux, "GET /api/v1/principals/{id}/sessions", s.handleListSessions)
+	s.route(mux, "DELETE /api/v1/principals/{id}/sessions/{sid}", s.handleRevokeSession)
 	s.route(mux, "POST /api/v1/principals/{id}/tokens", s.handleIssueToken)
 	s.route(mux, "DELETE /api/v1/principals/{id}/tokens/{token}", s.handleRevokeToken)
 	// A binding is granted with a validity or without one; granting it
@@ -593,6 +602,9 @@ type FleetSummary struct {
 	// A silenced alert already has an operator's decision behind it.
 	AlertsFiring   int `json:"alerts_firing"`
 	AlertsCritical int `json:"alerts_critical"`
+	// The counters of what waits for a person, missing for a reader
+	// without the right to the list each of them counts.
+	PendingDecisions
 }
 
 // RelayBufferHighPercent is the fill of a relay's buffer the dashboard
@@ -873,6 +885,10 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
+	if err := s.countPendingDecisions(ctx, principal, &summary.PendingDecisions); err != nil {
+		s.fail(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, summary)
 }
 
@@ -958,6 +974,9 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.SecurityUpdates = &waiting
+	}
+	if !attentionFilters(w, query, &filter) {
+		return
 	}
 	cursor, err := hosts.ParseCursor(query.Get("cursor"))
 	if err != nil {

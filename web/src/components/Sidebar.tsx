@@ -1,4 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, NavLink, useLocation } from "react-router-dom";
+import { api } from "../lib/api";
 import { useT } from "../i18n";
 import { useStoredState } from "../lib/storage";
 import { Icon, type IconName } from "./icons";
@@ -37,6 +39,60 @@ export type NavFace = {
 
 const GROUPS_KEY = "flotestro.sidebar.groups";
 
+/**
+ * The counters of the fleet summary the badges read: what waits for a
+ * decision behind each place. A counter the server left out is one this
+ * reader may not see, and the item then carries no badge.
+ */
+type BadgeCounts = {
+  jobs_awaiting_approval?: number;
+  campaigns_awaiting_approval?: number;
+  campaigns_manual_gate?: number;
+  alerts_firing?: number;
+  hosts_drifted?: number;
+};
+
+/** How often the badges ask again: a queue of decisions, not a heartbeat. */
+const BADGE_INTERVAL = 30 * 1000;
+
+/**
+ * The badge of an item, by its address: the jobs and the campaigns
+ * waiting for an approval, the alerts firing, the hosts a policy found
+ * drifted. Zero is no badge - the item is a place, and a badge is a reason
+ * to go there.
+ */
+function badgeFor(to: string, counts?: BadgeCounts): { count: number; tone: string; title: string } | undefined {
+  if (!counts) return undefined;
+  const sum = (...values: (number | undefined)[]) =>
+    values.every((value) => value === undefined) ? undefined : values.reduce<number>((total, value) => total + (value ?? 0), 0);
+  let count: number | undefined;
+  let tone = "warn";
+  let title = "";
+  switch (to) {
+    case "/jobs":
+      count = counts.jobs_awaiting_approval;
+      title = "jobs awaiting approval";
+      break;
+    case "/campaigns":
+      count = sum(counts.campaigns_awaiting_approval, counts.campaigns_manual_gate);
+      title = "campaigns awaiting approval or at a gate";
+      break;
+    case "/monitoring":
+      count = counts.alerts_firing;
+      tone = "error";
+      title = "alerts firing";
+      break;
+    case "/policies":
+      count = counts.hosts_drifted;
+      title = "hosts drifted";
+      break;
+    default:
+      return undefined;
+  }
+  if (!count) return undefined;
+  return { count, tone, title };
+}
+
 function isFoldMap(value: unknown): value is Record<string, boolean> {
   return typeof value === "object" && value !== null
     && Object.values(value as object).every((entry) => typeof entry === "boolean");
@@ -62,6 +118,17 @@ export function Sidebar({ face, collapsed, open, onClose }: {
   // The fold map holds only the groups somebody closed: a group absent
   // from it is open, so a group added in a later version starts open.
   const [folded, setFolded] = useStoredState<Record<string, boolean>>(GROUPS_KEY, {}, isFoldMap);
+  // The badges read the same summary the dashboard does, at a slower
+  // pace; a reader the summary is refused to has no badges, not an error
+  // in the navigation. The host face lists modules, not fleet places, so
+  // the counters are not asked for there.
+  const counts = useQuery({
+    queryKey: ["summary", "badges"],
+    queryFn: () => api.get<BadgeCounts>("/api/v1/fleet/summary"),
+    refetchInterval: BADGE_INTERVAL,
+    retry: false,
+    enabled: !face.back,
+  });
 
   const toggleGroup = (key: string) =>
     setFolded((current) => ({ ...current, [key]: !current[key] }));
@@ -106,22 +173,37 @@ export function Sidebar({ face, collapsed, open, onClose }: {
                 </button>
               )}
               <ul className="sidebar-items">
-                {group.items.map((item) => (
-                  <li key={item.to}>
-                    <NavLink
-                      to={item.to}
-                      className={({ isActive }) => {
-                        const on = item.active ? item.active(location.pathname) : isActive;
-                        return ["sidebar-item", on ? "active" : "", item.unavailable ? "unavailable" : ""].join(" ").trim();
-                      }}
-                      title={item.unavailable ?? t(item.label)}
-                      onClick={onClose}
-                    >
-                      <Icon name={item.icon} />
-                      <span className="sidebar-item-label">{t(item.label)}</span>
-                    </NavLink>
-                  </li>
-                ))}
+                {group.items.map((item) => {
+                  const badge = badgeFor(item.to, counts.data);
+                  return (
+                    <li key={item.to}>
+                      <NavLink
+                        to={item.to}
+                        className={({ isActive }) => {
+                          const on = item.active ? item.active(location.pathname) : isActive;
+                          return ["sidebar-item", on ? "active" : "", item.unavailable ? "unavailable" : ""].join(" ").trim();
+                        }}
+                        title={item.unavailable ?? t(item.label)}
+                        onClick={onClose}
+                      >
+                        <Icon name={item.icon} />
+                        <span className="sidebar-item-label">{t(item.label)}</span>
+                        {/* The count of what waits behind the item; the rail
+                            of icons has no room for it and drops it. */}
+                        {badge && !collapsed && (
+                          <span
+                            className={`badge ${badge.tone}`}
+                            style={{ marginLeft: "auto" }}
+                            title={t(badge.title)}
+                            data-testid="sidebar-badge"
+                          >
+                            {badge.count}
+                          </span>
+                        )}
+                      </NavLink>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           );

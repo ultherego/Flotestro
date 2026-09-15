@@ -5,9 +5,10 @@ import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
-  useHost, useModule,
+  Fact, Facts, Foot, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
+  countWhere, useHost, useModule,
 } from "./shared";
+import { capability } from "./modules";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
@@ -122,6 +123,10 @@ export function Security() {
   const [message, setMessage] = useState("");
   const [planMessage, setPlanMessage] = useState("");
   const [intent, setIntent] = useState<{ label: string; description: string } | null>(null);
+  // A single operation of the module - the SELinux mode, the audit rules -
+  // ordered through the same confirmation as everything else critical.
+  const [operation, setOperation] = useState<Operation | null>(null);
+  const [ordered, setOrdered] = useState<Job | null>(null);
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
   const flag = (value?: boolean | null) =>
     value === undefined || value === null ? unknown : value ? t("yes") : t("no");
@@ -182,6 +187,21 @@ export function Security() {
     },
   });
 
+  const order = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      setOrdered(job);
+      setOperation(null);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => {
+      setOperation(null);
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
   const stop = useMutation({
     mutationFn: (planID: string) =>
       api.post(`/api/v1/hosts/${host.id}/security/remediation/${planID}/stop`, {}),
@@ -198,6 +218,14 @@ export function Security() {
   // anything, read before the list. Unknown until the report is computed.
   const failing = report.data ? findings.filter((f) => f.applicable && !f.passed && !f.unknown) : undefined;
   const severities = ["high", "medium", "low", "info"];
+  // The mode switch exists only where SELinux runs and the adapter writes:
+  // the panel does not disable SELinux and does not turn it on, only
+  // moves between enforcing and permissive.
+  const selinux = snapshot?.mac?.system?.toLowerCase() === "selinux" && !!capability(host, "security.mac")?.available
+    && !capability(host, "security.mac")?.read_only;
+  const otherMode = snapshot?.mac?.mode === "enforcing" ? "permissive" : "enforcing";
+  const auditWritable = !!snapshot?.audit?.present && !!capability(host, "security.audit")?.available
+    && !capability(host, "security.audit")?.read_only;
 
   return (
     <ModulePage>
@@ -212,6 +240,7 @@ export function Security() {
       />
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       {snapshot?.unavailable_reason && (
         <p className="warning">
@@ -282,6 +311,28 @@ export function Security() {
                   })}
                 </span>
               )}
+            {selinux && (snapshot?.mac?.mode === "enforcing" || snapshot?.mac?.mode === "permissive") && (
+              <>
+                {" "}
+                <button
+                  type="button"
+                  className="link"
+                  disabled={operation !== null}
+                  onClick={() =>
+                    setOperation({
+                      action: "selinux.mode.set",
+                      label: otherMode === "enforcing" ? t("Set SELinux to enforcing") : t("Set SELinux to permissive"),
+                      description: otherMode === "enforcing"
+                        ? t("SELinux on {host} starts enforcing its policy now and after reboot. A process the policy does not cover is denied from this moment.", { host: host.hostname })
+                        : t("SELinux on {host} stops enforcing its policy, now and after reboot: denials are only logged. Coming back is another order, not a reboot.", { host: host.hostname }),
+                      payload: { security: { mode: otherMode } },
+                    })
+                  }
+                >
+                  {otherMode === "enforcing" ? t("set enforcing…") : t("set permissive…")}
+                </button>
+              </>
+            )}
           </Fact>
           <Fact label={t("Audit daemon")}>
             {!snapshot?.audit?.present
@@ -291,6 +342,26 @@ export function Security() {
                   {snapshot.audit.rules !== undefined && snapshot.audit.rules !== null
                     ? ` · ${t("{n} rules", { n: snapshot.audit.rules })}`
                     : ""}
+                  {auditWritable && (
+                    <>
+                      {" "}
+                      <button
+                        type="button"
+                        className="link"
+                        disabled={operation !== null}
+                        onClick={() =>
+                          setOperation({
+                            action: "security.audit.reload",
+                            label: t("Reload the audit rules"),
+                            description: t("auditd on {host} re-reads its rule files. Rules removed from the files stop; the daemon keeps running.", { host: host.hostname }),
+                            payload: {},
+                          })
+                        }
+                      >
+                        {t("reload rules…")}
+                      </button>
+                    </>
+                  )}
                 </>}
           </Fact>
           <Fact label={t("Secure boot")}>
@@ -544,6 +615,20 @@ export function Security() {
           onCancel={() => setIntent(null)}
         />
       )}
+
+      {operation && (
+        <TargetConfirmation
+          host={host}
+          label={operation.label}
+          description={operation.description}
+          busy={order.isPending}
+          onConfirm={(reason) => order.mutate({ action: operation.action, reason, payload: operation.payload })}
+          onCancel={() => setOperation(null)}
+        />
+      )}
     </ModulePage>
   );
 }
+
+/** One operation of the module waiting for its confirmation. */
+type Operation = { action: string; label: string; description: string; payload: Record<string, unknown> };

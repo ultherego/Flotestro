@@ -344,17 +344,23 @@ export function Containers() {
           </>
         )}
         {view === "images" && (
-          <ImageTable
-            images={lists?.images}
-            read={read}
-            remove={(image) =>
-              setPending({
-                kind: "remove-image",
-                id: image.id,
-                name: image.tags?.[0] || image.id.slice(7, 19),
-              })
-            }
-          />
+          <>
+            <ImageTable
+              images={lists?.images}
+              read={read}
+              remove={(image) =>
+                setPending({
+                  kind: "remove-image",
+                  id: image.id,
+                  name: image.tags?.[0] || image.id.slice(7, 19),
+                })
+              }
+            />
+            <PullImage
+              busy={request.isPending}
+              onPull={(reference) => request.mutate({ action: "docker.image.pull", payload: { docker_image: { reference } } })}
+            />
+          </>
         )}
         {view === "networks" && (
           <NetworkTable
@@ -833,6 +839,38 @@ function ImageTable({
         ))}
       </tbody>
     </Table>
+  );
+}
+
+/** An image reference as the API takes it: a name with an optional registry, tag or digest, no spaces. */
+const IMAGE_REFERENCE_PATTERN = /^[a-z0-9][A-Za-z0-9._\-/:@]{0,511}$/;
+
+/**
+ * Pulling an image ahead of a deploy: the download happens when somebody
+ * is watching rather than in the middle of a compose apply. The pull is
+ * a mutation and waits for approval like every other; it adds to the host
+ * and removes nothing, so it needs no typed confirmation.
+ */
+function PullImage({ busy, onPull }: { busy: boolean; onPull: (reference: string) => void }) {
+  const t = useT();
+  const [reference, setReference] = useState("");
+  const value = reference.trim();
+  const valid = IMAGE_REFERENCE_PATTERN.test(value);
+  return (
+    <div className="hm-section-body">
+      <Form>
+        <Fields>
+          <Field label={t("Pull an image")} help={t("The full reference, e.g. nginx:1.27 or registry.example.internal/team/app@sha256:…; the engine pulls it with its own credentials.")} wide>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="nginx:1.27" />
+          </Field>
+        </Fields>
+        <FormActions>
+          <button className="secondary" disabled={!valid || busy} onClick={() => onPull(value)}>
+            {t("Pull image")}
+          </button>
+        </FormActions>
+      </Form>
+    </div>
   );
 }
 

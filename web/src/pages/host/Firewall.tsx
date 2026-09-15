@@ -222,6 +222,7 @@ export function Firewall() {
                   <td className="hm-mono">{(zone.ports ?? []).join(", ") || "—"}</td>
                   <td>
                     <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
+                    <ZoneService zone={zone.name} services={zone.services ?? []} onIntent={setIntent} hostname={host.hostname} />
                   </td>
                 </tr>
               ))}
@@ -482,6 +483,69 @@ function ZonePort({
           disabled={!port}
         >
           {operation === "open" ? t("Open") : t("Close")}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A firewalld service name as the host validates it. */
+const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
+
+/**
+ * Adding or removing a firewalld service in a zone. A service is a named
+ * set of ports (ssh, https, nfs) that firewalld ships or the administrator
+ * defined; the change is permanent and reloaded at once, like a port.
+ */
+function ZoneService({
+  zone, services, onIntent, hostname,
+}: {
+  zone: string;
+  /** The services the zone allows now, so removing one offers a name that exists. */
+  services: string[];
+  onIntent: (intent: Intent) => void;
+  hostname: string;
+}) {
+  const t = useT();
+  const [service, setService] = useState("");
+  const name = service.trim();
+  const valid = SERVICE_NAME_PATTERN.test(name);
+
+  return (
+    <div className="operations">
+      <input
+        value={service}
+        onChange={(e) => setService(e.target.value)}
+        placeholder={t("service, e.g. https")}
+        list={`zone-services-${zone}`}
+        style={{ width: 130 }}
+      />
+      <datalist id={`zone-services-${zone}`}>
+        {services.map((entry) => <option key={entry} value={entry} />)}
+      </datalist>
+      {["add", "remove"].map((operation) => (
+        <button
+          key={operation}
+          className="secondary"
+          onClick={() =>
+            onIntent({
+              action: "firewall.zone.service",
+              label: operation === "add" ? t("Add service") : t("Remove service"),
+              description: operation === "add"
+                ? t("The service {service} will be allowed in zone {zone} on {host}, permanently and reloaded now.", { service: name, zone, host: hostname })
+                : t("The service {service} will be removed from zone {zone} on {host}, permanently and reloaded now.", { service: name, zone, host: hostname }),
+              payload: {
+                firewall: {
+                  zone,
+                  service: name,
+                  enable: operation === "add",
+                },
+              },
+            })
+          }
+          disabled={!valid || (operation === "remove" && !services.includes(name))}
+        >
+          {operation === "add" ? t("Add service") : t("Remove service")}
         </button>
       ))}
     </div>

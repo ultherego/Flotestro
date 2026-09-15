@@ -9,7 +9,7 @@ import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from
 import { Breakdown, StatusBar } from "../components/widgets";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { buildExpression, describeExpression, HostChooser, SelectorBuilder, type Rule } from "./Groups";
-import { useOperations, type Operation } from "./Bulk";
+import { FacetList, useFleetFacets, useOperations, type Operation } from "./Bulk";
 import { useT } from "../i18n";
 
 /**
@@ -176,6 +176,9 @@ function NewRead({ onDone }: { onDone: () => void }) {
   const [hostIDs, setHostIDs] = useState<Set<string>>(new Set());
   const [reason, setReason] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  // The sites, environments and OS families the fleet has, for the
+  // target fields' suggestions.
+  const facets = useFleetFacets();
 
   // A read picked from the list starts from its own payload, unless the
   // form was opened with one already filled in.
@@ -259,14 +262,20 @@ function NewRead({ onDone }: { onDone: () => void }) {
         </Field>
         {mode === "filters" && (
           <>
+            {/* The values the fleet really has are offered under each
+                field; free text still goes through, and the ceiling
+                below says what it matched. */}
             <Field label={t("Site")}>
-              <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
+              <input placeholder={t("site")} value={site} list="reads-sites" onChange={(e) => setSite(e.target.value)} />
+              <FacetList id="reads-sites" facets={facets.data?.by_site} />
             </Field>
             <Field label={t("Environment")}>
-              <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
+              <input placeholder={t("environment")} value={environment} list="reads-environments" onChange={(e) => setEnvironment(e.target.value)} />
+              <FacetList id="reads-environments" facets={facets.data?.by_environment} />
             </Field>
             <Field label={t("OS family")}>
-              <input placeholder={t("e.g. debian")} value={osFamily} onChange={(e) => setOsFamily(e.target.value)} />
+              <input placeholder={t("e.g. debian")} value={osFamily} list="reads-os-families" onChange={(e) => setOsFamily(e.target.value)} />
+              <FacetList id="reads-os-families" facets={facets.data?.by_os_family} />
             </Field>
           </>
         )}

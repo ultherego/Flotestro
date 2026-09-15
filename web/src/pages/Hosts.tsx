@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { REFRESH_INTERVAL } from "../lib/stream";
 import { api, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
-import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host } from "../lib/types";
+import { RELEASE_CHANNELS, refusalName, type FleetActivity, type Host, type Relay } from "../lib/types";
 import { relativeTime } from "../lib/format";
 import { ErrorBox, Time, OptionalFlag, OptionalNumber, Empty, ConnectionState } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
@@ -25,6 +25,82 @@ const ADDRESS_SOURCES: Record<string, string> = {
 };
 
 /**
+ * The filters of the list, each under the name it carries in the address
+ * and in the query to the server. The tags are one text of words; every
+ * other filter is one value, and an empty value does not narrow.
+ */
+type HostFilters = {
+  q: string;
+  site: string;
+  environment: string;
+  os_family: string;
+  connection_state: string;
+  lifecycle_state: string;
+  owner: string;
+  maintenance: string;
+  capability: string;
+  channel: string;
+  reboot_required: string;
+  security_updates: string;
+  identity_domain: string;
+  connection_refusal: string;
+  tags: string;
+  failed_units: string;
+  package_db_broken: string;
+  sssd_offline: string;
+  agent_behind: string;
+  relay: string;
+  failure_domain: string;
+};
+
+const EMPTY_FILTERS: HostFilters = {
+  q: "", site: "", environment: "", os_family: "", connection_state: "", lifecycle_state: "",
+  owner: "", maintenance: "", capability: "", channel: "", reboot_required: "", security_updates: "",
+  identity_domain: "", connection_refusal: "", tags: "", failed_units: "", package_db_broken: "",
+  sssd_offline: "", agent_behind: "", relay: "", failure_domain: "",
+};
+
+/**
+ * A button that reads as a word in a line rather than as a control: a
+ * value in the composition or the cross on a chip narrows or widens the
+ * list, and a row of accent buttons would drown the numbers next to them.
+ */
+const WORD_BUTTON: CSSProperties = {
+  background: "none", border: 0, padding: 0, font: "inherit", color: "inherit",
+  textDecoration: "underline dotted", cursor: "pointer",
+};
+
+/** The shape of a relay identifier, as the server checks it. */
+const RELAY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The filters as the address carries them; a name absent from it is empty. */
+function readFilters(params: URLSearchParams): HostFilters {
+  const filters = { ...EMPTY_FILTERS };
+  for (const key of Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[]) {
+    if (key === "tags") continue;
+    filters[key] = params.get(key) ?? "";
+  }
+  filters.tags = params.getAll("tag").join(" ");
+  return filters;
+}
+
+/**
+ * The filters as the address and the server take them: only the ones set,
+ * the tags one by one. The typed texts go in as typed - trimmed, so a
+ * bookmark does not carry a trailing space.
+ */
+function filterParams(filters: HostFilters): URLSearchParams {
+  const params = new URLSearchParams();
+  for (const key of Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[]) {
+    if (key === "tags") continue;
+    const value = filters[key].trim();
+    if (value) params.set(key, value);
+  }
+  for (const tag of filters.tags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
+  return params;
+}
+
+/**
  * The host list with filters executed on the server side. The panel never
  * fetches the whole fleet into the browser memory to filter it: the search,
  * the filters and the paging all happen in the database, and the screen
@@ -42,74 +118,56 @@ export function Hosts() {
   // campaigns has no such workspace and sees no checkboxes.
   const canSelect = (permissions.data?.permissions ?? []).includes("campaign.read");
   const navigate = useNavigate();
-  // A tile on the dashboard links here with a filter already set; the
-  // address only seeds the filters, the operator changes them freely.
-  const [initial] = useSearchParams();
-  const [search, setSearch] = useState(initial.get("q") ?? "");
-  const [site, setSite] = useState(initial.get("site") ?? "");
-  const [environment, setEnvironment] = useState(initial.get("environment") ?? "");
-  const [osFamily, setOsFamily] = useState(initial.get("os_family") ?? "");
-  const [connectionState, setConnectionState] = useState(initial.get("connection_state") ?? "");
-  const [lifecycleState, setLifecycleState] = useState(initial.get("lifecycle_state") ?? "");
-  const [owner, setOwner] = useState(initial.get("owner") ?? "");
-  const [maintenance, setMaintenance] = useState(initial.get("maintenance") ?? "");
-  const [capability, setCapability] = useState(initial.get("capability") ?? "");
-  const [channel, setChannel] = useState(initial.get("channel") ?? "");
-  // The "needs attention" filters: a host that must be rebooted, a host
-  // with a security update waiting, a host of one directory domain. The
-  // dashboard tiles link here with them set.
-  const [rebootRequired, setRebootRequired] = useState(initial.get("reboot_required") ?? "");
-  const [securityUpdates, setSecurityUpdates] = useState(initial.get("security_updates") ?? "");
-  const [identityDomain, setIdentityDomain] = useState(initial.get("identity_domain") ?? "");
+  // The address carries the filters: a tile on the dashboard, a chip on a
+  // row and a bookmark all link here with some already set, and every
+  // change goes back into the address so the view can be handed on as a
+  // link. The address last written or adopted tells a change made on the
+  // screen from a link followed to this page, so each side follows the
+  // other without the two chasing each other.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<HostFilters>(() => readFilters(searchParams));
+  const setFilter = (key: keyof HostFilters, value: string) =>
+    setFilters((previous) => ({ ...previous, [key]: value }));
+  const written = useRef(searchParams.toString());
+  useEffect(() => {
+    const next = filterParams(filters).toString();
+    if (next !== written.current) {
+      written.current = next;
+      setSearchParams(new URLSearchParams(next), { replace: true });
+    }
+  }, [filters, setSearchParams]);
+  useEffect(() => {
+    const current = searchParams.toString();
+    if (current !== written.current) {
+      written.current = current;
+      setFilters(readFilters(searchParams));
+    }
+  }, [searchParams]);
   // The rows ticked for the bulk workspace. The selection is by
   // identifier, so it survives a refresh of the list and a page loaded
   // later; a filter change drops it, because the rows it named are gone
   // from view and a hidden selection would order a campaign on hosts the
   // operator no longer sees.
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
-  // The refusal filter has no control of its own: the dashboard's
-  // expired-certificates tile links here with it set, and the address is
-  // the only way in. Clearing the connection state clears it too, so the
-  // operator is never stuck in a filter they cannot see.
-  const [refusal, setRefusal] = useState(initial.get("connection_refusal") ?? "");
-  // Tags typed as words: every one of them has to be on the host. A chip
-  // on a row links here with the tag filled in.
-  const [tags, setTags] = useState(initial.getAll("tag").join(" "));
-  // A segment of the status bar above the list links here with a state;
-  // the page is already open then, so the address is read again on every
-  // arrival, not only on the first.
-  const location = useLocation();
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const wanted = params.get("connection_state");
-    if (wanted !== null) setConnectionState(wanted);
-    const wantedRefusal = params.get("connection_refusal");
-    if (wantedRefusal !== null) setRefusal(wantedRefusal);
-    const wantedTags = params.getAll("tag");
-    if (wantedTags.length > 0) setTags(wantedTags.join(" "));
-  }, [location.key, location.search]);
   // The typed text reaches the server after a pause, not per keystroke.
-  const settledSearch = useDebounced(search.trim());
-  const settledOwner = useDebounced(owner.trim());
-  const settledTags = useDebounced(tags.trim());
-  const settledDomain = useDebounced(identityDomain.trim());
+  const settledSearch = useDebounced(filters.q.trim());
+  const settledOwner = useDebounced(filters.owner.trim());
+  const settledTags = useDebounced(filters.tags.trim());
+  const settledDomain = useDebounced(filters.identity_domain.trim());
+  const settledSite = useDebounced(filters.site.trim());
+  const settledEnvironment = useDebounced(filters.environment.trim());
+  const settledFailureDomain = useDebounced(filters.failure_domain.trim());
 
-  const params = new URLSearchParams();
-  if (settledSearch) params.set("q", settledSearch);
-  if (site) params.set("site", site);
-  if (environment) params.set("environment", environment);
-  if (osFamily) params.set("os_family", osFamily);
-  if (connectionState) params.set("connection_state", connectionState);
-  if (lifecycleState) params.set("lifecycle_state", lifecycleState);
-  if (settledOwner) params.set("owner", settledOwner);
-  if (maintenance) params.set("maintenance", maintenance);
-  if (capability) params.set("capability", capability);
-  if (channel) params.set("channel", channel);
-  if (refusal) params.set("connection_refusal", refusal);
-  if (rebootRequired) params.set("reboot_required", rebootRequired);
-  if (securityUpdates) params.set("security_updates", securityUpdates);
-  if (settledDomain) params.set("identity_domain", settledDomain);
-  for (const tag of settledTags.split(/\s+/).filter(Boolean)) params.append("tag", tag);
+  // A relay is asked for by identifier; a text that is not one yet - half
+  // typed, or pasted with a stray character - is not sent, because the
+  // server would refuse it and the whole list would turn into an error.
+  const settledRelay = useDebounced(filters.relay.trim());
+  const params = filterParams({
+    ...filters,
+    q: settledSearch, owner: settledOwner, tags: settledTags, identity_domain: settledDomain,
+    site: settledSite, environment: settledEnvironment, failure_domain: settledFailureDomain,
+    relay: RELAY_ID.test(settledRelay) ? settledRelay : "",
+  });
   params.set("limit", String(LIST_PAGE));
   const filterKey = params.toString();
   useEffect(() => {
@@ -138,6 +196,16 @@ export function Hosts() {
     refetchInterval: REFRESH_INTERVAL,
   });
 
+  // The relays, for the filter by route: read only by whoever may list
+  // them; for the rest the filter is still reachable through the address.
+  const canSeeRelays = (permissions.data?.permissions ?? []).includes("host.enroll.read");
+  const relays = useQuery({
+    queryKey: ["relays"],
+    queryFn: () => api.get<{ items: Relay[] }>("/api/v1/relays"),
+    enabled: canSeeRelays,
+    staleTime: 60 * 1000,
+  });
+
   if (hosts.error) return <ErrorBox error={hosts.error} />;
 
   const rows = loadedItems(hosts.data);
@@ -148,7 +216,41 @@ export function Hosts() {
   // themselves absent are a count nobody has yet, and the segment shows
   // a dash.
   const byConnection = (state: string) => (a ? a.by_connection_state.find((f) => f.key === state)?.count ?? 0 : undefined);
-  const facets = (items: { key: string; count: number }[]) => items.map((f) => ({ label: f.key, value: f.count }));
+  // A row of the composition narrows the list to its value: the count is
+  // one click from the hosts it counted.
+  const facets = (items: { key: string; count: number }[], key: keyof HostFilters) => items.map((f) => ({
+    label: (
+      <button type="button" style={WORD_BUTTON} onClick={() => setFilter(key, f.key)} title={t("show only these hosts")}>
+        {f.key}
+      </button>
+    ),
+    value: f.count,
+  }));
+  const facetKeys = (items?: { key: string }[]) => (items ?? []).map((f) => f.key).filter(Boolean);
+  // The facets do not count owners, so the suggestions are the owners of
+  // the rows on screen: a hint, not the whole list.
+  const ownerKeys = [...new Set(rows.map((host) => host.owner).filter((owner): owner is string => Boolean(owner)))].sort();
+  // The active filters as chips: what the list is narrowed by, each with
+  // its own way off. The refusal has no control of its own - the
+  // dashboard's expired-certificates tile links here with it set - so the
+  // chip is the only place it can be seen and cleared.
+  const chipLabels: Record<keyof HostFilters, string> = {
+    q: t("search"), site: t("site"), environment: t("environment"), os_family: t("OS"),
+    connection_state: t("state"), lifecycle_state: t("lifecycle"), owner: t("owner"),
+    maintenance: t("maintenance"), capability: t("capability"), channel: t("channel"),
+    reboot_required: t("reboot required"), security_updates: t("security updates"),
+    identity_domain: t("domain"), connection_refusal: t("refused for"), tags: t("tags"),
+    failed_units: t("failed units"), package_db_broken: t("package database broken"),
+    sssd_offline: t("SSSD offline"), agent_behind: t("agent behind"), relay: t("relay"),
+    failure_domain: t("failure domain"),
+  };
+  const chipValue = (key: keyof HostFilters, value: string): string => {
+    if (key === "connection_refusal") return t(refusalName(value));
+    if (key === "relay") return relays.data?.items.find((relay) => relay.id === value)?.name ?? value;
+    return value;
+  };
+  const activeFilters = (Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[])
+    .filter((key) => filters[key].trim() !== "");
   // The meter measures each host against the busiest one on the list; a
   // host whose count is unknown does not set the scale.
   const mostUpdates = Math.max(0, ...rows.map((host) => host.pending_updates ?? 0));
@@ -177,7 +279,7 @@ export function Hosts() {
           allowed anyway. */}
       <PageHeader
         title={t("Hosts")}
-        description={t("Filters are applied server-side.")}
+        description={<>{t("Filters are applied server-side.")} <Refreshed at={hosts.dataUpdatedAt} fetching={hosts.isFetching} onRefresh={() => hosts.refetch()} /></>}
         actions={canAdd && <Link to="/hosts/new" className="button primary">{t("Add host")}</Link>}
       />
 
@@ -199,31 +301,40 @@ export function Hosts() {
           <Toolbar end={hosts.data && <span>{t("{n} hosts", { n: total })}</span>}>
             <input
               placeholder={t("Search hostname, address, machine ID or owner")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              value={filters.q}
+              onChange={(e) => setFilter("q", e.target.value)}
             />
-            <input placeholder={t("site")} value={site} onChange={(e) => setSite(e.target.value)} />
-            <input placeholder={t("environment")} value={environment} onChange={(e) => setEnvironment(e.target.value)} />
-            <input placeholder={t("owner")} value={owner} onChange={(e) => setOwner(e.target.value)} />
+            {/* The sites, environments and owners are suggested from the
+                facets: the fleet's own values, not a list to maintain. */}
+            <input placeholder={t("site")} value={filters.site} list="hosts-sites" onChange={(e) => setFilter("site", e.target.value)} />
+            <datalist id="hosts-sites">{facetKeys(a?.by_site).map((key) => <option key={key} value={key} />)}</datalist>
+            <input placeholder={t("environment")} value={filters.environment} list="hosts-environments" onChange={(e) => setFilter("environment", e.target.value)} />
+            <datalist id="hosts-environments">{facetKeys(a?.by_environment).map((key) => <option key={key} value={key} />)}</datalist>
+            <input placeholder={t("owner")} value={filters.owner} list="hosts-owners" onChange={(e) => setFilter("owner", e.target.value)} />
+            <datalist id="hosts-owners">{ownerKeys.map((key) => <option key={key} value={key} />)}</datalist>
             <input
               placeholder={t("tags, e.g. role=db tier=gold")}
               title={t("every listed tag has to be on the host")}
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
+              value={filters.tags}
+              onChange={(e) => setFilter("tags", e.target.value)}
             />
-            <select value={osFamily} onChange={(e) => setOsFamily(e.target.value)}>
+            {/* The systems are the ones the fleet reports, from the facets;
+                a family set by a link but absent from the fleet stays
+                listed, so the control shows what the list is narrowed by. */}
+            <select value={filters.os_family} onChange={(e) => setFilter("os_family", e.target.value)}>
               <option value="">{t("OS: any")}</option>
-              <option value="debian">debian</option>
-              <option value="rhel">rhel</option>
+              {[...new Set([...facetKeys(a?.by_os_family), ...(filters.os_family ? [filters.os_family] : [])])].map((family) => (
+                <option key={family} value={family}>{family}</option>
+              ))}
             </select>
-            <select value={connectionState} onChange={(e) => { setConnectionState(e.target.value); setRefusal(""); }}>
+            <select value={filters.connection_state} onChange={(e) => setFilters((previous) => ({ ...previous, connection_state: e.target.value, connection_refusal: "" }))}>
               <option value="">{t("state: any")}</option>
               <option value="online">{t("online")}</option>
               <option value="offline">{t("offline")}</option>
               <option value="stale">{t("stale")}</option>
               <option value="unknown">{t("unknown")}</option>
             </select>
-            <select value={lifecycleState} onChange={(e) => setLifecycleState(e.target.value)}>
+            <select value={filters.lifecycle_state} onChange={(e) => setFilter("lifecycle_state", e.target.value)}>
               <option value="">{t("lifecycle: any")}</option>
               <option value="active">{t("active")}</option>
               <option value="quarantined">{t("quarantined")}</option>
@@ -231,25 +342,25 @@ export function Hosts() {
               <option value="retiring">{t("retiring")}</option>
               <option value="retired">{t("retired")}</option>
             </select>
-            <select value={maintenance} onChange={(e) => setMaintenance(e.target.value)}>
+            <select value={filters.maintenance} onChange={(e) => setFilter("maintenance", e.target.value)}>
               <option value="">{t("maintenance: any")}</option>
               <option value="true">{t("in a maintenance window")}</option>
               <option value="false">{t("outside a maintenance window")}</option>
             </select>
-            <select value={capability} onChange={(e) => setCapability(e.target.value)}>
+            <select value={filters.capability} onChange={(e) => setFilter("capability", e.target.value)}>
               <option value="">{t("capability: any")}</option>
               {CAPABILITIES.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
-            <select value={channel} onChange={(e) => setChannel(e.target.value)}>
+            <select value={filters.channel} onChange={(e) => setFilter("channel", e.target.value)}>
               <option value="">{t("channel: any")}</option>
               {RELEASE_CHANNELS.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
-            <select value={rebootRequired} onChange={(e) => setRebootRequired(e.target.value)} data-testid="filter-reboot">
+            <select value={filters.reboot_required} onChange={(e) => setFilter("reboot_required", e.target.value)} data-testid="filter-reboot">
               <option value="">{t("reboot: any")}</option>
               <option value="true">{t("reboot required")}</option>
               <option value="false">{t("no reboot required")}</option>
             </select>
-            <select value={securityUpdates} onChange={(e) => setSecurityUpdates(e.target.value)} data-testid="filter-security">
+            <select value={filters.security_updates} onChange={(e) => setFilter("security_updates", e.target.value)} data-testid="filter-security">
               <option value="">{t("security updates: any")}</option>
               <option value="true">{t("security updates waiting")}</option>
               <option value="false">{t("no security updates")}</option>
@@ -257,15 +368,67 @@ export function Hosts() {
             <input
               placeholder={t("domain, e.g. corp.example")}
               title={t("the directory domain the host is joined to")}
-              value={identityDomain}
-              onChange={(e) => setIdentityDomain(e.target.value)}
+              value={filters.identity_domain}
+              onChange={(e) => setFilter("identity_domain", e.target.value)}
             />
+            <input
+              placeholder={t("failure domain, e.g. rack-a")}
+              title={t("the rack, zone or cluster an operator placed the host in")}
+              value={filters.failure_domain}
+              onChange={(e) => setFilter("failure_domain", e.target.value)}
+            />
+            {/* The route: a relay by name for whoever may list them, the
+                identifier for the rest. */}
+            {canSeeRelays ? (
+              <select value={filters.relay} onChange={(e) => setFilter("relay", e.target.value)} data-testid="filter-relay">
+                <option value="">{t("relay: any")}</option>
+                {(relays.data?.items ?? []).map((relay) => <option key={relay.id} value={relay.id}>{relay.name}</option>)}
+                {filters.relay && !relays.data?.items.some((relay) => relay.id === filters.relay) && (
+                  <option value={filters.relay}>{filters.relay}</option>
+                )}
+              </select>
+            ) : (
+              <input placeholder={t("relay identifier")} value={filters.relay} onChange={(e) => setFilter("relay", e.target.value)} />
+            )}
+            {/* The "needs attention" boxes: each is the filter a dashboard
+                tile links here with, ticked means "only these". */}
+            <label className="toggle" title={t("hosts with at least one failed unit")}>
+              <input type="checkbox" checked={filters.failed_units === "true"} onChange={(e) => setFilter("failed_units", e.target.checked ? "true" : "")} data-testid="filter-failed-units" />
+              {t("failed units")}
+            </label>
+            <label className="toggle" title={t("hosts whose package database the last operation found broken")}>
+              <input type="checkbox" checked={filters.package_db_broken === "true"} onChange={(e) => setFilter("package_db_broken", e.target.checked ? "true" : "")} data-testid="filter-package-db" />
+              {t("package database broken")}
+            </label>
+            <label className="toggle" title={t("domain-joined hosts whose SSSD reports itself offline")}>
+              <input type="checkbox" checked={filters.sssd_offline === "true"} onChange={(e) => setFilter("sssd_offline", e.target.checked ? "true" : "")} data-testid="filter-sssd" />
+              {t("SSSD offline")}
+            </label>
+            <label className="toggle" title={t("hosts whose agent is older than the newest one in the fleet")}>
+              <input type="checkbox" checked={filters.agent_behind === "true"} onChange={(e) => setFilter("agent_behind", e.target.checked ? "true" : "")} data-testid="filter-agent-behind" />
+              {t("agent behind")}
+            </label>
           </Toolbar>
-          {refusal && (
-            <p className="source">
-              {t("Showing the hosts the gateway last refused for: {reason}.", { reason: t(refusalName(refusal)) })}{" "}
-              <button type="button" className="link" onClick={() => setRefusal("")}>{t("show all")}</button>
-            </p>
+          {activeFilters.length > 0 && (
+            <div className="filters" style={{ padding: "0 16px", marginBottom: 12 }} data-testid="active-filters">
+              {activeFilters.map((key) => (
+                <span key={key} className="chip">
+                  <span className="chip-tag">{chipLabels[key]}</span>
+                  {chipValue(key, filters[key].trim())}
+                  <button
+                    type="button"
+                    style={{ ...WORD_BUTTON, textDecoration: "none" }}
+                    aria-label={t("clear the {name} filter", { name: chipLabels[key] })}
+                    onClick={() => setFilter(key, "")}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+              <button type="button" className="secondary" onClick={() => setFilters(EMPTY_FILTERS)} data-testid="clear-filters">
+                {t("Clear filters")}
+              </button>
+            </div>
           )}
 
           {hosts.isLoading ? (
@@ -318,14 +481,15 @@ export function Hosts() {
                         {host.tags.length > 0 && (
                           <span className="fp-host-tags" style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                             {host.tags.map((tag) => (
-                              <Link
+                              <button
                                 key={tag}
+                                type="button"
                                 className="badge"
-                                to={`/hosts?tag=${encodeURIComponent(tag)}`}
+                                onClick={() => setFilter("tags", tag)}
                                 title={t("show every host tagged {tag}", { tag })}
                               >
                                 {tag}
-                              </Link>
+                              </button>
                             ))}
                           </span>
                         )}
@@ -367,7 +531,7 @@ export function Hosts() {
                         their hosts, like a tag chip does. */}
                     <td data-testid="host-owner">
                       {host.owner
-                        ? <button type="button" className="link" onClick={() => setOwner(host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
+                        ? <button type="button" className="link" onClick={() => setFilter("owner", host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
                         : <span className="source">—</span>}
                     </td>
                     <td>{host.os_distribution || host.os_family || "—"} {host.os_version}</td>
@@ -375,7 +539,7 @@ export function Hosts() {
                     <td>{host.environment}</td>
                     <td>
                       {host.identity.enrolled
-                        ? <button type="button" className="link" onClick={() => setIdentityDomain(host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
+                        ? <button type="button" className="link" onClick={() => setFilter("identity_domain", host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
                         : <span className="badge">{t("not in domain")}</span>}
                     </td>
                     {/* The bar is the host's share of the busiest host on the
@@ -440,13 +604,13 @@ export function Hosts() {
           {a ? (
             <>
               <h4 className="widget-subhead">{t("By system")}</h4>
-              <Breakdown items={facets(a.by_os_family)} />
+              <Breakdown items={facets(a.by_os_family, "os_family")} />
               <h4 className="widget-subhead">{t("Sites and environments")}</h4>
-              <Breakdown tone="ok" items={[...facets(a.by_site), ...facets(a.by_environment)]} />
+              <Breakdown tone="ok" items={[...facets(a.by_site, "site"), ...facets(a.by_environment, "environment")]} />
               <h4 className="widget-subhead">{t("Agent builds")}</h4>
-              <Breakdown tone="neutral" items={facets(a.by_agent_version)} />
+              <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: f.key, value: f.count }))} />
               <h4 className="widget-subhead">{t("Lifecycle")}</h4>
-              <Breakdown tone="info" items={facets(a.by_lifecycle_state)} />
+              <Breakdown tone="info" items={facets(a.by_lifecycle_state, "lifecycle_state")} />
             </>
           ) : activity.isError ? (
             <p className="fp-blank">{t("The composition could not be counted.")}</p>
@@ -454,5 +618,23 @@ export function Hosts() {
         </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * When the list was last read from the server, with a way to read it
+ * again now rather than at the next tick: an operator who has just changed
+ * something on a host does not want to wait five seconds to see it.
+ */
+function Refreshed({ at, fetching, onRefresh }: { at: number; fetching: boolean; onRefresh: () => void }) {
+  const t = useT();
+  return (
+    <span className="source" data-testid="refreshed">
+      {at > 0 ? t("refreshed {when}", { when: relativeTime(new Date(at).toISOString()) }) : t("not yet loaded")}
+      {" · "}
+      <button type="button" style={WORD_BUTTON} onClick={onRefresh} disabled={fetching}>
+        {fetching ? t("refreshing…") : t("refresh now")}
+      </button>
+    </span>
   );
 }

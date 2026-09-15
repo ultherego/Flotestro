@@ -120,6 +120,23 @@ export function Overview() {
                 testID="management-address"
               />
             </Fact>
+            {/* The domain is a budget key from the moment it is written:
+                the next change on the host asks for a token of that domain
+                next to the site's. Hence a fact set by hand, not a tag. */}
+            <Fact label={t("Failure domain")}>
+              <HostFact
+                host={host}
+                editable={canEditFacts}
+                value={host.failure_domain ?? ""}
+                shown={host.failure_domain ? <span>{host.failure_domain}</span> : <span className="badge unknown">{t("not placed")}</span>}
+                label={t("Failure domain")}
+                help={t("What the host goes down with: a rack, a zone, a cluster. Change budgets are keyed by it, so a campaign takes at most its share of one domain at a time; empty takes the host out from under the domain budgets.")}
+                placeholder={t("rack-12, zone-b")}
+                path="failure-domain"
+                field="failure_domain"
+                testID="failure-domain"
+              />
+            </Fact>
             <Fact label={t("Lifecycle state")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
             <Fact label={t("Reboot required")}><OptionalFlag value={host.reboot_required} /></Fact>
             <Fact label={t("Failed units")}><OptionalNumber value={host.failed_units} /></Fact>
@@ -245,9 +262,9 @@ function HostFact({ host, editable, value, shown, label, help, placeholder, path
   help: string;
   placeholder: string;
   /** The last segment of the PUT address under /api/v1/hosts/{id}/. */
-  path: "owner" | "management-address";
+  path: "owner" | "management-address" | "failure-domain";
   /** The name of the value in the request body. */
-  field: "owner" | "address";
+  field: "owner" | "address" | "failure_domain";
   testID: string;
 }) {
   const t = useT();
@@ -478,13 +495,165 @@ function Lifecycle({ host }: { host: Host }) {
       <Facts>
         <Fact label={t("State")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
         <Fact label={t("Since")}>{host.lifecycle_changed_at ? <Time value={host.lifecycle_changed_at} /> : "—"}</Fact>
+        <Fact label={t("Decided by")}>{lifecycleActor(host) || "—"}</Fact>
         <Fact label={t("Reason")}>{host.lifecycle_reason || "—"}</Fact>
         <Fact label={t("Meaning")} wide>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
       </Facts>
+      {alive && <Quarantine host={host} />}
       {alive && <IdentityRecovery host={host} prompted={!!refusal && RECOVERABLE_REFUSALS.includes(refusal.code)} />}
       {outcome && <div className="hm-section-body"><DecommissionResult outcome={outcome} /></div>}
       {host.lifecycle_state !== "retired" && <DecommissionHost host={host} onDone={setOutcome} />}
     </>
+  );
+}
+
+/**
+ * Who took the lifecycle decision, when the host view carries it. The
+ * field is written with every transition; a view from before it was
+ * exposed has none, and that is shown as unknown rather than as nobody.
+ */
+function lifecycleActor(host: Host): string {
+  const actor = (host as Host & { lifecycle_changed_by?: string }).lifecycle_changed_by;
+  return actor ?? "";
+}
+
+/**
+ * Cutting the host off and letting it back in.
+ *
+ * Quarantine is the first move of an incident: the host loses its session
+ * and its secrets, the undelivered jobs are cancelled, and nothing runs on
+ * it until somebody releases it. Revoking the certificates is a separate
+ * decision, taken on a suspected key theft: a revoked certificate cannot
+ * be released, only recovered. Both changes are step-up operations: the
+ * operator types the hostname, gives a reason, and the order asks for
+ * fresh authentication. The buttons exist only for whoever may order them.
+ */
+function Quarantine({ host }: { host: Host }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const whoami = useQuery({
+    queryKey: ["whoami"],
+    queryFn: () => api.get<Whoami>("/api/v1/whoami"),
+    staleTime: 5 * 60 * 1000,
+  });
+  const permissions = whoami.data?.permissions ?? [];
+  const quarantined = host.lifecycle_state === "quarantined";
+  const mayQuarantine = permissions.includes("host.quarantine") && !quarantined;
+  const mayRelease = permissions.includes("host.quarantine.release") && quarantined;
+  const [open, setOpen] = useState(false);
+  const [revoke, setRevoke] = useState(false);
+  const [confirming, setConfirming] = useState<"quarantine" | "release" | null>(null);
+  const [message, setMessage] = useState("");
+  const [signInAgain, setSignInAgain] = useState(false);
+
+  const request = useMutation({
+    mutationFn: ({ path, body }: { path: string; body: Record<string, unknown> }) =>
+      api.post<{ lifecycle_state: string; jobs_canceled?: number; certificates_revoked?: number }>(
+        `/api/v1/hosts/${host.id}/${path}`, body,
+      ),
+    onSuccess: (result) => {
+      setMessage(result.lifecycle_state === "quarantined"
+        ? t("The host is quarantined: {jobs} job(s) cancelled, {certificates} certificate(s) revoked.", {
+            jobs: result.jobs_canceled ?? 0, certificates: result.certificates_revoked ?? 0,
+          })
+        : t("The host is released; the agent reconnects on its own."));
+      setSignInAgain(false);
+      setConfirming(null);
+      setOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["host-timeline", host.id] });
+    },
+    onError: (error) => {
+      setConfirming(null);
+      // A stale authentication is a sign-in that comes back here, not a
+      // failure of the order.
+      if (error instanceof ApiError && error.unauthenticated) {
+        setSignInAgain(true);
+        setMessage(t("Fresh authentication is required: sign in again and repeat the order."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  if (!mayQuarantine && !mayRelease) return null;
+
+  return (
+    <div className="hm-section-body" data-testid="quarantine">
+      {mayRelease && (
+        <FormActions>
+          <button onClick={() => setConfirming("release")} disabled={confirming !== null}>
+            {t("Release from quarantine…")}
+          </button>
+        </FormActions>
+      )}
+      {mayQuarantine && !open && (
+        <FormActions>
+          <button className="hm-danger" onClick={() => setOpen(true)}>{t("Quarantine host…")}</button>
+        </FormActions>
+      )}
+      {mayQuarantine && open && (
+        <Form>
+          <Check checked={revoke} onChange={setRevoke}>
+            {t("Revoke the certificates as well (suspected key theft)")}
+          </Check>
+          <FormNote>
+            {revoke
+              ? t("The certificates stop working now. A host with revoked certificates is not released: its return is an identity recovery.")
+              : t("The certificates stay valid; the lifecycle state alone keeps the host out, and a release lets it back in.")}
+          </FormNote>
+          <FormNote>
+            {t("The session is closed, the undelivered jobs are cancelled, and the host takes no operations and no secrets. A task already delivered runs to its end; the panel cannot undo it.")}
+          </FormNote>
+          <FormActions>
+            <button className="hm-danger" onClick={() => setConfirming("quarantine")} disabled={confirming !== null}>
+              {t("Quarantine host…")}
+            </button>
+            <button className="secondary" onClick={() => { setOpen(false); setConfirming(null); }}>{t("Cancel")}</button>
+          </FormActions>
+        </Form>
+      )}
+      <Message text={message} />
+      {signInAgain && (
+        <FormActions>
+          <button
+            className="secondary"
+            onClick={() => {
+              const target = encodeURIComponent(window.location.pathname);
+              window.location.href = `/auth/login?step_up=1&redirect=${target}`;
+            }}
+          >
+            {t("Sign in again")}
+          </button>
+        </FormActions>
+      )}
+
+      {confirming === "quarantine" && (
+        <TargetConfirmation
+          host={host}
+          danger
+          label={t("Quarantine host")}
+          description={t("{host} is cut off from the fleet at once: no session, no operations, no secrets, until somebody releases it.", { host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason) =>
+            request.mutate({ path: "quarantine", body: { reason, revoke_certificates: revoke } })
+          }
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+      {confirming === "release" && (
+        <TargetConfirmation
+          host={host}
+          label={t("Release from quarantine")}
+          description={t("{host} returns to the fleet: the agent reconnects on its own and the host takes operations again. Under a duplicate identity, wipe or reinstall the other machine first, or the release produces the next duplicate.", { host: host.hostname })}
+          busy={request.isPending}
+          onConfirm={(reason) => request.mutate({ path: "quarantine/release", body: { reason } })}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
+    </div>
   );
 }
 

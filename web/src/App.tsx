@@ -37,6 +37,9 @@ import { Power } from "./pages/host/Power";
 import { Security } from "./pages/host/Security";
 import { FleetSecurity } from "./pages/Security";
 import { Secrets } from "./pages/Secrets";
+import { SecretPage } from "./pages/Secret";
+import { ModalProvider } from "./components/Modal";
+import { ToastProvider } from "./components/Toast";
 import { FleetCertificates } from "./pages/Certificates";
 import { FleetBackups } from "./pages/Backups";
 import { FleetMonitoring } from "./pages/Monitoring";
@@ -53,6 +56,7 @@ import { Identity } from "./pages/host/Identity";
 import { HostJobs } from "./pages/host/Jobs";
 import { HostAudit } from "./pages/host/Audit";
 import { Jobs } from "./pages/Jobs";
+import { JobPage } from "./pages/Job";
 import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
 import { Campaign } from "./pages/Campaign";
@@ -219,103 +223,109 @@ export function App() {
   const trail: Trail = { ...sectionOf(groups, location.pathname), host: onHost?.host, module: onHost?.module };
 
   return (
-    <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
-      {/* The shell is two panels: the sidebar down the left edge with the
-          places to go, and the top bar across the rest with where the
-          operator is and who they are. On a narrow screen the sidebar
-          becomes a drawer behind the bar's menu button. */}
-      <Sidebar
-        face={face}
-        collapsed={collapsed}
-        open={drawer}
-        onClose={() => setDrawer(false)}
-      />
-      {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
-      <Topbar
-        trail={trail}
-        user={data}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((current) => !current)}
-        onOpenDrawer={() => setDrawer(true)}
-        onSignOut={signOut}
-        theme={theme}
-        setTheme={setTheme}
-        scale={scale}
-        setScale={setScale}
-      />
-      <main className="content">
-        {/* The page keeps a reading width and sits in the middle of the
-            content area: on a wide screen a full-width page hugs the left
-            edge and leaves the rest empty. */}
-        <div className="page">
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/hosts" element={<Hosts />} />
-          {/* The path is before the host route, because "new" is not an identifier. */}
-          <Route path="/hosts/new" element={<AddHost />} />
-          <Route path="/groups" element={<Groups />} />
-          <Route path="/groups/:id" element={<Groups />} />
-          {seesRelays && <Route path="/relays" element={<Relays />} />}
-          {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
-          <Route path="/security" element={<FleetSecurity />} />
-          {seesPolicies && <Route path="/policies" element={<Policies />} />}
-          {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
-          <Route path="/certificates" element={<FleetCertificates />} />
-          <Route path="/backups" element={<FleetBackups />} />
-          <Route path="/monitoring" element={<FleetMonitoring />} />
-          <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
-          <Route path="/secrets" element={<Secrets />} />
-          {/* The host module is a segment of the address, so a refresh, the
-              browser history and a direct link lead where the operator
-              actually was. */}
-          <Route path="/hosts/:id" element={<HostLayout />}>
-            <Route index element={<Navigate to="overview" replace />} />
-            <Route path="overview" element={<Overview />} />
-            <Route path="system" element={<System />} />
-            <Route path="packages" element={<Packages />} />
-            <Route path="services" element={<Services />} />
-            <Route path="processes" element={<Processes />} />
-            <Route path="schedules" element={<Schedules />} />
-            <Route path="network" element={<Network />} />
-            <Route path="dns" element={<Resolver />} />
-            <Route path="firewall" element={<Firewall />} />
-            <Route path="storage" element={<Storage />} />
-            <Route path="ssh" element={<SshServer />} />
-            <Route path="kernel" element={<Kernel />} />
-            <Route path="time" element={<Time />} />
-            <Route path="power" element={<Power />} />
-            <Route path="policies" element={<HostPolicies />} />
-            <Route path="security" element={<Security />} />
-            <Route path="certificates" element={<Certificates />} />
-            <Route path="backups" element={<Backups />} />
-            <Route path="monitoring" element={<Monitoring />} />
-            <Route path="vulnerabilities" element={<Vulnerabilities />} />
-            <Route path="files" element={<Files />} />
-            <Route path="containers" element={<Containers />} />
-            <Route path="compose" element={<Compose />} />
-            <Route path="logs" element={<Logs />} />
-            <Route path="accounts" element={<HostAccounts />} />
-            <Route path="identity" element={<Identity />} />
-            <Route path="jobs" element={<HostJobs />} />
-            <Route path="audit" element={<HostAudit />} />
-          </Route>
-          <Route path="/jobs" element={<Jobs />} />
-          <Route path="/reads" element={<Reads />} />
-          <Route path="/reads/:id" element={<Reads />} />
-          {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
-          {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
-          {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
-          {seesBudgets && <Route path="/budgets" element={<Budgets />} />}
-          {capabilities.directory && <Route path="/directory" element={<Directory />} />}
-          {managesAccess && <Route path="/access" element={<Access />} />}
-          {seesAudit && <Route path="/audit" element={<Audit />} />}
-          {seesSettings && <Route path="/settings" element={<Settings />} />}
-          <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
-        </Routes>
+    <ToastProvider>
+      <ModalProvider>
+        <div className={collapsed ? "layout sidebar-collapsed" : "layout"}>
+          {/* The shell is two panels: the sidebar down the left edge with the
+              places to go, and the top bar across the rest with where the
+              operator is and who they are. On a narrow screen the sidebar
+              becomes a drawer behind the bar's menu button. */}
+          <Sidebar
+            face={face}
+            collapsed={collapsed}
+            open={drawer}
+            onClose={() => setDrawer(false)}
+          />
+          {drawer && <div className="sidebar-backdrop" onClick={() => setDrawer(false)} />}
+          <Topbar
+            trail={trail}
+            user={data}
+            collapsed={collapsed}
+            onToggleCollapsed={() => setCollapsed((current) => !current)}
+            onOpenDrawer={() => setDrawer(true)}
+            onSignOut={signOut}
+            theme={theme}
+            setTheme={setTheme}
+            scale={scale}
+            setScale={setScale}
+          />
+          <main className="content">
+            {/* The page keeps a reading width and sits in the middle of the
+                content area: on a wide screen a full-width page hugs the left
+                edge and leaves the rest empty. */}
+            <div className="page">
+            <Routes>
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/hosts" element={<Hosts />} />
+              {/* The path is before the host route, because "new" is not an identifier. */}
+              <Route path="/hosts/new" element={<AddHost />} />
+              <Route path="/groups" element={<Groups />} />
+              <Route path="/groups/:id" element={<Groups />} />
+              {seesRelays && <Route path="/relays" element={<Relays />} />}
+              {seesRelays && <Route path="/relays/:id" element={<RelayPage />} />}
+              <Route path="/security" element={<FleetSecurity />} />
+              {seesPolicies && <Route path="/policies" element={<Policies />} />}
+              {seesPolicies && <Route path="/policies/:id" element={<PolicyPage />} />}
+              <Route path="/certificates" element={<FleetCertificates />} />
+              <Route path="/backups" element={<FleetBackups />} />
+              <Route path="/monitoring" element={<FleetMonitoring />} />
+              <Route path="/vulnerabilities" element={<FleetVulnerabilities />} />
+              <Route path="/secrets" element={<Secrets />} />
+              <Route path="/secrets/:name" element={<SecretPage />} />
+              {/* The host module is a segment of the address, so a refresh, the
+                  browser history and a direct link lead where the operator
+                  actually was. */}
+              <Route path="/hosts/:id" element={<HostLayout />}>
+                <Route index element={<Navigate to="overview" replace />} />
+                <Route path="overview" element={<Overview />} />
+                <Route path="system" element={<System />} />
+                <Route path="packages" element={<Packages />} />
+                <Route path="services" element={<Services />} />
+                <Route path="processes" element={<Processes />} />
+                <Route path="schedules" element={<Schedules />} />
+                <Route path="network" element={<Network />} />
+                <Route path="dns" element={<Resolver />} />
+                <Route path="firewall" element={<Firewall />} />
+                <Route path="storage" element={<Storage />} />
+                <Route path="ssh" element={<SshServer />} />
+                <Route path="kernel" element={<Kernel />} />
+                <Route path="time" element={<Time />} />
+                <Route path="power" element={<Power />} />
+                <Route path="policies" element={<HostPolicies />} />
+                <Route path="security" element={<Security />} />
+                <Route path="certificates" element={<Certificates />} />
+                <Route path="backups" element={<Backups />} />
+                <Route path="monitoring" element={<Monitoring />} />
+                <Route path="vulnerabilities" element={<Vulnerabilities />} />
+                <Route path="files" element={<Files />} />
+                <Route path="containers" element={<Containers />} />
+                <Route path="compose" element={<Compose />} />
+                <Route path="logs" element={<Logs />} />
+                <Route path="accounts" element={<HostAccounts />} />
+                <Route path="identity" element={<Identity />} />
+                <Route path="jobs" element={<HostJobs />} />
+                <Route path="audit" element={<HostAudit />} />
+              </Route>
+              <Route path="/jobs" element={<Jobs />} />
+              <Route path="/jobs/:id" element={<JobPage />} />
+              <Route path="/reads" element={<Reads />} />
+              <Route path="/reads/:id" element={<Reads />} />
+              {seesCampaigns && <Route path="/bulk" element={<Bulk />} />}
+              {seesCampaigns && <Route path="/campaigns" element={<Campaigns />} />}
+              {seesCampaigns && <Route path="/campaigns/:id" element={<Campaign />} />}
+              {seesBudgets && <Route path="/budgets" element={<Budgets />} />}
+              {capabilities.directory && <Route path="/directory" element={<Directory />} />}
+              {managesAccess && <Route path="/access" element={<Access />} />}
+              {seesAudit && <Route path="/audit" element={<Audit />} />}
+              {seesSettings && <Route path="/settings" element={<Settings />} />}
+              <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
+            </Routes>
+            </div>
+          </main>
         </div>
-      </main>
-    </div>
+      </ModalProvider>
+    </ToastProvider>
   );
 }
 
