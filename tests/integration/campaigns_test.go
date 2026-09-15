@@ -2074,11 +2074,19 @@ func TestFirewalldZoneCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
+	// The second run of the same change finds every host in the desired
+	// state: the plans are empty, the hosts settle as no_change, and the
+	// campaign completes at planning with nothing to approve.
 	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
-	if afterRepeat.State != "awaiting_approval" {
-		t.Fatalf("repeat: planning ended in state %s (%s)",
+	if afterRepeat.State != "completed" {
+		t.Fatalf("repeat: planning ended in state %s (%s), expected completed with nothing to change",
 			afterRepeat.State, afterRepeat.PauseReason)
+	}
+	for _, target := range h.campaignTargets(repeat.ID) {
+		if target.State != "no_change" {
+			t.Errorf("host %s after the repeat is %s, expected no_change", target.Hostname, target.State)
+		}
 	}
 	for _, target := range h.campaignTargets(repeat.ID) {
 		if plan := zonePlan(h, target.PlanJobID); plan.Action != "no_change" || !plan.Present {
@@ -2408,11 +2416,19 @@ func TestSSHCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) {
 		"failure_threshold_percent": 0, "failure_threshold_absolute": 0,
 		"reboot_policy": "never",
 	})
+	// The second run of the same change finds every host in the desired
+	// state: the plans are empty, the hosts settle as no_change, and the
+	// campaign completes at planning with nothing to approve.
 	afterRepeat := h.awaitCampaign(repeat.ID,
 		map[string]bool{"awaiting_approval": true, "paused": true, "failed": true, "plan_failed": true, "completed": true}, 3*time.Minute)
-	if afterRepeat.State != "awaiting_approval" {
-		t.Fatalf("repeat: planning ended in state %s (%s)",
+	if afterRepeat.State != "completed" {
+		t.Fatalf("repeat: planning ended in state %s (%s), expected completed with nothing to change",
 			afterRepeat.State, afterRepeat.PauseReason)
+	}
+	for _, target := range h.campaignTargets(repeat.ID) {
+		if target.State != "no_change" {
+			t.Errorf("host %s after the repeat is %s, expected no_change", target.Hostname, target.State)
+		}
 	}
 	for _, target := range h.campaignTargets(repeat.ID) {
 		if plan := planOfKind(h, target.PlanJobID, "ssh_plan"); plan.Action != "no_change" {
@@ -4775,9 +4791,12 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
 
+	// A managed file with fresh content: a plan that always has something
+	// to change, unlike a security update on a fleet that has none waiting.
 	campaign := h.createCampaign(map[string]any{
-		"name": "expired plan", "action": "packages.upgrade",
-		"payload":                    map[string]any{"package_upgrade": map[string]any{"security_only": true}},
+		"name": "expired plan", "action": "file.ensure",
+		"payload": map[string]any{"file": map[string]any{
+			"path": "/etc/motd", "content": "expired plan test " + time.Now().Format(time.RFC3339Nano) + "\n", "mode": "0644"}},
 		"selector":                   map[string]any{"host_ids": []string{host.ID}},
 		"canary_size":                0,
 		"wave_size":                  1,
@@ -4808,12 +4827,20 @@ func TestAnExpiredPlanDoesNotStartTheHost(t *testing.T) {
 		campaign.ID); err != nil {
 		t.Fatal(err)
 	}
+	// The approval may land before or after the engine sees the age: an
+	// approved campaign with a stale plan closes the host as failed with
+	// plan_stale, and one the engine caught first expires as a whole with
+	// the host skipped for the same reason. Either way nothing runs.
 	h.approveCampaign(planned)
 	final := h.awaitCampaign(campaign.ID,
-		map[string]bool{"completed": true, "failed": true, "paused": true}, 3*time.Minute)
+		map[string]bool{"completed": true, "failed": true, "paused": true, "expired": true}, 3*time.Minute)
 	targets := h.campaignTargets(campaign.ID)
-	if len(targets) != 1 || targets[0].State != "failed" || targets[0].ErrorCode != "plan_stale" {
+	if len(targets) != 1 || targets[0].ErrorCode != "plan_stale" ||
+		(targets[0].State != "failed" && targets[0].State != "skipped") {
 		t.Fatalf("campaign %s; the host was not stopped on the expired plan: %+v", final.State, targets)
+	}
+	if final.State == "completed" {
+		t.Fatalf("the campaign completed although its only plan had expired")
 	}
 }
 

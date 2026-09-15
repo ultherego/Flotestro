@@ -4,6 +4,7 @@ package integration
 
 import (
 	"fmt"
+	"sort"
 	"testing"
 	"time"
 )
@@ -35,9 +36,32 @@ type footprintPoint struct {
 
 // footprintMetricsView is the answer of the chart endpoint the host page reads.
 type footprintMetricsView struct {
-	HostID       string          `json:"host_id"`
-	Latest       *footprintPoint `json:"latest"`
-	LastSampleAt *time.Time      `json:"last_sample_at"`
+	HostID       string           `json:"host_id"`
+	Points       []footprintPoint `json:"points"`
+	Latest       *footprintPoint  `json:"latest"`
+	LastSampleAt *time.Time       `json:"last_sample_at"`
+}
+
+// rssPercentile returns the 95th percentile of the resident memory over
+// the points of the last hour, or nil when the hour holds fewer than five
+// samples. The document's budget is a p95: one sample taken in the middle
+// of an inventory read says what the agent peaked at, not what it costs.
+func rssPercentile(points []footprintPoint, since time.Time) *uint64 {
+	var values []uint64
+	for _, point := range points {
+		if point.AgentRSSBytes != nil && !point.At.Before(since) {
+			values = append(values, *point.AgentRSSBytes)
+		}
+	}
+	if len(values) < 5 {
+		return nil
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+	index := (len(values)*95 + 99) / 100
+	if index > 0 {
+		index--
+	}
+	return &values[index]
 }
 
 // latestFootprint reads the newest sample of a host as the host
@@ -99,9 +123,17 @@ func TestAgentFootprintIsWithinBudget(t *testing.T) {
 			continue
 		}
 		summary := describeFootprint(latest)
-		if *latest.AgentRSSBytes >= footprintRSSBudget {
+		// The memory budget is judged at the 95th percentile of the last
+		// hour where the hour has enough samples; the newest sample alone
+		// decides only on a host that has just joined.
+		rss := *latest.AgentRSSBytes
+		if p95 := rssPercentile(view.Points, time.Now().Add(-time.Hour)); p95 != nil {
+			rss = *p95
+			summary += fmt.Sprintf("; p95 of the last hour %s", mebibytes(rss))
+		}
+		if rss >= footprintRSSBudget {
 			t.Errorf("%s: agent_rss_bytes %d (%s) is not below the budget of %d (%s); %s",
-				host.Hostname, *latest.AgentRSSBytes, mebibytes(*latest.AgentRSSBytes),
+				host.Hostname, rss, mebibytes(rss),
 				uint64(footprintRSSBudget), mebibytes(footprintRSSBudget), summary)
 		}
 		if latest.AgentCPUPercent == nil {

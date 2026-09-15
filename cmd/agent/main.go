@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -20,7 +21,17 @@ import (
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
+// heapSoftLimit is the point past which the collector runs eagerly. The
+// agent's budget is 30 MiB of resident memory; the heap is most of it, and
+// without a limit the collector lets it grow to twice its live size before
+// it bothers, which is how an inventory read of a few megabytes pushed a
+// host past the budget for a minute. A limit is not a cap - the runtime
+// exceeds it rather than thrash - so the agent keeps working on a host
+// with a large inventory and merely collects more often there.
+const heapSoftLimit = 20 << 20
+
 func main() {
+	debug.SetMemoryLimit(heapSoftLimit)
 	var (
 		stateDir = flag.String("state-dir",
 			config.Env("FLOTESTRO_AGENT_STATE_DIR", "/var/lib/flotestro-agent"), "the state directory of the agent")
