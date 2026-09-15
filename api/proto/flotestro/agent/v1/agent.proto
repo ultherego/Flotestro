@@ -727,6 +727,9 @@ message ReadJournal {
   // detail view hands over the cursor of its last line so the Logs page
   // continues where the detail ended.
   string after_cursor = 5;
+  // Until ends the read, in the same forms as since; the Logs page bounds
+  // a read to the window of a job with both.
+  string until = 6;
 }
 
 // SystemReboot restarts the host. A reboot is a separate campaign phase, not
