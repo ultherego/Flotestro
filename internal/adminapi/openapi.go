@@ -629,8 +629,8 @@ var requestSchemas = map[string]map[string]any{
 	"POST /api/v1/campaigns": {
 		"type": "object",
 		"properties": map[string]any{
-			"name":                       map[string]any{"type": "string"},
-			"action":                     map[string]any{"type": "string"},
+			"name":   map[string]any{"type": "string"},
+			"action": map[string]any{"type": "string"},
 			"payload": map[string]any{"allOf": []any{ref("Payload")},
 				"description": "For system.hostname.set the shared part carries no name: hostname.mapping {host_id: fqdn} names every host's new name, " +
 					"a host it leaves out settles as ineligible with no_hostname_for_host, and a missing, duplicate or invalid entry is refused with invalid_mapping."},
