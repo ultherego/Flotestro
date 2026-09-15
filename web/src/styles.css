@@ -1574,6 +1574,7 @@ a.status-bar-segment:hover { filter: brightness(1.08); text-decoration: none; co
 .meter-fill.ok { background: var(--ok); }
 .meter-fill.warn { background: var(--warn); }
 .meter-fill.error { background: var(--error); }
+.meter-fill.info { background: var(--blue, var(--accent)); }
 .meter-value { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--text-muted); white-space: nowrap; }
 
 /* The widget grid: twelve columns, each widget says how many it spans.

@@ -100,6 +100,7 @@ export function pageName(path: string): string {
     case "relays": return "Relays";
     case "policies": return "Policies";
     case "monitoring": return "Monitoring";
+    case "notifications": return "Notifications";
     default: return "Open";
   }
 }

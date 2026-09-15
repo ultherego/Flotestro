@@ -22,7 +22,15 @@ export function setPreferredTimeZone(zone: string): void {
 export function relativeTime(value?: string | null): string {
   if (!value) return t("never");
   const seconds = Math.floor((Date.now() - new Date(value).getTime()) / 1000);
-  if (seconds < 0) return t("in a moment");
+  // A moment ahead reads by the same scale as one behind: a certificate
+  // ten years out is not "in a moment".
+  if (seconds < 0) {
+    const ahead = -seconds;
+    if (ahead < 60) return t("in a moment");
+    if (ahead < 3600) return t("in {n}m", { n: Math.floor(ahead / 60) });
+    if (ahead < 86400) return t("in {n}h", { n: Math.floor(ahead / 3600) });
+    return t("in {n}d", { n: Math.floor(ahead / 86400) });
+  }
   if (seconds < 60) return t("{n}s ago", { n: seconds });
   if (seconds < 3600) return t("{n}m ago", { n: Math.floor(seconds / 60) });
   if (seconds < 86400) return t("{n}h ago", { n: Math.floor(seconds / 3600) });

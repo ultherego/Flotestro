@@ -11,9 +11,19 @@ import { useT } from "../i18n";
  * path with a different UUID. The plan computed on the host says what
  * happens there - or why not.
  */
+/** One package of a package plan: the name and the versions it moves between. */
+export type PackageChange = {
+  name: string;
+  current_version?: string;
+  candidate_version?: string;
+  security?: boolean;
+};
+
 export type HostPlan = {
   action?: string;
-  changes?: string[];
+  // A file or firewall plan names its changes in words; a package plan
+  // lists the packages with their versions.
+  changes?: (string | PackageChange)[];
   refusal?: string;
   validator_failed?: boolean;
   validator_output?: string;
@@ -28,6 +38,29 @@ export type HostPlan = {
   // operator would type them.
   commands?: string[];
 };
+
+/** How many package changes the summary spells out before it counts the rest. */
+const CHANGES_SHOWN = 6;
+
+/**
+ * One change of a plan as words: a sentence stays as it is, a package
+ * reads as its name and the versions it moves between, so a plan of
+ * forty packages is a list an operator can skim, not forty objects.
+ */
+export function changeText(change: string | PackageChange): string {
+  if (typeof change === "string") return change;
+  const versions = change.current_version && change.candidate_version
+    ? ` ${change.current_version} → ${change.candidate_version}`
+    : change.candidate_version ? ` ${change.candidate_version}` : "";
+  return `${change.name}${versions}${change.security ? " (security)" : ""}`;
+}
+
+/** The changes of a plan as one line, the first few spelled out and the rest counted. */
+export function changesSummary(changes: (string | PackageChange)[], shown = CHANGES_SHOWN): string {
+  const words = changes.slice(0, shown).map(changeText);
+  const rest = changes.length - words.length;
+  return rest > 0 ? `${words.join(", ")} +${rest}` : words.join(", ");
+}
 
 const ACTION_NAMES: Record<string, string> = {
   create: "will be created",
@@ -55,7 +88,7 @@ export function PlanSummary({ plan }: { plan: HostPlan }) {
     );
   }
   const parts = [plan.action && ACTION_NAMES[plan.action] ? t(ACTION_NAMES[plan.action]) : plan.action ?? t("plan")];
-  if (plan.changes?.length) parts.push(plan.changes.join(", "));
+  if (plan.changes?.length) parts.push(changesSummary(plan.changes));
   // The source resolved to a UUID is what goes to the host; the path from
   // the order stays only for comparison.
   if (plan.resolved_source && plan.resolved_source !== plan.requested_source) {

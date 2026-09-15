@@ -369,7 +369,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
             {kinds.map((kind) => (
               <tr key={kind}>
                 <td className="mono">{kind}</td>
-                <td className="mono">{retention[kind] ?? t("forever")}</td>
+                <td className="mono">{retention[kind] ? humanDuration(retention[kind]) : t("forever")}</td>
                 <td className="mono">{removed[kind] ?? "—"}</td>
               </tr>
             ))}
@@ -415,4 +415,13 @@ function About({ block }: { block: StatusBlock }) {
       </Pairs>
     </Card>
   );
+}
+
+/** A Go duration such as 720h0m0s as days and hours: what a retention is read in. */
+export function humanDuration(value: string): string {
+  const match = /^(\d+)h(\d+)m(\d+)s$/.exec(value);
+  if (!match) return value;
+  const hours = Number(match[1]);
+  if (hours % 24 === 0) return `${hours / 24} d`;
+  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
 }

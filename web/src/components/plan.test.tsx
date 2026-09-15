@@ -3,7 +3,7 @@ import { cleanup, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { isHostPlan, JobPlan, PlanSummary, type HostPlan } from "./plan";
+import { changesSummary, isHostPlan, JobPlan, PlanSummary, type HostPlan } from "./plan";
 
 /* The attempts of a job come from the API; the client is replaced by a
    function each test programs. The mock is hoisted with the module,
@@ -151,5 +151,19 @@ describe("JobPlan", () => {
     get.mockRejectedValue(new Error("forbidden"));
     const { container } = drawWithQueries(<JobPlan jobId="job-4" />);
     await waitFor(() => expect(container.querySelector(".source")).toHaveTextContent("plan unavailable"));
+  });
+});
+
+describe("changesSummary", () => {
+  it("spells a package out with its versions and counts the rest", () => {
+    const changes = [
+      { name: "openssl", current_version: "3.0.1", candidate_version: "3.0.2", security: true },
+      "a sentence of a file plan",
+      ...Array.from({ length: 6 }, (_, i) => ({ name: `pkg${i}`, candidate_version: "1.0" })),
+    ];
+    const summary = changesSummary(changes);
+    expect(summary.startsWith("openssl 3.0.1 → 3.0.2 (security), a sentence of a file plan, pkg0 1.0")).toBe(true);
+    expect(summary.endsWith(" +2")).toBe(true);
+    expect(summary).not.toContain("[object Object]");
   });
 });

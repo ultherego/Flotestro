@@ -162,9 +162,11 @@ func TestJobListSortsByCreationTime(t *testing.T) {
 	payload := map[string]any{
 		"journal": map[string]any{"unit": "cron.service", "lines": 3},
 	}
+	// The bound is taken right before the first order: an earlier read of
+	// the same kind on the host, left by another test, would come first.
+	since := time.Now().Add(-2 * time.Second).UTC().Format(time.RFC3339)
 	first := h.createOperation(host.ID, map[string]any{"action": "journal.read", "payload": payload})
 	second := h.createOperation(host.ID, map[string]any{"action": "journal.read", "payload": payload})
-	since := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	query := "/api/v1/jobs?action=journal.read&host_id=" + host.ID + "&since=" + url.QueryEscape(since)
 
 	var oldest jobPage

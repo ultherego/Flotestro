@@ -4033,4 +4033,7 @@ export const pl: Record<string, string> = {
   "{what}: no": "{what}: nie",
   "{what}: not declared": "{what}: niezadeklarowane",
   "{what}: yes": "{what}: tak",
+  "in {n}m": "za {n} min",
+  "in {n}h": "za {n} h",
+  "in {n}d": "za {n} d",
 };

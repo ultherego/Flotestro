@@ -34,6 +34,7 @@ type readView struct {
 		Message   string          `json:"message"`
 		Lines     []string        `json:"lines"`
 		Snapshot  json.RawMessage `json:"snapshot"`
+		Detail    json.RawMessage `json:"detail"`
 	} `json:"hosts"`
 	Timeline []struct {
 		HostID   string `json:"host_id"`
@@ -68,15 +69,37 @@ func awaitRead(t *testing.T, h *harness, id string, timeout time.Duration) readV
 	t.Helper()
 	deadline := time.Now().Add(timeout)
 	var view readView
+	var finished time.Time
 	for time.Now().Before(deadline) {
+		view = readView{}
 		h.get("/api/v1/reads/"+id, &view)
 		if view.Counts.Queued+view.Counts.Running == 0 && len(view.Hosts) > 0 {
-			return view
+			if finished.IsZero() {
+				finished = time.Now()
+			}
+			// A read whose answer is neither a snapshot nor a detail has
+			// nothing more to wait for; the rest gets a grace period.
+			if snapshotsLanded(view) || time.Since(finished) > 15*time.Second {
+				return view
+			}
 		}
 		time.Sleep(time.Second)
 	}
 	t.Fatalf("the fan-out %s did not finish within %s: %+v", id, timeout, view.Counts)
 	return view
+}
+
+// snapshotsLanded says whether every host that succeeded has its snapshot
+// in the view. The result of the job and the inventory fragment it
+// refreshed travel separately, and the fragment can land a moment after
+// the result: a view read in that moment is finished but not yet whole.
+func snapshotsLanded(view readView) bool {
+	for _, host := range view.Hosts {
+		if host.State == "succeeded" && len(host.Snapshot) == 0 && len(host.Detail) == 0 && len(host.Lines) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // hostIDs lists the identifiers of the hosts.

@@ -12,6 +12,8 @@ import { Icon, type IconName } from "./icons";
 
 /** How many recently opened hosts are kept; more than a screenful is noise. */
 const RECENT = 8;
+/** How many hosts of the fleet the empty palette offers to pick from, by name. */
+const FLEET_SHOWN = 8;
 /** How many starred hosts the empty palette resolves; the rest are a filter away. */
 const FAVOURITES_SHOWN = 12;
 /** The pause in typing before the server is asked. */
@@ -204,7 +206,7 @@ export function hostPath(target: { id: string; host?: Host }, segment: string, i
 }
 
 /** A host of the recent or favourite lists as a row of the palette. */
-function hostRow(host: Host, group: "Favourites" | "Recent"): Row {
+function hostRow(host: Host, group: "Favourites" | "Recent" | "Hosts"): Row {
   const meta = [`${host.site} / ${host.environment}`, host.os_family].filter(Boolean).join(" · ");
   return {
     key: `${group}:${host.id}`,
@@ -313,6 +315,18 @@ export function HostPicker() {
   const byID = new Map<string, Host>();
   records.forEach((record, index) => { if (record.data) byID.set(remembered[index], record.data); });
 
+  // A host to pick before a single letter is typed: the first of the
+  // fleet by name, so an operator with nothing starred and nothing recent
+  // still has hosts in front of them, not places alone. Any more is a
+  // filter away.
+  const fleet = useQuery({
+    queryKey: ["hosts", "palette", FLEET_SHOWN],
+    queryFn: () => api.get<{ items: Host[] }>(`/api/v1/hosts?limit=${FLEET_SHOWN}&sort=hostname`),
+    staleTime: 60_000,
+    retry: false,
+    enabled: armed,
+  });
+
   // The server is asked after a pause in typing, and the last answer stays
   // on the screen while the next one is on its way: a list that empties
   // between keystrokes looks like nothing matched.
@@ -339,12 +353,18 @@ export function HostPicker() {
         seen.add(id);
         return [hostRow(host, "Recent")];
       });
+      const needle = query.trim().toLowerCase();
+      const picked = (fleet.data?.items ?? []).flatMap((host) => {
+        if (seen.has(host.id) || (needle && !host.hostname.toLowerCase().includes(needle))) return [];
+        seen.add(host.id);
+        return [hostRow(host, "Hosts")];
+      });
       // A query too short for the server still narrows the places: one
       // letter is enough to tell the audit from the access.
-      return [...starred, ...opened, ...matchCommands(commands, query, t)];
+      return [...starred, ...opened, ...picked, ...matchCommands(commands, query, t)];
     }
     return [...groupResults(search.data?.items ?? [], settled), ...matchCommands(commands, settled, t)];
-  }, [searching, settled, query, search.data, favourites, recent, records, commands, t]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searching, settled, query, search.data, fleet.data, favourites, recent, records, commands, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Ctrl+K (Cmd+K on a Mac) opens the palette from anywhere: jumping
   // between places is the most frequent move in the panel, and it should

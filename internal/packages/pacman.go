@@ -136,21 +136,30 @@ func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 	if len(options.Packages) > 0 {
 		return plan, fmt.Errorf("%w; plan the upgrade without naming packages", ErrPartialUpgrade)
 	}
-	if !fileExists(checkupdatesPath) {
-		return plan, ErrCheckupdatesMissing
+	var pending []Change
+	if fileExists(checkupdatesPath) {
+		result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
+		switch {
+		case !result.Ran:
+			return plan, fmt.Errorf("checkupdates: %s", result.Reason())
+		case result.ExitCode == checkupdatesNoUpdates:
+			return plan, nil
+		case result.ExitCode != 0:
+			return plan, fmt.Errorf("checkupdates: %s", result.Reason())
+		}
+		pending = ParseCheckupdates(result.Stdout)
+	} else {
+		// Without pacman-contrib the adapter does what checkupdates does:
+		// a sync of the repositories into a copy of the database next to
+		// the local one, and the pending updates read from that copy. The
+		// system database stays as it was, which is the whole point.
+		var err error
+		if pending, err = p.pendingFromSyncCopy(ctx); err != nil {
+			return plan, err
+		}
 	}
 
-	result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
-	switch {
-	case !result.Ran:
-		return plan, fmt.Errorf("checkupdates: %s", result.Reason())
-	case result.ExitCode == checkupdatesNoUpdates:
-		return plan, nil
-	case result.ExitCode != 0:
-		return plan, fmt.Errorf("checkupdates: %s", result.Reason())
-	}
-
-	for _, change := range ParseCheckupdates(result.Stdout) {
+	for _, change := range pending {
 		// An ordinary upgrade skips the agent package, so the plan does not
 		// promise a change the transaction will not make.
 		if change.Name == AgentPackage {
@@ -164,6 +173,42 @@ func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 	// the plan came from, so the plan and its sizes agree.
 	plan.Space = p.planSpace(ctx, plan, "--dbpath", checkupdatesDB())
 	return plan, nil
+}
+
+// pendingFromSyncCopy syncs the repositories into the copy of the database
+// the plan reads and lists the updates pending against it. It is what
+// checkupdates does, done by hand when pacman-contrib is not installed:
+// the copy keeps the local database as a link, so pacman compares the
+// fresh repositories with what is installed, and the system's own sync
+// database is never touched. The helper runs as root, so no fakeroot is
+// needed for the sync.
+func (p *Pacman) pendingFromSyncCopy(ctx context.Context) ([]Change, error) {
+	db := checkupdatesDB()
+	if err := os.MkdirAll(db, 0o755); err != nil {
+		return nil, fmt.Errorf("%w: the copy of the database cannot be made at %s: %v", ErrCheckupdatesMissing, db, err)
+	}
+	local := filepath.Join(db, "local")
+	if _, err := os.Lstat(local); err != nil {
+		if err := os.Symlink("/var/lib/pacman/local", local); err != nil {
+			return nil, fmt.Errorf("%w: the local database cannot be linked into the copy: %v", ErrCheckupdatesMissing, err)
+		}
+	}
+	sync := run(ctx, 10*time.Minute, pacmanPath, "-Sy", "--dbpath", db, "--logfile", "/dev/null",
+		"--noconfirm", "--noprogressbar")
+	if !sync.Ran || sync.ExitCode != 0 {
+		return nil, fmt.Errorf("pacman -Sy into the copy of the database: %s", sync.Reason())
+	}
+	// Exit 1 without output is pacman's way of saying nothing is pending.
+	pending := run(ctx, 2*time.Minute, pacmanPath, "-Qu", "--dbpath", db)
+	switch {
+	case !pending.Ran:
+		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
+	case pending.ExitCode != 0 && strings.TrimSpace(pending.Stdout) == "":
+		return nil, nil
+	case pending.ExitCode != 0:
+		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
+	}
+	return ParseCheckupdates(pending.Stdout), nil
 }
 
 // planSpace measures where the bytes of the plan go. The download size is

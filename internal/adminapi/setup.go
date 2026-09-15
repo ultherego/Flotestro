@@ -303,19 +303,19 @@ func (s *Server) notificationStep(ctx context.Context) setupStep {
 	var present bool
 	if err := s.pool.QueryRow(ctx,
 		`select to_regclass('notification_channels') is not null`).Scan(&present); err != nil || !present {
-		return setupStep{Key: "notification_channel", State: setupOptional, Path: "/monitoring",
+		return setupStep{Key: "notification_channel", State: setupOptional, Path: "/notifications",
 			Detail: "alert notifications are not part of this installation; the alerts stand in the panel"}
 	}
 	channels, err := s.countRows(ctx, `select count(*) from notification_channels`)
 	if err != nil {
-		return setupStep{Key: "notification_channel", State: setupWarning, Path: "/monitoring",
+		return setupStep{Key: "notification_channel", State: setupWarning, Path: "/notifications",
 			Detail: "the notification channels could not be counted: " + err.Error()}
 	}
 	if channels > 0 {
-		return setupStep{Key: "notification_channel", State: setupDone, Path: "/monitoring",
+		return setupStep{Key: "notification_channel", State: setupDone, Path: "/notifications",
 			Detail: fmt.Sprintf("%d notification %s", channels, plural(channels, "channel", "channels"))}
 	}
-	return setupStep{Key: "notification_channel", State: setupOptional, Path: "/monitoring",
+	return setupStep{Key: "notification_channel", State: setupOptional, Path: "/notifications",
 		Detail: "no notification channel: an alert is seen only by whoever opens the panel"}
 }
 
