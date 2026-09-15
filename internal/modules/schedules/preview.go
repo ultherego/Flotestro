@@ -86,10 +86,15 @@ func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.
 		case line == "":
 			keys = nil
 		case strings.HasPrefix(line, "Original form:"):
-			keys = []string{strings.TrimSpace(strings.TrimPrefix(line, "Original form:"))}
+			// An empty form names nothing: a block without a specification
+			// is not filed under "".
+			keys = nil
+			if original := strings.TrimSpace(strings.TrimPrefix(line, "Original form:")); original != "" {
+				keys = []string{original}
+			}
 		case strings.HasPrefix(line, "Normalized form:"):
 			normalized := strings.TrimSpace(strings.TrimPrefix(line, "Normalized form:"))
-			if len(keys) == 0 || keys[0] != normalized {
+			if normalized != "" && (len(keys) == 0 || keys[0] != normalized) {
 				keys = append(keys, normalized)
 			}
 		case len(keys) > 0 && (strings.HasPrefix(line, "Next elapse:") ||
@@ -106,8 +111,10 @@ func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.
 				date, err = time.ParseInLocation(systemdLocalLayout, value, zone)
 			}
 			// "never" and a date the layout does not read leave the list as
-			// it is: a missing run is more honest than a guessed one.
-			if err == nil {
+			// it is: a missing run is more honest than a guessed one. So
+			// does the zero date, which the layout reads out of a year-one
+			// stamp that no timer ever prints.
+			if err == nil && !date.IsZero() {
 				file(date.In(zone))
 			}
 		}
