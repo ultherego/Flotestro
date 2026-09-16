@@ -42,6 +42,44 @@ export function outputFilename(jobID: string, attempt: number, stream: string): 
   return `job-${jobID.slice(0, 8)}-attempt-${attempt}-${stream}.txt`;
 }
 
+/**
+ * The payload as a list of fields: a dotted path and a value for every
+ * leaf, so "unit.name: cron.service" reads without the braces. A payload
+ * that is not an object, or that is deeper than a form would be, gives no
+ * list and stays as JSON. A payload arrives as an object or as a JSON
+ * text, the way prettyJSON takes it.
+ */
+export function payloadPairs(value: unknown): { path: string; value: string }[] | null {
+  let payload = value;
+  if (typeof payload === "string") {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return null;
+    }
+  }
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const pairs: { path: string; value: string }[] = [];
+  const walk = (node: Record<string, unknown>, prefix: string, depth: number): boolean => {
+    for (const [key, item] of Object.entries(node)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+        if (depth >= 2 || !walk(item as Record<string, unknown>, path, depth + 1)) return false;
+      } else if (Array.isArray(item)) {
+        // A list of words reads as one line; a list of objects is a
+        // table of its own and the JSON is the honest form of it.
+        if (item.some((entry) => entry !== null && typeof entry === "object")) return false;
+        pairs.push({ path, value: item.length === 0 ? "[]" : item.map(String).join(", ") });
+      } else {
+        pairs.push({ path, value: item === null ? "null" : typeof item === "string" ? item : String(item) });
+      }
+    }
+    return true;
+  };
+  if (!walk(payload as Record<string, unknown>, "", 0)) return null;
+  return pairs.length > 0 && pairs.length <= 24 ? pairs : null;
+}
+
 /** Whether a JSON value says anything: an order without preconditions carries an empty object or nothing. */
 export function hasContent(value: unknown): boolean {
   const text = prettyJSON(value);
@@ -104,6 +142,7 @@ export function JobPage() {
   const plan = (packagePlan ? planned?.detail : planned?.detail?.plan) as (HostPlan & PackagePlanFacts) | undefined;
   const planHash = (planned?.detail?.plan_hash as string | undefined) || plan?.plan_hash;
   const report = progress.get(id);
+  const fields = payloadPairs(data.payload);
 
   return (
     <>
@@ -265,6 +304,19 @@ export function JobPage() {
           description={t("The order as the host receives it; the hash above is computed over exactly this.")}
           actions={<DownloadButton text={prettyJSON(data.payload)} filename={`job-${data.id.slice(0, 8)}-payload.json`} />}
         >
+          {/* The fields first, for reading; the JSON stays under them,
+              because the hash is computed over that text and a reviewer
+              approves exactly it. */}
+          {fields && (
+            <>
+              <Pairs>
+                {fields.map((pair) => (
+                  <Pair key={pair.path} label={pair.path}><span className="mono">{pair.value}</span></Pair>
+                ))}
+              </Pairs>
+              <div className="source">{t("As JSON, the text the hash covers")}</div>
+            </>
+          )}
           <pre>{prettyJSON(data.payload) || "—"}</pre>
           {hasContent(data.preconditions) && (
             <>

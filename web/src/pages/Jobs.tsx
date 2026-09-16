@@ -5,7 +5,7 @@ import { api, loadedItems, LIST_PAGE, type Collection, type Page } from "../lib/
 import { useDebounced } from "../lib/debounce";
 import { bytes, toInstant } from "../lib/format";
 import { PlanSummary } from "../components/plan";
-import type { Attempt, FleetActivity, Job } from "../lib/types";
+import type { Attempt, Campaign, FleetActivity, Job } from "../lib/types";
 import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -241,6 +241,18 @@ export function Jobs() {
   // One stream per tab carries the progress of all the running operations
   // and wakes the list when one of them changes state.
   const progress = useProgress("/api/v1/events");
+  // The jobs name their campaign by identifier only; the names come from
+  // the campaign list, read once the list shows a job that has one. A
+  // reader without the right to the campaigns keeps the identifiers.
+  const anyCampaign = loadedItems(list.data).some((job) => job.campaign_id);
+  const campaigns = useQuery({
+    queryKey: ["campaigns", "names"],
+    queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=200"),
+    enabled: anyCampaign,
+    retry: false,
+    staleTime: 60 * 1000,
+  });
+  const campaignName = (id: string) => campaigns.data?.items.find((campaign) => campaign.id === id)?.name;
   // The chart is the whole fleet's last day, counted in the database: it
   // does not depend on the filters or on how many pages are loaded.
   const activity = useQuery({
@@ -520,7 +532,9 @@ export function Jobs() {
                           <>
                             {" "}
                             <Link to={`/campaigns/${job.campaign_id}`} className="chip" title={t("Part of a campaign")}>
-                              {t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
+                              {campaignName(job.campaign_id)
+                                ? t("campaign {name}", { name: campaignName(job.campaign_id) ?? "" })
+                                : t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
                             </Link>
                           </>
                         )}

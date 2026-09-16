@@ -463,7 +463,9 @@ export function FleetVulnerabilities() {
                 <tr>
                   <th>{t("Host")}</th><th>{t("Distribution")}</th><th className="num">{t("Open findings")}</th>
                   <th className="num">{t("Vendor fix")}</th><th className="num">{t("No fix")}</th>
-                  <th className="num">{t("Not established")}</th><th>{t("Coverage")}</th><th>{t("Assessed")}</th>
+                  <th className="num">{t("Not established")}</th>
+                  <th title={t("The share of the installed packages the vendor's tracker could say something about.")}>{t("Coverage")}</th>
+                  <th>{t("Assessed")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -493,7 +495,7 @@ export function FleetVulnerabilities() {
                     </td>
                     <td className="num">{item.affected_no_fix}</td>
                     <td className="num">{item.unknown}</td>
-                    <td>
+                    <td className={item.coverage_reason ? undefined : "fp-meter-cell"} title={item.coverage_reason ? undefined : t("{percent}% of the {total} installed packages were matched against the tracker.", { percent: item.coverage_percent.toFixed(1), total: item.packages_total })}>
                       {item.coverage_reason ? (
                         <span className="badge unknown">
                           {reason(item.coverage_reason)}

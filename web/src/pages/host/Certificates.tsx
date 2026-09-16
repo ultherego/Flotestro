@@ -6,7 +6,7 @@ import { ErrorBox, Time, Empty } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
-  Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
+  Fact, Facts, Field, Fields, Form, FormActions, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -104,6 +104,26 @@ type Deployment = {
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
+/**
+ * The list soonest deadline first: the certificate that expires next week
+ * is the one to look at, wherever certmonger listed it. A certificate
+ * without a deadline (unreadable, unknown) goes last.
+ */
+function byDeadline(list: Certificate[]): Certificate[] {
+  return list.slice().sort((a, b) => {
+    if (!a.not_after && !b.not_after) return a.path.localeCompare(b.path);
+    if (!a.not_after) return 1;
+    if (!b.not_after) return -1;
+    return a.not_after.localeCompare(b.not_after) || a.path.localeCompare(b.path);
+  });
+}
+
+/** The common name out of a subject, so the SAN list can leave it out. */
+function commonName(subject?: string): string {
+  const match = /(?:^|,\s*)CN=([^,]+)/.exec(subject ?? "");
+  return match ? match[1].trim() : "";
+}
+
 /** The deadline state is the panel's judgement, not a fact from the host - hence its own look. */
 function StatusBadge({ status, days }: { status: string; days?: number }) {
   const t = useT();
@@ -138,6 +158,8 @@ export function Certificates() {
   const [message, setMessage] = useState("");
   const [form, setForm] = useState<"" | "watch" | "deploy">("");
   const [selected, setSelected] = useState("");
+  // The last job ordered from this page, linked where its sentence stands.
+  const [ordered, setOrdered] = useState<Job | null>(null);
 
   const module = useModule<unknown>(host.id, "certificates");
   const report = useQuery({
@@ -149,11 +171,8 @@ export function Certificates() {
     mutationFn: (body: Record<string, unknown>) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
     onSuccess: (job) => {
-      setMessage(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      setOrdered(job);
+      setMessage("");
       setIntent(null);
       setForm("");
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
@@ -185,7 +204,13 @@ export function Certificates() {
 
   if (report.error) return <ErrorBox error={report.error} />;
   const data = report.data;
-  const list = data?.certificates ?? [];
+  const list = byDeadline(data?.certificates ?? []);
+  // The renewal and the source are codes in the report; the list speaks
+  // the operator's words, and the breakdown the same ones.
+  const renewalName = (renewal: string) =>
+    renewal === "tracked" ? "certmonger" : renewal === "manual" ? t("manual") : t("unknown");
+  const sourceName = (source: string) =>
+    source === "flotestro" ? t("panel") : source === "certmonger" ? "certmonger" : source === "external" ? t("outside the panel") : source;
   const targets = data?.targets ?? [];
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
   // The list is unknown until the report loads; the bar shows dashes then.
@@ -235,6 +260,7 @@ export function Certificates() {
       />
       <ModuleFreshness fragment={module.data} />
       <Message text={message} />
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       {data?.stale && (
         <p className="warning">
@@ -275,12 +301,12 @@ export function Certificates() {
         ) : (
           <>
             <Breakdown
-              items={tally((c) => c.renewal || t("unknown")).map(([renewal, count]) => ({
-                label: renewal, value: count, tone: renewal === "manual" ? "warn" as const : renewal === "unknown" ? "unknown" as const : "ok" as const,
+              items={tally((c) => c.renewal || "unknown").map(([renewal, count]) => ({
+                label: renewalName(renewal), value: count, tone: renewal === "manual" ? "warn" as const : renewal === "tracked" ? "ok" as const : "unknown" as const,
               }))}
             />
             <p className="widget-subhead">{t("Source")}</p>
-            <Breakdown items={tally((c) => c.source).map(([source, count]) => ({ label: source, value: count }))} />
+            <Breakdown items={tally((c) => c.source).map(([source, count]) => ({ label: sourceName(source), value: count }))} />
           </>
         )}
       </Section>
@@ -290,7 +316,13 @@ export function Certificates() {
         <DeployForm targets={targets} hostname={host.hostname} onIntent={setIntent} />
       )}
 
-      <Section title={t("Certificates")} count={list.length} span={12} flush>
+      <Section
+        title={t("Certificates")}
+        count={list.length}
+        span={12}
+        description={list.length ? t("Soonest deadline first. Click a path for the issuer, the chain and the deployments of that file.") : undefined}
+        flush
+      >
         {!list.length ? (
           <Empty>
             {t("No certificate is watched on this host yet. Add a path, or scan the host if certmonger tracks something here.")}
@@ -324,8 +356,12 @@ export function Certificates() {
                     ) : (
                       <>
                         {certificate.subject}
-                        {certificate.sans?.length ? (
-                          <div className="source">{certificate.sans.join(", ")}</div>
+                        {/* The names beyond the common name; a SAN that only
+                            repeats the CN says nothing new. */}
+                        {certificate.sans?.some((san) => san !== commonName(certificate.subject)) ? (
+                          <div className="source">
+                            {t("also")} {certificate.sans.filter((san) => san !== commonName(certificate.subject)).join(", ")}
+                          </div>
                         ) : null}
                       </>
                     )}
@@ -420,13 +456,13 @@ export function Certificates() {
                       </button>
                       )}
                       {certificate.watched && (
-                        <button className="secondary" onClick={() => forget.mutate(certificate.path)}>
+                        <button className="secondary" title={t("The panel stops reading this path; the file on the host stays as it is.")} onClick={() => forget.mutate(certificate.path)}>
                           {t("Stop watching")}
                         </button>
                       )}
                       {!certificate.watched && !(certificate.renewal === "tracked" && certificate.tracking?.request) && (
                         <span className="source" title={t("Renewed outside the panel; certmonger does not track this file and the panel does not watch it.")}>
-                          {t("renewed by hand")}
+                          —
                         </span>
                       )}
                     </div>

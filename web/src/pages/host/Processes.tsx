@@ -52,6 +52,15 @@ export function stateWords(state: string): string {
 }
 
 /**
+ * Whether a process is a kernel thread: a child of kthreadd (PID 2) or
+ * kthreadd itself. It has no address space of its own, so its resident
+ * size is not a small number but no number, and no signal will end it.
+ */
+export function kernelThread(process: Pick<Process, "pid" | "ppid">): boolean {
+  return process.pid === 2 || process.ppid === 2;
+}
+
+/**
  * The host's processes.
  *
  * The module is a diagnostic, not an observability system: the snapshot is
@@ -245,7 +254,11 @@ export function Processes() {
                   <tr key={process.pid}>
                     <td className="hm-num">{process.pid}</td>
                     <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
-                    <td><Meter value={process.rss_bytes} max={maxRss} tone="info" text={bytes(process.rss_bytes)} /></td>
+                    <td>
+                      {kernelThread(process)
+                        ? <span className="source" title={t("A kernel thread has no address space of its own.")}>—</span>
+                        : <Meter value={process.rss_bytes} max={maxRss} tone="info" text={bytes(process.rss_bytes)} />}
+                    </td>
                     <td>
                       <Meter
                         value={process.cpu_ticks}
@@ -260,7 +273,7 @@ export function Processes() {
                     <td className="hm-mono">
                       {process.container
                         ? `${t("container")} ${process.container.slice(0, 12)}`
-                        : process.unit || "—"}
+                        : process.unit || (kernelThread(process) ? <span className="source">{t("kernel")}</span> : "—")}
                     </td>
                     {/* In the tree the command is indented by its depth and a
                         parent carries the fold; the flat table has neither. */}
@@ -282,12 +295,26 @@ export function Processes() {
                       {tree && children > 0 && " "}
                       {(process.command || process.name).slice(0, 60)}
                     </td>
+                    {/* PID 1 and a kernel thread take no signal from here:
+                        init ignores what it does not handle and a kernel
+                        thread cannot be ended; the buttons say so instead
+                        of ordering a job the host refuses. The agent's own
+                        process is a warning, not a refusal - killing it
+                        cuts the host off until systemd brings it back. */}
                     <td>
-                      <div className="operations">
-                        <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
-                        <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
-                        <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
-                      </div>
+                      {process.pid === 1 || kernelThread(process) ? (
+                        <span className="source" title={process.pid === 1
+                          ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power tab.")
+                          : t("A kernel thread cannot be signalled.")}>
+                          {t("no signal")}
+                        </span>
+                      ) : (
+                        <div className="operations" title={agentProcess(process) ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.") : undefined}>
+                          <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
+                          <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
+                          <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -311,13 +338,16 @@ export function Processes() {
           host={host}
           label={t("Send {signal}", { signal: toSignal.signal })}
           description={
-            toSignal.signal === "KILL"
+            (toSignal.signal === "KILL"
               ? t("PID {pid} ({command}) will be killed without a chance to clean up.", {
                   pid: toSignal.process.pid, command: toSignal.process.command || toSignal.process.name,
                 })
               : t("PID {pid} ({command}) will receive {signal}.", {
                   pid: toSignal.process.pid, command: toSignal.process.command || toSignal.process.name, signal: toSignal.signal,
-                })
+                }))
+            + (agentProcess(toSignal.process)
+              ? " " + t("This is the agent itself: the host goes offline until systemd restarts it, and the result of this job may never be reported.")
+              : "")
           }
           busy={request.isPending}
           onConfirm={(reason) =>
@@ -341,6 +371,11 @@ export function Processes() {
       )}
     </ModulePage>
   );
+}
+
+/** Whether the process is the agent the panel talks through. */
+function agentProcess(process: Process): boolean {
+  return process.unit === "flotestro-agent.service";
 }
 
 /**

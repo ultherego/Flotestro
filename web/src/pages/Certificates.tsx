@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
@@ -239,6 +240,9 @@ type TrustView = {
   hosts_without_trust_store?: { reason: string; count: number }[];
 };
 
+/** How many authorities the trust table names before it folds the rest. */
+const AUTHORITIES_SHOWN = 8;
+
 /**
  * The authorities the fleet trusts.
  *
@@ -250,6 +254,7 @@ type TrustView = {
  */
 function Trust({ leaves }: { leaves: Item[] }) {
   const t = useT();
+  const [allAuthorities, setAllAuthorities] = useState(false);
   const { data } = useQuery({
     queryKey: ["certificates", "trust"],
     queryFn: () => api.get<TrustView>("/api/v1/certificates/trust"),
@@ -266,6 +271,13 @@ function Trust({ leaves }: { leaves: Item[] }) {
     leaves.filter((leaf) => anchor.subject && leaf.issuer === anchor.subject).length;
   const bulk = (action: string, name: string, payload: Record<string, unknown>) =>
     `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
+
+  // A rotation involves two authorities, three at most; a table of fifty
+  // is a lab that has rotated fifty times, and it folds so the page under
+  // it is still reached. The nearest to withdrawal stand first as the
+  // server lists them.
+  const folded = !allAuthorities && data.items.length > AUTHORITIES_SHOWN;
+  const shown = folded ? data.items.slice(0, AUTHORITIES_SHOWN) : data.items;
 
   return (
     <Card
@@ -298,7 +310,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
             <tr><th>{t("Authority")}</th><th>{t("Hosts")}</th><th className="num">{t("Leaves issued by it")}</th><th>{t("Valid until")}</th><th>{t("Fingerprint")}</th><th>{t("Stage")}</th></tr>
           </thead>
           <tbody>
-            {data.items.map((anchor) => {
+            {shown.map((anchor) => {
               const covered = anchor.hosts >= data.hosts_total && data.hosts_unknown === 0;
               const issued = issuedBy(anchor);
               return (
@@ -344,6 +356,15 @@ function Trust({ leaves }: { leaves: Item[] }) {
           </tbody>
         </table>
       )}
+      {data.items.length > AUTHORITIES_SHOWN && (
+        <div className="card-body">
+          <button className="secondary" onClick={() => setAllAuthorities((current) => !current)} aria-expanded={!folded}>
+            {folded
+              ? t("Show all {n} authorities", { n: data.items.length })
+              : t("Show the first {n} only", { n: AUTHORITIES_SHOWN })}
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -360,6 +381,6 @@ function ExpiryTimeline({ timeline }: { timeline: { reason: string; count: numbe
   const total = timeline.reduce((sum, window) => sum + window.count, 0);
   if (!timeline.length || total === 0) return <p className="fp-blank">{t("No deadline in the windows watched.")}</p>;
   return (
-    <Breakdown tone="warn" items={timeline.map((window) => ({ label: window.reason, value: window.count }))} />
+    <Breakdown tone="warn" items={timeline.map((window) => ({ label: t(window.reason), value: window.count }))} />
   );
 }

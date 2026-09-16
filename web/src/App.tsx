@@ -445,6 +445,10 @@ function sectionOf(groups: NavGroup[], pathname: string): Pick<Trail, "section" 
       return pathname === item.to ? { section: item.label } : { section: item.label, to: item.to };
     }
   }
+  // Pages reached from the user menu rather than the sidebar are named by
+  // the page, not by the product, so the bar does not look broken there.
+  const unlisted: Record<string, string> = { "/profile": "Profile", "/setup": "First run" };
+  if (unlisted[pathname]) return { section: unlisted[pathname] };
   return { section: "Flotestro" };
 }
 

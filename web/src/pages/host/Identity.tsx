@@ -206,13 +206,22 @@ function JoinDomain({ host }: { host: Host }) {
             <button
               className="secondary"
               disabled={!valid || preflight.busy || host.connection_state !== "online"}
+              title={!valid
+                ? t("Fill in the domain, the realm and the fully qualified host name first.")
+                : host.connection_state !== "online"
+                  ? t("The host is not online; a preflight needs an answer from it.")
+                  : t("The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.")}
               onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
             >
               {preflight.busy ? t("Checking…") : t("Preflight first")}
             </button>
           )}
           {mayJoin && (
-            <button disabled={!valid || confirming || request.isPending} onClick={() => setConfirming(true)}>
+            <button
+              disabled={!valid || confirming || request.isPending}
+              title={!valid ? t("Fill in the domain, the realm and the fully qualified host name first.") : undefined}
+              onClick={() => setConfirming(true)}
+            >
               {t("Join the domain…")}
             </button>
           )}

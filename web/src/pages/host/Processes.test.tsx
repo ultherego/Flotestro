@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { stateWords } from "./Processes";
+import { kernelThread, stateWords } from "./Processes";
 
 /* procfs prints the scheduler state as one letter; the table says it in
    words and keeps the letter on hover. */
@@ -16,5 +16,20 @@ describe("stateWords", () => {
     expect(stateWords("R+")).toBe("running");
     expect(stateWords("Ss")).toBe("sleeping");
     expect(stateWords("?")).toBe("?");
+  });
+});
+
+/* A kernel thread is kthreadd or one of its children; it has no memory of
+   its own and takes no signal, so the table treats it apart. */
+
+describe("kernelThread", () => {
+  it("recognises kthreadd and its children", () => {
+    expect(kernelThread({ pid: 2, ppid: 0 })).toBe(true);
+    expect(kernelThread({ pid: 15, ppid: 2 })).toBe(true);
+  });
+
+  it("leaves ordinary processes alone, including init", () => {
+    expect(kernelThread({ pid: 1, ppid: 0 })).toBe(false);
+    expect(kernelThread({ pid: 1160, ppid: 1 })).toBe(false);
   });
 });

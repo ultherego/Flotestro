@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { Empty, ErrorBox } from "../components/ui";
-import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
+import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useConfirm } from "../components/Modal";
 import { useToast } from "../components/Toast";
@@ -89,7 +89,9 @@ export function Tags() {
             { label: t("Tags"), value: loaded ? items.length : undefined, tone: "info" },
             { label: t("Plain"), value: loaded ? plain : undefined, tone: "neutral" },
             { label: t("Key=value"), value: loaded ? items.length - plain : undefined, tone: "ok" },
-            { label: t("Host tags"), value: loaded ? tagged : undefined, tone: "info" },
+            // A host with three tags counts three times here: it is the
+            // number of assignments, not of tagged hosts.
+            { label: t("Assignments"), value: loaded ? tagged : undefined, tone: "info" },
           ]} />
         </Card>
         <Card className="span-4" title={t("By key")} description={t("The keys with the most values.")}>
@@ -122,7 +124,9 @@ export function Tags() {
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : items.length === 0 ? (
-            <Empty>{t("No host you may read carries a tag. Tags are set on the host page, under Overview.")}</Empty>
+            <EmptyState action={<Link className="button secondary" to="/hosts">{t("Open the host list")}</Link>}>
+              {t("No host you may read carries a tag. Tags are set on the host page, under Overview.")}
+            </EmptyState>
           ) : shown.length === 0 ? (
             <Empty>{t("No tag matches the filter.")}</Empty>
           ) : (

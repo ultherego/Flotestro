@@ -37,7 +37,9 @@ test.describe("host list", () => {
     const fragment = distinctiveFragment(target.hostname, hosts.map((host) => host.hostname));
     const expected = hosts.filter((host) => host.hostname.toLowerCase().includes(fragment.toLowerCase()));
 
-    const search = page.getByPlaceholder("Search hostname, address, machine ID or owner");
+    // The box is short and says what it searches on hover and to the
+    // screen reader; the label is that sentence.
+    const search = page.getByRole("textbox", { name: "Search hostname, address, machine ID or owner" });
     await search.fill(fragment);
     // The filter runs on the server after a pause. The search also reads
     // addresses, machine IDs and owners, so the list may keep a row the
@@ -84,14 +86,31 @@ test.describe("host list", () => {
 
   test("the owner and the management address stand in their own columns", async ({ page }) => {
     const table = await openHostList(page);
-    await expect(table.getByRole("columnheader", { name: "Owner" })).toBeVisible();
-    await expect(table.getByRole("columnheader", { name: "Management address" })).toBeVisible();
+    // The address is a column of its own on every screen; a sortable
+    // heading carries a button with an arrow, so the heading is found by
+    // its text rather than by its whole accessible name.
+    await expect(table.locator("thead th", { hasText: heading("Address") })).toBeVisible();
+    // The owner is empty on most fleets, so its column stays off the
+    // screen until chosen: the chooser offers it unticked, and ticking it
+    // adds the column with the owner, or a dash, in every row.
+    await expect(table.locator("thead th", { hasText: heading("Owner") })).toHaveCount(0);
+    await page.getByTestId("column-chooser").click();
+    const owner = page.getByRole("group", { name: "Columns" }).getByRole("checkbox", { name: "Owner" });
+    await expect(owner).not.toBeChecked();
+    await owner.check();
+    await expect(table.locator("thead th", { hasText: heading("Owner") })).toBeVisible();
+    await page.keyboard.press("Escape");
     const row = table.locator("tbody tr").first();
+    await expect(row.getByTestId("host-owner")).toHaveText(/\S/);
     const address = row.getByTestId("host-address");
     // An address comes with its origin as a chip; a missing one says so.
     await expect(address.locator(".badge").first()).toBeVisible();
     const chip = (await address.locator(".badge").first().textContent())?.trim() ?? "";
     expect(["session", "agent", "manual", "unknown"]).toContain(chip);
+    // The reset puts the column away again.
+    await page.getByTestId("column-chooser").click();
+    await page.getByTestId("reset-columns").click();
+    await expect(table.locator("thead th", { hasText: heading("Owner") })).toHaveCount(0);
   });
 
   test("ticked hosts open the bulk workspace as its targets", async ({ page, request }) => {
@@ -196,6 +215,11 @@ test.describe("host workspace", () => {
     }
   });
 });
+
+/** A table heading by its label, with or without the arrow of a sortable column after it. */
+function heading(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[⇅▲▼]?$`);
+}
 
 /**
  * The shortest prefix of a hostname that does not name every host in the

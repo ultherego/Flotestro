@@ -15,6 +15,23 @@ function anyScope(value: string | undefined): boolean {
   return !value || value === "*";
 }
 
+/**
+ * A scope in words. The server keeps it as two fields, and "lab / test"
+ * or "* / prod" in a table says neither which is the site nor what the
+ * asterisk stands for; the words do.
+ */
+function ScopeText({ site, environment }: { site?: string; environment?: string }) {
+  const t = useT();
+  if (anyScope(site) && anyScope(environment)) return <span className="badge warn">{t("whole fleet")}</span>;
+  return (
+    <span>
+      {anyScope(site) ? t("any site") : <>{t("site")} <span className="mono">{site}</span></>}
+      {" · "}
+      {anyScope(environment) ? t("any environment") : <>{t("environment")} <span className="mono">{environment}</span></>}
+    </span>
+  );
+}
+
 const ROLES = [
   "viewer", "auditor", "operator", "approver", "identity_admin", "platform_admin",
 ];
@@ -212,11 +229,7 @@ function Mappings() {
                   <tr key={mapping.id}>
                     <td className="mono">{mapping.group_name}</td>
                     <td>{mapping.role}</td>
-                    <td className="source">
-                      {anyScope(mapping.site) && anyScope(mapping.environment)
-                        ? <span className="badge warn">{t("whole fleet")}</span>
-                        : `${mapping.site || "*"} / ${mapping.environment || "*"}`}
-                    </td>
+                    <td className="source"><ScopeText site={mapping.site} environment={mapping.environment} /></td>
                     <td className="source">{mapping.created_by}</td>
                     <td><Time value={mapping.created_at} /></td>
                     <td className="actions-cell">
@@ -531,7 +544,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                             <span>
                               {binding.role}
                               <span className="source">
-                                {" "}{binding.scope.site || "*"} / {binding.scope.environment || "*"}
+                                {" "}<ScopeText site={binding.scope.site} environment={binding.scope.environment} />
                               </span>
                               {/* A binding with a date ends by itself; one past its date
                                   stays on the record and grants nothing. */}
@@ -1097,7 +1110,7 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
           : principal.bindings.map((binding, index) => (
               <div key={index}>
                 {binding.role}
-                <span className="source"> {binding.scope.site || "*"} / {binding.scope.environment || "*"}</span>
+                <span className="source"> <ScopeText site={binding.scope.site} environment={binding.scope.environment} /></span>
                 {binding.expired
                   ? <> <span className="badge unknown">{t("expired")}</span></>
                   : binding.valid_until && <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>}

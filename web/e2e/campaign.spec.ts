@@ -34,12 +34,16 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await expect(scope.or(noEngine).first()).toBeVisible();
   test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered");
 
-  // Step 1: the order. The second step stays shut, with its reason on the
-  // button, until the order is complete.
+  // Step 1: the order. The second step stays shut until the order is
+  // complete: the pill above and the button at the end of the step are
+  // both off, and both say why.
   const steps = page.locator(".bulk-steps");
   const targetsStep = steps.getByRole("button", { name: /Targets/ });
   await expect(targetsStep).toBeDisabled();
   await expect(targetsStep).toContainText("pick an operation, name the campaign and give it a valid payload");
+  const next = (title: string) => page.getByRole("button", { name: `Next: ${title}`, exact: true });
+  await expect(next("Targets")).toBeDisabled();
+  await expect(page.getByText("Before going on: pick an operation, name the campaign and give it a valid payload.")).toBeVisible();
 
   await page.getByPlaceholder("campaign name").fill("e2e preview only");
   // The select is found through its field: a wrapping label lends the
@@ -55,12 +59,16 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await expect(scopeBar).toContainText("unit.restart");
 
   await expect(targetsStep).toBeEnabled();
-  await targetsStep.click();
+  await expect(next("Targets")).toBeEnabled();
+  await next("Targets").click();
 
-  // Step 2: the site. The count comes from the database and the sample
+  // Step 2: the site. The hosts are chosen by their filters, the way the
+  // step starts in; the count comes from the database and the sample
   // names the hosts.
   await expect(page.getByRole("heading", { name: "2. Targets" })).toBeVisible();
-  await page.getByPlaceholder("site", { exact: true }).fill(site);
+  await expect(page.getByRole("radio", { name: "by site, environment and OS" })).toBeChecked();
+  const siteField = page.locator("label.field").filter({ hasText: /^Site/ }).locator("input");
+  await siteField.fill(site);
   const matched = page.getByText(/The selector matches \d+ hosts/);
   await expect(matched).toBeVisible();
   // The previous answer stays on the screen while the narrowed preview
@@ -79,6 +87,14 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   // a unit; a host without it stays on the list with its reason.
   const eligibilityStep = steps.getByRole("button", { name: /Eligibility/ });
   await expect(eligibilityStep).toBeEnabled();
+  await next("Eligibility").click();
+  await expect(page.getByRole("heading", { name: "3. Eligibility" })).toBeVisible();
+
+  // Back leads to the targets with the site still typed, and the pill
+  // of the third step brings the operator forward again.
+  await page.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "2. Targets" })).toBeVisible();
+  await expect(siteField).toHaveValue(site);
   await eligibilityStep.click();
   await expect(page.getByRole("heading", { name: "3. Eligibility" })).toBeVisible();
 
@@ -99,9 +115,12 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   }
   await expect(scopeBar).toContainText(`targets: ${eligibleCount}`);
 
-  // The wizard goes no further: the rollout and the order are not touched.
+  // The wizard goes no further: the rollout, the window and the order
+  // are not touched. The next step is offered, the create step is not
+  // opened.
+  await expect(next("Rollout")).toBeEnabled();
   await expect(steps.getByRole("button", { name: /Create/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "5. Create" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "6. Create" })).toHaveCount(0);
   expect(writes, "the preview must not write anything").toEqual([]);
   await expectHealthy(page, errors);
 });

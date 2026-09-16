@@ -391,11 +391,11 @@ function BudgetTable({ budgets, canWrite }: { budgets: BudgetState[]; canWrite: 
           <th>{t("Key")}</th>
           <th className="num">{t("Capacity")}</th>
           <th>{t("In use")}</th>
-          <th>{t("Held by")}</th>
-          <th className="num">{t("Claimants")}</th>
-          <th className="num">{t("Share per claimant")}</th>
-          <th className="num">{t("Waiting jobs")}</th>
-          <th className="num">{t("Waiting hosts")}</th>
+          <th title={t("The campaigns, jobs and reads that hold tokens of this budget right now.")}>{t("Held by")}</th>
+          <th className="num" title={t("How many campaigns, jobs and reads ask for tokens of this budget at the moment.")}>{t("Claimants")}</th>
+          <th className="num" title={t("The most tokens one claimant may hold while others ask: the capacity split between the claimants, never below one.")}>{t("Share per claimant")}</th>
+          <th className="num" title={t("Jobs queued until a token of this budget frees up.")}>{t("Waiting jobs")}</th>
+          <th className="num" title={t("Campaign hosts waiting for a token of this budget before they start.")}>{t("Waiting hosts")}</th>
           {canWrite && <th />}
         </tr>
       </thead>
@@ -593,8 +593,11 @@ function DeleteBudget({ budget }: { budget: BudgetState }) {
     });
     if (ok && reason) remove.mutate(reason);
   };
+  // The row button is plain: a column of two dozen red buttons is a wall
+  // of alarm where nothing is wrong. The confirmation that follows is
+  // the one drawn as a danger.
   return (
-    <button className="danger" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
+    <button className="secondary" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
       {t("Delete")}
     </button>
   );

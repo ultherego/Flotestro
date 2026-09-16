@@ -2,7 +2,8 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
-import { Time, Empty } from "../../components/ui";
+import { Time, Empty, JobState } from "../../components/ui";
+import { Link } from "react-router-dom";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Foot, JobNotice, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
@@ -124,6 +125,28 @@ type RemediationPlan = {
   steps?: PlanStep[];
 };
 
+/** The severity in the operator's language; the report speaks in codes. */
+function severityLabel(severity: string, t: (key: string) => string): string {
+  const names: Record<string, string> = { high: t("high"), medium: t("medium"), low: t("low"), info: t("info") };
+  return names[severity] ?? severity;
+}
+
+/**
+ * Why a check could not be judged, as a sentence: the code says which
+ * side has to move - the host, the agent or the operator - and the sentence
+ * says it in words. A code without a sentence is shown as it came.
+ */
+function reasonText(code: string, t: (key: string) => string): string {
+  const names: Record<string, string> = {
+    fact_missing: t("the host did not report this fact"),
+    read_failed: t("the agent could not read this on the host"),
+    unsupported_system: t("this system has nothing to check here"),
+    module_unread: t("the module this check reads has not been read yet"),
+    permission_denied: t("the agent lacks the permission to read this"),
+  };
+  return names[code] ?? code;
+}
+
 /** The severity says what happens when nobody does anything - not how hard the fix is. */
 function SeverityBadge({ finding }: { finding: Finding }) {
   const t = useT();
@@ -133,7 +156,7 @@ function SeverityBadge({ finding }: { finding: Finding }) {
   if (finding.unknown) return <span className="badge unknown">{t("unknown")}</span>;
   if (finding.passed) return <span className="badge ok">{t("passed")}</span>;
   const cls = finding.severity === "high" ? "error" : finding.severity === "info" ? "unknown" : "warn";
-  return <span className={`badge ${cls}`}>{finding.severity}</span>;
+  return <span className={`badge ${cls}`}>{severityLabel(finding.severity, t)}</span>;
 }
 
 /**
@@ -289,7 +312,7 @@ export function Security() {
       <Summary
         title={t("Checks")}
         description={t("Every versioned check, by its verdict on this host.")}
-        span={8}
+        span={12}
         segments={[
           { label: t("need action"), value: counts ? counts.failed ?? 0 : undefined, tone: "error" },
           { label: t("passed"), value: counts ? counts.passed ?? 0 : undefined, tone: "ok" },
@@ -301,7 +324,7 @@ export function Security() {
         {failing ? (
           <Breakdown
             items={severities.map((severity) => ({
-              label: severity,
+              label: severityLabel(severity, t),
               value: countWhere(failing, (f) => f.severity === severity) ?? 0,
               tone: severity === "high" ? "error" as const : severity === "info" ? "unknown" as const : "warn" as const,
             }))}
@@ -327,7 +350,7 @@ export function Security() {
 
       {/* The protective facts and the open sockets are the two short
           answers; they share a row above the findings. */}
-      <Section title={t("Protective state")} span={5} flush>
+      <Section title={t("Protective state")} span={8} flush>
         <Facts>
           <Fact label={t("Mandatory access control")}>
             {snapshot?.mac?.system
@@ -426,7 +449,7 @@ export function Security() {
       <Section
         title={t("Listening sockets")}
         count={snapshot?.listening_known ? sockets.length : undefined}
-        span={7}
+        span={12}
         description={t("Every socket the host listens on, the ones beyond the loopback first. A socket on every interface is a way into this host for anyone who can see its network; the panel names the reach and does not rule what is visible from where.")}
         flush
       >
@@ -522,7 +545,7 @@ export function Security() {
                     {/* The reason code says what to do about it: wait for a
                         read, fix the agent or grant permissions. */}
                     {finding.reason_code && (
-                      <div className="source">{t("reason")}: {finding.reason_code}</div>
+                      <div className="source" title={finding.reason_code}>{t("reason")}: {reasonText(finding.reason_code, t)}</div>
                     )}
                     {finding.evidence && <div className="source">{finding.evidence}</div>}
                     {/* The evidence carries the module and the revision the
@@ -542,7 +565,7 @@ export function Security() {
                   <td>
                     {finding.remediation?.action ? (
                       <>
-                        <code>{finding.remediation.action}</code>
+                        <span className="source">{t("operation")} </span><code>{finding.remediation.action}</code>
                         {finding.remediation.note && (
                           <div className="source">{finding.remediation.note}</div>
                         )}
@@ -600,9 +623,7 @@ export function Security() {
             <div key={plan.id} className="hm-plan">
               <div className="hm-section-head">
                 <strong className="hm-mono">{plan.id.slice(0, 8)}</strong>
-                <span className={`badge ${plan.state === "succeeded" ? "ok" : plan.state === "running" ? "warn" : "error"}`}>
-                  {plan.state}
-                </span>
+                <JobState state={plan.state} />
                 <span className="source">
                   {plan.created_by} · <Time value={plan.created_at} />
                   {plan.stop_on_failure ? ` · ${t("stops on failure")}` : ` · ${t("continues after failure")}`}
@@ -632,9 +653,11 @@ export function Security() {
                           reaches for - two steps of the same class do not run
                           at once. */}
                       <td>{step.lock_class || <span className="source">—</span>}</td>
-                      <td className="hm-mono">{step.job_id ? step.job_id.slice(0, 8) : "—"}</td>
+                      <td className="hm-mono">
+                        {step.job_id ? <Link to={`/jobs/${step.job_id}`}>{step.job_id.slice(0, 8)}</Link> : "—"}
+                      </td>
                       <td>
-                        {step.state}
+                        <JobState state={step.state} />
                         {step.reason && <div className="source">{step.reason}</div>}
                       </td>
                     </tr>

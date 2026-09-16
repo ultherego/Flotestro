@@ -126,7 +126,10 @@ export function System() {
               the snapshot. */}
           <Fact label={t("Uptime")}>
             {uptime === undefined ? <Unknown /> : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
-            {snapshot.boot?.booted_at && <span className="source"> · {t("since")} {absoluteTime(snapshot.boot.booted_at)}</span>}
+            {uptime !== undefined && snapshot.observed_at && (
+              <span className="source"> · {t("as of")} <Timestamp value={snapshot.observed_at} /></span>
+            )}
+            {snapshot.boot?.booted_at && <span className="source"> · {t("booted")} {absoluteTime(snapshot.boot.booted_at)}</span>}
           </Fact>
           <Fact label={t("Runs on")}>
             {virtualization ? (virtualization === "none" ? t("bare metal") : virtualization) : <Unknown />}
@@ -237,8 +240,14 @@ export function System() {
           <Fact label={t("Firmware vendor")}>{fact("firmware", snapshot.firmware?.vendor)}</Fact>
           <Fact label={t("Firmware version")}>{fact("firmware", snapshot.firmware?.version)}</Fact>
           <Fact label={t("Firmware date")}>{fact("firmware", snapshot.firmware?.date)}</Fact>
-          <Fact label={t("Booted")}>{snapshot.boot?.booted_at ? <Timestamp value={snapshot.boot.booted_at} /> : fact("boot", undefined)}</Fact>
-          <Fact label={t("Uptime")}>{uptime === undefined ? fact("boot", undefined) : uptimeText(uptime)}</Fact>
+          <Fact label={t("Booted")}>
+            {snapshot.boot?.booted_at
+              ? <><Timestamp value={snapshot.boot.booted_at} /> <span className="source">· {absoluteTime(snapshot.boot.booted_at)}</span></>
+              : fact("boot", undefined)}
+          </Fact>
+          <Fact label={t("Uptime")}>
+            {uptime === undefined ? fact("boot", undefined) : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
+          </Fact>
           <Fact label={t("Boot id")}><span className="hm-mono">{snapshot.boot_id || "—"}</span></Fact>
           <Fact label={t("Virtualization")}>
             {fact("virtualization", virtualization === "none" ? t("bare metal") : virtualization)}

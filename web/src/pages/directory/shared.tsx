@@ -13,6 +13,39 @@ export function Forbidden() {
   return <Card><Empty>{t("You do not have permission to read this resource.")}</Empty></Card>;
 }
 
+/**
+ * What a change does, in words. The action type is the contract
+ * identifier the API and the trail use; the operator reading the recent
+ * changes wants to know what was ordered, not how it is keyed. A type
+ * the screen does not know is shown as it came.
+ */
+const ACTION_NAMES: Record<string, string> = {
+  "identity.user.create": "Create an account",
+  "identity.user.enable": "Unlock an account",
+  "identity.user.disable": "Lock an account",
+  "identity.user.expire": "Set the expiry of an account",
+  "identity.user.password.reset": "Reset a password",
+  "identity.user.posix": "Change the POSIX data of an account",
+  "identity.user.preserve": "Preserve an account",
+  "identity.user.delete": "Delete an account",
+  "identity.group.members": "Change the members of a group",
+  "identity.hostgroup.members": "Change the members of a host group",
+  "identity.sshkeys.set": "Set the SSH keys of an account",
+  "identity.hbac.rule.ensure": "Set an HBAC rule",
+  "identity.hbac.rule.remove": "Remove an HBAC rule",
+  "identity.sudo.rule.ensure": "Set a sudo rule",
+  "identity.sudo.rule.remove": "Remove a sudo rule",
+  "identity.host.enroll": "Join a host to the domain",
+  "identity.host.leave": "Take a host out of the domain",
+  "identity.host.preflight": "Check a host before joining",
+  "identity.keytab.rotate": "Rotate the keytab",
+  "identity.keytab.renew": "Renew the keytab",
+};
+
+export function actionName(type: string): string {
+  return ACTION_NAMES[type] ?? type;
+}
+
 /** Splits a comma-separated field into names; blanks fall out. */
 export function names(text: string): string[] {
   return text.split(",").map((item) => item.trim()).filter(Boolean);

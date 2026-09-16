@@ -656,6 +656,12 @@ function InstalledPackages({
   const stale = !!state?.digest && !!packages?.installed_digest && state.digest !== packages.installed_digest;
   const pacman = packages?.manager === "pacman";
   const key = (row: PackageRow) => `${row.name}/${row.architecture ?? ""}`;
+  // A column with nothing in any row says nothing: the architecture is
+  // left out where the manager does not report one, and the two plan
+  // columns until a plan exists - the caption says one is missing.
+  const showArchitecture = rows.some((row) => !!row.architecture);
+  const showPlan = plan.changes !== undefined;
+  const columns = 3 + (showArchitecture ? 1 : 0) + (showPlan ? 2 : 0);
 
   return (
     <>
@@ -666,7 +672,7 @@ function InstalledPackages({
         tools={list.data && list.data.items.length > 0 && (
           <>
             <input
-              placeholder={t("Search by name or source package")}
+              placeholder={t("Search packages")}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -729,12 +735,15 @@ function InstalledPackages({
                 items={shown}
                 rowHeight={PACKAGE_ROW}
                 height={480}
-                columns={7}
+                columns={columns}
                 rowKey={key}
                 head={
                   <tr>
-                    <th>{t("Package")}</th><th>{t("Version")}</th><th>{t("Architecture")}</th>
-                    <th>{t("Source")}</th><th>{t("Upgrade to")}</th><th>{t("Security")}</th><th>{t("Held")}</th>
+                    <th>{t("Package")}</th><th>{t("Version")}</th>
+                    {showArchitecture && <th>{t("Architecture")}</th>}
+                    <th>{t("Source")}</th>
+                    {showPlan && <><th>{t("Upgrade to")}</th><th>{t("Security")}</th></>}
+                    <th>{t("Held")}</th>
                   </tr>
                 }
                 render={(row) => (
@@ -750,12 +759,16 @@ function InstalledPackages({
                       </button>
                     </td>
                     <td className="hm-mono">{packageVersion(row)}</td>
-                    <td>{row.architecture || "—"}</td>
+                    {showArchitecture && <td>{row.architecture || "—"}</td>}
                     <td className="source" title={row.origin || undefined}>
                       {row.repository_id || row.origin || originWords(t, row.origin_class)}
                     </td>
-                    <td className="hm-mono">{row.candidate ?? ""}</td>
-                    <td>{row.security && <span className="badge error">{t("security")}</span>}</td>
+                    {showPlan && (
+                      <>
+                        <td className="hm-mono">{row.candidate ?? ""}</td>
+                        <td>{row.security && <span className="badge error">{t("security")}</span>}</td>
+                      </>
+                    )}
                     <td>
                       {row.held === true
                         ? <span className="badge warn">{t("held")}</span>

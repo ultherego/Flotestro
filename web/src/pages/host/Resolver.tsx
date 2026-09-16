@@ -167,7 +167,7 @@ export function Resolver() {
       )}
       {snapshot?.read_only_reason && (
         <p className="warning">
-          <span>{snapshot.read_only_reason}</span>
+          <span>{t("Read-only on this host: {reason}", { reason: snapshot.read_only_reason })}</span>
         </p>
       )}
 
@@ -202,19 +202,25 @@ export function Resolver() {
               show what the host said, not yes/no. */}
           <Fact label="DNSSEC">{snapshot?.dnssec || unknown}</Fact>
           <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknown}</Fact>
+          {/* What the owner means for a change made here, in a sentence
+              rather than on hover alone: it is the answer to "why can I
+              not change this". */}
+          {snapshot?.owner && ownerMeaning(snapshot.owner) && (
+            <Fact label={t("Meaning")} wide>{t(ownerMeaning(snapshot.owner))}</Fact>
+          )}
         </Facts>
       </Section>
 
       {/* The facts on the left, the test the operator runs against them on
           the right; the change form and the per-link list follow in full
           width. */}
-      <Section title={t("DNS")} span={6} flush>
+      {/* The owner, DNSSEC and DoT stand in the ownership card above;
+          here is what the file itself says. */}
+      <Section title={t("Configuration")} span={6} flush>
         <Facts>
-          <Fact label={t("Owner")}>
-            {snapshot?.owner ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span> : unknown}
-          </Fact>
           <Fact label={t("Mode")}>
             {snapshot?.mode ? <span title={t(modeMeaning(snapshot.mode)) || undefined}>{snapshot.mode}</span> : "—"}
+            {snapshot?.mode && modeMeaning(snapshot.mode) && <span className="source"> · {t(modeMeaning(snapshot.mode))}</span>}
           </Fact>
           <Fact label="resolv.conf">
             <span className="hm-mono">
@@ -224,10 +230,6 @@ export function Resolver() {
           </Fact>
           <Fact label={t("Servers")}><span className="hm-mono">{(snapshot?.servers ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Search domains")}><span className="hm-mono">{(snapshot?.search_domains ?? []).join(", ") || "—"}</span></Fact>
-          {/* "unsupported" and "disabled" are two different answers, so we
-              show what the host said, not yes/no. */}
-          <Fact label="DNSSEC">{snapshot?.dnssec || unknown}</Fact>
-          <Fact label="DNS over TLS">{snapshot?.dns_over_tls || unknown}</Fact>
         </Facts>
       </Section>
 

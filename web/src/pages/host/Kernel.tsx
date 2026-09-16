@@ -4,7 +4,7 @@ import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
-import { Breakdown, Meter } from "../../components/widgets";
+import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
   Summary, Table, Widgets, countWhere, useHost, useModule,
@@ -90,7 +90,6 @@ export function Kernel() {
   const knownSettings = snapshot?.unavailable_reason ? undefined : settings;
   const knownModules = snapshot?.unavailable_reason ? undefined : snapshot?.modules ?? [];
   const pending = (setting: Setting) => !!setting.desired && setting.desired !== setting.current;
-  const maxModule = Math.max(1, ...(snapshot?.modules ?? []).map((entry) => entry.size_bytes));
 
   return (
     <ModulePage>
@@ -110,14 +109,18 @@ export function Kernel() {
       <Widgets>
       {/* The settings by whether the kernel applies what was asked, then
           the kernel itself and its modules: one summary row. */}
+      {/* A key without a desired value is watched, not enforced: it is
+          counted apart, so "applied" never claims a value nobody asked
+          for. */}
       <Summary
         title={t("Settings")}
-        description={t("The profile keys, by whether the kernel applies the desired value.")}
+        description={t("The profile keys, by whether the kernel applies the desired value; a key nobody set a value for is only watched.")}
         span={8}
         segments={[
-          { label: t("applied"), value: countWhere(knownSettings, (setting) => !pending(setting) && setting.current !== undefined), tone: "ok" },
+          { label: t("as desired"), value: countWhere(knownSettings, (setting) => !!setting.desired && !pending(setting) && setting.current !== undefined), tone: "ok" },
           { label: t("not applied yet"), value: countWhere(knownSettings, pending), tone: "warn" },
           { label: t("value unknown"), value: countWhere(knownSettings, (setting) => setting.current === undefined), tone: "unknown" },
+          { label: t("watched only"), value: countWhere(knownSettings, (setting) => !setting.desired && setting.current !== undefined), tone: "neutral" },
           { label: t("written by the panel"), value: countWhere(knownSettings, (setting) => setting.managed), tone: "info" },
         ]}
       />
@@ -155,9 +158,9 @@ export function Kernel() {
                 {/* Differing values mark a setting that waits for a reboot or
                     was changed outside the panel. */}
                 <td className="hm-mono">
-                  {setting.desired ?? "—"}
+                  {setting.desired ?? <span className="source" title={t("No value was asked for; the key is watched as the host has it.")}>{t("none")}</span>}
                   {setting.desired && setting.desired !== setting.current && (
-                    <span className="badge unknown"> {t("not applied yet")}</span>
+                    <span className="badge warn"> {t("not applied yet")}</span>
                   )}
                 </td>
                 <td>
@@ -221,13 +224,13 @@ export function Kernel() {
       >
         <Table>
           <thead>
-            <tr><th>{t("Module")}</th><th>{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
+            <tr><th>{t("Module")}</th><th className="hm-num">{t("Size")}</th><th>{t("Used by")}</th><th>{t("State")}</th><th>{t("Actions")}</th></tr>
           </thead>
           <tbody>
             {modules.slice(0, 60).map((entry) => (
               <tr key={entry.name}>
                 <td className="hm-mono hm-primary">{entry.name}</td>
-                <td><Meter value={entry.size_bytes} max={maxModule} tone="info" text={bytes(entry.size_bytes)} /></td>
+                <td className="hm-num">{bytes(entry.size_bytes)}</td>
                 <td className="hm-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
                 <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
                 <td>

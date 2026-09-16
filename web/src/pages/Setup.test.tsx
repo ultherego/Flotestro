@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { firstUndone, mayAct, pageName, stepTone } from "./Setup";
+import { firstUndone, mayAct, pageName, readableDetail, stepTone } from "./Setup";
 
 /* The first-run page decides a few things without the server: which step
    is highlighted, what colour a state gets, who may press a test button
@@ -69,5 +69,17 @@ describe("pageName", () => {
 
   it("falls back to a plain verb for a path it does not know", () => {
     expect(pageName("/somewhere/else")).toBe("Open");
+  });
+});
+
+describe("readableDetail", () => {
+  it("rewrites a moment in the server's RFC 3339 shape as the panel's absolute time", () => {
+    const detail = readableDetail("flotestro/panel@EXAMPLE answered at 2026-09-16T15:35:25Z");
+    expect(detail).not.toContain("T15:35:25Z");
+    expect(detail).toMatch(/answered at \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  it("leaves a sentence without a moment as it came", () => {
+    expect(readableDetail("6 hosts enrolled")).toBe("6 hosts enrolled");
   });
 });

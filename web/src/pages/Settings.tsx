@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import type { Settings as SettingsView, SettingsArea, SettingsFact } from "../lib/types";
 import { Empty, ErrorBox, Pair, Pairs } from "../components/ui";
 import { Card, PageHeader } from "../components/layout";
+import { humanDuration } from "./Status";
 import { useT } from "../i18n";
 
 /**
@@ -52,7 +53,7 @@ function AreaCard({ area }: { area: SettingsArea }) {
       <Pairs>
         {area.facts.map((fact) => (
           <Pair key={fact.key} label={t(FACT_LABELS[fact.key] ?? fact.key)}>
-            <FactValue fact={fact} />
+            <FactValue fact={fact} area={area.key} />
           </Pair>
         ))}
       </Pairs>
@@ -60,7 +61,11 @@ function AreaCard({ area }: { area: SettingsArea }) {
   );
 }
 
-function FactValue({ fact }: { fact: SettingsFact }) {
+/* A Go duration as the server prints it: hours, minutes and seconds with
+   every zero part written out, such as 720h0m0s. */
+const GO_DURATION = /^(?:\d+h)?(?:\d+m)?(?:\d+(?:\.\d+)?s)?$/;
+
+function FactValue({ fact, area }: { fact: SettingsFact; area: string }) {
   const t = useT();
   // A secret says only whether it is set. The server masks the value, but
   // the screen does not print it either way: what it gets is not its to
@@ -72,10 +77,17 @@ function FactValue({ fact }: { fact: SettingsFact }) {
   }
   const value = fact.value;
   if (value === null) return <span className="badge unknown">{t("no snapshot yet")}</span>;
+  // A retention left unset keeps the record for good; a dash would read
+  // as "nothing kept", which is the opposite of what happens.
+  if (value === "" && area === "retention") return <span title={t("No limit is set; the records are never swept.")}>{t("forever")}</span>;
   if (value === "" || (Array.isArray(value) && value.length === 0)) return <span className="source">—</span>;
   if (typeof value === "boolean") return <span className={value ? "badge ok" : "badge unknown"}>{value ? t("yes") : t("no")}</span>;
-  if (Array.isArray(value)) return <span className="mono">{value.join(", ")}</span>;
-  return <span className="mono">{String(value)}</span>;
+  if (Array.isArray(value)) return <span className="mono fp-wrap">{value.join(", ")}</span>;
+  // A duration is read in days and hours, with the exact value on hover.
+  if (typeof value === "string" && value !== "" && GO_DURATION.test(value)) {
+    return <span className="mono" title={value}>{humanDuration(value)}</span>;
+  }
+  return <span className="mono fp-wrap">{String(value)}</span>;
 }
 
 /* The English label of each fact, so the catalogue has a sentence to

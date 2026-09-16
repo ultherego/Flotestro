@@ -50,11 +50,13 @@ test.describe("navigation", () => {
     await expect(links.first()).toBeVisible();
 
     // The targets are read first: the sidebar re-renders on every
-    // navigation, and a locator held across it would go stale.
+    // navigation, and a locator held across it would go stale. The name
+    // is the label alone: an item may carry a badge with the count of
+    // what waits behind it, and the count moves while the fleet works.
     const items: { name: string; href: string }[] = [];
     for (const link of await links.all()) {
       const href = await link.getAttribute("href");
-      const name = (await link.textContent())?.trim() ?? "";
+      const name = (await link.locator(".sidebar-item-label").textContent())?.trim() ?? "";
       if (href) items.push({ name, href });
     }
     expect(items.length).toBeGreaterThanOrEqual(4);
@@ -62,7 +64,7 @@ test.describe("navigation", () => {
 
     for (const item of items) {
       await test.step(`${item.name} (${item.href})`, async () => {
-        await navigation(page).getByRole("link", { name: item.name, exact: true }).click();
+        await navigation(page).locator(`a[href="${item.href}"]`).click();
         await expect(page).toHaveURL(new RegExp(`${item.href.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\?|$)`));
         const header = page.locator(".page-header, .hm-header").first();
         await expect(header).toBeVisible();
@@ -122,20 +124,53 @@ test.describe("account menu", () => {
   });
 });
 
-test.describe("host picker", () => {
-  test("Ctrl+K opens the picker with the filter focused", async ({ page }) => {
+test.describe("command palette", () => {
+  test("Ctrl+K opens the palette with the search focused and the places of the panel", async ({ page }) => {
     await page.goto("/dashboard");
-    await expect(page.getByRole("button", { name: "Search hosts" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Search the panel" })).toBeVisible();
     await page.keyboard.press("Control+k");
 
-    const filter = page.getByRole("textbox", { name: "Filter hosts" });
+    const search = page.getByRole("textbox", { name: "Search the panel" });
+    await expect(search).toBeVisible();
+    await expect(search).toBeFocused();
+    // Empty, the palette lists the places of the panel and nothing else:
+    // the hosts stand in the selector beside it. Every row is a "Go to",
+    // and the host list is among them for whoever may see the sidebar.
+    const list = page.getByRole("listbox", { name: "Results" });
+    await expect(list).toBeVisible();
+    const rows = list.getByRole("option");
+    await expect(rows.first()).toBeVisible();
+    await expect(list.locator("[role='option']:not([data-kind='command'])")).toHaveCount(0);
+    for (const row of await rows.all()) {
+      await expect(row).toContainText(/^Go to /);
+    }
+    await expect(rows.filter({ hasText: /^Go to Hosts\b/ })).toHaveCount(1);
+
+    await page.keyboard.press("Escape");
+    await expect(search).toBeHidden();
+  });
+});
+
+test.describe("host selector", () => {
+  test("Ctrl+Shift+K opens the selector with the filter focused and the hosts listed", async ({ page }) => {
+    await page.goto("/dashboard");
+    await expect(page.getByRole("button", { name: "Select a host" })).toBeVisible();
+    await page.keyboard.press("Control+Shift+k");
+
+    const filter = page.getByRole("textbox", { name: "Select a host" });
     await expect(filter).toBeVisible();
     await expect(filter).toBeFocused();
+    // The selector must not have opened the palette as well: Ctrl+K
+    // without Shift is the palette's, and the two share the key.
+    await expect(page.getByRole("textbox", { name: "Search the panel" })).toHaveCount(0);
     const list = page.getByRole("listbox", { name: "Hosts" });
     await expect(list).toBeVisible();
-    // The list fills once the hosts arrive; a fleet with no host would
-    // say so instead of staying blank.
-    await expect(list.getByRole("option").first().or(page.getByText("No host matches the filter."))).toBeVisible();
+    // The list fills once the hosts arrive, every row a host; a fleet
+    // with no host would say so instead of staying blank.
+    await expect(list.getByRole("option").first().or(page.getByText("No host is enrolled yet"))).toBeVisible();
+    for (const row of await list.getByRole("option").all()) {
+      await expect(row).toHaveAttribute("data-kind", "hosts");
+    }
 
     await page.keyboard.press("Escape");
     await expect(filter).toBeHidden();

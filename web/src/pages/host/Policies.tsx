@@ -39,13 +39,17 @@ export function HostPolicies() {
         <Empty>{t("Loading…")}</Empty>
       ) : (
         <Widgets>
-          <Summary
-            title={t("Verdicts")}
-            description={t("{n} rules over {p} policies", { n: rows.length, p: byPolicy.length })}
-            segments={POLICY_VERDICTS.map((verdict) => ({
-              label: verdictLabel(verdict, t), value: counts[verdict], tone: verdictTone(verdict),
-            }))}
-          />
+          {/* A bar of four zeros says nothing the empty state below does not;
+              the verdicts are summed only once there is a verdict. */}
+          {rows.length > 0 && (
+            <Summary
+              title={t("Verdicts")}
+              description={t("{n} rules over {p} policies", { n: rows.length, p: byPolicy.length })}
+              segments={POLICY_VERDICTS.map((verdict) => ({
+                label: verdictLabel(verdict, t), value: counts[verdict], tone: verdictTone(verdict),
+              }))}
+            />
+          )}
           {byPolicy.length === 0 ? (
             <Section title={t("Policies")} span={12}>
               {/* The way to a first policy stands where the list would: an
@@ -65,7 +69,7 @@ export function HostPolicies() {
             >
               <Table>
                 <thead>
-                  <tr><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th>{t("Inventory revision")}</th><th>{t("Evaluated")}</th></tr>
+                  <tr><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th title={t("The inventory revision the rule was judged against.")}>{t("Judged against")}</th><th>{t("Evaluated")}</th></tr>
                 </thead>
                 <tbody>
                   {group.results.map((result) => (

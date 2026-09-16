@@ -59,6 +59,9 @@ type DetailDocument = { kind?: string; units?: UnitDetail[] };
 
 type Attempt = JobAttempt<DetailDocument>;
 
+/** How many units the list shows before the operator asks for more. */
+const UNIT_PAGE = 50;
+
 /**
  * The detail of a read, typed by the panel from the result of the agent. An
  * agent from before the typed result prints the same document on stdout, so
@@ -86,6 +89,9 @@ export function Services() {
   const [toMask, setToMask] = useState<Unit | null>(null);
   const [message, setMessage] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  // The list grows a page at a time: two hundred rows at once make the
+  // page a scroll of nothing, and the filter is the way to a unit anyway.
+  const [limit, setLimit] = useState(UNIT_PAGE);
   const [details, setDetails] = useState<Record<string, UnitDetail>>({});
   const [detailError, setDetailError] = useState("");
 
@@ -172,6 +178,13 @@ export function Services() {
     if (!filter) return true;
     return unit.name.toLowerCase().includes(filter.toLowerCase());
   });
+  // The unit opened from the address is always on the page, wherever the
+  // alphabet put it: the operator followed a link to it.
+  const page = units.slice(0, limit);
+  if (expanded && !page.some((unit) => unit.name === expanded)) {
+    const opened = units.find((unit) => unit.name === expanded);
+    if (opened) page.push(opened);
+  }
   // The state counts come from the full listing, which exists only after a
   // read; the failed count comes from the inventory and is known earlier.
   // Neither is zero before it is known.
@@ -211,10 +224,11 @@ export function Services() {
         ]}
       />
 
-      {/* The failed units stand beside the full list: they are the reason
-          to open the page, and the list is where the rest is found. Under
-          them, what starts at boot. */}
-      <Section title={t("Failed units")} count={known ? failed.length : undefined} span={4} flush>
+      {/* The failed units stand first: they are the reason to open the
+          page. Beside them, what starts at boot; the full list runs under
+          both across the width, so an empty failed list never stretches
+          beside two hundred rows. */}
+      <Section title={t("Failed units")} count={known ? failed.length : undefined} span={6} flush>
         {!known ? (
           <Empty>{t("Unit states could not be determined.")}</Empty>
         ) : failed.length === 0 ? (
@@ -242,35 +256,35 @@ export function Services() {
             </tbody>
           </Table>
         )}
-        <div className="hm-section-body">
-          <p className="widget-subhead">{t("On boot")}</p>
-          {listed ? (
-            <Breakdown
-              items={[
-                ...bootStates.map((state) => ({
-                  label: state, value: countWhere(listed, (unit) => unit.unit_file_state === state) ?? 0,
-                  tone: state === "masked" ? "warn" as const : state === "enabled" ? "ok" as const : "info" as const,
-                })),
-                { label: t("other"), value: countWhere(listed, (unit) => !bootStates.includes(unit.unit_file_state ?? "")) ?? 0, tone: "info" as const },
-              ]}
-            />
-          ) : (
-            <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
-          )}
-        </div>
+      </Section>
+
+      <Section title={t("On boot")} span={6} description={t("What the unit files say happens at boot: enabled starts, disabled waits for a hand, static is pulled in by another unit, masked cannot start at all.")}>
+        {listed ? (
+          <Breakdown
+            items={[
+              ...bootStates.map((state) => ({
+                label: state, value: countWhere(listed, (unit) => unit.unit_file_state === state) ?? 0,
+                tone: state === "masked" ? "warn" as const : state === "enabled" ? "ok" as const : "info" as const,
+              })),
+              { label: t("other"), value: countWhere(listed, (unit) => !bootStates.includes(unit.unit_file_state ?? "")) ?? 0, tone: "info" as const },
+            ]}
+          />
+        ) : (
+          <p className="source" style={{ margin: 0 }}>{t("Known after a read from the host.")}</p>
+        )}
       </Section>
 
       <Section
         title={t("All units")}
         count={listing.data ? units.length : undefined}
-        span={8}
+        span={12}
         description={t("The full list is read from the host on request, not on every inventory cycle.")}
         tools={listing.data && (
           <>
             <input
               placeholder={t("Filter by name")}
               value={filter}
-              onChange={(e) => setFilter(e.target.value)}
+              onChange={(e) => { setFilter(e.target.value); setLimit(UNIT_PAGE); }}
             />
             <label className="toggle">
               <input
@@ -315,11 +329,11 @@ export function Services() {
             <Table>
               <thead>
                 <tr>
-                  <th>{t("Unit")}</th><th>{t("Active")}</th><th>{t("Sub")}</th><th>{t("On boot")}</th><th>{t("Actions")}</th>
+                  <th>{t("Unit")}</th><th>{t("Active")}</th><th>{t("Sub-state")}</th><th>{t("On boot")}</th><th>{t("Actions")}</th>
                 </tr>
               </thead>
               <tbody>
-                {units.map((unit) => (
+                {page.map((unit) => (
                   <UnitRow
                     key={unit.name}
                     unit={unit}
@@ -339,9 +353,14 @@ export function Services() {
             </Table>
             <Foot>
               <span>
-                {t("{shown} of {total} units shown · read", { shown: units.length, total: allUnits.length })}{" "}
+                {t("{shown} of {total} units shown · read", { shown: page.length, total: allUnits.length })}{" "}
                 <Time value={listing.data.observed_at} />
               </span>
+              {units.length > page.length && (
+                <button className="secondary" onClick={() => setLimit((current) => current + UNIT_PAGE)}>
+                  {t("Show {n} more", { n: Math.min(UNIT_PAGE, units.length - page.length) })}
+                </button>
+              )}
             </Foot>
           </>
         )}

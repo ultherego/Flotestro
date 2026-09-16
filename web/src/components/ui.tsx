@@ -41,7 +41,7 @@ export function JobState({ state }: { state: string }) {
 }
 
 /** One sentence per state, shown on hover. States are not self-explanatory. */
-function stateMeaning(state: string): string {
+export function stateMeaning(state: string): string {
   const meanings: Record<string, string> = {
     queued: "Approved and waiting for delivery to the host.",
     active: "The change is in force; nothing waits.",
@@ -90,7 +90,7 @@ function stateMeaning(state: string): string {
  * A state outside the list is shown as it came. Guessing a translation
  * would hide the fact that the panel saw something it does not know.
  */
-function stateName(state: string): string {
+export function stateName(state: string): string {
   const names: Record<string, string> = {
     online: "online", offline: "offline", stale: "stale", unknown: "unknown",
     queued: "queued", planned: "planned", leased: "assigned",

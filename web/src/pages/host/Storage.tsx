@@ -6,7 +6,7 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
-  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
   Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -91,6 +91,50 @@ type SmartResult = {
   unsupported_reason?: string;
   output?: string;
 };
+
+/** One row of the mount table: a mount, and how many times the host has it mounted at that point. */
+type MountRow = { mount: Mount; times: number };
+
+/**
+ * The mounts folded by mount point and source: a shared folder mounted
+ * twice at the same path (what a provisioning tool does when it runs
+ * again) is one row that says "twice", not two rows that read as two
+ * different filesystems.
+ */
+export function mountRows(mounts: Mount[]): MountRow[] {
+  const rows: MountRow[] = [];
+  const seen = new Map<string, MountRow>();
+  for (const mount of mounts) {
+    const key = `${mount.target}\u0000${mount.source}\u0000${mount.fs_type}`;
+    const known = seen.get(key);
+    if (known) {
+      known.times += 1;
+      continue;
+    }
+    const row = { mount, times: 1 };
+    seen.set(key, row);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Whether anything sits on the device: its own mount points, or a
+ * partition or volume under it that is mounted or used as swap. A disk
+ * whose partitions are in use is not a blank disk to format, whatever
+ * its own row says.
+ */
+export function deviceInUse(device: Device, devices: Device[]): boolean {
+  if ((device.mountpoints ?? []).length > 0) return true;
+  return devices.some((other) =>
+    other !== device && (other.parent === device.name || other.parent === device.path) && deviceInUse(other, devices),
+  );
+}
+
+/** A mount point as lsblk prints it, in the operator's words: "[SWAP]" is swap, the rest a path. */
+export function mountpointWords(mountpoint: string): string {
+  return mountpoint === "[SWAP]" ? "swap" : mountpoint;
+}
 
 /**
  * The host's storage.
@@ -195,7 +239,7 @@ export function Storage() {
         )}
         <p className="widget-subhead">{t("Volume groups")}</p>
         {snapshot?.lvm_unavailable_reason ? (
-          <p className="source" style={{ margin: 0 }}>{snapshot.lvm_unavailable_reason}</p>
+          <p className="source" style={{ margin: 0 }}>{t("No LVM here: {reason}", { reason: snapshot.lvm_unavailable_reason })}</p>
         ) : !snapshot?.groups?.length ? (
           <p className="source" style={{ margin: 0 }}>{t("This host has LVM but no volume groups.")}</p>
         ) : (
@@ -207,9 +251,15 @@ export function Storage() {
             }))}
           />
         )}
+        {snapshot?.raid_unavailable_reason && (
+          <>
+            <p className="widget-subhead">{t("Software RAID")}</p>
+            <p className="source" style={{ margin: 0 }}>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
+          </>
+        )}
       </Section>
 
-      <Section title={t("Mounts")} count={mounts.length} span={12} flush>
+      <Section title={t("Mounts")} count={mountRows(mounts).length} span={12} flush>
         <Table>
           <thead>
             <tr>
@@ -218,9 +268,14 @@ export function Storage() {
             </tr>
           </thead>
           <tbody>
-            {mounts.map((mount) => (
-              <tr key={mount.target}>
-                <td className="hm-mono hm-primary">{mount.target}</td>
+            {mountRows(mounts).map(({ mount, times }) => (
+              <tr key={`${mount.target}|${mount.source}|${mount.fs_type}`}>
+                <td className="hm-mono hm-primary">
+                  {mount.target}
+                  {times > 1 && (
+                    <span className="badge" title={t("The host has this filesystem mounted {n} times at this point, one over the other.", { n: times })}> ×{times}</span>
+                  )}
+                </td>
                 <td className="hm-mono" title={mount.source}>{mount.source.slice(0, 40)}</td>
                 <td>{mount.fs_type}</td>
                 {/* The four "mounted / in fstab" combinations mean four
@@ -307,7 +362,7 @@ export function Storage() {
                     <span className="source"> · fs {bytes(device.fs_size_bytes)}</span>
                   )}
                 </td>
-                <td className="hm-mono">{(device.mountpoints ?? []).join(", ") || "—"}</td>
+                <td className="hm-mono">{(device.mountpoints ?? []).map((point) => t(mountpointWords(point))).join(", ") || "—"}</td>
                 {/* Identification goes by UUID and serial: /dev/sdX depends on
                     the detection order and points at another disk after a
                     reboot. */}
@@ -339,8 +394,9 @@ export function Storage() {
                     </div>
                   )}
                   {/* Operations on a device make sense only when nothing sits
-                      on it - and the host checks that once more anyway. */}
-                  {(device.mountpoints ?? []).length === 0 && (
+                      on it or under it - and the host checks that once more
+                      anyway. */}
+                  {!deviceInUse(device, devices) && (
                     <div className="operations">
                       {device.fs_type && (
                         <button
@@ -414,11 +470,12 @@ export function Storage() {
 
       {smartOf && <SmartReport key={smartOf.path} device={smartOf} onClose={() => setSmartOf(null)} />}
 
-      {/* The two LVM tables are narrow; side by side they fill the row. */}
+      {/* The two LVM tables are narrow; side by side they fill the row. A
+          host without LVM tools has no table to show: the devices card
+          above says so, and an empty section would say it twice. */}
+      {!snapshot?.lvm_unavailable_reason && (
       <Section title={t("Volume groups")} count={snapshot?.groups?.length} span={snapshot?.volumes?.length ? 6 : 12} flush>
-        {snapshot?.lvm_unavailable_reason ? (
-          <Empty>{snapshot.lvm_unavailable_reason}</Empty>
-        ) : !snapshot?.groups?.length ? (
+        {!snapshot?.groups?.length ? (
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (
           <Table>
@@ -445,10 +502,8 @@ export function Storage() {
             </tbody>
           </Table>
         )}
-        {snapshot?.raid_unavailable_reason && (
-          <Foot><span>{snapshot.raid_unavailable_reason}</span></Foot>
-        )}
       </Section>
+      )}
 
       {snapshot?.volumes?.length ? (
         <Section title={t("Volumes")} count={snapshot.volumes.length} span={6} flush>

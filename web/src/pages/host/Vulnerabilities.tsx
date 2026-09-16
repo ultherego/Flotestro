@@ -293,7 +293,14 @@ export function Vulnerabilities() {
             {patchAll ? (
               <Link className="button" to={patchAll}>{t("Patch all fixable")}</Link>
             ) : (
-              <button disabled title={t("No finding on this host has a vendor fix to install.")}>{t("Patch all fixable")}</button>
+              <button
+                disabled
+                title={assessed
+                  ? t("No finding on this host has a vendor fix to install.")
+                  : t("Nothing was assessed on this host yet, so there is nothing to patch from here.")}
+              >
+                {t("Patch all fixable")}
+              </button>
             )}
             <button disabled={reread.isPending || host.connection_state !== "online"}
                     onClick={() => reread.mutate()}>
@@ -382,7 +389,7 @@ export function Vulnerabilities() {
 
       <Section
         title={t("Findings")}
-        count={visible.length}
+        count={assessed ? visible.length : undefined}
         span={12}
         tools={
           <span className="hm-choices">
@@ -394,7 +401,7 @@ export function Vulnerabilities() {
             <select value={severity} onChange={(e) => narrowed(() => setSeverity(e.target.value))}>
               <option value="">{t("any severity")}</option>
               {["critical", "high", "medium", "low", "negligible", "unrated"].map((rung) => (
-                <option key={rung} value={rung}>{rung}</option>
+                <option key={rung} value={rung}>{t(rung)}</option>
               ))}
             </select>
             {(["fixable", "no-fix", "unknown"] as const).map((key) => (

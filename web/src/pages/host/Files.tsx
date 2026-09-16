@@ -7,7 +7,7 @@ import { EmptyState } from "../../components/layout";
 import { absoluteTime, bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
+  Field, Fields, Form, FormActions, JobNotice, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
   useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -63,6 +63,8 @@ export function Files() {
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState("");
   const [adding, setAdding] = useState(false);
+  // The last job ordered from this page, linked where its sentence stands.
+  const [ordered, setOrdered] = useState<Job | null>(null);
 
   const files = useQuery({
     queryKey: ["managed-files", host.id],
@@ -73,11 +75,8 @@ export function Files() {
     mutationFn: (body: Record<string, unknown>) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
     onSuccess: (job) => {
-      setMessage(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      setOrdered(job);
+      setMessage("");
       setIntent(null);
       setAdding(false);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
@@ -110,11 +109,16 @@ export function Files() {
           </button>
         }
       />
-      <Message text={message} />
+      <Message text={message} error />
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       <Widgets>
       {/* The files by whether the host has what the panel expects: the
-          reason to open the page, before the list. */}
+          reason to open the page, before the list. Two cards of zeros
+          over an empty list say nothing the empty state does not, so the
+          summaries wait for the first file. */}
+      {(!files.data || list.length > 0) && (
+      <>
       <Summary
         title={t("Managed files")}
         description={t("What the host has against what the panel expects.")}
@@ -147,10 +151,12 @@ export function Files() {
           <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
         )}
       </Section>
+      </>
+      )}
 
       {adding && <NewFile onIntent={setIntent} />}
 
-      <Section title={t("Files")} count={list.length} span={12} flush>
+      <Section title={t("Files")} count={known ? list.length : undefined} span={12} flush>
         {!files.data ? (
           <Empty>{t("Loading…")}</Empty>
         ) : !list.length ? (
@@ -217,6 +223,7 @@ export function Files() {
                       </button>
                       <button
                         className="hm-danger"
+                        title={t("Deletes the file on the host and stops managing it; the versions stay in the history.")}
                         onClick={() =>
                           setIntent({
                             action: "file.remove",

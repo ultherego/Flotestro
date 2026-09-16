@@ -132,7 +132,7 @@ func (s *Server) setupChecklist(ctx context.Context) (setupChecklist, error) {
 	}
 	if relays > 0 {
 		steps = append(steps, setupStep{Key: "relay", State: setupDone, Path: "/relays",
-			Detail: fmt.Sprintf("%d %s serve the sites that do not reach the panel directly", relays, plural(relays, "relay", "relays"))})
+			Detail: fmt.Sprintf("%d %s the sites that do not reach the panel directly", relays, plural(relays, "relay serves", "relays serve"))})
 	} else {
 		steps = append(steps, setupStep{Key: "relay", State: setupOptional, Path: "/relays",
 			Detail: "no relay; needed only for a site whose hosts cannot reach the panel directly"})

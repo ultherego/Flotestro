@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { absoluteTime } from "../../lib/format";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
   Section, Summary, Table, Widgets, countWhere, useHost, useModule,
@@ -134,7 +135,9 @@ export function Power() {
       <Section title={t("This boot")} span={4} flush>
         <Facts>
           <Fact label={t("Uptime")}>
-            {snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null ? unknown : uptime(snapshot.uptime_seconds)}
+            {snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null
+              ? unknown
+              : <span title={t("as of the last read")}>{uptime(snapshot.uptime_seconds)}</span>}
           </Fact>
           <Fact label={t("Reboot required")}>
             {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
@@ -161,8 +164,22 @@ export function Power() {
       <Section title={t("Boot")} span={7} flush>
         <Facts>
           <Fact label={t("Boot ID")}><span className="hm-mono">{snapshot?.boot_id || unknown}</span></Fact>
-          <Fact label={t("Booted")}>{snapshot?.booted_at ? <Time value={snapshot.booted_at} /> : unknown}</Fact>
-          <Fact label={t("Uptime")}>{snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null ? unknown : uptime(snapshot.uptime_seconds)}</Fact>
+          {/* The boot instant absolute beside the relative one, and the
+              uptime marked as of the read: the two are read at different
+              moments and would otherwise seem to disagree. */}
+          <Fact label={t("Booted")}>
+            {snapshot?.booted_at
+              ? <><Time value={snapshot.booted_at} /> <span className="source">· {absoluteTime(snapshot.booted_at)}</span></>
+              : unknown}
+          </Fact>
+          <Fact label={t("Uptime")}>
+            {snapshot?.uptime_seconds === undefined || snapshot?.uptime_seconds === null
+              ? unknown
+              : <span title={t("as of the last read")}>{uptime(snapshot.uptime_seconds)}</span>}
+            {snapshot?.uptime_seconds !== undefined && snapshot?.uptime_seconds !== null && snapshot.observed_at && (
+              <span className="source"> · {t("as of")} <Time value={snapshot.observed_at} /></span>
+            )}
+          </Fact>
           <Fact label={t("Running kernel")}><span className="hm-mono">{snapshot?.running_kernel || unknown}</span></Fact>
           <Fact label={t("Reboot required")}>
             {snapshot?.reboot_required === undefined || snapshot?.reboot_required === null
@@ -287,8 +304,8 @@ export function Power() {
                     {dashedBootID(boot.boot_id)}
                     {boot.index === 0 && <span className="badge ok"> {t("this boot")}</span>}
                   </td>
-                  <td><Time value={boot.first_entry} /></td>
-                  <td><Time value={boot.last_entry} /></td>
+                  <td><Time value={boot.first_entry} /> <span className="source">· {absoluteTime(boot.first_entry)}</span></td>
+                  <td><Time value={boot.last_entry} /> <span className="source">· {absoluteTime(boot.last_entry)}</span></td>
                 </tr>
               ))}
             </tbody>

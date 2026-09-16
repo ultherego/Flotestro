@@ -177,7 +177,22 @@ export function HostAudit() {
                 return (
                   <Fragment key={event.id}>
                     <tr>
-                      <td><Time value={event.occurred_at} /></td>
+                      <td>
+                        {/* The row opens on the whole record, the way a job
+                            row opens on its attempts: one mark at the left
+                            edge instead of a link repeated on every row. */}
+                        <button
+                          className="expander"
+                          aria-expanded={open}
+                          aria-label={open ? t("Hide the record") : t("Show the record")}
+                          title={open ? t("Hide the record") : t("Show the record")}
+                          onClick={() => setExpanded(open ? null : event.id)}
+                        >
+                          {open ? "▾" : "▸"}
+                        </button>
+                        {" "}
+                        <Time value={event.occurred_at} />
+                      </td>
                       <td>
                         {(() => {
                           const who = actorLabel(event, host, t);
@@ -202,15 +217,9 @@ export function HostAudit() {
                         {/* A line of the detail, then the whole event as
                             the trail keeps it: the row shows four columns,
                             and an incident wants every key of the record. */}
-                        {digest(event.detail) && <div className="source">{digest(event.detail)}</div>}
-                        <button
-                          type="button"
-                          className="hm-link"
-                          aria-expanded={open}
-                          onClick={() => setExpanded(open ? null : event.id)}
-                        >
-                          {open ? t("Hide the record") : t("Show the record")}
-                        </button>
+                        {digest(event.detail)
+                          ? <span className="source">{digest(event.detail)}</span>
+                          : <span className="source">—</span>}
                       </td>
                     </tr>
                     {open && (

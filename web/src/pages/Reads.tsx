@@ -82,7 +82,9 @@ function ReadsList() {
       {building && <NewRead onDone={() => setBuilding(false)} />}
 
       <div className="widgets">
-        <Card className="span-12" title={t("Hosts by state")} description={listed}>
+        {/* The bar counts host answers, not reads: four reads of four
+            hosts are sixteen answers, and the caption says which. */}
+        <Card className="span-12" title={t("Hosts by state")} description={t("every host of the {n} reads listed, counted once per read", { n: reads.length })}>
           <StatusBar segments={[
             { label: t("Queued"), value: sum("queued"), tone: "warn" },
             { label: t("Running"), value: sum("running"), tone: "info" },

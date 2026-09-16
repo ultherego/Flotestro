@@ -1747,3 +1747,8 @@ th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--text); }
 .topbar-host-select { flex: 0 1 240px; }
 .host-select-trigger.on-host { color: var(--text); }
 .host-select-trigger.on-host .host-picker-placeholder { font-weight: 500; }
+
+/* A button that reads as a link: an inline word that opens an editor or
+   a filter, not a call to action of its own. */
+button.link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-text); text-decoration: underline dotted; cursor: pointer; }
+button.link:where(:hover:not(:disabled)) { background: none; color: var(--accent); }

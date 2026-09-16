@@ -657,10 +657,12 @@ function MonthView({ year, month, entries, loading }: { year: number; month: num
               <div key={`${entry.kind}-${entry.id}-${index}`} style={{ marginBottom: 2, fontSize: 11, lineHeight: "16px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
                 title={entryTitle(t, entry)}>
                 <span className={`badge ${entryTone(entry)}`}>{kindWord(t, entry.kind)}</span>{" "}
+                {/* A window shows the hour it opens on the day it opens;
+                    on the days it runs through, the name alone. */}
                 {entry.kind === "campaign_window"
-                  ? <Link to={`/campaigns/${entry.id}`}>{entry.name}</Link>
+                  ? <><span className="source">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/campaigns/${entry.id}`}>{entry.name}</Link></>
                   : entry.kind === "host_window"
-                    ? <Link to={`/hosts/${entry.id}`}>{entry.name}</Link>
+                    ? <><span className="source">{startsOn(entry, key) ? `${time(entry.start)} ` : ""}</span><Link to={`/hosts/${entry.id}`}>{entry.name}</Link></>
                     : <span>{time(entry.start)} {entry.name}</span>}
               </div>
             ))}
@@ -669,6 +671,11 @@ function MonthView({ year, month, entries, loading }: { year: number; month: num
       })}
     </div>
   );
+}
+
+/** Whether the entry's start falls on the day drawn, in the browser's zone. */
+function startsOn(entry: CalendarEntry, day: string): boolean {
+  return Boolean(entry.start) && dayKey(new Date(entry.start as string)) === day;
 }
 
 function kindWord(t: (text: string) => string, kind: CalendarEntry["kind"]): string {

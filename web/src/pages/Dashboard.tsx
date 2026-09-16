@@ -44,7 +44,10 @@ export function Dashboard() {
   });
   const campaigns = useQuery({
     queryKey: ["campaigns"],
-    queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=20"),
+    // The list takes one state at a time, so the ones that need a person
+    // are picked out here: a hundred newest rows reach back far enough for
+    // a campaign parked at a gate weeks ago, where twenty did not.
+    queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=100"),
   });
   // The activity feeds the chart and the composition widgets: computed in
   // the database over the visible hosts, like the summary.
@@ -72,8 +75,11 @@ export function Dashboard() {
   if (summary.error) return <ErrorBox error={summary.error} />;
   const s = summary.data;
 
+  // A campaign in progress is one a person may still have to act on: the
+  // ones at work, the ones waiting for a consent or a go-ahead, and the
+  // ones still computing their plans.
   const activeCampaigns = (campaigns.data?.items ?? []).filter((campaign) =>
-    ["canary", "running", "paused", "awaiting_approval"].includes(campaign.state),
+    ["planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "paused"].includes(campaign.state),
   );
   const denied = denials.data?.items ?? [];
   const a = activity.data;
@@ -83,6 +89,11 @@ export function Dashboard() {
   const securityFailed = security.data ? security.data.checks.reduce((sum, c) => sum + c.failed, 0) : undefined;
   const securityUnknown = security.data ? security.data.checks.reduce((sum, c) => sum + c.unknown, 0) : undefined;
   const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit" });
+  // A facet the hosts have not reported is a badge, not a value named
+  // "unknown" that reads like a system called that.
+  const facetLabel = (key: string) => (key === "" || key === "unknown"
+    ? <span className="badge unknown">{t("unknown")}</span>
+    : key);
 
   // A count above zero on a tile that should read zero is the alarm; the
   // rest of the tiles are the fleet's size, not a state.
@@ -153,8 +164,11 @@ export function Dashboard() {
           <StatusBar segments={[
             { label: t("Security findings"), value: securityFailed, tone: "error", to: "/security" },
             { label: t("Failed jobs, 24 h"), value: s?.failed_jobs_24h, tone: "error", to: `/jobs?state=failed&since=${encodeURIComponent(dayAgo)}` },
-            { label: t("Reboot required"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
-            { label: t("Security updates"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
+            // A segment at zero is the narrowest of the bar, and a label
+            // longer than a dozen characters is cut off in it; these two
+            // are the short names of the tiles below.
+            { label: t("Reboot due"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
+            { label: t("Unpatched"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
             { label: t("Unknown checks"), value: securityUnknown, tone: "unknown", to: "/security" },
           ]} />
         </Card>
@@ -264,14 +278,18 @@ export function Dashboard() {
           )}
         </Card>
 
-        <Card className="span-3" title={t("Fleet composition")} description={t("By system and by agent build.")}>
+        <Card className="span-3" title={t("Fleet composition")} description={t("By system, agent build, site and environment.")}>
           {a ? (
             <>
-              <Breakdown items={a.by_os_family.map((f) => ({ label: f.key, value: f.count }))} />
+              <Breakdown items={a.by_os_family.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
               <h4 className="widget-subhead">{t("Agent builds")}</h4>
-              <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: f.key, value: f.count }))} />
-              <h4 className="widget-subhead">{t("Sites and environments")}</h4>
-              <Breakdown tone="ok" items={[...a.by_site.map((f) => ({ label: f.key, value: f.count })), ...a.by_environment.map((f) => ({ label: f.key, value: f.count }))]} />
+              <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+              {/* Sites and environments are two dimensions, not one list:
+                  "lab 6, test 6" under one heading reads as two sites. */}
+              <h4 className="widget-subhead">{t("Sites")}</h4>
+              <Breakdown tone="ok" items={a.by_site.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
+              <h4 className="widget-subhead">{t("Environments")}</h4>
+              <Breakdown tone="ok" items={a.by_environment.map((f) => ({ label: facetLabel(f.key), value: f.count }))} />
             </>
           ) : <Empty>{t("Loading…")}</Empty>}
         </Card>
@@ -355,7 +373,10 @@ export function Dashboard() {
                         typo, a run of them is somebody probing. */}
                     <td className="mono"><Link to={`/audit?actor=${encodeURIComponent(event.actor_id)}`}>{event.actor_id}</Link></td>
                     <td className="mono">{event.action}</td>
-                    <td>{String(event.detail?.reason ?? "")}</td>
+                    {/* The reason is a code with a guide on hover, the
+                        way a job's error is: what it means and what to
+                        do about it. */}
+                    <td><DenialReason reason={event.detail?.reason} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -365,6 +386,30 @@ export function Dashboard() {
       </div>
     </>
   );
+}
+
+/**
+ * What the server's reasons for a refusal mean, for the hover: the code
+ * stays on screen as the trail spells it, and the sentence says whether
+ * the person lacked a right or the request came at the wrong moment.
+ */
+const DENIAL_MEANINGS: Record<string, string> = {
+  permission_denied: "The person has no role that grants this operation.",
+  invalid_state: "The object was not in a state that allows this: for example a cancel of a job that had already finished.",
+  reason_required: "The request carried no reason, and this operation is not recorded without one.",
+  target_confirmation_mismatch: "The name typed to confirm the target did not match it; nothing was done.",
+  reauthentication_required: "The session was too old for this operation; a fresh sign-in is asked for first.",
+  approval_stale: "The plan changed between the review and the approval; the approval was refused so nobody consents to a plan they have not read.",
+  fingerprint_mismatch: "What was approved is not what stands now; the campaign has to be reviewed again.",
+  forbidden: "The server refused the request for this person.",
+};
+
+function DenialReason({ reason }: { reason: unknown }) {
+  const t = useT();
+  if (reason === undefined || reason === null || reason === "") return <>—</>;
+  const code = String(reason);
+  const meaning = DENIAL_MEANINGS[code];
+  return <code title={meaning ? t(meaning) : undefined}>{code}</code>;
 }
 
 /**

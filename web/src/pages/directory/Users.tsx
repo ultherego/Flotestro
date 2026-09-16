@@ -2,12 +2,12 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, type Collection } from "../../lib/api";
 import type { DirectoryChange, DirectoryUser, RevealedSecret } from "../../lib/types";
-import { ErrorBox, Empty, Time } from "../../components/ui";
+import { ErrorBox, Empty, JobState, Time } from "../../components/ui";
 import { Actions, Card, Field, FieldGrid, Toolbar } from "../../components/layout";
 import { useT } from "../../i18n";
 import { absoluteTime } from "../../lib/format";
 import {
-  DirectoryConfirmation, Forbidden, ListField, PlanImpact, ReasonField, lines, names, useDirectoryChange,
+  DirectoryConfirmation, Forbidden, ListField, PlanImpact, ReasonField, actionName, lines, names, useDirectoryChange,
 } from "./shared";
 
 /**
@@ -459,9 +459,16 @@ function RecentChanges() {
           <tbody>
             {(changes.data?.items ?? []).map((item) => (
               <tr key={item.id}>
-                <td className="mono">{item.id.slice(0, 8)}</td>
-                <td className="mono">{item.action_type}</td>
-                <td><span className={item.state === "succeeded" ? "badge ok" : item.state === "failed" || item.state === "partially_applied" ? "badge error" : "badge"}>{item.state.replace("_", " ")}</span></td>
+                <td className="mono" title={item.id}>{item.id.slice(0, 8)}</td>
+                <td>
+                  {/* The plan names what the change touches; without one
+                      the type says at least what kind of change it is. */}
+                  <div className="fp-host-cell">
+                    <span>{t(actionName(item.action_type))}</span>
+                    <span className="source">{item.plan?.summary || <span className="mono">{item.action_type}</span>}</span>
+                  </div>
+                </td>
+                <td><JobState state={item.state} /></td>
                 <td>{item.created_by || "—"}</td>
                 {/* A change is read by when it ended; one still running
                     is read by when it was ordered. */}

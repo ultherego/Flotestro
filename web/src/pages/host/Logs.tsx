@@ -512,6 +512,7 @@ export function Logs() {
             {!preview && (
               <Link
                 className="button"
+                title={t("Opens the reads page with this query filled in; the lines of every chosen host come back in one timeline.")}
                 to={readsPrefill(
                   source === "journal" ? "journal.read" : "logfile.read",
                   source === "journal"

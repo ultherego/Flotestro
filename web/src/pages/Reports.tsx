@@ -254,7 +254,9 @@ export function campaignStateLabel(state: string): string {
    and the head that says what the document is appears only on paper. */
 const PRINT_STYLES = `
 .report-print-head { display: none; }
+.report-folded { display: none; }
 @media print {
+  .report-folded { display: table-row; }
   .layout { display: block; }
   .sidebar, .sidebar-backdrop, .topbar, .no-print { display: none !important; }
   .content { padding: 0; overflow: visible; }
@@ -510,9 +512,17 @@ function GroupBreakdown({ title, groups }: { title: string; groups: ({ key: stri
   );
 }
 
+/** How many campaigns the table shows on screen before it asks to unfold; on paper it is whole. */
+export const FOLDED_ROWS = 25;
+
 function CampaignsCard({ report, error, ready, params }: { report?: CampaignsReport; error: unknown; ready: boolean; params: URLSearchParams }) {
   const t = useT();
   const totals = report?.totals;
+  // A month of a busy fleet closes a hundred campaigns; the screen shows
+  // the first rows in the server's order and unfolds the rest on request,
+  // while the printed document and the file always carry them all.
+  const [unfolded, setUnfolded] = useState(false);
+  const folded = report ? Math.max(0, report.campaigns.length - FOLDED_ROWS) : 0;
   return (
     <Card
       className="span-12"
@@ -559,8 +569,8 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
                   </tr>
                 </thead>
                 <tbody>
-                  {report.campaigns.map((row) => (
-                    <tr key={row.id}>
+                  {report.campaigns.map((row, index) => (
+                    <tr key={row.id} className={!unfolded && index >= FOLDED_ROWS ? "report-folded" : undefined}>
                       <td>
                         <Link to={`/campaigns/${row.id}`}>{row.name}</Link>
                         {row.by_site.length > 1 && (
@@ -583,6 +593,17 @@ function CampaignsCard({ report, error, ready, params }: { report?: CampaignsRep
                   ))}
                 </tbody>
               </table>
+            )}
+            {folded > 0 && (
+              <p className="fp-note no-print">
+                {unfolded
+                  ? t("All {n} campaigns are shown.", { n: report.campaigns.length })
+                  : t("The first {shown} of {total} campaigns are shown; the printed report and the file carry them all.", { shown: FOLDED_ROWS, total: report.campaigns.length })}
+                {" "}
+                <button type="button" className="secondary" onClick={() => setUnfolded(!unfolded)}>
+                  {unfolded ? t("Show the first {n} only", { n: FOLDED_ROWS }) : t("Show all {n}", { n: report.campaigns.length })}
+                </button>
+              </p>
             )}
           </>
         )}

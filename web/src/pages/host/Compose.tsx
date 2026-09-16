@@ -5,7 +5,7 @@ import type { Job } from "../../lib/types";
 import { Time, Empty, JobState } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
-  Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
+  Field, Fields, Form, FormActions, FormNote, JobNotice, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
   countWhere, useHost,
 } from "./shared";
 import { useT } from "../../i18n";
@@ -46,6 +46,8 @@ export function Compose() {
   const [manifest, setManifest] = useState("");
   const [plan, setPlan] = useState<ProjectPlan | null>(null);
   const [message, setMessage] = useState("");
+  // The deployment ordered last, linked where its sentence stands.
+  const [ordered, setOrdered] = useState<Job | null>(null);
 
   const versions = useQuery({
     queryKey: ["compose-versions", host.id, project],
@@ -102,11 +104,8 @@ export function Compose() {
         },
       }),
     onSuccess: (job) => {
-      setMessage(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      setOrdered(job);
+      setMessage("");
       queryClient.invalidateQueries({ queryKey: ["compose-versions", host.id, project] });
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
@@ -128,6 +127,7 @@ export function Compose() {
         description={t("Docker Compose projects deployed from the panel: plan first, then deploy exactly that plan.")}
       />
       <Message text={message} />
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       <Widgets>
       {/* The project's deployments by outcome, and the plan's changes by

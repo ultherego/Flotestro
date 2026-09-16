@@ -301,10 +301,12 @@ test.describe("logs", () => {
       await expect(value).toHaveText("—");
     }
 
-    // A page of the journal, bounded by the line count.
+    // A page of the journal, bounded by the line count. The fields carry
+    // their label and a hint under it in one label element, so a field
+    // is found by the label it starts with.
     const form = section(page, "Read");
-    await form.getByPlaceholder("unit (optional)").fill("");
-    await form.locator("input[type=number]").fill("50");
+    await form.locator("label.hm-field", { hasText: /^Unit/ }).locator("input").fill("");
+    await form.locator("label.hm-field", { hasText: /^Lines/ }).locator("input[type=number]").fill("50");
     const ordered = nextJob(page, target.id);
     await form.getByRole("button", { name: "Read", exact: true }).click();
     const readJob = await ordered;
@@ -365,7 +367,7 @@ test.describe("security and ssh", () => {
       await expect(values.nth(0)).toHaveText(String(counts.failed ?? 0));
       await expect(values.nth(1)).toHaveText(String(counts.passed ?? 0));
     }
-    for (const title of ["Need action", "Protective state", "Exposed services", "Findings"]) {
+    for (const title of ["Need action", "Protective state", "Listening sockets", "Findings"]) {
       await expect(section(page, title).first()).toBeVisible();
     }
     await expectHealthy(page, errors);

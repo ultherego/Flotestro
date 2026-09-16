@@ -67,6 +67,25 @@ function adapterLabel(adapter: string): string {
   return ADAPTER_LABELS[adapter] ?? adapter;
 }
 
+/**
+ * The origin of a route in words. The kernel's names are terse - "ra" is
+ * a router advertisement, "boot" a route set at boot by a script - and
+ * the operator asks who put the route there, not what the field is called.
+ */
+export function routeProtocolWords(protocol: string | undefined): string {
+  switch (protocol) {
+    case "kernel": return "kernel (from an address)";
+    case "dhcp": return "DHCP";
+    case "ra": return "router advertisement";
+    case "static": return "static";
+    case "boot": return "set at boot";
+    case "bird":
+    case "bgp":
+    case "ospf": return `routing daemon (${protocol})`;
+    default: return protocol || "—";
+  }
+}
+
 type Intent = {
   action: string;
   label: string;
@@ -110,6 +129,9 @@ export function Network() {
   const [all, setAll] = useState(false);
 
   const snapshot = module.data?.payload;
+  // Without a write adapter no row has an action; a column of greyed
+  // buttons would only repeat the warning above the table.
+  const writable = !!snapshot?.write_adapter;
   const interfaces = snapshot?.interfaces ?? [];
   const visible = all ? interfaces : interfaces.filter(relevant);
   const routes = snapshot?.routes ?? [];
@@ -205,7 +227,7 @@ export function Network() {
           <thead>
             <tr>
               <th>{t("Interface")}</th><th>{t("Kind")}</th><th>{t("State")}</th><th>{t("Addresses")}</th>
-              <th className="hm-num">MTU</th><th>{t("Link")}</th><th>MAC</th><th>{t("Driver")}</th><th>{t("Actions")}</th>
+              <th className="hm-num">MTU</th><th>{t("Link")}</th><th>MAC</th><th>{t("Driver")}</th>{writable && <th>{t("Actions")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -257,23 +279,16 @@ export function Network() {
                 </td>
                 <td className="hm-mono">{iface.mac || "—"}</td>
                 <td>{iface.driver || "—"}</td>
-                <td>
-                  {/* Without a write mechanism there is nothing to edit: the
-                      panel does not change a configuration the host will not
-                      keep after a reboot. */}
-                  <button
-                    className="secondary"
-                    onClick={() => setEdited(iface)}
-                    disabled={!snapshot?.write_adapter}
-                    title={
-                      snapshot?.write_adapter
-                        ? ""
-                        : t("This host has no NetworkManager, nmstate or netplan.")
-                    }
-                  >
-                    {t("Change")}
-                  </button>
-                </td>
+                {/* Without a write mechanism there is nothing to edit: the
+                    panel does not change a configuration the host will not
+                    keep after a reboot. */}
+                {writable && (
+                  <td>
+                    <button className="secondary" onClick={() => setEdited(iface)}>
+                      {t("Change")}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -307,7 +322,7 @@ export function Network() {
                   <td className="hm-mono">{route.gateway || "—"}</td>
                   <td className="hm-mono">{route.interface || "—"}</td>
                   <td className="hm-mono">{route.source || "—"}</td>
-                  <td>{route.protocol || "—"}</td>
+                  <td title={route.protocol || undefined}>{t(routeProtocolWords(route.protocol))}</td>
                   <td className="hm-num">{route.metric}</td>
                   <td>{route.family === "inet6" ? "IPv6" : "IPv4"}</td>
                 </tr>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { blockTone, formatSeconds, STATUS_REFRESH_INTERVAL } from "./Status";
+import { blockTone, formatSeconds, humanDuration, STATUS_REFRESH_INTERVAL } from "./Status";
 
 /* The helpers judge the tone and shape the numbers; the page only draws
    what they say, so they are tested on their own, without a screen. */
@@ -44,5 +44,20 @@ describe("formatSeconds", () => {
 describe("STATUS_REFRESH_INTERVAL", () => {
   it("refreshes every fifteen seconds", () => {
     expect(STATUS_REFRESH_INTERVAL).toBe(15_000);
+  });
+});
+
+describe("humanDuration", () => {
+  it("reads a Go duration in days, hours, minutes and seconds, the zero parts left out", () => {
+    expect(humanDuration("720h0m0s")).toBe("30 d");
+    expect(humanDuration("6h0m0s")).toBe("6 h");
+    expect(humanDuration("4m30s")).toBe("4 min 30 s");
+    expect(humanDuration("29m53s")).toBe("29 min 53 s");
+    expect(humanDuration("26h0m0s")).toBe("1 d 2 h");
+  });
+
+  it("shows a value in another shape as it came", () => {
+    expect(humanDuration("soon")).toBe("soon");
+    expect(humanDuration("")).toBe("");
   });
 });

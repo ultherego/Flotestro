@@ -247,7 +247,11 @@ test.describe("monitoring", () => {
 
     await page.goto("/monitoring");
     await expect(header(page, "Monitoring")).toBeVisible();
-    await expectCounted(card(page, "Firing now").getByTestId("status-bar"), 5);
+    // Three severities, then the alerts somebody took, the pending and
+    // the silenced ones: six segments, each a number.
+    const firing = card(page, "Firing now").getByTestId("status-bar");
+    await expectCounted(firing, 6);
+    await expect(firing.getByRole("listitem").filter({ hasText: "Acknowledged" })).toHaveCount(1);
 
     // The coverage tiles carry the numbers of the API answer.
     const coverage = card(page, "Coverage");

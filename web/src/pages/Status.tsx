@@ -116,7 +116,6 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   max_snapshot_age_seconds: ["Maximum snapshot age", "seconds"],
   ca_subject: ["Fleet CA", "text"],
   ca_not_after: ["CA expires", "time"],
-  ca_expires_in_days: ["CA expires in (days)", "number"],
   authorities: ["Authorities in the trust set", "number"],
   agents_expiring_7d: ["Hosts expiring within 7 days", "number"],
   agents_expiring_30d: ["Hosts expiring within 30 days", "number"],
@@ -125,9 +124,24 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   degraded: ["Degraded", "number"],
 };
 
-/* The keys a widget draws instead of a row, so the row is not repeated. */
+/* What the housekeeping sweeps, named as the settings screen names the
+   retention of the same thing; a kind the screen does not know is shown
+   as it came. */
+const HOUSEKEEPING_KINDS: Record<string, string> = {
+  agent_sessions: "Ended agent sessions",
+  audit_events: "Audit trail",
+  campaigns: "Finished campaigns",
+  jobs: "Finished jobs",
+  outbox_events: "Delivered trail events",
+  metrics_raw: "Raw resource samples",
+  metrics_rollup: "Quarter-hour rollups",
+};
+
+/* The keys a widget draws instead of a row, so the row is not repeated.
+   The days until the CA expires are in the expiry time itself, and the
+   total of the relays is the sum of the segments above it. */
 const DRAWN_ELSEWHERE = new Set([
-  "consumers", "feeds", "removed", "retention",
+  "consumers", "feeds", "removed", "retention", "ca_expires_in_days", "total",
   "awaiting_approval", "queued", "leased", "dispatched", "running",
   "agents_on_this_gateway", "hosts_online", "hosts_stale", "web_sessions",
   "active", "silent", "never_seen", "revoked",
@@ -277,7 +291,9 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
   switch (name) {
     case "scheduler": {
       const segments: Segment[] = [
-        { label: t("awaiting approval"), value: count("awaiting_approval"), tone: "info", to: "/jobs?state=awaiting_approval" },
+        // Five segments share a third of the page; the shortest label that
+        // still says what the number counts is the one that is not cut.
+        { label: t("for approval"), value: count("awaiting_approval"), tone: "info", to: "/jobs?state=awaiting_approval" },
         { label: t("queued"), value: count("queued"), tone: "neutral", to: "/jobs?state=queued" },
         { label: t("leased"), value: count("leased"), tone: "info" },
         { label: t("dispatched"), value: count("dispatched"), tone: "info" },
@@ -368,7 +384,7 @@ function BlockWidget({ name, facts }: { name: string; facts: Record<string, unkn
           <tbody>
             {kinds.map((kind) => (
               <tr key={kind}>
-                <td className="mono">{kind}</td>
+                <td>{t(HOUSEKEEPING_KINDS[kind] ?? kind)}</td>
                 <td className="mono">{retention[kind] ? humanDuration(retention[kind]) : t("forever")}</td>
                 <td className="mono">{removed[kind] ?? "—"}</td>
               </tr>
@@ -417,11 +433,21 @@ function About({ block }: { block: StatusBlock }) {
   );
 }
 
-/** A Go duration such as 720h0m0s as days and hours: what a retention is read in. */
+/**
+ * A Go duration such as 720h0m0s, 4m30s or 29m53s in the units a person
+ * reads it in: whole days, hours, minutes and seconds, the zero parts
+ * left out. A value in another shape is shown as it came.
+ */
 export function humanDuration(value: string): string {
-  const match = /^(\d+)h(\d+)m(\d+)s$/.exec(value);
-  if (!match) return value;
-  const hours = Number(match[1]);
-  if (hours % 24 === 0) return `${hours / 24} d`;
-  return `${Math.floor(hours / 24)} d ${hours % 24} h`;
+  const match = /^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+(?:\.\d+)?)s)?$/.exec(value);
+  if (!match || value === "") return value;
+  const hours = Number(match[1] ?? 0);
+  const minutes = Number(match[2] ?? 0);
+  const seconds = Number(match[3] ?? 0);
+  const parts: string[] = [];
+  if (hours >= 24) parts.push(`${Math.floor(hours / 24)} d`);
+  if (hours % 24 > 0) parts.push(`${hours % 24} h`);
+  if (minutes > 0) parts.push(`${minutes} min`);
+  if (seconds > 0) parts.push(`${seconds} s`);
+  return parts.length > 0 ? parts.join(" ") : "0 s";
 }

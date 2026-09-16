@@ -749,7 +749,15 @@ function Lifecycle({ host }: { host: Host }) {
       {refusal && <ConnectionRefusalNotice host={host} />}
       <Facts>
         <Fact label={t("State")}><LifecycleBadge state={host.lifecycle_state} /></Fact>
-        <Fact label={t("Since")}>{host.lifecycle_changed_at ? <Time value={host.lifecycle_changed_at} /> : "—"}</Fact>
+        {/* A host whose state never changed has been in it since it was
+            enrolled; a dash there would read as "nobody knows". */}
+        <Fact label={t("Since")}>
+          {host.lifecycle_changed_at
+            ? <Time value={host.lifecycle_changed_at} />
+            : host.enrolled_at
+              ? <><Time value={host.enrolled_at} /> <span className="source">· {t("since enrollment")}</span></>
+              : "—"}
+        </Fact>
         <Fact label={t("Decided by")}>{lifecycleActor(host) || "—"}</Fact>
         <Fact label={t("Reason")}>{host.lifecycle_reason || "—"}</Fact>
         <Fact label={t("Meaning")} wide>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
@@ -1275,7 +1283,7 @@ function RecentActivity({ host }: { host: Host }) {
                   {item.detail && <div className="source">{item.detail}</div>}
                 </td>
                 <td><ActivityState item={item} /></td>
-                <td className="source">{item.actor || "—"}</td>
+                <td className="source"><ActivityActor host={host} item={item} /></td>
               </tr>
             ))}
           </tbody>
@@ -1313,7 +1321,11 @@ function kindName(kind: HostTimelineKind): string {
 function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
   const t = useT();
   const target = linkOf(host, item);
-  const title = <span className="hm-mono">{item.title || "—"}</span>;
+  // A session row carries the agent version as its title; on its own the
+  // version reads as a nonsense name, so the row says what it is.
+  const title = item.kind === "session"
+    ? <span>{t("Agent session")}{item.title && <span className="source"> · {t("agent {version}", { version: item.title })}</span>}</span>
+    : <span className="hm-mono">{item.title || "—"}</span>;
   return (
     <div>
       {target ? <Link to={target}>{title}</Link> : title}
@@ -1324,9 +1336,24 @@ function ActivityTitle({ host, item }: { host: Host; item: HostTimelineItem }) {
   );
 }
 
+/**
+ * Who acted: a person or a token by name, the host's own agent by the
+ * host's name. The agent signs its audit entries with the host identifier,
+ * which nobody recognises in a list.
+ */
+function ActivityActor({ host, item }: { host: Host; item: HostTimelineItem }) {
+  const t = useT();
+  if (!item.actor) return <>—</>;
+  if (item.actor === host.id) {
+    return <span title={item.actor}>{t("{host} (agent)", { host: host.hostname })}</span>;
+  }
+  return <>{item.actor}</>;
+}
+
 function linkOf(host: Host, item: HostTimelineItem): string | undefined {
   switch (item.kind) {
-    case "job": return `/hosts/${host.id}/jobs`;
+    // The task has a page of its own with its attempts and its result.
+    case "job": return item.ref.type === "job" && item.ref.id ? `/jobs/${item.ref.id}` : `/hosts/${host.id}/jobs`;
     case "audit":
     case "lifecycle": return `/hosts/${host.id}/audit`;
     case "alert": return `/hosts/${host.id}/monitoring`;

@@ -188,7 +188,9 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
           {account.groups.map((group, index) => (
             <span key={group}>
               {index > 0 && ", "}
-              {PRIVILEGED_GROUPS.includes(group) ? <span className="badge warn">{group}</span> : group}
+              {PRIVILEGED_GROUPS.includes(group)
+                ? <span className="badge warn" title={t("Membership of this group gives root-level rights.")}>{group}</span>
+                : group}
             </span>
           ))}
           {account.groups.length === 0 && "—"}
@@ -203,11 +205,17 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
           ) : (
             <div className="operations">
               {account.locked === true ? (
-                <button onClick={() => request.mutate({ action: "localuser.unlock", name: account.name })}>
+                <button
+                  title={t("Lets the account log in again; the order goes out at once.")}
+                  onClick={() => request.mutate({ action: "localuser.unlock", name: account.name })}
+                >
                   {t("Unlock")}
                 </button>
               ) : (
-                <button onClick={() => request.mutate({ action: "localuser.lock", name: account.name })}>
+                <button
+                  title={t("Locks the account so nobody can log in as it; the order goes out at once and can be undone with Unlock.")}
+                  onClick={() => request.mutate({ action: "localuser.lock", name: account.name })}
+                >
                   {t("Lock")}
                 </button>
               )}

@@ -35,8 +35,8 @@ export function StatusBar({ segments, compact = false }: { segments: Segment[]; 
           </>
         );
         return segment.to
-          ? <Link key={segment.label} role="listitem" className={className} style={style} to={segment.to}>{body}</Link>
-          : <div key={segment.label} role="listitem" className={className} style={style}>{body}</div>;
+          ? <Link key={segment.label} role="listitem" className={className} style={style} to={segment.to} title={segment.label}>{body}</Link>
+          : <div key={segment.label} role="listitem" className={className} style={style} title={segment.label}>{body}</div>;
       })}
     </div>
   );

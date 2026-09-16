@@ -604,7 +604,7 @@ export function Hosts() {
                         their hosts, like a tag chip does. */}
                     <Td columns={columns} name="owner" data-testid="host-owner">
                       {host.owner
-                        ? <button type="button" className="link" onClick={() => setFilter("owner", host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
+                        ? <button type="button" style={WORD_BUTTON} onClick={() => setFilter("owner", host.owner ?? "")} title={t("show every host of {owner}", { owner: host.owner })}>{host.owner}</button>
                         : <span className="source">—</span>}
                     </Td>
                     <Td columns={columns} name="system">{host.os_distribution || host.os_family || "—"} {host.os_version}</Td>
@@ -614,21 +614,29 @@ export function Hosts() {
                         until chosen: a click narrows the list to the state,
                         the way the composition widget does. */}
                     <Td columns={columns} name="lifecycle">
-                      <button type="button" className="link" onClick={() => setFilter("lifecycle_state", host.lifecycle_state)} title={t("show only these hosts")}>
+                      <button type="button" style={WORD_BUTTON} onClick={() => setFilter("lifecycle_state", host.lifecycle_state)} title={t("show only these hosts")}>
                         {host.lifecycle_state}
                       </button>
                     </Td>
                     <Td columns={columns} name="agent">{host.agent_version || <span className="badge unknown">{t("unknown")}</span>}</Td>
                     <Td columns={columns} name="domain">
                       {host.identity.enrolled
-                        ? <button type="button" className="link" onClick={() => setFilter("identity_domain", host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
+                        ? <button type="button" style={WORD_BUTTON} onClick={() => setFilter("identity_domain", host.identity.domain ?? "")} title={t("show every host in this domain")}>{host.identity.domain}</button>
                         : <span className="badge">{t("not in domain")}</span>}
                     </Td>
                     {/* The bar is the host's share of the busiest host on the
                         list; the security part is named, because it is the
                         part that cannot wait. An unknown count stays a badge,
                         not an empty bar. */}
-                    <Td columns={columns} name="updates" className="fp-meter-cell" data-testid="host-updates">
+                    <Td
+                      columns={columns}
+                      name="updates"
+                      className="fp-meter-cell"
+                      data-testid="host-updates"
+                      title={host.pending_updates === null ? undefined : t("{n} pending updates, {security} of them security; the bar is the host's share of the busiest host on the list", {
+                        n: host.pending_updates, security: host.pending_security_updates ?? t("an unknown number"),
+                      })}
+                    >
                       {host.pending_updates === null ? (
                         <OptionalNumber value={host.pending_updates} warnFrom={1} />
                       ) : (
@@ -697,13 +705,17 @@ export function Hosts() {
           )}
         </Card>
 
-        <Card className="span-3" title={t("Fleet composition")} description={t("By system and by agent build.")}>
+        <Card className="span-3" title={t("Fleet composition")} description={t("By system, site, environment, agent build and lifecycle.")}>
           {a ? (
             <>
               <h4 className="widget-subhead">{t("By system")}</h4>
               <Breakdown items={facets(a.by_os_family, "os_family")} />
-              <h4 className="widget-subhead">{t("Sites and environments")}</h4>
-              <Breakdown tone="ok" items={[...facets(a.by_site, "site"), ...facets(a.by_environment, "environment")]} />
+              {/* Two dimensions under two headings: "lab 6, test 6" in
+                  one list reads as two sites. */}
+              <h4 className="widget-subhead">{t("Sites")}</h4>
+              <Breakdown tone="ok" items={facets(a.by_site, "site")} />
+              <h4 className="widget-subhead">{t("Environments")}</h4>
+              <Breakdown tone="ok" items={facets(a.by_environment, "environment")} />
               <h4 className="widget-subhead">{t("Agent builds")}</h4>
               <Breakdown tone="neutral" items={a.by_agent_version.map((f) => ({ label: f.key, value: f.count }))} />
               <h4 className="widget-subhead">{t("Lifecycle")}</h4>

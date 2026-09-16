@@ -139,7 +139,10 @@ export function SshServer() {
           { label: t("methods enabled"), value: countWhere(knownMethods, ([, value]) => value === "yes"), tone: "warn" },
           { label: t("methods disabled"), value: countWhere(knownMethods, ([, value]) => value === "no"), tone: "ok" },
           { label: t("methods unknown"), value: countWhere(knownMethods, ([, value]) => value !== "yes" && value !== "no"), tone: "unknown" },
-          { label: t("Host keys"), value: known ? (known.host_keys ?? []).length : undefined, tone: "neutral" },
+          // The keys come from the disk, not from "sshd -T": they are
+          // counted whenever the snapshot carries them, even when the
+          // effective configuration could not be read.
+          { label: t("host keys"), value: snapshot?.host_keys ? snapshot.host_keys.length : undefined, tone: "neutral" },
         ]}
       />
       <Section title={t("Posture")} span={4} flush>
@@ -172,7 +175,7 @@ export function SshServer() {
 
       {/* The facts and the short method table share a row; the keys and
           the drop-in below share the next one. */}
-      <Section title={t("SSH")} span={7} flush>
+      <Section title={t("Effective configuration")} span={7} flush>
         <Facts>
           <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Listening on")}><span className="hm-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>

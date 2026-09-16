@@ -40,6 +40,73 @@ type Identity = Whoami & { id?: string };
 
 const WHOAMI_STALE = 5 * 60 * 1000;
 
+/** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
+function anyScope(value: string | undefined): boolean {
+  return !value || value === "*";
+}
+
+/**
+ * Two hundred permission names in one cloud are read by nobody. They
+ * are named area.action, so they fold by area: one row per part of the
+ * panel, with the actions allowed in it. A name without a dot is its own
+ * area.
+ */
+export function groupPermissions(permissions: string[]): { area: string; actions: string[] }[] {
+  const areas = new Map<string, string[]>();
+  for (const permission of [...permissions].sort()) {
+    const dot = permission.indexOf(".");
+    const area = dot === -1 ? permission : permission.slice(0, dot);
+    const action = dot === -1 ? "*" : permission.slice(dot + 1);
+    const actions = areas.get(area) ?? [];
+    if (!actions.includes(action)) actions.push(action);
+    areas.set(area, actions);
+  }
+  return Array.from(areas, ([area, actions]) => ({ area, actions }));
+}
+
+/* The part of the panel each area of the permission names stands for.
+   An area the screen does not know is shown as it came. */
+const AREA_NAMES: Record<string, string> = {
+  agent: "Agent",
+  audit: "Audit trail",
+  backup: "Backups",
+  budget: "Budgets",
+  campaign: "Campaigns",
+  certificate: "Certificates",
+  dns: "DNS",
+  docker: "Containers",
+  file: "Files",
+  firewall: "Firewall",
+  host: "Hosts",
+  identity: "Directory",
+  inventory: "Inventory",
+  job: "Jobs",
+  journal: "Logs",
+  kernel: "Kernel",
+  localuser: "Local accounts",
+  logfile: "Log files",
+  metrics: "Metrics",
+  monitoring: "Monitoring",
+  network: "Network",
+  notification: "Notifications",
+  packages: "Packages",
+  pki: "Fleet CA",
+  policy: "Policies",
+  principal: "Identities and access",
+  process: "Processes",
+  relay: "Relays",
+  schedule: "Schedules",
+  secret: "Secrets",
+  security: "Security checks",
+  settings: "Settings",
+  ssh: "SSH",
+  storage: "Storage",
+  system: "System",
+  time: "Time",
+  unit: "Services",
+  vulnerability: "Vulnerabilities",
+};
+
 export function Profile({ theme, setTheme }: {
   theme: Theme;
   setTheme: (theme: Theme) => void;
@@ -99,7 +166,7 @@ export function Profile({ theme, setTheme }: {
         <Card
           className="span-6"
           title={t("Bindings")}
-          description={t("Each role with the site and the environment it holds in; an asterisk stands for any.")}
+          description={t("Each role with the site and the environment it holds in.")}
           flush
         >
           {!me ? (
@@ -117,8 +184,8 @@ export function Profile({ theme, setTheme }: {
                   return (
                     <tr key={`${binding.role}-${binding.scope.site}-${binding.scope.environment}-${index}`}>
                       <td>{binding.role}</td>
-                      <td className="mono">{binding.scope.site}</td>
-                      <td className="mono">{binding.scope.environment}</td>
+                      <td>{anyScope(binding.scope.site) ? <span className="source">{t("any site")}</span> : <span className="mono">{binding.scope.site}</span>}</td>
+                      <td>{anyScope(binding.scope.environment) ? <span className="source">{t("any environment")}</span> : <span className="mono">{binding.scope.environment}</span>}</td>
                       <td>{until ? <Time value={until} /> : <span className="source">{t("until revoked")}</span>}</td>
                     </tr>
                   );
@@ -131,18 +198,38 @@ export function Profile({ theme, setTheme }: {
         <Card
           className="span-12"
           title={t("Permissions")}
-          description={t("Everything your roles allow, in any scope. The screens hide what is not here; the server refuses it either way.")}
+          description={t("Everything your roles allow, in any scope, by the part of the panel it concerns. The screens hide what is not here; the server refuses it either way.")}
+          flush
         >
           {!me ? (
             <Empty>{t("Loading…")}</Empty>
           ) : me.permissions.length === 0 ? (
             <Empty>{t("No permission.")}</Empty>
           ) : (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {[...me.permissions].sort().map((permission) => (
-                <span key={permission} className="chip chip-mono">{permission}</span>
-              ))}
-            </div>
+            <table>
+              <thead>
+                <tr><th>{t("Area")}</th><th>{t("Allowed")}</th></tr>
+              </thead>
+              <tbody>
+                {groupPermissions(me.permissions).map((group) => (
+                  <tr key={group.area}>
+                    <td className="fp-nowrap">
+                      <div className="fp-host-cell">
+                        <span>{t(AREA_NAMES[group.area] ?? group.area)}</span>
+                        <span className="source mono">{group.area}.*</span>
+                      </div>
+                    </td>
+                    <td>
+                      <div className="fp-chips">
+                        {group.actions.map((action) => (
+                          <span key={action} className="chip chip-mono" title={`${group.area}.${action}`}>{action}</span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
         </Card>
 

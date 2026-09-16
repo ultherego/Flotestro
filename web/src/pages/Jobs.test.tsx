@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   anyFilter, EMPTY_FILTERS, filterParams, hoursAgo, localInput, nextSort, orderAgainAddress, prettyJSON, readFilters, reasonAccepted,
 } from "./Jobs";
-import { hasContent, outputFilename } from "./Job";
+import { hasContent, outputFilename, payloadPairs } from "./Job";
 
 /* The filters of the job list live in the address bar: a tile, a read
    fan-out and a bookmark set them, and every change goes back. The
@@ -102,6 +102,26 @@ describe("the payload on screen", () => {
     expect(hasContent(undefined)).toBe(false);
     expect(hasContent("null")).toBe(false);
     expect(hasContent({ unit_active: true })).toBe(true);
+  });
+});
+
+describe("the payload as fields", () => {
+  it("lists every leaf by its dotted path, whether the payload came as an object or as text", () => {
+    expect(payloadPairs({ unit: { name: "cron.service" }, reason: "stuck" })).toEqual([
+      { path: "unit.name", value: "cron.service" }, { path: "reason", value: "stuck" },
+    ]);
+    expect(payloadPairs("{\"packages\":[\"vim\",\"git\"],\"security_only\":true}")).toEqual([
+      { path: "packages", value: "vim, git" }, { path: "security_only", value: "true" },
+    ]);
+  });
+
+  it("keeps the JSON for what a list of fields would misread", () => {
+    expect(payloadPairs({})).toBeNull();
+    expect(payloadPairs(null)).toBeNull();
+    expect(payloadPairs([1, 2])).toBeNull();
+    expect(payloadPairs("not json")).toBeNull();
+    expect(payloadPairs({ rules: [{ port: 22 }] })).toBeNull();
+    expect(payloadPairs({ a: { b: { c: { d: 1 } } } })).toBeNull();
   });
 });
 

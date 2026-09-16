@@ -1,8 +1,10 @@
-import { Outlet, useLocation, useParams } from "react-router-dom";
+import { Link, Outlet, useLocation, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host } from "../../lib/types";
 import { ErrorBox, Empty } from "../../components/ui";
+import { EmptyState } from "../../components/layout";
+import { ModuleHeader } from "./shared";
 import { useCapabilities } from "../../lib/capabilities";
 import { ContextBar } from "./ContextBar";
 import { modules, DEFAULT_MODULE } from "./modules";
@@ -72,9 +74,18 @@ export function HostLayout() {
                the reason. A vanished entry would look like a missing feature
                in the product. */
         !active.available ? (
-          <Empty>
-            {t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
-          </Empty>
+          // A module the host cannot serve is still a page with a header:
+          // a bare sentence in a blank area reads as a broken screen.
+          <div className="hm-page">
+            <ModuleHeader
+              title={t(active.name)}
+              icon={active.icon}
+              description={t("{module} is not available on this host: {reason}.", { module: t(active.name), reason: active.missingReason })}
+            />
+            <EmptyState action={<Link className="button" to={`/hosts/${data.id}/overview`}>{t("Back to the overview")}</Link>}>
+              {t("The module appears once the host reports the adapter it needs; the agent checks for it at every report, so nothing has to be re-enrolled.")}
+            </EmptyState>
+          </div>
         ) : (
           <Outlet context={{ host: data }} />
         )}

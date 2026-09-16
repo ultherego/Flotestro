@@ -162,9 +162,13 @@ export function Firewall() {
         span={8}
         segments={[
           { label: "Flotestro", value: countWhere(knownRules, (rule) => rule.source === "managed"), tone: "ok" },
-          ...otherSources.map((source) => ({
-            label: source, value: countWhere(knownRules, (rule) => rule.source === source), tone: "neutral" as const,
-          })),
+          // A rule set with nobody else's rules still says so: one
+          // segment alone reads as a bar that lost its other half.
+          ...(otherSources.length
+            ? otherSources.map((source) => ({
+                label: source, value: countWhere(knownRules, (rule) => rule.source === source), tone: "neutral" as const,
+              }))
+            : [{ label: t("others"), value: countWhere(knownRules, (rule) => rule.source !== "managed"), tone: "neutral" as const }]),
           ...(snapshot?.zones?.length ? [{ label: t("Zones"), value: zones.length, tone: "info" as const }] : []),
         ]}
       />

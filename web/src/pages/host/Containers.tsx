@@ -6,7 +6,7 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
-  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader,
+  Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, JobNotice, Message, ModuleFreshness, ModuleHeader,
   ModulePage, Section, Summary as SummaryBar, Table, Widgets, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
@@ -147,6 +147,8 @@ export function Containers() {
   const [pending, setPending] = useState<Pending | null>(null);
   const [logsOf, setLogsOf] = useState<Container | null>(null);
   const [message, setMessage] = useState("");
+  // The last job ordered from this page, linked where its sentence stands.
+  const [ordered, setOrdered] = useState<Job | null>(null);
   const summary = useModule<Summary>(host.id, "containers");
   const full = useModule<FullState>(host.id, "containers.full");
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
@@ -171,11 +173,8 @@ export function Containers() {
     mutationFn: (body: Record<string, unknown>) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
     onSuccess: (job) => {
-      setMessage(
-        job.requires_approval
-          ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
-          : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }),
-      );
+      setOrdered(job);
+      setMessage("");
       setPending(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
       refetch(job);
@@ -248,7 +247,8 @@ export function Containers() {
         }
       />
       <ModuleFreshness fragment={summary.data} />
-      <Message text={message} />
+      <Message text={message} error />
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
       <Widgets>
       {/* The containers by state. A container that keeps coming up is

@@ -147,6 +147,14 @@ export function HostJobs() {
     acc[module] = (acc[module] ?? 0) + 1;
     return acc;
   }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  // Who ordered the listed jobs: a person by name, every campaign as one
+  // requester. It stands under the outcomes, so the bar and the breakdown
+  // by module read as one row.
+  const requesters = Object.entries((jobs ?? []).reduce<Record<string, number>>((acc, job) => {
+    const who = job.created_by.startsWith("campaign:") ? t("campaigns") : job.created_by;
+    acc[who] = (acc[who] ?? 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
   const filtered = state !== "" || settledAction !== "" || toInstant(since) !== "";
   const columns = 7;
 
@@ -170,7 +178,14 @@ export function HostJobs() {
           { label: t("waiting"), value: countWhere(jobs, (job) => waiting.includes(job.state)), tone: "warn" },
           { label: t("other"), value: countWhere(jobs, (job) => ![...succeeded, ...failed, ...running, ...waiting].includes(job.state)), tone: "unknown" },
         ]}
-      />
+      >
+        {requesters.length > 0 && (
+          <>
+            <p className="widget-subhead">{t("Requested by")}</p>
+            <Breakdown items={requesters.map(([who, count]) => ({ label: who, value: count }))} />
+          </>
+        )}
+      </Summary>
       <Section title={t("By module")} span={4} description={t("Which modules the operations belong to.")}>
         {!jobs ? (
           <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>

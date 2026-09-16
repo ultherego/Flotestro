@@ -270,11 +270,11 @@ export function Audit() {
                             </div>
                           )}
                         </td>
-                        <td>{event.actor_type}</td>
+                        <td>{t(ACTOR_KINDS[event.actor_type] ?? event.actor_type)}</td>
                         <td className="mono">{event.action}</td>
                         <td className="mono"><TargetCell event={event} /></td>
                         <td><OutcomeBadge outcome={event.outcome} /></td>
-                        <td className="source">{digest(event.detail)}</td>
+                        <td className="source">{digest(event.detail, t)}</td>
                       </tr>
                       {/* What an approval rests on and what a change did,
                           under the row rather than in columns of their
@@ -418,6 +418,14 @@ export function exportFileName(disposition?: string | null): string {
   return match?.[1] ?? "audit.jsonl";
 }
 
+/* Who acted, as the trail types it: a signed-in person or a token in
+   their name, the panel itself, or an agent reporting for its host. */
+const ACTOR_KINDS: Record<string, string> = {
+  user: "person",
+  system: "panel",
+  agent: "agent",
+};
+
 /**
  * The target of an event: the host by the name and the address it had when
  * the event was written, where the trail kept them, else the type and the
@@ -504,10 +512,16 @@ function renderSide(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function digest(detail: Record<string, unknown>): string {
-  const interesting = ["reason", "action_type", "hostname", "state", "permission", "scope"];
+function digest(detail: Record<string, unknown>, t: (key: string) => string): string {
+  // The keys of the detail as the trail keeps them, with the word each
+  // is read by: "action_type=packages.plan" is a record, "type: packages
+  // plan" is a sentence.
+  const interesting: [string, string][] = [
+    ["reason", "reason"], ["action_type", "type"], ["hostname", "host"],
+    ["state", "state"], ["permission", "permission"], ["scope", "scope"],
+  ];
   const parts = interesting
-    .filter((key) => detail?.[key] !== undefined && detail[key] !== null && detail[key] !== "")
-    .map((key) => `${key}=${String(detail[key])}`);
-  return parts.join(" ").slice(0, 90);
+    .filter(([key]) => detail?.[key] !== undefined && detail[key] !== null && detail[key] !== "")
+    .map(([key, word]) => `${t(word)}: ${String(detail[key])}`);
+  return parts.join(" · ").slice(0, 120);
 }

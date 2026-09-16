@@ -428,7 +428,7 @@ export function FleetMonitoring() {
         </Card>
 
         <Card
-          className="span-7"
+          className="span-8"
           title={t("Recent alerts")}
           description={t("The last fifty, newest first: what fired, when, and whether it has resolved.")}
           actions={
@@ -463,13 +463,16 @@ export function FleetMonitoring() {
               <tbody>
                 {history.data.items.map((alert) => (
                   <tr key={alert.id}>
-                    <td><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
+                    {/* A host name, a value and a moment are read as one
+                        word each; broken over two lines they read as
+                        two rows. The note is what may wrap. */}
+                    <td className="fp-nowrap"><Link to={`/hosts/${alert.host_id}/monitoring`}>{alert.hostname || alert.host_id.slice(0, 8)}</Link></td>
                     <td>{alert.rule_name}</td>
                     <td><SeverityBadge severity={alert.severity} /></td>
                     <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /> <AcknowledgedChip alert={alert} /></td>
-                    <td className="num">{metricValue(alert.metric, alert.value)}</td>
-                    <td><Time value={alert.started_at} /></td>
-                    <td>{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="source">—</span>}</td>
+                    <td className="num fp-nowrap">{metricValue(alert.metric, alert.value)}</td>
+                    <td className="fp-nowrap"><Time value={alert.started_at} /></td>
+                    <td className="fp-nowrap">{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="source">—</span>}</td>
                     <td className="source">{alert.note || "—"}</td>
                   </tr>
                 ))}
@@ -479,7 +482,7 @@ export function FleetMonitoring() {
         </Card>
 
         <Card
-          className="span-5"
+          className="span-4"
           title={t("Silences in force")}
           description={t("Every silence ends by itself; ending one here brings the alert back at once.")}
           flush

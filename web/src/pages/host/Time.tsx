@@ -209,6 +209,7 @@ export function Time() {
             {snapshot?.service
               ? <span className={snapshot.service_active === false ? "badge error" : "badge ok"}>{snapshot.service}</span>
               : unknown}
+            {snapshot?.unit && <span className="source"> · <span className="hm-mono">{snapshot.unit}</span></span>}
             {snapshot?.service_active === false && <span className="source"> · {t("not running")}</span>}
           </Fact>
           {/* The offset against the step threshold: the bar fills as the
@@ -226,7 +227,9 @@ export function Time() {
         </Facts>
       </Section>
 
-      <Section title={t("Time")} span={12} flush>
+      {/* The clock card above carries the verdict; this one the rest of
+          what timedatectl and the daemon report. */}
+      <Section title={t("Clock details")} span={12} flush>
         <Facts>
           {/* The host's clock as it read at the observation: an absolute
               value, because "19 minutes ago" is the age of the read and
@@ -248,15 +251,11 @@ export function Time() {
           {/* A hardware clock in local time breaks the hour at every
               daylight saving change - and only after a reboot. */}
           <Fact label={t("Hardware clock in local time")}>{flag(snapshot?.rtc_in_local_time)}</Fact>
-          <Fact label={t("Synchronized")}>{flag(snapshot?.synchronized)}</Fact>
-          <Fact label={t("Daemon")}>
-            {snapshot?.service || unknown}
-            {snapshot?.unit && ` · ${snapshot.unit}`}
-            {snapshot?.service_active === false && ` · ${t("not running")}`}
-          </Fact>
+          <Fact label={t("NTP enabled")}>{flag(snapshot?.ntp_enabled)}</Fact>
           <Fact label={t("Reference")}>{snapshot?.reference_name || unknown}</Fact>
-          <Fact label={t("Stratum")}>{snapshot?.stratum ?? unknown}</Fact>
-          <Fact label={t("Offset")}>{seconds(snapshot?.offset_seconds)}</Fact>
+          <Fact label={t("Frequency error")}>
+            {snapshot?.frequency_ppm === undefined || snapshot?.frequency_ppm === null ? unknown : `${snapshot.frequency_ppm.toFixed(3)} ppm`}
+          </Fact>
           <Fact label={t("Root delay")}>{seconds(snapshot?.root_delay_seconds)}</Fact>
           <Fact label={t("Root dispersion")}>{seconds(snapshot?.root_dispersion_seconds)}</Fact>
           <Fact label={t("Leap status")}>{snapshot?.leap_status || unknown}</Fact>
@@ -432,7 +431,12 @@ export function Time() {
       <Section title={t("Timezone")} span={5}>
         <Form>
           <Fields>
-            <Field label={t("Timezone")}>
+            <Field
+              label={t("Timezone")}
+              help={snapshot?.timezone
+                ? t("A zone from the tz database; the host is on {zone} now.", { zone: snapshot.timezone })
+                : t("A zone from the tz database.")}
+            >
               <input
                 value={timezone}
                 onChange={(e) => setTimezone(e.target.value)}

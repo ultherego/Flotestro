@@ -53,3 +53,16 @@ td.fp-meter-cell .meter { width: 100%; }
 .fp-audit-diff li { overflow-wrap: anywhere; }
 .fp-audit-before { color: var(--text-muted); text-decoration: line-through; }
 .fp-audit-after { color: var(--text); }
+
+/* A cell read as one word - a host name, a value, a moment - is not
+   broken over two lines: broken, it reads as two rows. */
+.fp-nowrap { white-space: nowrap; }
+
+/* A long value in a grid of facts - an issuer URL, a service principal,
+   a feed address - wraps inside its column instead of running under the
+   next label. */
+.fp-wrap { overflow-wrap: anywhere; min-width: 0; }
+
+/* The permissions of the profile: the actions allowed in one area of the
+   panel, as chips on one row of the table. */
+.fp-chips { display: flex; flex-wrap: wrap; gap: 6px; }

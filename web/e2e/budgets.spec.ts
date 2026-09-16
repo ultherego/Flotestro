@@ -36,6 +36,11 @@ function exact(text: string): RegExp {
   return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
 }
 
+/** A table heading by its label, with or without the arrow of a sortable column after it. */
+function heading(text: string): RegExp {
+  return new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*[⇅▲▼]?$`);
+}
+
 /** The card of a fleet page by its title. */
 function card(page: Page, title: string) {
   return page.locator(".card").filter({ has: page.locator(".card-title", { hasText: exact(title) }) });
@@ -115,9 +120,12 @@ test.describe("budgets", () => {
       return;
     }
 
+    // The headings are found by their text: a heading that sorts the
+    // table carries a button with an arrow after the label, and a plain
+    // one has no scope a screen reader would call a column by.
     const table = page.locator("table").first();
     for (const column of ["Key", "Capacity", "In use", "Held by", "Claimants", "Share per claimant", "Waiting jobs", "Waiting hosts"]) {
-      await expect(table.getByRole("columnheader", { name: exact(column) })).toBeVisible();
+      await expect(table.locator("thead th", { hasText: heading(column) })).toBeVisible();
     }
     await expect(table.locator("tr[data-testid='budget-row']")).toHaveCount(items.length);
     for (const item of items) {

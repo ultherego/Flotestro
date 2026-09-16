@@ -448,14 +448,20 @@ export function Monitoring() {
                     <td className="source">{alert.detail}</td>
                     <td><Time value={alert.fired_at || alert.started_at} /></td>
                     <td>
-                      <button
-                        className="secondary"
-                        disabled={alert.silenced || !reasonReady || silence.isPending}
-                        title={reasonReady ? undefined : t("Write a reason in the silence form first.")}
-                        onClick={() => silence.mutate(alert.rule_id)}
-                      >
-                        {t("Silence this")}
-                      </button>
+                      {/* A resolved alert has nothing left to silence; the
+                          button would order a silence for a rule that is quiet. */}
+                      {alert.state === "resolved" ? (
+                        <span className="source" title={t("The alert is resolved; there is nothing to silence.")}>—</span>
+                      ) : (
+                        <button
+                          className="secondary"
+                          disabled={alert.silenced || !reasonReady || silence.isPending}
+                          title={alert.silenced ? t("Already silenced.") : reasonReady ? undefined : t("Write a reason in the silence form first.")}
+                          onClick={() => silence.mutate(alert.rule_id)}
+                        >
+                          {t("Silence this")}
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

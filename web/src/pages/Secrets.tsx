@@ -244,7 +244,7 @@ export function Secrets() {
       />
 
       <div className="widgets">
-        <Card className="span-8" title={t("Store")} description={t("{n} secrets", { n: secrets.length })}>
+        <Card className="span-8" title={t("Store")} description={t("{n} secrets; the never-rotated ones are counted among the issuable, still on their first version.", { n: secrets.length })}>
           <StatusBar segments={[
             { label: t("Issuable"), value: counts?.issuable, tone: "ok" },
             { label: t("Never rotated"), value: counts?.neverRotated, tone: "warn" },
@@ -291,7 +291,7 @@ export function Secrets() {
 
         <Card className="span-12" flush>
           <Toolbar end={loaded && <span>{t("{shown} of {n} secrets", { shown: shown.length, n: secrets.length })}</span>}>
-            <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input placeholder={t("Search by name or description")} value={search} onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
             {notice && <span className="source">{notice}</span>}
           </Toolbar>
           {!loaded ? (

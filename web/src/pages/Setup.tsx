@@ -5,6 +5,7 @@ import { api, ApiError } from "../lib/api";
 import type { GroupMapping, Whoami } from "../lib/types";
 import { useCapabilities } from "../lib/capabilities";
 import { ErrorBox, Empty } from "../components/ui";
+import { absoluteTime } from "../lib/format";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
 import { Meter } from "../components/widgets";
 import { useToast } from "../components/Toast";
@@ -52,6 +53,19 @@ const ROLES = ["viewer", "auditor", "operator", "approver", "identity_admin", "p
 
 /** The reason every change of the access rules is recorded with. */
 const REASON_MIN_LENGTH = 8;
+
+/**
+ * The detail of a step is a sentence from the server, and a moment in it
+ * comes in the RFC 3339 shape the server writes. The operator reads
+ * moments in the zone of their preference, like everywhere else on the
+ * panel, so the moment is rewritten and the rest of the sentence kept.
+ */
+export function readableDetail(detail: string): string {
+  return detail.replace(
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g,
+    (stamp) => absoluteTime(stamp) || stamp,
+  );
+}
 
 /** The key of the first step that is undone; the page highlights it. */
 export function firstUndone(steps: Pick<SetupStep, "key" | "state">[]): string | undefined {
@@ -188,7 +202,12 @@ export function Setup() {
               ? t("The warnings and the optional steps below are advice, not blockers.")
               : t("The first step left is highlighted; the optional ones can wait.")}
           >
-            <Meter value={list.done} max={Math.max(list.total, 1)} tone={list.complete ? "ok" : "info"} />
+            <Meter
+              value={list.done}
+              max={Math.max(list.total, 1)}
+              tone={list.complete ? "ok" : "info"}
+              text={t("{done} of {total}", { done: list.done, total: list.total })}
+            />
             {list.bootstrap_live && (
               <p className="source" style={{ marginTop: 10 }}>
                 {t("The bootstrap token still works. It is for the first mapping only: once an administrator signs in through the provider, revoke it.")}
@@ -210,7 +229,7 @@ export function Setup() {
                 )}
               >
                 <p style={{ margin: 0 }}>
-                  <strong>{t("Found:")}</strong> {step.detail}
+                  <strong>{t("Found:")}</strong> {readableDetail(step.detail)}
                 </p>
                 {step.key === "identity_provider" && capabilities.identity_provider && mayAct(permissions, step.key) && (
                   <ConnectionTester path="/api/v1/setup/test-oidc" label={t("Test the identity provider")} />
