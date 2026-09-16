@@ -4340,4 +4340,7 @@ export const pl: Record<string, string> = {
   "The host is not online; a preflight needs an answer from it.": "Host nie jest online; preflight wymaga jego odpowiedzi.",
   "The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.": "Host sprawdza DNS, zegar i dostęp do katalogu, zanim cokolwiek się zmieni; nic nie jest dołączane.",
   "campaigns": "kampanie",
+  "host repository metadata": "metadane repozytoriów hosta",
+  "read on {n} hosts": "odczytane na {n} hostach",
+  "More": "Więcej",
 };

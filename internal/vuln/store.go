@@ -180,6 +180,37 @@ func (s *Store) ActiveSnapshot(ctx context.Context, provider string) (Snapshot, 
 }
 
 // Snapshots returns the active snapshots of every provider.
+// HostRepositorySource sums up the advisories the given hosts read from
+// their own repositories - the source of a Fedora host's findings, which
+// no feed of the panel carries. Nil when none of the hosts has any.
+func (s *Store) HostRepositorySource(ctx context.Context, hostIDs []string) (*RepositorySource, error) {
+	if len(hostIDs) == 0 {
+		return nil, nil
+	}
+	var source RepositorySource
+	var collected *time.Time
+	err := s.pool.QueryRow(ctx, `
+		select count(distinct advisory_id), count(distinct host_id), max(collected_at)
+		from host_advisories where host_id = any($1::uuid[])`, hostIDs).
+		Scan(&source.Advisories, &source.Hosts, &collected)
+	if err != nil {
+		return nil, err
+	}
+	if source.Hosts == 0 || collected == nil {
+		return nil, nil
+	}
+	source.CollectedAt = *collected
+	return &source, nil
+}
+
+// RepositorySource is the tally of the advisories hosts carry from their
+// own repositories, as one source next to the feeds.
+type RepositorySource struct {
+	Advisories  int
+	Hosts       int
+	CollectedAt time.Time
+}
+
 func (s *Store) Snapshots(ctx context.Context) ([]Snapshot, error) {
 	const query = `
 		select id::text, provider, digest, releases, advisory_count, fetched_at,

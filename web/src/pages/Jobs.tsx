@@ -6,7 +6,7 @@ import { useDebounced } from "../lib/debounce";
 import { bytes, toInstant } from "../lib/format";
 import { PlanSummary } from "../components/plan";
 import type { Attempt, Campaign, FleetActivity, Job } from "../lib/types";
-import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState } from "../components/ui";
+import { ErrorBox, ErrorCode, Time, ProgressBar, Empty, JobState, stateName } from "../components/ui";
 import { Actions, Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import {
@@ -411,7 +411,7 @@ export function Jobs() {
           </>}>
             <select value={filters.state} onChange={(e) => setFilter("state", e.target.value)}>
               <option value="">{t("state: any")}</option>
-              {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+              {JOB_STATES.map((value) => <option key={value} value={value}>{t(stateName(value))}</option>)}
             </select>
             <input placeholder={t("operation")} title={t("the operation, e.g. unit.restart")} value={filters.action} onChange={(e) => setFilter("action", e.target.value)} />
             <input placeholder={t("host name")} value={filters.hostname} onChange={(e) => setFilter("hostname", e.target.value)} />

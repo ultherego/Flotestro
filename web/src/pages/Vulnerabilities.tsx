@@ -37,6 +37,8 @@ type Source = {
   digest: string;
   advisories: number;
   releases?: string[];
+  /** For the repository metadata of the hosts themselves: how many hosts carry it. */
+  hosts?: number;
   fetched_at: string;
   stale: boolean;
   error?: string;
@@ -317,9 +319,13 @@ export function FleetVulnerabilities() {
               <tbody>
                 {data.sources.map((source) => (
                   <tr key={source.provider}>
-                    <td>{source.provider}</td>
+                    <td>{source.provider === "host repository metadata" ? t("host repository metadata") : source.provider}</td>
                     <td className="num">{source.advisories}</td>
-                    <td className="source">{(source.releases ?? []).join(", ")}</td>
+                    <td className="source">
+                      {source.hosts !== undefined
+                        ? t("read on {n} hosts", { n: source.hosts })
+                        : (source.releases ?? []).join(", ")}
+                    </td>
                     <td><Time value={source.fetched_at} /></td>
                     <td>
                       {source.error ? (

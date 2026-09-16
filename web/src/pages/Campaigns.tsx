@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Campaign } from "../lib/types";
-import { ErrorBox, Time, Empty, JobState } from "../components/ui";
+import { ErrorBox, Time, Empty, JobState, stateName } from "../components/ui";
 import { Card, EmptyState, PageHeader, Toolbar } from "../components/layout";
 import {
   ColumnChooser, PageSizeSelect, Td, Th, useColumns, usePageSize, useSort, type ColumnDef,
@@ -200,7 +200,7 @@ export function Campaigns() {
           </>}>
             <select value={state} onChange={(e) => narrow(() => setState(e.target.value))}>
               <option value="">{t("state: any")}</option>
-              {CAMPAIGN_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+              {CAMPAIGN_STATES.map((value) => <option key={value} value={value}>{t(stateName(value))}</option>)}
             </select>
             <select value={action} onChange={(e) => narrow(() => setAction(e.target.value))}>
               <option value="">{t("operation: any")}</option>

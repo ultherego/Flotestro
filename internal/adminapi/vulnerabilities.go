@@ -375,13 +375,27 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		rows = rows[:filter.Limit]
 	}
 
-	sources := make([]map[string]any, 0, len(snapshots))
+	sources := make([]map[string]any, 0, len(snapshots)+1)
 	for _, snapshot := range snapshots {
 		sources = append(sources, map[string]any{
 			"provider": snapshot.Provider, "digest": snapshot.Digest,
 			"advisories": snapshot.AdvisoryCount, "releases": snapshot.Releases,
 			"fetched_at": snapshot.FetchedAt, "stale": snapshot.Stale(s.feedAge, now),
 			"error": snapshot.Error,
+		})
+	}
+	// The advisories a host reads from its own repositories - Fedora's
+	// updateinfo - are a source too, without a feed of their own: the
+	// table names it, or a Fedora host's findings would seem to come from
+	// nowhere.
+	if repository, err := s.vulnerabilities.HostRepositorySource(r.Context(), ids); err != nil {
+		s.fail(w, err)
+		return
+	} else if repository != nil {
+		sources = append(sources, map[string]any{
+			"provider": "host repository metadata", "advisories": repository.Advisories,
+			"hosts": repository.Hosts, "fetched_at": repository.CollectedAt,
+			"stale": repository.CollectedAt.Before(now.Add(-s.feedAge)),
 		})
 	}
 

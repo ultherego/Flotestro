@@ -237,14 +237,22 @@ export function Users() {
                   </td>
                   <td>{user.disabled ? <span className="badge error">{t("locked")}</span> : <span className="badge ok">{t("active")}</span>}</td>
                   <td className="num">
+                    {/* The everyday action stands alone; the rarer ones sit
+                        under one menu, so a row of fifty users is not a
+                        wall of two hundred buttons. */}
                     <div className="actions">
                       {user.disabled
                         ? <button className="secondary" onClick={() => { setIntent({ kind: "enable", user }); setForm(null); }}>{t("Unlock")}</button>
                         : <button className="secondary" onClick={() => { setIntent({ kind: "disable", user }); setForm(null); }}>{t("Lock")}</button>}
-                      <button className="secondary" title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
-                      <button className="secondary" title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
-                      <button className="secondary" title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
-                      <button className="secondary" title={t("Soft-delete: the UID and the trail stay, nobody signs in")} onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
+                      <details className="chip" style={{ position: "relative" }}>
+                        <summary style={{ cursor: "pointer", listStyle: "none" }}>{t("More")} ▾</summary>
+                        <div className="actions" style={{ position: "absolute", right: 0, zIndex: 5, flexDirection: "column", alignItems: "stretch", padding: 8, background: "var(--bg-raised)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", minWidth: 220 }}>
+                          <button className="link" style={{ textAlign: "left" }} title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
+                          <button className="link" style={{ textAlign: "left" }} title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
+                          <button className="link" style={{ textAlign: "left" }} title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
+                          <button className="link" style={{ textAlign: "left" }} title={t("Soft-delete: the UID and the trail stay, nobody signs in")} onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
+                        </div>
+                      </details>
                     </div>
                   </td>
                 </tr>
