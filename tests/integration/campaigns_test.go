@@ -669,12 +669,14 @@ func TestPackageCampaignComputesAPlanOnEveryHost(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/campaigns/"+campaign.ID+"/approve",
 		map[string]any{"approval_fingerprint": orderFingerprint}, nil, http.StatusConflict)
 
-	// Every target has a planning job and went back to the queue.
+	// Every target has a planning job and went back to the queue - or, on
+	// a host whose plan found nothing to change, settled as no_change
+	// without ever needing the approval.
 	for _, target := range h.campaignTargets(campaign.ID) {
 		if target.PlanJobID == "" {
 			t.Errorf("target %s without a planning job", target.Hostname)
 		}
-		if target.State != "pending" {
+		if target.State != "pending" && target.State != "no_change" {
 			t.Errorf("target %s after planning is in state %s", target.Hostname, target.State)
 		}
 	}
