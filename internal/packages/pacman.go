@@ -928,9 +928,18 @@ func pacmanRebootRequired() bool {
 // system database. The count is undetermined when it cannot be computed - a
 // host without checkupdates has an unknown number of updates rather than
 // none.
+//
+// Without checkupdates the count comes from the copy of the sync database
+// the helper keeps, as old as the copy is: the inventory says so through
+// the age the copy carries, and a host that has never had a plan has no
+// copy and an unknown number of updates.
 func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 	if !fileExists(checkupdatesPath) {
-		return 0, ErrCheckupdatesMissing.Error()
+		pending, err := p.pendingFromSyncCopy(ctx)
+		if err != nil {
+			return 0, err.Error()
+		}
+		return len(pending), ""
 	}
 	result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
 	switch {

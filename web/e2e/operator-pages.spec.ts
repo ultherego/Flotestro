@@ -64,11 +64,13 @@ test.describe("jobs", () => {
 
     // The table or the honest empty state; the host column is a header
     // of its own when there is a table.
-    const table = page.locator("table").first();
+    // The job table is the one headed by the operation; the widgets
+    // above it are tables of their own.
+    const table = page.locator("table:has(th:has-text(\"Operation\"))").first();
     await expect(table.or(page.getByText(exact("No jobs."))).first()).toBeVisible();
     if (await table.isVisible()) {
-      await expect(table.getByRole("columnheader", { name: "Host" })).toBeVisible();
-      await expect(table.getByRole("columnheader", { name: "Operation" })).toBeVisible();
+      await expect(table.locator("th", { hasText: "Host" }).first()).toBeVisible();
+      await expect(table.locator("th", { hasText: "Operation" }).first()).toBeVisible();
     }
 
     // A state chosen in the toolbar goes to the address, and the clear
@@ -245,14 +247,14 @@ test.describe("access", () => {
     await expect(identities.getByPlaceholder("subject, name or identifier")).toBeVisible();
     // The token itself is an identity, so the table is never empty.
     await expect(identities.locator("tbody tr").first()).toBeVisible();
-    await expect(identities.getByRole("columnheader", { name: "Roles and scopes" })).toBeVisible();
+    await expect(identities.locator("th", { hasText: "Roles and scopes" }).first()).toBeVisible();
 
     await page.goto("/access?tab=roles");
     await expect(tabs.getByRole("button", { name: "Roles" })).toHaveClass(/active/);
     const roles = card(page, "Roles");
     await expect(roles).toBeVisible();
     const matrix = roles.locator("table");
-    await expect(matrix.getByRole("columnheader", { name: "Permission" })).toBeVisible();
+    await expect(matrix.locator("th", { hasText: "Permission" }).first()).toBeVisible();
     // A permission is a row, a role is a column: at least two roles and
     // one permission ticked "yes".
     expect(await matrix.locator("thead th").count()).toBeGreaterThanOrEqual(3);
@@ -354,8 +356,10 @@ test.describe("reports", () => {
     for (const title of titles) {
       const report = card(page, title);
       await expect(report).toBeVisible();
-      await expect(report.locator(".card-actions").getByTestId("export-csv")).toBeVisible();
-      await expect(report.locator(".card-actions").getByTestId("export-csv")).toHaveText("Export CSV");
+      // The compliance report carries one export per section; the first
+      // stands for the card.
+      await expect(report.locator(".card-actions").getByTestId("export-csv").first()).toBeVisible();
+      await expect(report.locator(".card-actions").getByTestId("export-csv").first()).toHaveText(/Export .*CSV/);
     }
     // The patch report has settled: a table of hosts, or the reason it
     // could not be drawn.
@@ -555,9 +559,9 @@ test.describe("host workspace", () => {
     const search = installed.getByPlaceholder("Search by name or source package");
     await expect(search).toBeVisible();
     await expect(installed.locator(".hm-count")).toHaveText(String(packages.items.length));
-    const table = installed.locator("table");
-    await expect(table.getByRole("columnheader", { name: "Package" })).toBeVisible();
-    await expect(table.getByRole("columnheader", { name: "Held" })).toBeVisible();
+    const table = installed.locator("table").first();
+    await expect(table.locator("th", { hasText: "Package" }).first()).toBeVisible();
+    await expect(table.locator("th", { hasText: "Held" }).first()).toBeVisible();
     await expect(table.locator("tbody tr:not(.spacer)").first()).toBeVisible();
 
     // The search narrows in the browser; the count follows it.
