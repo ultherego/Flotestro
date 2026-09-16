@@ -322,13 +322,25 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 // subject - before a campaign dispatches to a host, hours after the
 // campaign was ordered - so a disabled or denied identity is reported as
 // ErrUnauthenticated, exactly as it would be at the door.
+//
+// The rights of a person who signs in through the identity provider come
+// from the group mapping, not from bindings of their own: a request under
+// their session maps the groups on every call. A check away from any
+// request - the orchestrator before a dispatch, a schedule placing its
+// order - has to do the same, from the freshest snapshot of the groups
+// the panel holds, or an administrator's campaign would stop at the
+// first host with "no longer holds", which is not what happened. The
+// snapshot is the newest session's, live, ended or not: the rights come from
+// the groups, not from being signed in at that moment, and a group the
+// person was taken out of drops from the snapshot at the next refresh.
 func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Principal, error) {
 	const query = `
-		select id, subject, display_name, kind from principals
+		select id, subject, display_name, kind, coalesce(issuer, '') from principals
 		where subject = $1 and disabled_at is null and denied_at is null`
 	var principal Principal
+	var issuer string
 	err := s.pool.QueryRow(ctx, query, subject).
-		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind)
+		Scan(&principal.ID, &principal.Subject, &principal.DisplayName, &principal.Kind, &issuer)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUnauthenticated
 	}
@@ -338,6 +350,22 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 	bindings, err := s.bindingsOf(ctx, principal.ID)
 	if err != nil {
 		return nil, err
+	}
+	var groups []string
+	err = s.pool.QueryRow(ctx, `
+		select groups from web_sessions
+		 where principal_id = $1
+		 order by coalesce(groups_refreshed_at, created_at) desc
+		 limit 1`, principal.ID).Scan(&groups)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	if len(groups) > 0 && issuer != "" {
+		mapped, err := s.MappedBindings(ctx, issuer, groups)
+		if err != nil {
+			return nil, err
+		}
+		bindings = mergeBindings(bindings, mapped)
 	}
 	principal.Bindings = bindings
 	return &principal, nil
