@@ -184,6 +184,10 @@ func hello(facts Facts, revision, localAddress string) *agentv1.Hello {
 		Capabilities:      capabilitiesToProto(facts.Capabilities),
 		InventoryRevision: revision,
 		LocalAddress:      localAddress,
+		// This agent forwards the panel's capability to the helper; what
+		// the helper does with it is the helper's word, or unknown.
+		HelperCapabilitySupported: true,
+		HelperCapabilityMode:      helperCapabilityMode(context.Background()),
 	}
 	if loaded, ok := agentconfig.Current(); ok {
 		message.ConfigFingerprint = loaded.Fingerprint
@@ -258,6 +262,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	if sessionConfig == nil {
 		return errors.New("the server did not send back the session configuration")
 	}
+	// The panel's capability keys go to the helper before any task of this
+	// session: a task under a key the helper does not know yet would be
+	// refused, and a rotated key must reach the host without a separate
+	// distribution.
+	deliverHelperTrust(sessionCtx, sessionConfig.GetHelperTrust(), opts.Log)
 	heartbeatInterval := time.Duration(sessionConfig.GetHeartbeatSeconds()) * time.Second
 	if heartbeatInterval <= 0 {
 		heartbeatInterval = 60 * time.Second

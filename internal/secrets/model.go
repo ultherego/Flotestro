@@ -100,6 +100,12 @@ type Version struct {
 	CreatedBy string     `json:"created_by"`
 	CreatedAt time.Time  `json:"created_at"`
 	Destroyed *time.Time `json:"destroyed_at,omitempty"`
+	// EnvelopeVersion says how the value is sealed: 1 is the value under
+	// the installation's key directly, 2 a data key of its own wrapped by
+	// the key named in KeyID. The operator reads it during a key rotation:
+	// a version still on the old key is one the rotation has not reached.
+	EnvelopeVersion int    `json:"envelope_version"`
+	KeyID           string `json:"key_id,omitempty"`
 }
 
 // Lease entitles one host to fetch one version of one secret within one
@@ -122,60 +128,142 @@ func (d Lease) Valid(now time.Time) bool {
 	return d.RedeemedAt == nil && d.RevokedAt == nil && now.Before(d.ExpiresAt)
 }
 
-// Cipher protects the values of secrets with a key from outside the database.
+// Cipher is the primitive of the store: AES-256-GCM under one key.
 //
-// The key lies in a file rather than in the database: a copy of the database
-// without that file is not enough to read anything. That is the whole
-// difference between a secret store and a column of passwords.
+// It serves two things that must stay apart in the reader's mind. A version
+// written before the envelope was introduced has its value sealed directly
+// under the installation's key, and that is what Encrypt and Decrypt do; the
+// local key provider wraps the per-version data keys with the same
+// primitive. The key itself lies in a file rather than in the database: a
+// copy of the database without that file is not enough to read anything.
+// That is the whole difference between a secret store and a column of
+// passwords.
 type Cipher struct {
 	aead cipher.AEAD
 }
 
-// OpenCipher reads the key from a file and creates a new one when it is
-// missing.
-//
-// We create the key ourselves, because a panel without a secret store cannot
-// perform some operations, and refusing to start would be worse than that. In
-// return we say outright that without a copy of this file the secrets cannot
-// be recovered.
-func OpenCipher(path string) (*Cipher, bool, error) {
-	key, err := os.ReadFile(path)
-	created := false
-	switch {
-	case err == nil:
-		if len(key) != KeyLength {
-			return nil, false, fmt.Errorf("the secret store key has %d bytes instead of %d",
-				len(key), KeyLength)
-		}
-	case errors.Is(err, os.ErrNotExist):
-		key = make([]byte, KeyLength)
-		if _, err := io.ReadFull(rand.Reader, key); err != nil {
-			return nil, false, err
-		}
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return nil, false, err
-		}
-		if err := os.WriteFile(path, key, 0o600); err != nil {
-			return nil, false, err
-		}
-		created = true
-	default:
-		return nil, false, err
-	}
+// ErrKeyMissing means the key file is not there. The store never creates
+// one in its place on its own: a key that appears by itself next to an
+// existing database is the beginning of two installations sharing one
+// name, and the startup guard is the only place allowed to decide that
+// nothing depends on the old one yet.
+var ErrKeyMissing = errors.New("secrets_key_missing")
 
+// NewCipher builds the primitive over raw key material.
+func NewCipher(key []byte) (*Cipher, error) {
+	if len(key) != KeyLength {
+		return nil, fmt.Errorf("the secret store key has %d bytes instead of %d", len(key), KeyLength)
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
 	aead, err := cipher.NewGCM(block)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	return &Cipher{aead: aead}, created, nil
+	return &Cipher{aead: aead}, nil
 }
 
+// ReadKeyFile reads raw key material from a file. A missing file is
+// ErrKeyMissing, so the caller can tell "not there" from "unreadable".
+func ReadKeyFile(path string) ([]byte, error) {
+	key, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("%w: %s", ErrKeyMissing, path)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != KeyLength {
+		return nil, fmt.Errorf("%s: the secret store key has %d bytes instead of %d", path, len(key), KeyLength)
+	}
+	return key, nil
+}
+
+// OpenCipher reads the key from a file. It creates nothing: a missing file
+// is ErrKeyMissing and the decision what that means belongs to the caller.
+func OpenCipher(path string) (*Cipher, error) {
+	key, err := ReadKeyFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return NewCipher(key)
+}
+
+// InitCipher creates a new key in a file that must not exist yet and
+// returns the primitive over it.
+//
+// The explicit initialisation is the only way a key comes into being. The
+// file is created exclusively and written through a temporary name, so
+// two processes racing for the same path cannot both believe they own the
+// key, and a crash halfway leaves no half-written file under the final
+// name.
+func InitCipher(path string) (*Cipher, error) {
+	key := make([]byte, KeyLength)
+	if _, err := io.ReadFull(rand.Reader, key); err != nil {
+		return nil, err
+	}
+	if err := WriteKeyFile(path, key); err != nil {
+		return nil, err
+	}
+	return NewCipher(key)
+}
+
+// WriteKeyFile persists key material so that the file is either complete
+// or absent, and refuses to replace an existing key.
+//
+// Key material is written with the narrowest mode, synced to disk and
+// renamed into place, and the directory is synced after the rename: a key
+// that a power cut turns into an empty file is a store nobody can open.
+func WriteKeyFile(path string, key []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("%s: a key already exists and is not replaced", path)
+	}
+	temporary := path + ".new"
+	file, err := os.OpenFile(temporary, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(key); err != nil {
+		file.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		file.Close()
+		_ = os.Remove(temporary)
+		return err
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	// The final name must still be free: the exclusive create above
+	// guarded the temporary name only.
+	if err := os.Link(temporary, path); err != nil {
+		_ = os.Remove(temporary)
+		return err
+	}
+	_ = os.Remove(temporary)
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
+}
+
+// NonceSize is the length of the nonce Encrypt produces.
+func (s *Cipher) NonceSize() int { return s.aead.NonceSize() }
+
 // Encrypt returns the nonce and the ciphertext of one version of one
-// secret.
+// secret sealed the first way: directly under this key. New versions go
+// through Seal instead; this stays for the tests of the old rows and for
+// the one place that still writes this way, the local provider's own
+// wrapping of data keys.
 //
 // The identifier and the version go in as the associated data: the
 // ciphertext then opens only in the row it was written for. Without that a
@@ -190,7 +278,7 @@ func (s *Cipher) Encrypt(value []byte, secretID string, version int) (nonce, cip
 	return nonce, s.aead.Seal(nil, nonce, value, associatedData(secretID, version)), nil
 }
 
-// Decrypt returns the value of the secret.
+// Decrypt returns the value of a version sealed the first way.
 //
 // A version written before the associated data was introduced carries
 // none, so a ciphertext that does not open with it is tried once more the

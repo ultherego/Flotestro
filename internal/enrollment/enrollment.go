@@ -26,6 +26,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/paging"
 )
 
 // TokenPrefix distinguishes an enrollment token from other secrets in logs and configuration.
@@ -567,22 +570,116 @@ func (s *Store) Request(ctx context.Context, id string) (*Request, error) {
 // Settled and revoked ones too: the operator has to see what happened to the
 // installation they ordered, not only what is still waiting.
 func (s *Store) List(ctx context.Context) ([]Request, error) {
-	const query = requestColumns + ` order by created_at desc limit 200`
-	rows, err := s.pool.Query(ctx, query)
+	page, err := s.ListPaged(ctx, ListFilter{}, "", 200)
 	if err != nil {
 		return nil, err
 	}
+	return page.Items, nil
+}
+
+// ListFilter narrows the orders listed. Scopes narrow to the placements
+// the caller may read; nil narrows nothing, which is right only for a
+// caller with the global scope or one that has checked the scope itself.
+type ListFilter struct {
+	Status      string
+	Kind        string
+	Site        string
+	Environment string
+	Scopes      []authz.Scope
+}
+
+// ListPage is one page of orders and the cursor of the next.
+type ListPage struct {
+	Items      []Request
+	NextCursor string
+}
+
+// MaxListPage bounds one page of orders.
+const MaxListPage = 500
+
+// ListPaged lists the orders newest first, narrowed by the filter and
+// the caller's scopes in the query itself - a list must not show an
+// order a direct read of it would refuse. The page is keyed by the
+// creation time and the identifier, so an order placed while the operator
+// browses does not shift the rows under the cursor. The status "expired"
+// is a pending order past its deadline, as the reads spell it, so the
+// filter says so in SQL rather than after the fact.
+func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor string, limit int) (ListPage, error) {
+	if limit <= 0 || limit > MaxListPage {
+		limit = MaxListPage
+	}
+	conditions := []string{"true"}
+	var args []any
+	add := func(condition string, value any) {
+		args = append(args, value)
+		conditions = append(conditions, fmt.Sprintf(condition, len(args)))
+	}
+	switch filter.Status {
+	case "":
+	case StatusPending:
+		conditions = append(conditions, "(status = 'pending' and expires_at > now())")
+	case StatusExpired:
+		conditions = append(conditions, "(status = 'expired' or (status = 'pending' and expires_at <= now()))")
+	default:
+		add("status = $%d", filter.Status)
+	}
+	if filter.Kind != "" {
+		add("kind = $%d", filter.Kind)
+	}
+	if filter.Site != "" {
+		add("site = $%d", filter.Site)
+	}
+	if filter.Environment != "" {
+		add("environment = $%d", filter.Environment)
+	}
+	if filter.Scopes != nil {
+		if condition, extra := authz.ScopeSQL(filter.Scopes, "site", "environment", len(args)); condition != "" {
+			conditions = append(conditions, condition)
+			args = append(args, extra...)
+		}
+	}
+	parts, err := paging.Decode(cursor, 2)
+	if err != nil {
+		return ListPage{}, err
+	}
+	if parts != nil {
+		at, err := paging.ParseTime(parts[0])
+		if err != nil {
+			return ListPage{}, err
+		}
+		if _, err := uuid.Parse(parts[1]); err != nil {
+			return ListPage{}, fmt.Errorf("%w: %v", paging.ErrInvalidCursor, err)
+		}
+		args = append(args, at, parts[1])
+		conditions = append(conditions, fmt.Sprintf("(created_at, id) < ($%d::timestamptz, $%d::uuid)",
+			len(args)-1, len(args)))
+	}
+	args = append(args, limit+1)
+	query := requestColumns + " where " + strings.Join(conditions, " and ") +
+		fmt.Sprintf(" order by created_at desc, id desc limit $%d", len(args))
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return ListPage{}, err
+	}
 	defer rows.Close()
 
-	var requests []Request
+	page := ListPage{Items: []Request{}}
 	for rows.Next() {
 		request, err := scanRequest(rows)
 		if err != nil {
-			return nil, err
+			return ListPage{}, err
 		}
-		requests = append(requests, *request)
+		page.Items = append(page.Items, *request)
 	}
-	return requests, rows.Err()
+	if err := rows.Err(); err != nil {
+		return ListPage{}, err
+	}
+	if len(page.Items) > limit {
+		page.Items = page.Items[:limit]
+		last := page.Items[limit-1]
+		page.NextCursor = paging.Encode(paging.FormatTime(last.CreatedAt), last.ID)
+	}
+	return page, nil
 }
 
 // requestColumns is the shared list of columns for reads.

@@ -282,3 +282,104 @@ func TestTheReverseTableNamesOnlyDeclaredWaysBack(t *testing.T) {
 		}
 	}
 }
+
+func scheduleOrder(user string, command ...string) Payload {
+	if len(command) == 0 {
+		command = []string{"/usr/bin/true"}
+	}
+	return Payload{Schedule: &SchedulePayload{
+		ID: "nightly", Expression: "0 3 * * *", Command: command, User: user, Enabled: true,
+	}}
+}
+
+// The user of a cron line is separated from the command by whitespace
+// only, and it used to reach the host unchecked, root by default. A value
+// that would not stay in its field is refused at ordering time, as is an
+// entry that names no account: root is a decision, not a default.
+func TestAScheduleUserHasToBeAnAccountName(t *testing.T) {
+	for _, user := range []string{
+		"", "root; /bin/sh", "root\n* * * * * root /bin/sh", "root\t/bin/sh", "root #",
+		"Root", "-root", "a.b", "user$", "0user", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	} {
+		if err := Validate(ActionScheduleEnsure, scheduleOrder(user)); err == nil {
+			t.Errorf("the user %q passed validation", user)
+		}
+	}
+	for _, user := range []string{"root", "backup", "www-data", "_apt", "svc_backup-2"} {
+		if err := Validate(ActionScheduleEnsure, scheduleOrder(user)); err != nil {
+			t.Errorf("the user %q was refused: %v", user, err)
+		}
+	}
+	// Disabling, removing and running name only the entry; no user is
+	// involved there.
+	if err := Validate(ActionScheduleRemove, Payload{Schedule: &SchedulePayload{ID: "nightly"}}); err != nil {
+		t.Errorf("a removal without a user was refused: %v", err)
+	}
+}
+
+// A zero byte ends the string for the tools that read the line; the shell
+// character list would not see it.
+func TestAScheduleCommandRefusesAZeroByte(t *testing.T) {
+	for _, command := range [][]string{
+		{"/usr/bin/true\x00; /bin/sh"},
+		{"/usr/bin/true", "a\x00b"},
+		{"true"},
+		{"/usr/bin/true", ""},
+	} {
+		if err := Validate(ActionScheduleEnsure, scheduleOrder("root", command...)); err == nil {
+			t.Errorf("the command %q passed validation", command)
+		}
+	}
+}
+
+// The content of an order can ask for more than the operation: an entry
+// for root needs schedule.root.exec on top of schedule.write, and a write
+// allowed to skip its validator needs file.write.unvalidated. Everything
+// else asks for nothing beyond the registry's permission.
+func TestPayloadPermissionsNameWhatTheContentAsksFor(t *testing.T) {
+	if got := PayloadPermissions(ActionScheduleEnsure, scheduleOrder("root")); len(got) != 1 || got[0] != PermissionScheduleRootExec {
+		t.Errorf("root entry needs %v, want [%s]", got, PermissionScheduleRootExec)
+	}
+	if got := PayloadPermissions(ActionScheduleEnsure, scheduleOrder("backup")); len(got) != 0 {
+		t.Errorf("a service account entry needs %v, want nothing", got)
+	}
+	// Removing or running an entry of root is judged by the entry's own
+	// permissions; the payload carries no user there.
+	if got := PayloadPermissions(ActionScheduleRemove, Payload{Schedule: &SchedulePayload{ID: "nightly", User: "root"}}); len(got) != 0 {
+		t.Errorf("a removal needs %v, want nothing", got)
+	}
+	file := &FilePayload{Path: "/etc/app.conf", Content: "x\n", AllowMissingValidator: true}
+	for _, action := range []ActionType{ActionFileEnsure, ActionFileRollback} {
+		if got := PayloadPermissions(action, Payload{File: file}); len(got) != 1 || got[0] != PermissionFileWriteUnvalidated {
+			t.Errorf("%s allowed to skip its validator needs %v, want [%s]", action, got, PermissionFileWriteUnvalidated)
+		}
+	}
+	checked := &FilePayload{Path: "/etc/app.conf", Content: "x\n"}
+	if got := PayloadPermissions(ActionFileEnsure, Payload{File: checked}); len(got) != 0 {
+		t.Errorf("a checked write needs %v, want nothing", got)
+	}
+	if got := PayloadPermissions(ActionFilePlan, Payload{File: file}); len(got) != 0 {
+		t.Errorf("a plan needs %v, want nothing", got)
+	}
+	if got := PayloadPermissions(ActionUnitRestart, Payload{Unit: &UnitPayload{Unit: "nginx.service"}}); len(got) != 0 {
+		t.Errorf("a unit restart needs %v, want nothing", got)
+	}
+}
+
+// The order says whether it may skip the validator; the flag is part of
+// the payload and so of its hash, so it cannot be added after approval.
+func TestAllowMissingValidatorEntersThePayloadHash(t *testing.T) {
+	checked := Payload{File: &FilePayload{Path: "/etc/app.conf", Content: "x\n"}}
+	unchecked := Payload{File: &FilePayload{Path: "/etc/app.conf", Content: "x\n", AllowMissingValidator: true}}
+	a, err := PayloadHash(ActionFileEnsure, ActionVersion, checked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := PayloadHash(ActionFileEnsure, ActionVersion, unchecked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) == string(b) {
+		t.Error("the payload hash does not see allow_missing_validator")
+	}
+}

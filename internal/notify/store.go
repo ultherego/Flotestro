@@ -106,22 +106,38 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Channe
 }
 
 // redact replaces the secret of a configuration with the fact that it is
-// set: what leaves the store towards the API.
+// set: what leaves the store towards the API. A webhook's secret is the
+// signing key; an incoming webhook's address is the whole credential, so
+// it is treated the same way.
 func redact(kind string, raw json.RawMessage) json.RawMessage {
-	if kind != KindWebhook {
+	switch kind {
+	case KindWebhook:
+		var config WebhookConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return raw
+		}
+		config.SecretSet = config.Secret != ""
+		config.Secret = ""
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			return raw
+		}
+		return encoded
+	case KindSlackWebhook:
+		var config SlackConfig
+		if err := json.Unmarshal(raw, &config); err != nil {
+			return raw
+		}
+		config.URLSet = config.URL != ""
+		config.URL = ""
+		encoded, err := json.Marshal(config)
+		if err != nil {
+			return raw
+		}
+		return encoded
+	default:
 		return raw
 	}
-	var config WebhookConfig
-	if err := json.Unmarshal(raw, &config); err != nil {
-		return raw
-	}
-	config.SecretSet = config.Secret != ""
-	config.Secret = ""
-	encoded, err := json.Marshal(config)
-	if err != nil {
-		return raw
-	}
-	return encoded
 }
 
 // Create records a channel. The configuration is checked for its kind
@@ -135,6 +151,11 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 	}
 	if err := s.checkSecret(ctx, config); err != nil {
 		return nil, err
+	}
+	// "The address is set" is a statement about a stored channel; a new
+	// one has nothing stored to keep.
+	if slack, ok := config.(SlackConfig); ok && slack.URL == "" {
+		return nil, Error{Code: "invalid_config", Message: "the incoming webhook needs its address"}
 	}
 	encodedConfig, err := json.Marshal(config)
 	if err != nil {
@@ -161,7 +182,10 @@ func (s *Store) Create(ctx context.Context, channel Channel) (*Channel, error) {
 
 // Update replaces a channel. A webhook edited without retyping its
 // secret keeps the one it has: the API never showed it, so the editor
-// cannot send it back. secret_set false with no secret clears it.
+// cannot send it back. secret_set false with no secret clears it. An
+// incoming webhook edited without its address keeps the stored one the
+// same way; there is no clearing it, because a channel without an address
+// cannot send.
 func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channel, error) {
 	existing, err := s.get(ctx, id)
 	if err != nil {
@@ -180,6 +204,18 @@ func (s *Store) Update(ctx context.Context, id string, channel Channel) (*Channe
 			webhook.Secret = kept.Secret
 		}
 		config = webhook
+	}
+	if slack, ok := config.(SlackConfig); ok && slack.URL == "" {
+		if existing.Kind == KindSlackWebhook {
+			var kept SlackConfig
+			_ = json.Unmarshal(existing.Config, &kept)
+			slack.URL = kept.URL
+		}
+		if slack.URL == "" {
+			return nil, Error{Code: "invalid_config", Message: "the incoming webhook needs its address"}
+		}
+		slack.URLSet = false
+		config = slack
 	}
 	if err := s.checkSecret(ctx, config); err != nil {
 		return nil, err

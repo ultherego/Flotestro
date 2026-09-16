@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -20,10 +21,28 @@ import (
 	"github.com/ultherego/flotestro/internal/pki"
 )
 
-// hostHeader carries the identity of the host attested by the relay. The name
-// has to match the gateway: it is the only place where the panel learns whose
-// traffic goes through the relay.
-const hostHeader = "Flotestro-Relay-Host"
+// The headers the relay attests a host's session with. The host is named
+// by its identifier, and the certificate it presented to the relay by its
+// SHA-256 fingerprint in hex and its serial: the relay verified the chain
+// in its handshake, and the gateway checks that certificate against its
+// record - revoked, expired, another host's - as it would in a direct
+// handshake. The names have to match the gateway: they are the only place
+// where the panel learns whose traffic goes through the relay.
+const (
+	hostHeader            = "Flotestro-Relay-Host"
+	hostFingerprintHeader = "Flotestro-Relay-Host-Fingerprint"
+	hostSerialHeader      = "Flotestro-Relay-Host-Serial"
+)
+
+// attestHost names the host and the certificate it presented on a call
+// forwarded to the centre.
+func attestHost(headers http.Header, hostID string, cert *x509.Certificate) {
+	headers.Set(hostHeader, hostID)
+	headers.Set(hostFingerprintHeader, hex.EncodeToString(pki.Fingerprint(cert)))
+	if cert.SerialNumber != nil {
+		headers.Set(hostSerialHeader, cert.SerialNumber.String())
+	}
+}
 
 // Options describe the relay of a site.
 type Options struct {
@@ -199,7 +218,7 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 	}
 
 	forwarded := connect.NewRequest(req.Msg)
-	forwarded.Header().Set(hostHeader, hostID)
+	attestHost(forwarded.Header(), hostID, cert)
 	response, err := r.centre().RenewCertificate(ctx, forwarded)
 	if err != nil {
 		// The renewal has to reach the centre; the buffer does not help here,
@@ -229,7 +248,7 @@ func (r *Relay) FetchSecret(ctx context.Context,
 	}
 
 	forwarded := connect.NewRequest(req.Msg)
-	forwarded.Header().Set(hostHeader, hostID)
+	attestHost(forwarded.Header(), hostID, cert)
 	response, err := r.centre().FetchSecret(ctx, forwarded)
 	if err != nil {
 		return nil, err
@@ -282,7 +301,7 @@ func (r *Relay) Connect(ctx context.Context,
 	defer r.trackSession(hostID, nil)
 
 	upstream := r.centre().Connect(sessionCtx)
-	upstream.RequestHeader().Set(hostHeader, hostID)
+	attestHost(upstream.RequestHeader(), hostID, cert)
 	defer func() {
 		_ = upstream.CloseRequest()
 		_ = upstream.CloseResponse()

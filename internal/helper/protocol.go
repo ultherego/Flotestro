@@ -18,8 +18,11 @@ import (
 const ProtocolVersion = 1
 
 // maxFrameBytes limits a single message. The helper runs as root, so it must
-// not let the peer allocate an arbitrary amount of memory.
-const maxFrameBytes = 1 << 20
+// not let the peer allocate an arbitrary amount of memory. The bound is
+// four times the largest managed file: a request carries the content once
+// in the operation and once more in the canonical payload the capability
+// binds, JSON-escaped, and that has to fit under the same ceiling.
+const maxFrameBytes = 4 << 20
 
 // ErrFrameTooLarge means a frame exceeding the limit.
 var ErrFrameTooLarge = errors.New("the frame exceeds the allowed size")

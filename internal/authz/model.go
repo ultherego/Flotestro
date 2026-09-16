@@ -116,6 +116,12 @@ const (
 	// A preview of the next runs of an expression computes dates on the
 	// host and writes nothing.
 	PermSchedulePreview Permission = "schedule.preview"
+	// An entry for root is a level of trust above writing schedules: the
+	// grant is separate and travels in the capability under this name.
+	PermScheduleRootExec Permission = "schedule.root.exec"
+	// A write whose validator the host lacks may go on only with this
+	// grant and an order that says so; without it the host refuses.
+	PermFileWriteUnvalidated Permission = "file.write.unvalidated"
 	// The network. Reading the profiles is preparation for a change, so it is
 	// cheap; changing an address or a route can cut the host off from the
 	// panel, and then no further order will arrive. Routes have their own
@@ -535,6 +541,7 @@ var rolePermissions = map[Role][]Permission{
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 		PermNotificationRead,
+		PermScheduleRootExec,
 	},
 	RolePlatformAdmin: {
 		PermHostRead, PermInventoryRead, PermInventoryRefresh, PermJobRead, PermAuditRead,
@@ -551,7 +558,7 @@ var rolePermissions = map[Role][]Permission{
 		PermPackagesInstall, PermPackagesRemove, PermPackagesHold,
 		PermPackagesRepository,
 		PermScheduleWrite, PermScheduleDisable, PermScheduleRemove, PermScheduleRun,
-		PermSchedulePreview,
+		PermSchedulePreview, PermScheduleRootExec, PermFileWriteUnvalidated,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
 		PermDNSRead, PermDNSPlan, PermDNSHostWrite,

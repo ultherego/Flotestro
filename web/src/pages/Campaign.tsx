@@ -321,7 +321,7 @@ export function Campaign() {
             {["canary", "running", "planned", "manual_gate"].includes(data.state) && (
               <button className="secondary" onClick={() => setPendingStop("pause")}>{t("Pause")}</button>
             )}
-            {data.state === "paused" && (
+            {(data.state === "paused" || data.state === "pausing") && (
               <button onClick={() => setPendingStop("resume")}>{t("Resume")}</button>
             )}
             {!SETTLED_CAMPAIGN_STATES.includes(data.state) && data.state !== "canceling" && (

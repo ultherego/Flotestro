@@ -115,19 +115,41 @@ func (s *Server) channelProblem(w http.ResponseWriter, err error) bool {
 }
 
 // channelDetail is what the trail records about a channel: the address
-// without its secret, the subjects and the filter.
+// without its secret, the subjects and the filter. The address of an
+// incoming webhook is the credential itself, so the trail keeps only that
+// one is set.
 func channelDetail(channel notify.Channel) map[string]any {
 	var config map[string]any
 	_ = json.Unmarshal(channel.Config, &config)
 	delete(config, "secret")
+	if channel.Kind == notify.KindSlackWebhook {
+		delete(config, "url")
+	}
 	return map[string]any{
 		"name": channel.Name, "kind": channel.Kind, "config": config, "events": channel.Events,
 		"filter": channel.Filter, "enabled": channel.Enabled, "reason": channel.Reason,
 	}
 }
 
+// channelScope is where a channel's news comes from, as a scope: the site
+// and the environment its filter names, and the whole fleet where it names
+// none. A channel of one site is the business of that site's operators; a
+// fleet-wide channel carries every site's alerts and is the business of
+// somebody with a right over the whole fleet.
+func channelScope(channel notify.Channel) authz.Scope {
+	scope := authz.GlobalScope
+	if channel.Filter.Site != "" {
+		scope.Site = channel.Filter.Site
+	}
+	if channel.Filter.Environment != "" {
+		scope.Environment = channel.Filter.Environment
+	}
+	return scope
+}
+
 func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorizeCollection(w, r, authz.PermNotificationRead, "notification_channel"); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermNotificationRead, "notification_channel")
+	if !ok {
 		return
 	}
 	if !s.notificationsEnabled(w) {
@@ -138,8 +160,17 @@ func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.R
 		s.fail(w, err)
 		return
 	}
+	// The list is narrowed to the channels of the caller's scope, the
+	// way a direct read of each would be answered: a channel of another
+	// site tells where its alerts go, which is not the caller's to know.
+	visible := make([]notify.Channel, 0, len(channels))
+	for _, channel := range channels {
+		if principal.Can(authz.PermNotificationRead, channelScope(channel)) {
+			visible = append(visible, channel)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"items": channels, "count": len(channels),
+		"items": visible, "count": len(visible),
 		// The vocabulary of a channel, so the form does not carry a copy.
 		"kinds": notify.Kinds, "subjects": notify.Subjects, "severities": notify.Severities,
 	})
@@ -154,6 +185,13 @@ func (s *Server) handleGetNotificationChannel(w http.ResponseWriter, r *http.Req
 	}
 	channel, err := s.notifications.Get(r.Context(), r.PathValue("id"))
 	if s.channelProblem(w, err) {
+		return
+	}
+	// The channel is read in its own scope, after it is known: the
+	// refusal is a 403 with the scope on the trail, not a 404 that would
+	// say there is no such channel.
+	if _, ok := s.authorize(w, r, authz.PermNotificationRead, channelScope(*channel),
+		"notification_channel", channel.ID); !ok {
 		return
 	}
 	writeJSON(w, http.StatusOK, channel)

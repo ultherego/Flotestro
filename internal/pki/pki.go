@@ -141,38 +141,168 @@ func (ca *CA) NotAfter() time.Time {
 	return ca.Certificate.NotAfter
 }
 
-// EnsureCA reads the CA from the state directory or creates one on the first start.
+// The names of the files of the signing CA in the state directory.
+const (
+	caCertFile = "ca.pem"
+	caKeyFile  = "ca.key"
+)
+
+// The states of the CA material on disk that stop the panel. The codes
+// are stable: they are what the log shows and what the runbook names.
+var (
+	// ErrNoMaterial means a state directory with no CA at all: neither a
+	// certificate nor a key, nothing pending and nothing retired. It is
+	// the one state in which creating a CA is allowed.
+	ErrNoMaterial = errors.New("pki_no_material")
+	// ErrIssuerKeyUnavailable means the certificate of the CA is there
+	// and its private key is not. The fleet trusts that certificate, so
+	// a new CA would cut every host off; the key has to come back from
+	// the backup.
+	ErrIssuerKeyUnavailable = errors.New("issuer_key_unavailable")
+	// ErrStateMismatch means material that does not fit together: a key
+	// without a certificate, a pair whose key does not match the
+	// certificate, or a file that does not parse.
+	ErrStateMismatch = errors.New("pki_state_mismatch")
+	// ErrMaterialExists refuses an initialisation over a directory that
+	// already holds something.
+	ErrMaterialExists = errors.New("pki_material_exists")
+)
+
+// HasAnyMaterial says whether the state directory holds any CA material:
+// the signing pair or a part of it, a pending CA or a retired one. It is
+// what decides between opening and initialising, and a single stray file
+// counts, because a stray file is a sign of an installation whose rest is
+// missing.
+func HasAnyMaterial(dir string) bool {
+	for _, name := range []string{caCertFile, caKeyFile, pendingCertFile, pendingKeyFile, retiredDir} {
+		if _, err := os.Lstat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// EnsureCA reads the CA from the state directory when it holds material
+// and creates one only when the directory holds nothing at all.
+//
+// A partial set - a certificate without its key, or a key without its
+// certificate - is an error rather than a reason to create a new CA: the
+// fleet's certificates were issued by the one that is missing, and a new
+// one would leave every host outside.
 func EnsureCA(dir string) (*CA, error) {
+	if HasAnyMaterial(dir) {
+		return Open(dir)
+	}
+	return Init(dir)
+}
+
+// Open reads the signing CA and refuses anything but a complete, matching
+// pair.
+func Open(dir string) (*CA, error) {
+	certPath := filepath.Join(dir, caCertFile)
+	keyPath := filepath.Join(dir, caKeyFile)
+	certPEM, certErr := os.ReadFile(certPath)
+	keyPEM, keyErr := os.ReadFile(keyPath)
+	switch {
+	case certErr == nil && keyErr == nil:
+		ca, err := parseCA(certPEM, keyPEM)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrStateMismatch, err)
+		}
+		if err := ca.VerifyPair(); err != nil {
+			return nil, err
+		}
+		return ca, nil
+	case os.IsNotExist(certErr) && os.IsNotExist(keyErr):
+		if HasAnyMaterial(dir) {
+			return nil, fmt.Errorf("%w: the directory holds CA material but no signing pair (%s, %s)",
+				ErrStateMismatch, caCertFile, caKeyFile)
+		}
+		return nil, ErrNoMaterial
+	case certErr == nil && os.IsNotExist(keyErr):
+		return nil, fmt.Errorf("%w: %s is there and %s is not", ErrIssuerKeyUnavailable, caCertFile, caKeyFile)
+	case os.IsNotExist(certErr) && keyErr == nil:
+		return nil, fmt.Errorf("%w: %s is there and %s is not", ErrStateMismatch, caKeyFile, caCertFile)
+	case certErr != nil:
+		return nil, certErr
+	default:
+		return nil, keyErr
+	}
+}
+
+// Init creates the first CA of an installation in a directory that holds
+// no material. The key is written before the certificate, and the pair is
+// read back and verified: a crash between the two files leaves a key
+// without a certificate, which Open reports as a mismatch rather than
+// silently starting over.
+func Init(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("state directory: %w", err)
 	}
-	certPath := filepath.Join(dir, "ca.pem")
-	keyPath := filepath.Join(dir, "ca.key")
-
-	certPEM, certErr := os.ReadFile(certPath)
-	keyPEM, keyErr := os.ReadFile(keyPath)
-	if certErr == nil && keyErr == nil {
-		return parseCA(certPEM, keyPEM)
+	if HasAnyMaterial(dir) {
+		return nil, fmt.Errorf("%w: %s already holds CA material", ErrMaterialExists, dir)
 	}
-	if certErr != nil && !os.IsNotExist(certErr) {
-		return nil, certErr
-	}
-	if keyErr != nil && !os.IsNotExist(keyErr) {
-		return nil, keyErr
-	}
-
-	ca, certPEM, keyPEM, err := newCA()
+	_, certPEM, keyPEM, err := newCA()
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
-		return nil, err
-	}
 	// The CA key is the most sensitive material in the system.
-	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(dir, caKeyFile), keyPEM, 0o600); err != nil {
 		return nil, err
 	}
-	return ca, nil
+	if err := writeFileAtomic(filepath.Join(dir, caCertFile), certPEM, 0o644); err != nil {
+		return nil, err
+	}
+	return Open(dir)
+}
+
+// VerifyPair checks that the private key is the one the certificate
+// describes. A CA whose key belongs to another certificate signs
+// certificates no host can verify, and nothing before the first failed
+// renewal would say so.
+func (ca *CA) VerifyPair() error {
+	if ca == nil || ca.Certificate == nil || ca.PrivateKey == nil {
+		return fmt.Errorf("%w: the CA is incomplete", ErrStateMismatch)
+	}
+	public, ok := ca.Certificate.PublicKey.(*ecdsa.PublicKey)
+	if !ok || !public.Equal(&ca.PrivateKey.PublicKey) {
+		return fmt.Errorf("%w: the private key does not match the certificate %s",
+			ErrStateMismatch, ca.Certificate.SerialNumber)
+	}
+	return nil
+}
+
+// IssuerID is the stable identifier of this CA as an issuer: a UUID
+// derived from the certificate, so every panel of an installation derives
+// the same one without a table to agree through, and a certificate row
+// can name its issuer without a join on subject and serial.
+func (ca *CA) IssuerID() string {
+	if ca == nil || ca.Certificate == nil {
+		return ""
+	}
+	return IssuerIDOf(ca.Certificate)
+}
+
+// IssuerIDOf derives the issuer identifier of a CA certificate.
+//
+// The first sixteen bytes of the certificate's SHA-256 make the UUID, with
+// the version and variant bits set as for a name-based one. Two CAs never
+// share an identifier unless they share a certificate.
+func IssuerIDOf(cert *x509.Certificate) string {
+	sum := sha256.Sum256(cert.Raw)
+	var id [16]byte
+	copy(id[:], sum[:16])
+	id[6] = (id[6] & 0x0f) | 0x50
+	id[8] = (id[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%x-%x-%x-%x-%x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16])
+}
+
+// FingerprintHex is the SHA-256 of the certificate as the API shows it.
+func (ca *CA) FingerprintHex() string {
+	if ca == nil || ca.Certificate == nil {
+		return ""
+	}
+	return fingerprintHex(ca.Certificate.Raw)
 }
 
 func newCA() (*CA, []byte, []byte, error) {
@@ -277,6 +407,8 @@ type IssuedCert struct {
 	// The issuer allows counting how many hosts a withdrawal of a given CA concerns.
 	IssuerSubject string
 	IssuerSerial  string
+	// IssuerID is the stable identifier of the issuing CA (see IssuerID).
+	IssuerID string
 	// The network names issued in the certificate. Empty for hosts: only a
 	// relay acts as a server towards anyone.
 	DNSNames    []string
@@ -389,6 +521,7 @@ func (ca *CA) signCSR(csrPEM []byte, kind, id string, ttl time.Duration,
 		NotAfter:      template.NotAfter,
 		IssuerSubject: ca.Certificate.Subject.CommonName,
 		IssuerSerial:  ca.Certificate.SerialNumber.String(),
+		IssuerID:      ca.IssuerID(),
 		CommonName:    id,
 		DNSNames:      template.DNSNames,
 		IPAddresses:   addresses,

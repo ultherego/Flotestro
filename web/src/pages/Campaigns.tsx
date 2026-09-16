@@ -35,7 +35,7 @@ type CampaignPage = {
 
 /** The states the filter offers, in the order a campaign moves through them. */
 const CAMPAIGN_STATES = [
-  "planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "paused", "canceling",
+  "planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "pausing", "paused", "canceling",
   "completed", "completed_with_issues", "failed", "plan_failed", "expired", "canceled",
 ];
 
@@ -154,7 +154,7 @@ export function Campaigns() {
   const byOperation = tally((campaign) => campaign.action_type);
   const outcomeTone = (value: string): WidgetTone =>
     value === "completed" ? "ok" : ["failed", "plan_failed", "expired", "partially_applied"].includes(value) ? "error"
-      : ["paused", "manual_gate", "awaiting_approval", "planned", "completed_with_issues"].includes(value) ? "warn"
+      : ["pausing", "paused", "manual_gate", "awaiting_approval", "planned", "completed_with_issues"].includes(value) ? "warn"
         : ["canceled", "canceling", "cancelled"].includes(value) ? "unknown" : "info";
   const filtering = Boolean(state || action || settledRequester || since);
   const resetFilters = () => { setState(""); setAction(""); setRequester(""); setSince(""); setOffset(0); };

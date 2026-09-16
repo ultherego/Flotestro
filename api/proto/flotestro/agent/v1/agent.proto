@@ -3,6 +3,7 @@ syntax = "proto3";
 package flotestro.agent.v1;
 
 import "google/protobuf/timestamp.proto";
+import "flotestro/helper/v1/helper.proto";
 
 option go_package = "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1;agentv1";
 
@@ -151,6 +152,11 @@ message RenewCertificateResponse {
   bytes certificate_pem = 1;
   bytes ca_bundle_pem = 2;
   google.protobuf.Timestamp not_after = 3;
+  // The panel's capability keys, signed, for the root helper's keyring.
+  // A renewal carries the current set so a rotated key reaches every host
+  // without a separate distribution. Absent from a panel without a
+  // signing key.
+  flotestro.helper.v1.HelperTrustBundle helper_trust = 4;
 }
 
 message EnrollRequest {
@@ -174,6 +180,10 @@ message EnrollResponse {
   bytes certificate_pem = 2;
   bytes ca_bundle_pem = 3;
   google.protobuf.Timestamp not_after = 4;
+  // The panel's capability keys and the host identifier, signed, which
+  // the agent hands to the root helper: the helper takes its host
+  // identity and its keyring from here, not from the agent's word.
+  flotestro.helper.v1.HelperTrustBundle helper_trust = 5;
 }
 
 message AgentBuild {
@@ -247,6 +257,13 @@ message Hello {
   // protocol range means no file: the host is still on the environment
   // variables, which the panel shows as a legacy configuration.
   uint32 config_schema_version = 10;
+  // Whether this agent forwards the panel's capability to the root helper,
+  // and the mode the helper on the host runs in - observe, prefer or
+  // enforce. The mode is what the helper last reported; empty means the
+  // agent has not heard from the helper yet, which is not the same as
+  // a helper without the capability.
+  bool helper_capability_supported = 11;
+  string helper_capability_mode = 12;
 }
 
 message SessionConfig {
@@ -259,6 +276,10 @@ message SessionConfig {
   int32 metrics_interval_seconds = 5;
   // The periodic inventory cycle. Absent means the agent's own settings.
   InventoryCadence inventory_cadence = 6;
+  // The panel's helper capability keys for this host, signed. The agent
+  // hands the bundle to the helper before any task; an older agent
+  // ignores it.
+  flotestro.helper.v1.HelperTrustBundle helper_trust = 7;
 }
 
 // InventoryCadence sets the periodic inventory cycle of the agent. Every
@@ -599,6 +620,14 @@ message TaskEnvelope {
   Preconditions preconditions = 7;
   Limits limits = 8;
   ActorContext actor_context = 9;
+  // The panel's authorization of this operation for the root helper: the
+  // capability, its Ed25519 signature and the canonical payload the
+  // capability binds. The agent forwards all three untouched; it holds no
+  // key to mint or alter them. Absent for a read and from a panel without
+  // a signing key.
+  flotestro.helper.v1.HelperCapability helper_capability = 10;
+  bytes helper_capability_signature = 11;
+  bytes canonical_payload = 12;
 
   oneof action {
     UnitAction unit_action = 20;
@@ -1897,6 +1926,10 @@ message FileAction {
   // It excludes the content field: either the content is plain or it comes
   // from the store.
   SecretRef content_secret = 9;
+  // AllowMissingValidator lets the write go on when the host lacks the
+  // validator the order names. The order says so, and the capability has
+  // to carry the grant file.write.unvalidated; either alone is not enough.
+  bool allow_missing_validator = 10;
 }
 
 message FileResult {

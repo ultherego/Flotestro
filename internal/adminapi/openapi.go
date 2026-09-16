@@ -126,6 +126,10 @@ func (s *Server) openAPI() map[string]any {
 	// The reflection reads the shape, not the meaning. A field a program
 	// decides on - whether a rollback can be ordered, and on how many
 	// hosts - gets its sentence here, next to the type it belongs to.
+	describe(schemas, "Campaign", "revision",
+		"Grows with every state change; a client that read the campaign at one revision and orders a transition at another is answered with 409 concurrent_transition.")
+	describe(schemas, "CampaignTarget", "cancel_requested_at",
+		"When the cancel of a target already handed to a host was asked for; the target settles once the host acknowledges or its task is taken back from the queue.")
 	describe(schemas, "Campaign", "retried_by",
 		"The campaigns ordered to run this one's failed hosts again, oldest first, each with its state. "+
 			"Read from the retrying campaigns; the record of this one never changes when a retry is ordered.")
@@ -144,7 +148,8 @@ func (s *Server) openAPI() map[string]any {
 	// reflection sees a string. The list here is the list the database
 	// checks, in the order a campaign moves through them.
 	describe(schemas, "Campaign", "state",
-		"planning (every host computes its plan), planned, awaiting_approval, canary, manual_gate, running, paused, "+
+		"planning (every host computes its plan), planned, awaiting_approval, canary, manual_gate, running, "+
+			"pausing (a pause ordered while hosts still carry their tasks; paused once they settle), paused, "+
 			"canceling (a cancel with hosts still carrying their tasks; canceled once they settle), "+
 			"and the terminal states: completed, completed_with_issues (finished under the threshold with hosts "+
 			"failed or unknown), failed (nothing got through), plan_failed (planning left no host to run on), "+
@@ -474,6 +479,15 @@ var queryParameters = map[string][]queryParameter{
 		{"exclude", "string", "A host identifier to leave out; may repeat."},
 		{"exclude_reason", "string", ""},
 		{"compensates", "string", "The campaign the order would undo; an empty selector then names the hosts that campaign changed, and the answer carries the original under compensates."},
+		{"host_id", "string", "A host identifier to preview as an explicit list; may repeat. The list is strict: an unknown host, one outside the caller's scope for the operation, or one also excluded answers 422 targets_invalid with the reason per host."},
+	},
+	"GET /api/v1/enrollment-requests": {
+		{"status", "string", "pending, enrolled, expired, revoked or failed."},
+		{"kind", "string", "agent or relay."},
+		{"site", "string", ""},
+		{"environment", "string", ""},
+		{"limit", "integer", "The page size: 200 by default, 500 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
 	},
 	"GET /api/v1/policies/{id}/results": {
 		{"host_id", "string", "Only the verdicts of this host."},

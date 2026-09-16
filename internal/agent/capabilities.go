@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"os"
 
 	"github.com/ultherego/flotestro/internal/modules/backup"
@@ -72,6 +73,12 @@ const (
 	// Backup. The module drives a tool the host already has: without the tool
 	// and without runbooks there is nothing to make a copy with.
 	CapBackup = "backup"
+	// CapHelperCapability says this agent forwards the panel's signed
+	// capability to the root helper. The features name the mode the helper
+	// reported - observe, prefer or enforce - one of them true once the
+	// helper has answered; all false is a helper that has not said, which
+	// the panel shows as unknown rather than as a helper without the check.
+	CapHelperCapability = "helper.capability"
 )
 
 // The requirements of operations. A logical name does not point at an
@@ -266,7 +273,20 @@ func DetectCapabilities() Capabilities {
 	timesyncd := exists("/usr/lib/systemd/systemd-timesyncd") ||
 		exists("/lib/systemd/systemd-timesyncd")
 
+	helperMode := helperCapabilityMode(context.Background())
+
 	return Capabilities{
+		{
+			Name:      CapHelperCapability,
+			Version:   adapterVersion,
+			Available: true,
+			Features: map[string]bool{
+				"observe": helperMode == "observe",
+				"prefer":  helperMode == "prefer",
+				"enforce": helperMode == "enforce",
+			},
+			Reason: reason(helperMode != "", "the helper has not reported its capability mode"),
+		},
 		{
 			Name:      CapSystemd,
 			Version:   adapterVersion,

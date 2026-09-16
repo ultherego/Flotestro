@@ -1,0 +1,91 @@
+{
+  "documents": [
+    {
+      "name": "empty object",
+      "input": "{}",
+      "canonical": "{}",
+      "sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "members sorted, whitespace dropped",
+      "input": "{ \"b\": 1, \"a\": [1, 2, {\"z\": null, \"y\": true}] }",
+      "canonical": "{\"a\":[1,2,{\"y\":true,\"z\":null}],\"b\":1}",
+      "sha256": "d6ae48f46655f67e859afc5c997311f8d21e10c126c66dddd2b6a5bc49dfe25e"
+    },
+    {
+      "name": "numbers as ECMAScript prints them",
+      "input": "{\"int\": 100, \"neg\": -7, \"frac\": 1.5, \"zero\": 0, \"exp\": 1e2}",
+      "canonical": "{\"exp\":100,\"frac\":1.5,\"int\":100,\"neg\":-7,\"zero\":0}",
+      "sha256": "5cb6125cdb9ac86b6ffa4ea0ccad6b69ab17990481a752d664549d773743c5ff"
+    },
+    {
+      "name": "strings with escapes and unicode",
+      "input": "{\"text\": \"line\\nbreak \\\"quoted\\\" \\\\ ü é\", \"tab\": \"\\t\"}",
+      "canonical": "{\"tab\":\"\\t\",\"text\":\"line\\nbreak \\\"quoted\\\" \\\\ ü é\"}",
+      "sha256": "04e6f4feb187713e5aa5d446bcfc3ae2f0a4e06f38cb63d0619df3665158b993"
+    },
+    {
+      "name": "unit restart payload",
+      "input": "{\"unit\": {\"unit\": \"cron.service\"}}",
+      "canonical": "{\"unit\":{\"unit\":\"cron.service\"}}",
+      "sha256": "c63cacfd8330d08fa524604f50dd980aebe085f9296daffbd43c71d96ec87692"
+    },
+    {
+      "name": "schedule payload with a command",
+      "input": "{\"schedule\": {\"id\": \"nightly-backup\", \"expression\": \"0 2 * * *\", \"command\": [\"/usr/bin/backup\", \"--full\"], \"user\": \"root\"}}",
+      "canonical": "{\"schedule\":{\"command\":[\"/usr/bin/backup\",\"--full\"],\"expression\":\"0 2 * * *\",\"id\":\"nightly-backup\",\"user\":\"root\"}}",
+      "sha256": "65a4acb51addb2d585f5d2fdfebdb0043af7afd2af94d81e0b5eb3e23a030eae"
+    }
+  ],
+  "envelopes": [
+    {
+      "name": "zero envelope",
+      "envelope": {
+        "schema_version": 0,
+        "kind": "",
+        "subject_id": "",
+        "revision": 0,
+        "payload": {}
+      },
+      "canonical": "{\"kind\":\"\",\"payload\":{},\"revision\":0,\"schema_version\":0,\"subject_id\":\"\"}",
+      "sha256": "77340cec8e5b2d2ceb45fa8282d03bcd7ff9f8933b16995e382c3d304eaf00a6"
+    },
+    {
+      "name": "job envelope with a payload",
+      "envelope": {
+        "schema_version": 1,
+        "kind": "job",
+        "subject_id": "7d2b2a2e-1c3f-4a6e-9b8a-5f1e2d3c4b5a",
+        "revision": 3,
+        "payload": {
+          "unit": {
+            "unit": "cron.service"
+          },
+          "limits": {
+            "timeout_seconds": 120
+          }
+        }
+      },
+      "canonical": "{\"kind\":\"job\",\"payload\":{\"limits\":{\"timeout_seconds\":120},\"unit\":{\"unit\":\"cron.service\"}},\"revision\":3,\"schema_version\":1,\"subject_id\":\"7d2b2a2e-1c3f-4a6e-9b8a-5f1e2d3c4b5a\"}",
+      "sha256": "0bd46f88f034678bfa7261b12ccb0041e11769b162b8a90ce844fe4a0fdedae9"
+    },
+    {
+      "name": "capability envelope",
+      "envelope": {
+        "schema_version": 1,
+        "kind": "helper_capability",
+        "subject_id": "cap-1",
+        "revision": 1,
+        "payload": {
+          "action_type": "unit.restart",
+          "grants": [
+            "unit.restart"
+          ],
+          "policy_revision": 0
+        }
+      },
+      "canonical": "{\"kind\":\"helper_capability\",\"payload\":{\"action_type\":\"unit.restart\",\"grants\":[\"unit.restart\"],\"policy_revision\":0},\"revision\":1,\"schema_version\":1,\"subject_id\":\"cap-1\"}",
+      "sha256": "e0b32e77c1dd88676a2f66ca033418ff780f494e67ec6d15ad8afc92f94d1ea7"
+    }
+  ]
+}

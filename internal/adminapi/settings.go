@@ -170,6 +170,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			durationFact("stale_after", effective.StaleAfter),
 			durationFact("agent_cert_ttl", effective.AgentCertTTL),
 			fact("clone_policy", process.ClonePolicy),
+			fact("relay_identity", process.RelayIdentity),
 			fact("dispatch_rate", process.DispatchRate),
 		}},
 		{Key: "identity", Title: "Identity provider", Facts: []settingsFact{

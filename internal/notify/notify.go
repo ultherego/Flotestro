@@ -209,7 +209,12 @@ type EmailConfig struct {
 // SlackConfig is an incoming webhook of Slack or of a service that reads
 // its shape - Mattermost, Rocket.Chat, Discord's Slack endpoint.
 type SlackConfig struct {
-	URL string `json:"url"`
+	// URL is the incoming webhook. It carries the token that lets anybody
+	// post to the channel, so it is a secret: the API never shows it back
+	// and an edit without retyping it keeps the stored one.
+	URL string `json:"url,omitempty"`
+	// URLSet is what the API shows in place of the address.
+	URLSet bool `json:"url_set,omitempty"`
 }
 
 // Error is a refusal with a code the API answers with.
@@ -294,9 +299,16 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 			return nil, Error{Code: "invalid_config", Message: "the configuration does not read as an incoming webhook: " + err.Error()}
 		}
 		config.URL = strings.TrimSpace(config.URL)
+		// An edit that says "the address is set" and types none keeps the
+		// stored address; the store fills it in and refuses a channel that
+		// ends up with none. Every other case has to carry an address.
+		if config.URL == "" && config.URLSet {
+			return config, nil
+		}
 		if err := checkHTTPURL(config.URL); err != nil {
 			return nil, err
 		}
+		config.URLSet = false
 		return config, nil
 	case KindEmail:
 		var config EmailConfig

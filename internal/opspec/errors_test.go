@@ -82,3 +82,28 @@ func TestAnAliasOfAnUnknownCodeIsRefused(t *testing.T) {
 	}()
 	withAliases(reportedGuides, []documentAlias{{code: "x", reportedAs: "something_nobody_wrote"}})
 }
+
+// The refusals of the schedule user, the root grant, the missing validator
+// and the payload permission gate are operator-visible and have advice in
+// the guide; a code the panel shows without advice is a dead end.
+func TestTheGuideCoversTheScheduleAndValidatorRefusals(t *testing.T) {
+	for _, code := range []string{"user_required", "unknown_user", "root_grant_required",
+		"validator_unavailable", "payload_permission_missing"} {
+		guide, ok := ErrorGuideFor(code)
+		if !ok {
+			t.Errorf("the guide does not list %s", code)
+			continue
+		}
+		if guide.Action == "" || guide.Meaning == "" {
+			t.Errorf("%s has no advice: %+v", code, guide)
+		}
+	}
+	// A refusal of the panel before a job exists is not a failure of any
+	// change; the host's refusals are, because the change did not happen.
+	if guide, _ := ErrorGuideFor("payload_permission_missing"); guide.CountsAsFailure {
+		t.Error("payload_permission_missing counts as a failure of a change")
+	}
+	if guide, _ := ErrorGuideFor("validator_unavailable"); !guide.CountsAsFailure {
+		t.Error("validator_unavailable does not count as a failure of the change")
+	}
+}

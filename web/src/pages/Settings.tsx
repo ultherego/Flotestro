@@ -112,6 +112,7 @@ const FACT_LABELS: Record<string, string> = {
   stale_after: "Stale after",
   agent_cert_ttl: "Agent certificate lifetime",
   clone_policy: "Clone policy",
+  relay_identity: "Relayed session without the host certificate",
   dispatch_rate: "Dispatch rate (envelopes per second)",
   issuer: "Issuer",
   client_id: "Client identifier",

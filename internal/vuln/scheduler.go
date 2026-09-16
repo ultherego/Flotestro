@@ -452,7 +452,19 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 			_ = h.store.SaveFetchError(ctx, source.Name(), err.Error())
 			continue
 		}
-		if _, err := h.store.SaveSnapshot(ctx, snapshot, advisories); err != nil {
+		_, err = h.store.SaveSnapshot(ctx, snapshot, advisories)
+		if errors.Is(err, ErrFeedEmpty) {
+			// A feed that answered with nothing where it used to carry
+			// findings is a broken fetch or a broken parser, not a vendor
+			// that fixed everything. The last good snapshot stays active
+			// and carries the reason; without a confirmation it ages into
+			// a stale source the panel shows as such.
+			h.log.Error("the feed came back empty; the previous snapshot stays in force",
+				"provider", source.Name(), "releases", list)
+			_ = h.store.SaveFetchError(ctx, source.Name(), ReasonFeedEmpty)
+			continue
+		}
+		if err != nil {
 			h.log.Error("the feed snapshot was not saved", "provider", source.Name(), "err", err)
 			continue
 		}
@@ -539,8 +551,13 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			}
 			fromHost, collected, err := h.packages.HostAdvisories(ctx, description.ID)
 			if err != nil {
-				h.log.Error("the findings of the host were not read",
+				// A read that failed is not an empty set of findings: an
+				// assessment made with nothing would say the host is clean.
+				// The previous findings stand until the next sweep reads
+				// the metadata.
+				h.log.Error("the findings of the host were not read; the previous assessment stands",
 					"host_id", description.ID, "err", err)
+				continue
 			}
 			set = fromHost
 			input.AdvisoryDigest = advisoryState.Digest
@@ -577,8 +594,13 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				fetched, err := h.store.AdvisoriesForRelease(ctx, snapshot.ID,
 					description.Distribution, description.Release)
 				if err != nil {
-					h.log.Error("the findings of the feed were not read",
-						"provider", provider, "err", err)
+					// The same rule as for the host's own findings: a feed
+					// that could not be read must not assess anybody as
+					// clean. Nothing is cached for the release, so the
+					// next host of it asks the database again.
+					h.log.Error("the findings of the feed were not read; the previous assessments stand",
+						"provider", provider, "release", description.Release, "err", err)
+					continue
 				}
 				feedAdvisories[key] = fetched
 			}

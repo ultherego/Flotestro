@@ -104,6 +104,9 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				ExpectedSha256: payload.ExpectedSHA256,
 				Validator:      payload.Validator,
 				FromSecret:     !payload.ContentSecret.Empty(),
+				// The flag travels with the order; the grant that makes it
+				// count travels in the capability the client attaches.
+				AllowMissingValidator: payload.AllowMissingValidator,
 			},
 		},
 	}, timeout)

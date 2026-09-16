@@ -377,3 +377,118 @@ func TestSchedulePreviewComesFromTheHost(t *testing.T) {
 			"payload": map[string]any{"schedule": map[string]any{"expression": "0 25 * * *"}}},
 		nil, http.StatusBadRequest)
 }
+
+// TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending guards the
+// user field of a cron line. The user is separated from the command by
+// whitespace only, and the panel used to pass it through unchecked: a value
+// like "root; /bin/sh" or one with a newline would have become a root cron
+// line of its own. Such an order is a defect of the order and never leaves
+// the panel - and neither does an entry that names no account, because
+// root is not a default.
+func TestScheduleUserThatIsNotAnAccountNameIsRefusedBeforeSending(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, user := range []string{"root; /bin/sh", "root\n* * * * * root /bin/sh", "root #", "Root", ""} {
+		response, body := h.request(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{"action": "schedule.ensure", "reason": scheduleReason,
+				"payload": map[string]any{"schedule": map[string]any{
+					"id": "bad-user", "expression": "0 4 * * *",
+					"command": []string{"/usr/bin/true"}, "user": user,
+				}}}, nil)
+		if response.StatusCode != http.StatusBadRequest {
+			t.Errorf("user %q: status %d, want 400; body: %s", user, response.StatusCode, truncate(body, 300))
+			continue
+		}
+		if code := problemCode(t, body); code != "invalid_payload" {
+			t.Errorf("user %q: code %q, want invalid_payload", user, code)
+		}
+	}
+	for _, remaining := range schedulesOf(t, h, host.ID).Schedules {
+		if remaining.ID == "bad-user" {
+			t.Fatalf("an entry with a bad user reached the host: %+v", remaining)
+		}
+	}
+}
+
+// TestScheduleForAnUnknownUserIsRefusedByTheHost checks the second level:
+// the account has to exist on the host, and only the host knows that. The
+// refusal has its own code and nothing lands in /etc/cron.d.
+func TestScheduleForAnUnknownUserIsRefusedByTheHost(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	const id = "unknown-user-test"
+
+	t.Cleanup(func() {
+		h.createOperation(host.ID, map[string]any{
+			"action": "schedule.remove", "reason": scheduleReason,
+			"payload": map[string]any{"schedule": map[string]any{"id": id}},
+		})
+	})
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "schedule.ensure", "reason": scheduleReason,
+		"payload": map[string]any{"schedule": map[string]any{
+			"id": id, "expression": "0 4 * * *",
+			"command": []string{"/usr/bin/true"}, "user": "flotestro-no-such-account",
+		}},
+	}, 90*time.Second)
+	if job.State == "succeeded" {
+		t.Fatalf("the host wrote an entry for an account it does not have")
+	}
+	if len(attempts) == 0 || attempts[len(attempts)-1].ErrorCode != "unknown_user" {
+		t.Fatalf("refusal = %s, want unknown_user", lastMessage(attempts))
+	}
+	for _, remaining := range schedulesOf(t, h, host.ID).Schedules {
+		if remaining.ID == id {
+			t.Fatalf("the refused entry is on the host: %+v", remaining)
+		}
+	}
+}
+
+// TestRootScheduleNeedsItsOwnPermission checks the gate between writing
+// schedules and putting a command into root's crontab. A principal without
+// schedule.root.exec is refused with a code naming the payload, not the
+// operation, and no job comes into being. With the built-in roles the
+// operator has no schedule.write either, so the first gate refuses them
+// with permission_denied; a role that holds schedule.write without the
+// root grant reaches the second gate and gets payload_permission_missing.
+func TestRootScheduleNeedsItsOwnPermission(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+
+	for _, role := range []string{"viewer", "operator"} {
+		limited := h.withToken(h.createPrincipal(uniqueSubject("root-schedule-"+role),
+			[]map[string]string{{"role": role, "site": host.Site, "environment": host.Environment}}))
+		var identity struct {
+			Permissions []string `json:"permissions"`
+		}
+		limited.get("/api/v1/whoami", &identity)
+		holdsWrite := containsName(identity.Permissions, "schedule.write")
+		holdsRoot := containsName(identity.Permissions, "schedule.root.exec")
+		if holdsRoot {
+			t.Fatalf("the built-in role %s holds schedule.root.exec", role)
+		}
+
+		response, body := limited.request(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
+			map[string]any{"action": "schedule.ensure", "reason": scheduleReason,
+				"payload": map[string]any{"schedule": map[string]any{
+					"id": "root-grant-test", "expression": "0 4 * * *",
+					"command": []string{"/usr/bin/true"}, "user": "root",
+				}}}, nil)
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("%s: status %d, want 403; body: %s", role, response.StatusCode, truncate(body, 300))
+		}
+		want := "permission_denied"
+		if holdsWrite {
+			want = "payload_permission_missing"
+		}
+		if code := problemCode(t, body); code != want {
+			t.Errorf("%s: code %q, want %q", role, code, want)
+		}
+	}
+	for _, remaining := range schedulesOf(t, h, host.ID).Schedules {
+		if remaining.ID == "root-grant-test" {
+			t.Fatalf("a refused root entry reached the host: %+v", remaining)
+		}
+	}
+}

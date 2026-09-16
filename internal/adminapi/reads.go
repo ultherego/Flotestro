@@ -240,7 +240,10 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	candidates, ok := s.materialize(w, r, chosen)
+	// The fleet is resolved within the scopes of the read's own
+	// permission; the per-host check below is the second lock on the
+	// same door.
+	candidates, ok := s.materialize(w, r, principal, authz.Permission(action.Permission()), chosen)
 	if !ok {
 		return
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/relays"
 )
 
@@ -374,18 +375,48 @@ func (s *Server) lastDenial(r *http.Request, orderID string) (string, string) {
 	return "", ""
 }
 
-// handleListEnrollmentRequests shows the pending and closed installations.
+// handleListEnrollmentRequests shows the pending and closed installations
+// the caller may read: the list is narrowed in the query to the scopes of
+// the caller's right, so the operator of one site sees that site's orders
+// and never learns where else machines are being installed. The page is
+// keyed, and the filters name the status, the kind and the placement.
 func (s *Server) handleListEnrollmentRequests(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.authorize(w, r, authz.PermHostEnrollRead, authz.GlobalScope,
-		"enrollment_request", ""); !ok {
+	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "enrollment_request")
+	if !ok {
 		return
 	}
-	orders, err := s.tokens.List(r.Context())
+	query := r.URL.Query()
+	filter := enrollment.ListFilter{
+		Status:      strings.TrimSpace(query.Get("status")),
+		Kind:        strings.TrimSpace(query.Get("kind")),
+		Site:        strings.TrimSpace(query.Get("site")),
+		Environment: strings.TrimSpace(query.Get("environment")),
+		Scopes:      principal.ScopesFor(authz.PermHostEnrollRead),
+	}
+	if filter.Status != "" && !slices.Contains([]string{enrollment.StatusPending, enrollment.StatusEnrolled,
+		enrollment.StatusExpired, enrollment.StatusRevoked, enrollment.StatusFailed}, filter.Status) {
+		problem(w, http.StatusBadRequest, "invalid_status",
+			"status has to be pending, enrolled, expired, revoked or failed")
+		return
+	}
+	if filter.Kind != "" && filter.Kind != enrollment.KindAgent && filter.Kind != enrollment.KindRelay {
+		problem(w, http.StatusBadRequest, "invalid_kind", "kind has to be agent or relay")
+		return
+	}
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	limit = paging.Limit(limit, 200, enrollment.MaxListPage)
+	page, err := s.tokens.ListPaged(r.Context(), filter, query.Get("cursor"), limit)
+	if errors.Is(err, paging.ErrInvalidCursor) {
+		problem(w, http.StatusBadRequest, "invalid_cursor", err.Error())
+		return
+	}
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": orders, "count": len(orders)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": page.Items, "count": len(page.Items), "next_cursor": page.NextCursor,
+	})
 }
 
 // handleGetEnrollmentRequest shows one order.
@@ -455,21 +486,39 @@ func (s *Server) handleEnrollmentConfig(w http.ResponseWriter, r *http.Request) 
 }
 
 // handleRevokeEnrollmentRequest blocks the remaining uses immediately.
+//
+// The order is read first and the right is checked where the machine was
+// to live: the operator of a site revokes the orders of that site, and an
+// identifier from elsewhere is a refusal with the scope on the trail. A
+// right over the whole fleet is not required for that, and no right at all
+// does not learn whether the identifier exists.
 func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Request) {
-	principal, ok := s.authorize(w, r, authz.PermHostEnrollRevoke, authz.GlobalScope,
-		"enrollment_request", r.PathValue("id"))
-	if !ok {
+	id := r.PathValue("id")
+	if _, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRevoke, "enrollment_request"); !ok {
 		return
 	}
-	// The order is read before it is revoked: the announcement of the
-	// revocation carries its placement, and the row says nothing else
-	// once it is gone from the screen.
-	order, err := s.tokens.Request(r.Context(), r.PathValue("id"))
-	if err != nil && !errors.Is(err, enrollment.ErrUnknownRequest) {
+	if _, err := uuid.Parse(id); err != nil {
+		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
+		return
+	}
+	// The order is read before it is revoked: the right is judged by its
+	// placement, and the announcement of the revocation carries that
+	// placement once the row is gone from the screen.
+	order, err := s.tokens.Request(r.Context(), id)
+	if errors.Is(err, enrollment.ErrUnknownRequest) {
+		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
+		return
+	}
+	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	err = s.tokens.Revoke(r.Context(), r.PathValue("id"))
+	principal, ok := s.authorize(w, r, authz.PermHostEnrollRevoke,
+		authz.Scope{Site: order.Site, Environment: order.Environment}, "enrollment_request", id)
+	if !ok {
+		return
+	}
+	err = s.tokens.Revoke(r.Context(), id)
 	if errors.Is(err, enrollment.ErrUnknownRequest) {
 		problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
 		return
@@ -481,14 +530,13 @@ func (s *Server) handleRevokeEnrollmentRequest(w http.ResponseWriter, r *http.Re
 	s.audit.Record(r.Context(), audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
 		Action: "host.enrollment.revoke", TargetType: "enrollment_request",
-		TargetID: r.PathValue("id"), Outcome: audit.OutcomeSuccess,
+		TargetID: id, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{"site": order.Site, "environment": order.Environment, "kind": order.Kind},
 	})
-	if order != nil {
-		s.publishEnrollment(r.Context(), events.EnrollmentChange{
-			RequestID: order.ID, Change: events.EnrollmentRevoked,
-			Site: order.Site, Environment: order.Environment, Kind: order.Kind,
-		})
-	}
+	s.publishEnrollment(r.Context(), events.EnrollmentChange{
+		RequestID: order.ID, Change: events.EnrollmentRevoked,
+		Site: order.Site, Environment: order.Environment, Kind: order.Kind,
+	})
 	// A revoked recovery order may have been the only thing a host in
 	// recovery was waiting for; it comes back to active at once rather than
 	// at the next sweep.

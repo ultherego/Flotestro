@@ -75,6 +75,9 @@ type Scheduler struct {
 	bucket  *Bucket
 	log     *slog.Logger
 	options Options
+	// capabilities mints the root helper's authorization for a mutating
+	// task at dispatch. A zero value mints nothing.
+	capabilities HelperCapabilities
 }
 
 // SetSecrets attaches the secret store. Without it a task naming a secret
@@ -260,10 +263,16 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 	// database can, and the check is one query for the whole batch.
 	ambiguous, err := s.ambiguousHosts(ctx, hostsOf(leased))
 	if err != nil {
-		// A failed check holds nobody: the tasks go out as before the
-		// check existed, and a stale session is caught by its lease.
-		s.log.Error("the open sessions of the hosts were not read", "err", err)
-		ambiguous = nil
+		// A failed check holds the whole batch: without the answer the
+		// scheduler does not know whose session is the right one, and a
+		// task sent over the wrong one would run twice once the other
+		// gateway sends it as well. The tasks go back to the queue and the
+		// next pass asks again.
+		s.log.Error("the open sessions of the hosts were not read; the batch is held", "err", err)
+		for _, item := range leased {
+			s.holdAmbiguous(ctx, item)
+		}
+		return
 	}
 	for _, item := range leased {
 		if ambiguous[item.Job.HostID] {
@@ -334,6 +343,16 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	if err != nil {
 		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
 		metrics.JobDispatch.Inc("invalid_envelope", s.options.GatewayID)
+		if errors.Is(err, errCapabilityUnsupported) {
+			// Under enforce a host whose agent forwards no capability gets
+			// no mutating task: the helper would refuse it anyway, and the
+			// job says on the panel why, rather than on the host.
+			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
+				ErrorHelperCapabilityUnsupported, err.Error()); err != nil {
+				s.log.Error("the held task was not settled", "job_id", item.Job.ID, "err", err)
+			}
+			return
+		}
 		if permanentFailure(err) {
 			// The same answer would come on every pass until the deadline;
 			// a task that cannot be assembled is settled now, with the
@@ -369,21 +388,43 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	if session, ok := s.registry.Get(item.Job.HostID); ok && buildinfo.AcknowledgesTasks(session.AgentVersion) {
 		lease = jobs.DispatchLease
 	}
-	if err := s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, sessionID, lease); err != nil {
+	err = s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, sessionID, lease)
+	if errors.Is(err, jobs.ErrSessionStale) {
+		// The host left this gateway between the send and the record:
+		// the session the envelope went over is closed in the database.
+		// The task goes back to the queue for the host's current session;
+		// the agent that got the envelope answers on a released attempt,
+		// which the store does not count.
+		s.log.Info("the task was sent over a session the host has left, going back to the queue",
+			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
+		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, "session_stale"); releaseErr != nil {
+			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
+		}
+		metrics.JobDispatch.Inc("session_stale", s.options.GatewayID)
+		return
+	}
+	if err != nil {
 		s.log.Error("the delivery was not recorded", "job_id", item.Job.ID, "err", err)
 		metrics.JobDispatch.Inc("unrecorded", s.options.GatewayID)
 		return
 	}
 	metrics.JobDispatch.Inc("dispatched", s.options.GatewayID)
 
+	detail := map[string]any{
+		"host_id": item.Job.HostID, "attempt": item.Attempt,
+		"action_type": item.Job.ActionType, "session_id": sessionID,
+	}
+	// The capability's identifier is on both sides of the trail: here at
+	// the dispatch, and in the helper's log at the verification.
+	if id := envelope.GetHelperCapability().GetCapabilityId(); id != "" {
+		detail["capability_id"] = id
+		detail["capability_key_id"] = envelope.GetHelperCapability().GetKeyId()
+	}
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: s.options.GatewayID,
 		Action: "job.dispatch", TargetType: "job", TargetID: item.Job.ID,
 		RequestID: item.Job.RequestID, Outcome: audit.OutcomeSuccess,
-		Detail: map[string]any{
-			"host_id": item.Job.HostID, "attempt": item.Attempt,
-			"action_type": item.Job.ActionType, "session_id": sessionID,
-		},
+		Detail: detail,
 	})
 	s.log.Info("the task was delivered",
 		"job_id", item.Job.ID, "host_id", item.Job.HostID,
@@ -416,6 +457,12 @@ func (s *Scheduler) buildEnvelopeFor(ctx context.Context, item jobs.LeasedJob) (
 			}
 			envelope.PayloadHash = hash
 		}
+	}
+
+	// The root helper's authorization is minted at the same moment and for
+	// the same reason: its window starts when the host starts working.
+	if _, err := s.attachCapability(ctx, item, envelope); err != nil {
+		return nil, err
 	}
 
 	// The secrets named in the task get their leases exactly at delivery
@@ -739,6 +786,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			file.Group = payload.File.Group
 			file.ExpectedSha256 = payload.File.ExpectedSHA256
 			file.Validator = payload.File.Validator
+			file.AllowMissingValidator = payload.File.AllowMissingValidator
 		}
 		envelope.Action = &agentv1.TaskEnvelope_File{File: file}
 

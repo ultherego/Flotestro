@@ -201,6 +201,9 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return fmt.Errorf("the new identity was refused: %w", err)
 	}
 	*identity = *fromIdentity(renewed)
+	// The renewal carries the panel's current capability keys: a rotated
+	// key reaches the helper here, and again with the next session.
+	deliverHelperTrust(ctx, response.Msg.GetHelperTrust(), options.Log)
 	return nil
 }
 

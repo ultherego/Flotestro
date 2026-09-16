@@ -58,6 +58,22 @@ func NewStore(pool *pgxpool.Pool, log *slog.Logger) *Store {
 // whole campaign.
 func (s *Store) Acquire(ctx context.Context, owner, claimant string, class Class,
 	needs []Need) (Refusal, error) {
+	return s.AcquireFenced(ctx, owner, claimant, class, needs, 0)
+}
+
+// AcquireFenced grants the needs like Acquire and writes the caller's
+// fencing token on every lease it records.
+//
+// The token is the claim token of a campaign target: minted when the
+// runner claims the target, moved on when another runner takes it over.
+// A renewal or a release that names the token is applied only while the
+// lease still carries it, so the runner that lost the target cannot
+// extend or free the tokens of the runner that holds it now. A single job
+// passes zero and keeps the unfenced path: the scheduler is the one owner
+// of a job's lease, and the job's own lease on the agent is what guards
+// the work there.
+func (s *Store) AcquireFenced(ctx context.Context, owner, claimant string, class Class,
+	needs []Need, token int64) (Refusal, error) {
 	if len(needs) == 0 {
 		return Refusal{}, nil
 	}
@@ -105,7 +121,7 @@ func (s *Store) Acquire(ctx context.Context, owner, claimant string, class Class
 	}
 
 	for _, need := range granted {
-		if err := s.recordLease(ctx, tx, need, owner, claimant); err != nil {
+		if err := s.recordLease(ctx, tx, need, owner, claimant, token); err != nil {
 			return Refusal{}, err
 		}
 	}
@@ -299,15 +315,18 @@ func (s *Store) recordWaiter(ctx context.Context, tx pgx.Tx,
 }
 
 func (s *Store) recordLease(ctx context.Context, tx pgx.Tx, need Need,
-	owner, claimant string) error {
+	owner, claimant string, token int64) error {
+	// A lease taken again by the same owner - a task retried, a target
+	// claimed once more - carries the token of the newest claim: the
+	// older claim is the one that must not be able to touch it.
 	const query = `
-		insert into budget_leases (key, owner, claimant, weight, lease_until)
-		values ($1, $2, $3, $4, now() + make_interval(secs => $5))
+		insert into budget_leases (key, owner, claimant, weight, lease_until, fencing_token)
+		values ($1, $2, $3, $4, now() + make_interval(secs => $5), $6)
 		on conflict (key, owner) do update
 		   set claimant = excluded.claimant, weight = excluded.weight,
-		       lease_until = excluded.lease_until`
+		       lease_until = excluded.lease_until, fencing_token = excluded.fencing_token`
 	_, err := tx.Exec(ctx, query, need.Key, owner, claimant,
-		need.Weight, s.lease.Seconds())
+		need.Weight, s.lease.Seconds(), token)
 	return err
 }
 
@@ -326,9 +345,49 @@ func (s *Store) Renew(ctx context.Context, owners []string) error {
 	return err
 }
 
+// Fenced names one lease by its owner and the fencing token the caller
+// holds for it.
+type Fenced struct {
+	Owner string
+	Token int64
+}
+
+// RenewFenced extends the leases the caller still holds under its tokens.
+// A lease whose token moved on - another runner took the owner over - is
+// left alone: the document's rule is that the losing replica cannot
+// extend the lease of the new holder, and the same statement keeps it
+// from extending a lease it merely used to hold.
+func (s *Store) RenewFenced(ctx context.Context, leases []Fenced) error {
+	if len(leases) == 0 {
+		return nil
+	}
+	owners := make([]string, 0, len(leases))
+	tokens := make([]int64, 0, len(leases))
+	for _, lease := range leases {
+		owners = append(owners, lease.Owner)
+		tokens = append(tokens, lease.Token)
+	}
+	_, err := s.pool.Exec(ctx, `
+		update budget_leases l
+		   set lease_until = now() + make_interval(secs => $3)
+		  from unnest($1::text[], $2::bigint[]) as held (owner, token)
+		 where l.owner = held.owner and l.fencing_token = held.token`,
+		owners, tokens, s.lease.Seconds())
+	return err
+}
+
 // Release returns the tokens of one piece of work.
 func (s *Store) Release(ctx context.Context, owner string) error {
 	_, err := s.pool.Exec(ctx, `delete from budget_leases where owner = $1`, owner)
+	return err
+}
+
+// ReleaseFenced returns the tokens of one piece of work only while the
+// lease still carries the caller's token. A runner that lost the owner to
+// another one releases nothing: the tokens are the new holder's now.
+func (s *Store) ReleaseFenced(ctx context.Context, owner string, token int64) error {
+	_, err := s.pool.Exec(ctx,
+		`delete from budget_leases where owner = $1 and fencing_token = $2`, owner, token)
 	return err
 }
 

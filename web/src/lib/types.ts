@@ -145,6 +145,9 @@ export function refusalName(code: string): string {
     case "unknown_certificate": return "certificate unknown";
     case "revoked_certificate": return "certificate revoked";
     case "identity_mismatch": return "identity mismatch";
+    case "relay_identity_missing": return "relay did not attest the certificate";
+    case "relay_identity_invalid": return "relay attestation unreadable";
+    case "relay_scope_mismatch": return "relay of another site or environment";
     default:
       return code.startsWith("lifecycle_") ? `host ${code.slice("lifecycle_".length)}` : code;
   }

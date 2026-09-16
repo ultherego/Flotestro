@@ -19,6 +19,7 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -28,6 +29,8 @@ import (
 	"github.com/ultherego/flotestro/internal/events"
 	managedfiles "github.com/ultherego/flotestro/internal/files"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/issuer"
@@ -139,6 +142,16 @@ type AgentService struct {
 	// clonePolicy says what the gateway does with a copied identity: the
 	// empty value is the packaged default, quarantine.
 	clonePolicy ClonePolicy
+	// relayIdentity says what the gateway does with a session through a
+	// relay that names the host without the certificate it presented: the
+	// empty value is the packaged default, prefer.
+	relayIdentity RelayIdentityMode
+	// helperSigner signs the capabilities the root helper verifies and the
+	// trust bundle every session and renewal carries down to it. Nil is a
+	// panel without a signing key: the hosts get no bundle and the tasks no
+	// capability, and the helpers under prefer treat every task as a
+	// legacy one.
+	helperSigner *helpercap.Signer
 
 	heartbeatSeconds int
 	heartbeatJitter  int
@@ -159,6 +172,19 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
 		attempts: map[string]attemptContextEntry{},
 	}
+}
+
+// SetHelperSigner connects the capability key. The session configuration
+// then carries the panel's trust bundle to every host that connects.
+func (s *AgentService) SetHelperSigner(signer *helpercap.Signer) { s.helperSigner = signer }
+
+// helperTrustFor is the signed keyring for one host, or nil on a panel
+// without a signing key.
+func (s *AgentService) helperTrustFor(hostID string) *helperv1.HelperTrustBundle {
+	if s.helperSigner == nil {
+		return nil
+	}
+	return s.helperSigner.TrustBundle(hostID, time.Now())
 }
 
 // SetAssessmentRefresh connects the request to recompute the vulnerability
@@ -250,18 +276,19 @@ func (s *AgentService) Connect(ctx context.Context,
 	// site. In the second case the identity of the host does not come from the
 	// TLS handshake but from the attestation of the relay, and that is exactly
 	// why it is checked separately.
-	hostID, relayID, err := s.identifyPeer(ctx, cert, stream.RequestHeader().Get(relayHostHeader))
+	who, err := s.identifyPeer(ctx, cert, stream.RequestHeader())
 	if err != nil {
 		return err
 	}
+	hostID, relayID := who.HostID, who.RelayID
 	if relayID != "" {
 		s.relays.MarkSeen(ctx, relayID)
 	}
 
 	// The certificate of a relay does not describe a host, so the state of the
-	// certificate of a host is checked only for a direct connection. The
-	// identity of a host from the attestation of a relay has already been
-	// checked above.
+	// certificate of a host is checked here only for a direct connection. A
+	// host attested by a relay went through the same checks above, on the
+	// certificate the relay named.
 	if relayID == "" {
 		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
 		if err != nil {
@@ -324,6 +351,12 @@ func (s *AgentService) Connect(ctx context.Context,
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)
 	session.RelayID = relayID
+	session.RelayIdentity = who.Identity
+	// What the host does with a signed capability decides whether the
+	// scheduler mints one for it. An agent from before the field says
+	// nothing, and nothing is what it gets.
+	session.HelperCapabilitySupported = hello.GetHelperCapabilitySupported()
+	session.HelperCapabilityMode = hello.GetHelperCapabilityMode()
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
@@ -387,6 +420,10 @@ func (s *AgentService) Connect(ctx context.Context,
 				InventoryCadence: &agentv1.InventoryCadence{
 					NormalEvery: inventoryNormalEvery,
 				},
+				// The panel's capability keys, signed, for the helper's
+				// keyring: every session refreshes them, so a rotated key
+				// reaches the host at its next connection at the latest.
+				HelperTrust: s.helperTrustFor(hostID),
 			},
 		},
 	}); err != nil {
@@ -837,9 +874,6 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		return nil
 	}
 
-	// The desired state of a file is written after a successful operation
-	// rather than at the ordering: the panel must not claim it manages a file
-	// the host rejected.
 	// A job that has finished has no reason to keep an open right to a secret.
 	// The lease will expire on its own anyway, but the window is to be as
 	// short as it can be - not as long as the clock allows.
@@ -849,6 +883,55 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
+	state, statusName := jobStateFor(result.GetStatus())
+
+	// A refresh of the inventory is settled by the appearance of a revision
+	// rather than by the report of the agent. The agent sends the image over
+	// the same stream right before the result, so by the time we get here the
+	// revision is already recorded. When it is not there, the image did not
+	// arrive - and a job that says "refreshed" over a state from a quarter of
+	// an hour ago is worse than a failed job.
+	errorCode, errorMessage := result.GetErrorCode(), result.GetMessage()
+	if state == jobs.StateSucceeded && action == string(opspec.ActionInventoryRefresh) {
+		if code, message := s.checkRefresh(ctx, hostID, result); code != "" {
+			state, statusName = jobs.StateFailed, "failed"
+			errorCode, errorMessage = code, message
+		}
+	}
+
+	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
+		Status:          statusName,
+		ExitCode:        result.GetExitCode(),
+		Stdout:          result.GetStdout(),
+		Stderr:          result.GetStderr(),
+		OutputTruncated: result.GetOutputTruncated(),
+		ErrorCode:       errorCode,
+		Message:         errorMessage,
+		Replayed:        result.GetReplayed(),
+		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
+		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
+		Detail:          resultDetailJSON(result),
+	}, state)
+	if err != nil {
+		return err
+	}
+	// Everything a result changes on the host's record - the desired state
+	// of a file, a deployed certificate, a package list, a backup run, the
+	// inventory fragments the agent sent back with it - follows the
+	// settlement rather than precedes it. A result the store did not
+	// accept is a result for a job that was settled, canceled or given up
+	// on before it arrived; the audit trail keeps it, with applied=false,
+	// and the host's record stays as the settlement left it: a late copy
+	// of an old result must not move the observed state of the host
+	// forward or re-run a backup's bookkeeping.
+	if !accepted {
+		s.recordUnappliedResult(ctx, hostID, jobID, attemptID, statusName, result, attemptStatus)
+		return nil
+	}
+
+	// The desired state of a file is written after a successful operation
+	// rather than at the ordering: the panel must not claim it manages a file
+	// the host rejected.
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
 		s.saveFileState(ctx, hostID, jobID)
 		s.saveCertificateDeployment(ctx, hostID, jobID, result.GetCertificateResult())
@@ -1090,39 +1173,6 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		}
 	}
 
-	state, statusName := jobStateFor(result.GetStatus())
-
-	// A refresh of the inventory is settled by the appearance of a revision
-	// rather than by the report of the agent. The agent sends the image over
-	// the same stream right before the result, so by the time we get here the
-	// revision is already recorded. When it is not there, the image did not
-	// arrive - and a job that says "refreshed" over a state from a quarter of
-	// an hour ago is worse than a failed job.
-	errorCode, errorMessage := result.GetErrorCode(), result.GetMessage()
-	if state == jobs.StateSucceeded && action == string(opspec.ActionInventoryRefresh) {
-		if code, message := s.checkRefresh(ctx, hostID, result); code != "" {
-			state, statusName = jobs.StateFailed, "failed"
-			errorCode, errorMessage = code, message
-		}
-	}
-
-	accepted, err := s.jobs.RecordResult(ctx, jobID, attemptID, jobs.Result{
-		Status:          statusName,
-		ExitCode:        result.GetExitCode(),
-		Stdout:          result.GetStdout(),
-		Stderr:          result.GetStderr(),
-		OutputTruncated: result.GetOutputTruncated(),
-		ErrorCode:       errorCode,
-		Message:         errorMessage,
-		Replayed:        result.GetReplayed(),
-		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
-		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
-		Detail:          resultDetailJSON(result),
-	}, state)
-	if err != nil {
-		return err
-	}
-
 	// An operation on an account changes the state of the host at once, while
 	// the full inventory report comes only in a dozen or so minutes. The agent
 	// reads the account after the change, so we record the actual state of the
@@ -1182,29 +1232,41 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		Detail: map[string]any{
 			"attempt_id": attemptID, "status": statusName,
 			"exit_code": result.GetExitCode(), "error_code": result.GetErrorCode(),
-			"replayed": result.GetReplayed(), "applied": accepted,
+			"replayed": result.GetReplayed(), "applied": true,
 			"after_lease_expiry": afterLeaseExpiry,
 		},
 	})
-
-	if !accepted {
-		// A result after a settlement, a cancellation or an expiry is kept in
-		// the attempt for diagnostics but does not take back the decision. A
-		// result on an attempt whose lease ran out is not that case: the job
-		// was still open, and the store settled it from this result and
-		// closed the redelivered attempt as superseded - unless the job had
-		// only just gone back to the queue, in which case the redelivery
-		// answers from the agent's journal.
-		s.log.Warn("the result did not change the state of the job",
-			"job_id", jobID, "attempt_id", attemptID, "status", statusName,
-			"after_lease_expiry", afterLeaseExpiry)
-		return nil
-	}
 	s.log.Info("the result of the job was written",
 		"job_id", jobID, "host_id", hostID, "status", statusName,
 		"exit_code", result.GetExitCode(), "replayed", result.GetReplayed(),
 		"after_lease_expiry", afterLeaseExpiry)
 	return nil
+}
+
+// recordUnappliedResult puts a result the store did not accept on the
+// trail. A result after a settlement, a cancellation or an expiry does not
+// take back the decision and changes nothing on the host's record; the
+// trail is where it is kept. A result on an attempt whose lease ran out is
+// not that case: the job was still open, and the store settled it from
+// the result and closed the redelivered attempt as superseded - unless the
+// job had only just gone back to the queue, in which case the redelivery
+// answers from the agent's journal.
+func (s *AgentService) recordUnappliedResult(ctx context.Context, hostID, jobID, attemptID,
+	statusName string, result *agentv1.TaskResult, attemptStatus string) {
+	afterLeaseExpiry := attemptStatus == jobs.AttemptStatusLeaseExpired
+	s.audit.Record(ctx, audit.Event{
+		ActorType: audit.ActorAgent, ActorID: hostID,
+		Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: audit.OutcomeFailure,
+		Detail: map[string]any{
+			"attempt_id": attemptID, "status": statusName,
+			"exit_code": result.GetExitCode(), "error_code": result.GetErrorCode(),
+			"replayed": result.GetReplayed(), "applied": false,
+			"after_lease_expiry": afterLeaseExpiry,
+		},
+	})
+	s.log.Warn("the result did not change the state of the job and was not applied to the host",
+		"job_id", jobID, "attempt_id", attemptID, "host_id", hostID, "status", statusName,
+		"after_lease_expiry", afterLeaseExpiry)
 }
 
 // jobStateFor translates the status reported by the agent into the state of a
@@ -2120,20 +2182,36 @@ func (s *AgentService) countReconnect(ctx context.Context, session *Session) {
 
 func (s *AgentService) openSession(ctx context.Context, session *Session,
 	fingerprint []byte, relayID string) error {
-	// The epoch number and the session row come into being in one transaction.
+	// The epoch number and the session row come into being in one statement.
 	// Two gateways opening a session for the same host at the same moment have
 	// to get different numbers, because it is the number that settles which of
-	// them is the right one.
+	// them is the right one. Each computes max + 1 on its own, and the unique
+	// index on (host_id, epoch) is what makes the two differ: the second
+	// insert is refused and tried again over the number the first one took.
+	// The retries are bounded, because a host reconnecting in a storm on
+	// several gateways must not keep a request spinning on the database.
 	const query = `
 		insert into agent_sessions
 			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch)
 		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid,
 			(select coalesce(max(epoch), 0) + 1 from agent_sessions where host_id = $2))
 		returning epoch`
-	if err := s.pool.QueryRow(ctx, query, session.ID, session.HostID, s.gatewayID,
-		fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID).
-		Scan(&session.Epoch); err != nil {
-		return err
+	var err error
+	for attempt := 0; attempt < sessionEpochAttempts; attempt++ {
+		err = s.pool.QueryRow(ctx, query, session.ID, session.HostID, s.gatewayID,
+			fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID).
+			Scan(&session.Epoch)
+		if err == nil {
+			break
+		}
+		if !epochTaken(err) {
+			return err
+		}
+		s.log.Info("the session epoch was taken by another gateway; trying the next one",
+			"host_id", session.HostID, "attempt", attempt+1)
+	}
+	if err != nil {
+		return fmt.Errorf("opening the session after %d attempts at an epoch: %w", sessionEpochAttempts, err)
 	}
 
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
@@ -2206,6 +2284,13 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		s.log.Error("the epoch of the session was not announced",
 			"host_id", session.HostID, "epoch", session.Epoch, "err", err)
 	}
+	// How the host was identified is a fact of the newest session and is
+	// written on the host: a session on the relay's word alone is the
+	// operator's business, and the host page is where they look.
+	if err := s.hosts.RecordRelayIdentity(ctx, session.HostID, session.RelayIdentity); err != nil {
+		s.log.Error("the identity strength of the session was not recorded on the host",
+			"host_id", session.HostID, "err", err)
+	}
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: session.HostID,
 		Action: "agent.session.open", TargetType: "host", TargetID: session.HostID,
@@ -2215,9 +2300,22 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 			"session_id": session.ID, "gateway_id": s.gatewayID,
 			"epoch":         session.Epoch,
 			"agent_version": session.AgentVersion, "boot_id": session.BootID,
+			"relay_identity": nullableRelay(session.RelayIdentity),
 		},
 	})
 	return nil
+}
+
+// sessionEpochAttempts bounds how many times a session tries to take the
+// next epoch of its host when another gateway takes it first.
+const sessionEpochAttempts = 5
+
+// epochTaken says whether an insert of a session row was refused because
+// another gateway took the same epoch of the host a moment earlier.
+func epochTaken(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" &&
+		pgErr.ConstraintName == "agent_sessions_host_epoch_key"
 }
 
 // ClonePolicy says what the gateway does once it sees the same identity
@@ -2710,8 +2808,74 @@ func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 	}
 }
 
-// relayHostHeader carries the identity of a host attested by a relay.
-const relayHostHeader = "Flotestro-Relay-Host"
+// The headers a relay attests a host's session with. The host is named by
+// its identifier; the certificate it presented to the relay by its SHA-256
+// fingerprint in hex and its serial, so the gateway can check that
+// certificate against the record as it would in a direct handshake. The
+// names have to match the relay: they are the only place where the panel
+// learns whose traffic goes through it.
+const (
+	relayHostHeader            = "Flotestro-Relay-Host"
+	relayHostFingerprintHeader = "Flotestro-Relay-Host-Fingerprint"
+	relayHostSerialHeader      = "Flotestro-Relay-Host-Serial"
+)
+
+// RelayIdentityMode says what the gateway does with a session through a
+// relay that names the host alone, without the certificate it presented.
+type RelayIdentityMode string
+
+const (
+	// RelayIdentityObserve lets such a session in, counts it and marks the
+	// host as weakly identified: for an installation taking stock of its
+	// relays before asking anything. It is the same as prefer today and
+	// kept apart so a later step can tighten prefer without touching an
+	// installation that only watches.
+	RelayIdentityObserve RelayIdentityMode = "observe"
+	// RelayIdentityPrefer lets such a session in, counts it, and marks
+	// the host as weakly identified so the operator sees which relays are
+	// due for an upgrade. The packaged default.
+	RelayIdentityPrefer RelayIdentityMode = "prefer"
+	// RelayIdentityEnforce refuses such a session: the relay has to attest
+	// the certificate, and a relay that cannot is one the fleet does not
+	// take a host's identity from.
+	RelayIdentityEnforce RelayIdentityMode = "enforce"
+)
+
+// ParseRelayIdentityMode reads the mode from configuration; empty is the
+// packaged default.
+func ParseRelayIdentityMode(value string) (RelayIdentityMode, error) {
+	switch RelayIdentityMode(strings.ToLower(strings.TrimSpace(value))) {
+	case "":
+		return RelayIdentityPrefer, nil
+	case RelayIdentityObserve:
+		return RelayIdentityObserve, nil
+	case RelayIdentityPrefer:
+		return RelayIdentityPrefer, nil
+	case RelayIdentityEnforce:
+		return RelayIdentityEnforce, nil
+	}
+	return "", fmt.Errorf("unknown relay identity mode %q: observe, prefer or enforce", value)
+}
+
+// SetRelayIdentityMode sets what the gateway does with a relayed session
+// without the certificate of the host.
+func (s *AgentService) SetRelayIdentityMode(mode RelayIdentityMode) { s.relayIdentity = mode }
+
+// hostAttestation is what a relay said about the certificate of the host
+// it forwards: the fingerprint and the serial from the headers, decoded.
+type hostAttestation struct {
+	Fingerprint []byte
+	Serial      string
+}
+
+// peer is who a session belongs to and on what grounds.
+type peer struct {
+	HostID  string
+	RelayID string
+	// Identity is how the host was identified through a relay - attested
+	// or weak - and empty for a direct connection.
+	Identity string
+}
 
 // identifyPeer establishes whose session it is and who vouches for it.
 //
@@ -2719,71 +2883,145 @@ const relayHostHeader = "Flotestro-Relay-Host"
 // proof of holding the private key of the host.
 //
 // A connection through a relay: the certificate belongs to the relay, and the
-// identity of the host is an attestation of the relay. The panel cannot check
-// it cryptographically, so it checks what it can: whether the relay is known,
-// not revoked, and whether the host belongs to its site. That is exactly the
-// trust boundary the document speaks about - and that is why it is recorded in
-// the session.
+// identity of the host is an attestation of the relay. The panel checks
+// what it can: whether the relay is known and not revoked, whether the host
+// belongs to its site and environment, and - when the relay names the
+// certificate the host presented - whether that certificate is on record,
+// not revoked, within its validity and the host's own, the same checks a
+// direct handshake goes through. A relay that names the host alone is
+// taken at its word or refused, by the mode of the installation. That is
+// exactly the trust boundary the document speaks about - and that is why
+// it is recorded in the session and on the host.
 func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
-	asserted string) (hostID string, relayID string, err error) {
+	headers http.Header) (peer, error) {
+	asserted := headers.Get(relayHostHeader)
 	if hostID, hostErr := pki.HostIDFromCert(cert); hostErr == nil {
 		if asserted != "" {
 			// An agent must not impersonate a relay: attesting somebody
 			// else's identity is a permission of a relay rather than a header
 			// to be added.
-			return "", "", connect.NewError(connect.CodePermissionDenied,
+			return peer{}, connect.NewError(connect.CodePermissionDenied,
 				errors.New("the certificate of a host does not allow attesting other hosts"))
 		}
-		return hostID, "", nil
+		return peer{HostID: hostID}, nil
 	}
 
 	relayIdentity, relayErr := pki.RelayIDFromCert(cert)
 	if relayErr != nil {
-		return "", "", connect.NewError(connect.CodeUnauthenticated, relayErr)
+		return peer{}, connect.NewError(connect.CodeUnauthenticated, relayErr)
 	}
 	if s.relays == nil {
-		return "", "", connect.NewError(connect.CodePermissionDenied,
+		return peer{}, connect.NewError(connect.CodePermissionDenied,
 			errors.New("the mediation through a relay is not enabled"))
 	}
 	if asserted == "" {
-		return "", "", connect.NewError(connect.CodeInvalidArgument,
+		return peer{}, connect.NewError(connect.CodeInvalidArgument,
 			errors.New("a relay has to name the host in the header "+relayHostHeader))
 	}
 
 	status, err := s.relays.LookupCertificate(ctx, pki.Fingerprint(cert))
 	if err != nil {
-		return "", "", connect.NewError(connect.CodeInternal, err)
+		return peer{}, connect.NewError(connect.CodeInternal, err)
 	}
 	switch {
 	case !status.Known:
 		s.denied(ctx, relayIdentity, "unknown_relay_certificate")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate of the relay is unknown"))
+		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the certificate of the relay is unknown"))
 	case status.Revoked:
 		s.denied(ctx, relayIdentity, "revoked_relay")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the relay was revoked"))
+		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the relay was revoked"))
 	case status.ID != relayIdentity:
 		s.denied(ctx, relayIdentity, "relay_identity_mismatch")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the identity of the relay does not match the certificate"))
+		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the identity of the relay does not match the certificate"))
 	}
 
 	host, err := s.hosts.Get(ctx, asserted)
 	if err != nil {
 		s.denied(ctx, asserted, "relay_unknown_host")
-		return "", "", connect.NewError(connect.CodeUnauthenticated, errors.New("the host is unknown"))
+		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the host is unknown"))
 	}
-	// A relay mediates for its own site alone. Without that one compromised
-	// relay would serve the whole fleet.
+	// A relay mediates for its own site alone, and for its own environment
+	// when it has one. Without that one compromised relay would serve the
+	// whole fleet.
 	if host.Site != status.Site {
-		s.denied(ctx, asserted, "relay_scope_mismatch")
-		return "", "", connect.NewError(connect.CodePermissionDenied,
+		s.refused(ctx, asserted, hosts.RefusalRelayScopeMismatch,
+			"relay "+status.Name+" serves site "+status.Site+", the host is in site "+host.Site)
+		return peer{}, connect.NewError(connect.CodePermissionDenied,
 			errors.New("the host does not belong to the site of the relay"))
+	}
+	if status.Environment != "" && host.Environment != status.Environment {
+		s.refused(ctx, asserted, hosts.RefusalRelayScopeMismatch,
+			"relay "+status.Name+" serves environment "+status.Environment+", the host is in environment "+host.Environment)
+		return peer{}, connect.NewError(connect.CodePermissionDenied,
+			errors.New("the host does not belong to the environment of the relay"))
 	}
 	if !hosts.Connectable(host.LifecycleState, host.LifecycleChangedAt, time.Now()) {
 		s.denied(ctx, asserted, "lifecycle_"+host.LifecycleState)
-		return "", "", connect.NewError(connect.CodePermissionDenied,
+		return peer{}, connect.NewError(connect.CodePermissionDenied,
 			fmt.Errorf("the host is in the state %s", host.LifecycleState))
 	}
-	return asserted, status.ID, nil
+
+	attestation, err := readRelayAttestation(headers)
+	if err != nil {
+		s.refused(ctx, asserted, hosts.RefusalRelayIdentityInvalid, err.Error())
+		return peer{}, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	if attestation == nil {
+		// The relay named the host alone. Whether its word is enough is
+		// the installation's decision; what it is not is invisible.
+		metrics.RelaySessionIdentity.Inc(hosts.RelayIdentityWeak)
+		if s.relayIdentity == RelayIdentityEnforce {
+			s.refused(ctx, asserted, hosts.RefusalRelayIdentityMissing,
+				"relay "+status.Name+" did not attest the certificate of the host; upgrade the relay")
+			return peer{}, connect.NewError(connect.CodePermissionDenied,
+				errors.New("the relay did not attest the certificate of the host"))
+		}
+		s.log.Warn("the relay named the host without its certificate; the session rests on the relay's word",
+			"host_id", asserted, "relay_id", status.ID, "relay", status.Name,
+			"mode", string(s.relayIdentity))
+		return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityWeak}, nil
+	}
+
+	// The certificate the host presented to the relay goes through the
+	// same checks as one in a direct handshake: on record, not revoked,
+	// within its validity, and the host's own. The record is the only
+	// source for the validity here - the certificate itself never reaches
+	// the gateway.
+	certificate, err := s.hosts.LookupCertificate(ctx, attestation.Fingerprint)
+	if err != nil {
+		return peer{}, connect.NewError(connect.CodeInternal, err)
+	}
+	if problem := s.rejectCertificate(ctx, certificate, asserted); problem != nil {
+		return peer{}, problem
+	}
+	if attestation.Serial != "" && attestation.Serial != certificate.Serial {
+		s.refused(ctx, asserted, hosts.RefusalRelayIdentityInvalid,
+			"the relay names serial "+attestation.Serial+", the fingerprint is on record with serial "+certificate.Serial)
+		return peer{}, connect.NewError(connect.CodeUnauthenticated,
+			errors.New("the serial named by the relay does not match the certificate"))
+	}
+	metrics.RelaySessionIdentity.Inc(hosts.RelayIdentityAttested)
+	return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityAttested}, nil
+}
+
+// readRelayAttestation decodes what the relay said about the certificate
+// of the host. Nil without an error is a relay that said nothing - one
+// from before the attestation. A fingerprint that does not read as one is
+// an error: a relay that sends the header sends it whole.
+func readRelayAttestation(headers http.Header) (*hostAttestation, error) {
+	encoded := strings.TrimSpace(headers.Get(relayHostFingerprintHeader))
+	serial := strings.TrimSpace(headers.Get(relayHostSerialHeader))
+	if encoded == "" {
+		if serial != "" {
+			return nil, errors.New("the relay named the serial of the certificate without its fingerprint")
+		}
+		return nil, nil
+	}
+	fingerprint, err := hex.DecodeString(encoded)
+	if err != nil || len(fingerprint) != sha256.Size {
+		return nil, errors.New("the fingerprint named by the relay is not a SHA-256 in hex")
+	}
+	return &hostAttestation{Fingerprint: fingerprint, Serial: serial}, nil
 }
 
 // rejectCertificate checks the state of the certificate of a host for a
@@ -2828,6 +3066,15 @@ func certificateStatusRefusal(status hosts.CertificateStatus, hostID string, now
 		return hosts.RefusalRevokedCertificate, "serial " + status.Serial + " was revoked"
 	case status.HostID != hostID:
 		return hosts.RefusalIdentityMismatch, "serial " + status.Serial + " is on record for host " + status.HostID
+	case !status.NotBefore.IsZero() && now.Before(status.NotBefore):
+		// The validity from the record. A direct handshake refused such a
+		// certificate before this point; a session attested by a relay has
+		// only the record to read it from.
+		return hosts.RefusalCertificateNotYetValid, "serial " + status.Serial + " is not valid before " +
+			status.NotBefore.UTC().Format(time.RFC3339)
+	case !status.NotAfter.IsZero() && now.After(status.NotAfter):
+		return hosts.RefusalCertificateExpired, "serial " + status.Serial + " expired at " +
+			status.NotAfter.UTC().Format(time.RFC3339)
 	case !hosts.Connectable(status.LifecycleState, status.LifecycleChangedAt, now):
 		// A quarantine, a withdrawal in progress and a withdrawal differ for
 		// the operator, but for a connection they mean the same: this host has

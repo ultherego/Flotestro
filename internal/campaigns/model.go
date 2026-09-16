@@ -34,7 +34,14 @@ const (
 	// for the machinery.
 	StateManualGate State = "manual_gate"
 	StateRunning    State = "running"
-	StatePaused     State = "paused"
+	// StatePausing is a pause ordered while hosts are still carrying their
+	// tasks. Nothing new starts and no target is claimed; the hosts under
+	// way settle, their budget leases are renewed meanwhile, and the
+	// campaign is paused once none is in flight. A campaign that said
+	// "paused" with hosts still running would have their leases expire
+	// under them and their results unread until the resume.
+	StatePausing State = "pausing"
+	StatePaused  State = "paused"
 	// StateCanceling is a cancel ordered while hosts are still carrying
 	// their tasks. Nothing new starts; the hosts under way settle on their
 	// own - a campaign stop never interrupts work on a host - and the
@@ -76,6 +83,55 @@ func (s State) Terminal() bool {
 	case StateCompleted, StateCompletedWithIssues, StateFailed, StatePlanFailed,
 		StateExpired, StateCanceled:
 		return true
+	default:
+		return false
+	}
+}
+
+// Launching says whether the campaign may start a host now: a campaign in
+// its planning phase, its canary or its waves hands tasks to hosts, and so
+// does a planned one - approved, or in need of no approval - whose first
+// pass is about to name the phase; a host that came back from being
+// offline may be planned again on that pass. The launch of a target checks
+// this on the campaign row, under a lock, in the same transaction that
+// creates the task: a pause or a cancel committed a moment earlier is
+// seen, and the task is never created.
+func (s State) Launching() bool {
+	return s == StatePlanning || s == StatePlanned || s == StateCanary || s == StateRunning
+}
+
+// mayBecome says whether the orchestrator may move a campaign from this
+// state to the given one. It is the state machine the orchestrator's
+// writes are checked against after a lost race: a write that found the
+// campaign moved re-reads it and asks this question again rather than
+// repeating the old decision. A terminal state never moves; the operator's
+// own transitions - approve, pause, resume, advance, cancel - have their
+// own conditions in the store.
+func (s State) mayBecome(to State) bool {
+	if s.Terminal() || s == to {
+		return false
+	}
+	switch to {
+	case StateCanary, StateRunning:
+		return s == StatePlanned || s == StateCanary
+	case StateManualGate:
+		// A campaign resumed after a pause in its canary stands planned
+		// when it reaches the gate.
+		return s == StatePlanned || s == StateCanary || s == StateRunning
+	case StatePausing:
+		return s == StatePlanned || s == StateCanary || s == StateRunning
+	case StatePaused:
+		return s == StatePlanned || s == StateCanary || s == StateRunning || s == StatePausing
+	case StateExpired:
+		return s == StatePlanned || s == StateAwaitingApproval
+	case StatePlanFailed:
+		return s == StatePlanning
+	case StateCompleted, StateCompletedWithIssues, StateFailed:
+		// A planning phase in which every host settled - already in the
+		// desired state, refused by its plan - ends completed too.
+		return s == StatePlanning || s == StatePlanned || s == StateCanary || s == StateRunning
+	case StateCanceled:
+		return s == StateCanceling
 	default:
 		return false
 	}
@@ -181,6 +237,45 @@ func (t TargetState) Succeeded() bool {
 // unplugged machine would hold the whole fleet until the deadline.
 func (t TargetState) HoldsWave() bool {
 	return !t.Finished() && t != TargetQueuedOffline
+}
+
+// mayBecome says whether a target may move from this state to the given
+// one. A settled host never moves again - a late result is an observation,
+// not a transition - and the transitions among the open states follow the
+// course of a host: the queue, the task, the reboot, the verification. The
+// list is the one the compare-and-swap write is checked against, so a
+// concurrent writer that saw an older state cannot push the host where its
+// course does not lead.
+func (t TargetState) mayBecome(to TargetState) bool {
+	if t.Finished() {
+		return false
+	}
+	// The same state written again carries a new reason or message - a
+	// host waiting for another budget than a moment ago - and is a change
+	// of the row, not of the course.
+	if t == to {
+		return true
+	}
+	// Any open host may settle, and any open host may be canceled.
+	if to.Finished() {
+		return true
+	}
+	switch to {
+	case TargetPending:
+		return t == TargetAwaitingBudget || t == TargetQueuedOffline || t == TargetPlanning
+	case TargetAwaitingBudget, TargetQueuedOffline, TargetPlanning:
+		return t.Waiting() || t == TargetPlanning
+	case TargetDispatched:
+		return t.Waiting() || t == TargetAwaitingLock || t == TargetRunning
+	case TargetAwaitingLock, TargetRunning:
+		return t.Waiting() || t == TargetDispatched || t == TargetAwaitingLock || t == TargetRunning
+	case TargetRebooting:
+		return t == TargetDispatched || t == TargetAwaitingLock || t == TargetRunning
+	case TargetVerifying:
+		return t == TargetDispatched || t == TargetAwaitingLock || t == TargetRunning || t == TargetRebooting
+	default:
+		return false
+	}
 }
 
 // Finished says whether the host has finished taking part in the campaign.
@@ -652,6 +747,17 @@ type Campaign struct {
 	// operator ordered.
 	PolicyID      string `json:"policy_id,omitempty"`
 	PolicyVersion int    `json:"policy_version,omitempty"`
+	// Revision grows with every change of the record. A write names the
+	// revision it read, and a write against an older one fails: the
+	// orchestrator reads the campaign again rather than acting on a stale
+	// picture, and a client may send it back as If-Match.
+	Revision int64 `json:"revision"`
+	// The runner lease: which orchestrator drives the campaign, under
+	// which token, until when. Read for the fencing of the orchestrator's
+	// writes; not part of the record a client reads.
+	RunnerID    string     `json:"-"`
+	RunnerToken int64      `json:"-"`
+	RunnerUntil *time.Time `json:"-"`
 }
 
 // CampaignLink names another campaign the way a screen links to it.
@@ -728,6 +834,18 @@ type Target struct {
 	// empty once the operation starts, or when the host waits on nothing
 	// the panel knows of.
 	Blocker string `json:"blocker,omitempty"`
+	// Revision grows with every change of the row; a state is written
+	// only against the revision the writer read.
+	Revision int64 `json:"revision"`
+	// ClaimedBy and ClaimToken say which runner holds the target and under
+	// which token. The token fences every write to the row and the
+	// target's budget lease: a runner that lost the target carries an old
+	// token, and its writes touch nothing.
+	ClaimedBy  string `json:"-"`
+	ClaimToken int64  `json:"-"`
+	// CancelRequestedAt is when a cancel found the host carrying its task.
+	// The task stays with the host; the campaign waits for it to settle.
+	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
 }
 
 // Report summarises the course of a campaign.
@@ -854,6 +972,17 @@ func cancelSettled(targets []Target) bool {
 		}
 	}
 	return true
+}
+
+// pauseState is the state a pause puts the campaign in: pausing while any
+// host carries a task, paused once none does. The same rule the operator's
+// pause and the machinery's pauses follow, and the rule the settling pass
+// applies when the last host of a pausing campaign ends.
+func pauseState(targets []Target) State {
+	if cancelSettled(targets) {
+		return StatePaused
+	}
+	return StatePausing
 }
 
 // plansExpired says whether the campaign's plans passed their time limit

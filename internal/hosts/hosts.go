@@ -291,9 +291,13 @@ type Host struct {
 	// time it tried: a session that opens clears it, so an old refusal
 	// never outlives a reconnect.
 	LastConnectionRefusal *ConnectionRefusal `json:"last_connection_refusal,omitempty"`
-	Identity              HostIdentity       `json:"identity"`
-	EnrolledAt            time.Time          `json:"enrolled_at"`
-	Capabilities          Capabilities       `json:"capabilities"`
+	// RelayIdentity says how the host's last session through a relay was
+	// identified: attested, or weak when the relay named the host alone.
+	// Empty for a host that last connected directly.
+	RelayIdentity string       `json:"relay_identity,omitempty"`
+	Identity      HostIdentity `json:"identity"`
+	EnrolledAt    time.Time    `json:"enrolled_at"`
+	Capabilities  Capabilities `json:"capabilities"`
 }
 
 // ConnectionRefusal is the reason the gateway would not open a session for
@@ -327,6 +331,32 @@ const (
 	// RefusalIdentityMismatch is a certificate on record for another host
 	// than the one it names.
 	RefusalIdentityMismatch = "identity_mismatch"
+	// RefusalRelayIdentityMissing is a session through a relay that did
+	// not attest which certificate the host presented, refused because the
+	// installation requires the attestation (FLOTESTRO_RELAY_IDENTITY=enforce).
+	// The remedy is a relay at a release that sends it.
+	RefusalRelayIdentityMissing = "relay_identity_missing"
+	// RefusalRelayIdentityInvalid is an attestation the gateway could not
+	// read: a fingerprint that is not one, or a serial that does not
+	// belong to the fingerprint.
+	RefusalRelayIdentityInvalid = "relay_identity_invalid"
+	// RefusalRelayScopeMismatch is a host attested by a relay of another
+	// site or environment: a relay mediates for its own scope alone.
+	RefusalRelayScopeMismatch = "relay_scope_mismatch"
+)
+
+// The strength of the identity behind a host's session, as the host
+// record shows it. Empty is a direct connection: the certificate of the
+// host itself was in the handshake.
+const (
+	// RelayIdentityAttested is a session through a relay that named the
+	// certificate of the host, and the gateway checked that certificate
+	// against the record as it would in a direct handshake.
+	RelayIdentityAttested = "attested"
+	// RelayIdentityWeak is a session through a relay that named the host
+	// alone: the relay vouches for it, and the gateway could check nothing
+	// about the certificate. Let in under prefer; refused under enforce.
+	RelayIdentityWeak = "weak"
 )
 
 // MaintenanceWindow describes a host's maintenance window.
@@ -680,14 +710,14 @@ func (s *Store) HasLiveCertificate(ctx context.Context, hostID string) (bool, er
 
 // SaveCertificate records an issued agent certificate.
 func (s *Store) SaveCertificate(ctx context.Context, tx pgx.Tx, hostID, serial, commonName string,
-	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial string) error {
+	fingerprint []byte, notBefore, notAfter time.Time, issuerSubject, issuerSerial, issuerID string) error {
 	const query = `
 		insert into agent_certificates
 			(id, host_id, serial, fingerprint_sha256, subject_common_name, not_before, not_after,
-			 issuer_subject, issuer_serial)
-		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''))`
+			 issuer_subject, issuer_serial, issuer_id)
+		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, ''), nullif($9, ''), nullif($10, '')::uuid)`
 	_, err := tx.Exec(ctx, query, uuid.NewString(), hostID, serial, fingerprint, commonName,
-		notBefore, notAfter, issuerSubject, issuerSerial)
+		notBefore, notAfter, issuerSubject, issuerSerial, issuerID)
 	if err != nil {
 		return fmt.Errorf("saving the certificate: %w", err)
 	}
@@ -706,6 +736,11 @@ type CertificateStatus struct {
 	// Serial identifies the certificate in the audit trail; on a renewal it
 	// allows linking the new certificate with the replaced one.
 	Serial string
+	// NotBefore and NotAfter are the validity as issued. A direct
+	// connection has the certificate itself to read them from; a session
+	// attested by a relay has only the record, so the record carries them.
+	NotBefore time.Time
+	NotAfter  time.Time
 }
 
 // LookupCertificate checks whether the certificate is known and not revoked
@@ -713,13 +748,15 @@ type CertificateStatus struct {
 // based on this result.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (CertificateStatus, error) {
 	const query = `
-		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial
+		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial,
+		       c.not_before, c.not_after
 		from agent_certificates c
 		join hosts h on h.id = c.host_id
 		where c.fingerprint_sha256 = $1`
 	var status CertificateStatus
 	err := s.pool.QueryRow(ctx, query, fingerprint).
-		Scan(&status.HostID, &status.LifecycleState, &status.LifecycleChangedAt, &status.Revoked, &status.Serial)
+		Scan(&status.HostID, &status.LifecycleState, &status.LifecycleChangedAt, &status.Revoked, &status.Serial,
+			&status.NotBefore, &status.NotAfter)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return CertificateStatus{}, nil
 	}
@@ -852,6 +889,18 @@ func (s *Store) RecordConnectionRefusal(ctx context.Context, hostID, code, detai
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
+}
+
+// RecordRelayIdentity writes down how the session that has just opened
+// identified the host: attested or weak through a relay, empty for a
+// direct connection. It is a fact of the newest session, so every open
+// overwrites it - a host that came back directly no longer carries the
+// weakness of a relay it left.
+func (s *Store) RecordRelayIdentity(ctx context.Context, hostID, strength string) error {
+	_, err := s.pool.Exec(ctx,
+		`update hosts set relay_identity = nullif($2, ''), updated_at = now() where id = $1`,
+		hostID, strength)
+	return err
 }
 
 // Get returns a single host.
@@ -1563,7 +1612,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       h.maintenance_until, coalesce(h.maintenance_reason, ''),
 		       coalesce(h.maintenance_by, ''), h.maintenance_at,
 		       coalesce(h.last_connection_refusal_code, ''), h.last_connection_refusal_at,
-		       coalesce(h.last_connection_refusal_detail, ''),
+		       coalesce(h.last_connection_refusal_detail, ''), coalesce(h.relay_identity, ''),
 		       coalesce(c.rejestr, '[]'::json),
 		       i.payload, i.observed_at
 		from hosts h
@@ -1610,7 +1659,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			&h.Identity.Enrolled, &h.Identity.Domain, &h.Identity.Realm,
 			&h.Identity.SSSDOnline, &h.Identity.CheckedAt,
 			&windowUntil, &windowReason, &windowBy, &windowFrom,
-			&refusalCode, &refusalAt, &refusalDetail,
+			&refusalCode, &refusalAt, &refusalDetail, &h.RelayIdentity,
 			&h.Capabilities, &identityPayload, &identityObservedAt); err != nil {
 			return nil, err
 		}

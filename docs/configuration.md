@@ -24,7 +24,7 @@ off.
 | Variable | Default | Meaning | Restart | Security |
 |---|---|---|---|---|
 | `FLOTESTRO_DATABASE_URL` | none, required | The PostgreSQL DSN. The database is the only source of truth. | yes | Carries the database password; the file is readable by root and the service account alone. |
-| `FLOTESTRO_STATE_DIR` | `/var/lib/flotestro` | The state directory: the fleet CA, the secret store key, the bootstrap token file. | yes | Holds the CA key; nothing else may read it. |
+| `FLOTESTRO_STATE_DIR` | `/var/lib/flotestro` | The state directory: the fleet CA, the keys of the secret store under `keys/`, the bootstrap token file. Checked against the installation record at every start; a missing key or a missing part of the CA stops the start with a named state instead of a fresh key or CA (see `docs/runbooks/db-restore.md`). | yes | Holds the CA key and the store keys; nothing else may read it. |
 | `FLOTESTRO_ADMIN_ADDR` | `127.0.0.1:8080` | The REST API and the web panel. | yes | Plain HTTP; expose it through a reverse proxy with TLS. |
 | `FLOTESTRO_GATEWAY_ADDR` | `:8443` | The agent gateway (mTLS). | yes | |
 | `FLOTESTRO_ENROLLMENT_ADDR` | `:8444` | The enrollment endpoint (TLS, no client certificate). | yes | Answers strangers; a request is bounded to 256 KiB. |
@@ -43,6 +43,7 @@ off.
 | `FLOTESTRO_AGENT_CERT_TTL` | `720h` | The lifetime of an agent certificate; the agent renews after two thirds. | yes | A shorter term narrows the window of a stolen key. |
 | `FLOTESTRO_DISPATCH_RATE` | `100` | Task envelopes sent per second, with a burst of one second's worth; `0` sends every leased task at once. Held-back tasks are counted in `flotestro_dispatch_throttled_total`. | yes | |
 | `FLOTESTRO_CLONE_POLICY` | `quarantine` | What the gateway does with the same identity alive on two boots: `quarantine` ends both sessions and quarantines the host, `report` records the incident and lets the newer session stand. Any other word refuses to start. | yes | `report` lets a cloned key act until somebody looks. |
+| `FLOTESTRO_RELAY_IDENTITY` | `prefer` | What the gateway does with a session through a relay that names the host without the certificate it presented (a relay from before the attestation). `observe` and `prefer` let it in, count it in `flotestro_relay_session_identity_total{strength="weak"}` and mark the host with `relay_identity: weak`. `enforce` refuses it with `relay_identity_missing` on the host. A relay that names the certificate is checked like a direct handshake under every mode: a revoked, expired or foreign certificate is refused. Any other word refuses to start. | yes | Set `enforce` once every relay is upgraded; until then a relay's word alone opens a session. |
 
 ### Identity provider and browser sessions
 
@@ -104,7 +105,9 @@ off.
 | `FLOTESTRO_JOB_RETENTION` | `2160h` (90 days) | How long finished jobs are kept with their attempts. A job of a campaign stays as long as the campaign; a job under way is never deleted. `0` means the default. | yes | |
 | `FLOTESTRO_CAMPAIGN_RETENTION` | `8760h` (a year) | How long finished campaigns are kept with their targets, steps, plans and approvals. A campaign under way, or one another campaign retries or compensates, is never deleted. `0` means the default. | yes | |
 | `FLOTESTRO_OUTBOX_RETENTION` | `720h` (30 days) | How long the delivered events of the durable trail are kept. An event a webhook consumer has not taken yet stays whatever its age. `0` means the default. | yes | |
-| `FLOTESTRO_SECRETS_KEY_FILE` | `<state dir>/secrets.key` | The key of the secret store. | yes | Without a copy of the file the secrets cannot be recovered; the panel generates one at first start and warns. |
+| `FLOTESTRO_SECRETS_KEY_FILE` | `<state dir>/secrets.key` | The key file of a secret store from before the key provider. At the first start after the upgrade it is adopted as `keys/legacy.key` and becomes the active key `legacy`; a new installation never has one. | yes | Keep it in the backup set until the key `legacy` is retired. The panel never generates it. |
+| `FLOTESTRO_SECRETS_KEY_CREDENTIAL` | empty | The name of a systemd credential (`LoadCredential=<name>:<file>` in the unit) that holds a key of the secret store under that key id; read from `$CREDENTIALS_DIRECTORY`, never written. | yes | A credential is narrower than a file of the state directory: no other process sees it. |
+| `FLOTESTRO_SECRETS_KEY_ROTATE_TO` | empty | The id of the key the secret store switches to at this start (`k-...`, lowercase letters, digits, dashes). Created under `keys/` when missing; the versions of the store are rewrapped in the background and the old key stays until none of them names it. A no-op once that key is active. | yes | Remove the old key only when the status block shows `pending_rewrap: 0`. |
 
 The sweep runs once an hour, five thousand rows of a kind at a time, and
 the ended agent sessions are swept after thirty days regardless of any

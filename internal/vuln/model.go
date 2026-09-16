@@ -75,6 +75,11 @@ const (
 	ReasonFamilyUnsupported = "family_unsupported"
 	// ReasonFeedStale means a snapshot older than the policy allows.
 	ReasonFeedStale = "feed_stale"
+	// ReasonFeedEmpty means a fetch that carried no findings where the
+	// previous one did. It is written as the error of the active snapshot,
+	// which stays in force: an empty feed replacing a full one would turn
+	// every host clean in one sweep.
+	ReasonFeedEmpty = "feed_empty"
 	// ReasonReleaseUnsupported means a release outside the feed.
 	ReasonReleaseUnsupported = "release_unsupported"
 	// ReasonPackageOriginUnknown means a package whose vendor cannot be

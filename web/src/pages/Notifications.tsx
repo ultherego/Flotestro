@@ -62,6 +62,8 @@ export type ChannelForm = {
   name: string;
   kind: ChannelKind;
   url: string;
+  /** True while a stored incoming webhook has an address the form does not show. */
+  urlSet: boolean;
   secret: string;
   /** True while a stored webhook has a secret the form does not show. */
   secretSet: boolean;
@@ -85,7 +87,7 @@ export type ChannelForm = {
 
 export function emptyForm(kind: ChannelKind = "webhook"): ChannelForm {
   return {
-    name: "", kind, url: "", secret: "", secretSet: false, keepSecret: true,
+    name: "", kind, url: "", urlSet: false, secret: "", secretSet: false, keepSecret: true,
     host: "", port: "587", starttls: true, from: "", to: "", username: "", passwordSecret: "",
     events: ["alert.fired", "alert.resolved"], severityMin: "", site: "", environment: "",
     enabled: true, reason: "",
@@ -101,6 +103,7 @@ export function formOf(channel: Channel): ChannelForm {
     name: channel.name,
     kind: channel.kind,
     url: text("url"),
+    urlSet: config.url_set === true,
     secret: "",
     secretSet: config.secret_set === true,
     keepSecret: true,
@@ -143,8 +146,11 @@ export function channelBody(form: ChannelForm): { body?: Record<string, unknown>
       break;
     }
     case "slack_webhook": {
-      if (!/^https?:\/\/\S+/.test(form.url.trim())) return { problem: "url" };
-      config = { url: form.url.trim() };
+      // The address is the credential: a stored one is never shown back,
+      // and an edit that leaves the field empty keeps it.
+      if (form.url.trim() === "" && form.urlSet) config = { url_set: true };
+      else if (!/^https?:\/\/\S+/.test(form.url.trim())) return { problem: "url" };
+      else config = { url: form.url.trim() };
       break;
     }
     case "email": {
@@ -201,6 +207,12 @@ export function describeChannel(channel: Pick<Channel, "kind" | "config">): stri
     return `${to.join(", ")} via ${relay}${config.starttls === false ? "" : " (STARTTLS)"}`;
   }
   return String(config.url ?? "");
+}
+
+/** True for a stored incoming webhook whose address the API keeps to itself. */
+export function addressWithheld(channel: Pick<Channel, "kind" | "config">): boolean {
+  const config = channel.config ?? {};
+  return channel.kind === "slack_webhook" && !config.url && config.url_set === true;
 }
 
 /** The name of a kind for the table and the form. */
@@ -514,7 +526,7 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
           </div>
         </td>
         <td>{kindLabel(t, channel.kind)}</td>
-        <td className="hm-mono">{describeChannel(channel)}</td>
+        <td className="hm-mono">{addressWithheld(channel) ? t("URL is set") : describeChannel(channel)}</td>
         <td className="source">{channel.events.length ? channel.events.join(", ") : t("nothing")}</td>
         <td className="source">{describeFilter(t, channel.filter)}</td>
         <td>
@@ -582,8 +594,10 @@ function ChannelFields({ form, subjects, severities, onChange }: {
         <Field label={t("Address")} wide
           hint={form.kind === "webhook"
             ? t("The deliveries are JSON, signed with HMAC-SHA256 over the body and the timestamp like the webhook of the environment file.")
-            : t("An incoming webhook of Slack, or of a service that reads its shape: the body is {text, blocks}.")}>
-          <input value={form.url} onChange={(e) => set({ url: e.target.value })} className="mono" placeholder="https://" />
+            : form.urlSet
+              ? t("URL is set; leave the field empty to keep it, or type a new one. The address is the credential of the channel and is never shown back.")
+              : t("An incoming webhook of Slack, or of a service that reads its shape: the body is {text, blocks}.")}>
+          <input value={form.url} onChange={(e) => set({ url: e.target.value })} className="mono" placeholder={form.urlSet ? t("URL is set") : "https://"} />
         </Field>
       )}
       {form.kind === "webhook" && (

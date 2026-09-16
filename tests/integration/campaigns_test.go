@@ -365,8 +365,10 @@ func TestOperatorDoesNotApproveCampaigns(t *testing.T) {
 		consent, nil, http.StatusOK)
 }
 
-// TestCampaignOutsideTheScopeIsRejected checks that the permission is
-// examined for every host of the snapshot, not only for the first.
+// TestCampaignOutsideTheScopeIsRejected checks that the scope is examined
+// for every host of the snapshot, not only for the first: an explicit
+// list is strict, and a host outside the caller's scope is refused with
+// its reason rather than skipped or let through with the rest.
 func TestCampaignOutsideTheScopeIsRejected(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("debian")
@@ -374,10 +376,14 @@ func TestCampaignOutsideTheScopeIsRejected(t *testing.T) {
 	outsider := h.withToken(h.createPrincipal(uniqueSubject("foreign-operator"), []map[string]string{
 		{"role": "operator", "site": "other-site", "environment": "other"},
 	}))
+	var refusal targetsProblem
 	outsider.do(http.MethodPost, "/api/v1/campaigns",
 		labCampaign("outside the scope", "cron.service", map[string]any{
 			"selector": map[string]any{"host_ids": []string{host.ID}},
-		}), nil, http.StatusForbidden)
+		}), &refusal, http.StatusUnprocessableEntity)
+	if refusal.Code != "targets_invalid" || refusal.reasonOf(host.ID) != "out_of_scope" {
+		t.Fatalf("the order from outside the scope answered %+v", refusal)
+	}
 }
 
 // TestCampaignRefusesAnOperationWithoutABulkMode guards the gate that

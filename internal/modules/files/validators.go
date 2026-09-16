@@ -21,6 +21,10 @@ type Validator struct {
 	Command []string
 	// BuiltIn checks the content in memory.
 	BuiltIn func(content string) error
+	// NeedsName marks a tool that reads the kind of file from its name: it
+	// gets a named staging file that keeps the suffix of the target, never
+	// an anonymous one.
+	NeedsName bool
 }
 
 // validators lists the known checks. The key is the name used in the
@@ -31,6 +35,9 @@ var validators = map[string]Validator{
 	"systemd-unit": {
 		Name:    "systemd-unit",
 		Command: []string{"/usr/bin/systemd-analyze", "verify"},
+		// The unit type comes from the suffix of the file name, so the
+		// check needs a name ending like the target.
+		NeedsName: true,
 	},
 	"nginx": {
 		Name: "nginx",

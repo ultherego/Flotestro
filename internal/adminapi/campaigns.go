@@ -216,6 +216,12 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	}
 
 	principal := authz.FromContext(r.Context())
+	// The operation's permission has to be held somewhere before the
+	// fleet is resolved by it: a caller without it anywhere resolves
+	// nobody, and "no targets" would be the wrong answer to give them.
+	if _, ok := s.authorizeCollection(w, r, orderPermission(action), "campaign"); !ok {
+		return
+	}
 	chosen, ok := s.checkSelector(w, request.Selector)
 	if !ok {
 		return
@@ -227,7 +233,10 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	if !ok {
 		return
 	}
-	candidates, ok := s.materialize(w, r, chosen)
+	// The resolver cuts the fleet to the scopes of the operation's
+	// permission: the preview ran the same query, so what the operator saw
+	// counted is what the order carries.
+	candidates, ok := s.materialize(w, r, principal, orderPermission(action), chosen)
 	if !ok {
 		return
 	}
@@ -277,6 +286,11 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 			return
 		}
 		if _, ok := s.authorize(w, r, authz.Permission(action.Permission()), scope, "host", host.ID); !ok {
+			return
+		}
+		// What the payload asks for beyond the operation - root, an
+		// unchecked write - is checked per host too.
+		if _, ok := s.authorizePayload(w, r, action, payload, scope, "host", host.ID); !ok {
 			return
 		}
 	}
@@ -642,11 +656,17 @@ func (s *Server) checkSelector(w http.ResponseWriter, chosen campaigns.Selector)
 // materialize turns the selector into the host list and answers a
 // selector that does not resolve or resolves to too much. An empty list is
 // an answer, not an error: the preview says "nobody", and the order
-// refuses it in its own words. The answer has already been written when
-// the second result is false.
-func (s *Server) materialize(w http.ResponseWriter, r *http.Request, chosen campaigns.Selector) ([]hosts.Host, bool) {
-	candidates, err := s.resolveTargets(r, chosen)
+// refuses it in its own words. An explicit list that names a host the
+// order cannot carry is refused with the reason per host. The answer has
+// already been written when the second result is false.
+func (s *Server) materialize(w http.ResponseWriter, r *http.Request, principal authz.Principal,
+	permission authz.Permission, chosen campaigns.Selector) ([]hosts.Host, bool) {
+	candidates, err := s.resolveTargets(r, principal, permission, chosen)
+	var invalid *targetsInvalidError
 	switch {
+	case errors.As(err, &invalid):
+		problemWithTargets(w, invalid)
+		return nil, false
 	case errors.Is(err, ErrSelectorTooBroad):
 		problem(w, http.StatusBadRequest, "selector_too_broad", err.Error())
 		return nil, false
@@ -661,44 +681,193 @@ func (s *Server) materialize(w http.ResponseWriter, r *http.Request, chosen camp
 	return candidates, true
 }
 
-// resolveTargets turns the selector into a host list.
+// The reasons an explicitly named host cannot be a target. They travel
+// per host in the targets_invalid refusal, so the operator sees which row
+// of the list to take out and why rather than a list that shrank.
+const (
+	// TargetUnknownHost names an identifier that is no host of the fleet.
+	TargetUnknownHost = "unknown_host"
+	// TargetOutOfScope names a host the caller has no right over for this
+	// operation. It is told apart from an unknown host on purpose: the
+	// document asks for the reason per host, and a host the caller can
+	// name is one they were told about.
+	TargetOutOfScope = "out_of_scope"
+	// TargetExcludedAndListed names a host on both the list and the
+	// exclusion list: the order does not say what it wants with it.
+	TargetExcludedAndListed = "excluded_and_listed"
+	// TargetInvalidHostID names an identifier that is not one.
+	TargetInvalidHostID = "invalid_host_id"
+)
+
+// targetRefusal is one host of an explicit list the order cannot carry.
+type targetRefusal struct {
+	HostID string `json:"host_id"`
+	Reason string `json:"reason"`
+}
+
+// targetsInvalidError carries the refusals of an explicit host list. The
+// list is strict: the order names exactly these hosts, and one that cannot
+// be honoured is an error with its reason rather than a quiet gap in the
+// snapshot the approver would never see.
+type targetsInvalidError struct {
+	Refusals []targetRefusal
+}
+
+func (e *targetsInvalidError) Error() string {
+	parts := make([]string, 0, len(e.Refusals))
+	for _, refusal := range e.Refusals {
+		parts = append(parts, refusal.HostID+": "+refusal.Reason)
+	}
+	return "the host list names hosts the order cannot carry: " + strings.Join(parts, ", ")
+}
+
+// problemWithTargets answers an explicit list the order cannot carry: the
+// problem document as always, with the refusals per host next to it.
+func problemWithTargets(w http.ResponseWriter, invalid *targetsInvalidError) {
+	w.Header().Set("Content-Type", "application/problem+json; charset=utf-8")
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"type":    "about:blank",
+		"title":   http.StatusText(http.StatusUnprocessableEntity),
+		"status":  http.StatusUnprocessableEntity,
+		"code":    "targets_invalid",
+		"detail":  invalid.Error(),
+		"targets": invalid.Refusals,
+	})
+}
+
+// resolveTargets turns the selector into a host list, already cut to the
+// scopes in which the caller holds the permission the order needs.
+//
+// The scope is part of the query rather than a filter over its result:
+// the count of a preview, the sample and the snapshot of an order all come
+// from the same narrowed query, so a preview and a create by the same
+// caller answer the same question. A caller without the permission
+// anywhere resolves nobody.
 //
 // The typed expression, when present, decides alone: it is expanded of
 // its group references and compiled into the host query, the same query
-// the host list and the group page run. The older fields take the older
-// way - an explicit list is read host by host, the flat filters page
-// through the list.
-func (s *Server) resolveTargets(r *http.Request, chosen campaigns.Selector) ([]hosts.Host, error) {
-	if chosen.Expression != nil {
-		expanded, err := selector.Expand(r.Context(), chosen.Expression, s.groups)
-		if err != nil {
-			return nil, err
-		}
-		return s.pageHosts(r.Context(), hosts.ListFilter{Expression: expanded})
-	}
+// the host list and the group page run. The flat filters page through the
+// list the same way. An explicit list is strict: every identifier has to
+// be a host in scope and not on the exclusion list at the same time, or
+// the whole list is refused with the reason per host.
+func (s *Server) resolveTargets(r *http.Request, principal authz.Principal,
+	permission authz.Permission, chosen campaigns.Selector) ([]hosts.Host, error) {
 	if len(chosen.HostIDs) > 0 {
-		result := make([]hosts.Host, 0, len(chosen.HostIDs))
-		for _, hostID := range chosen.HostIDs {
-			host, err := s.hosts.Get(r.Context(), hostID)
-			if errors.Is(err, hosts.ErrNotFound) {
-				continue
-			}
-			if err != nil {
-				return nil, err
-			}
-			result = append(result, *host)
-		}
-		return result, nil
+		return s.resolveListedHosts(r, orderScopes(principal, permission), chosen)
+	}
+	filter, err := s.selectorFilter(r, principal, permission, chosen)
+	if err != nil {
+		return nil, err
 	}
 	// The selector is read page by page, without a hidden limit: a campaign
 	// covering a thousand hosts is meant to mean a thousand hosts, not the
 	// first five hundred sorted alphabetically. The upper bound is explicit
 	// and ends in an error, not a quiet trimming of the list.
-	return s.pageHosts(r.Context(), hosts.ListFilter{
+	return s.pageHosts(r.Context(), filter)
+}
+
+// orderScopes are the scopes the fleet is cut to for an order: those in
+// which the caller holds the permission. Never nil - nil would narrow
+// nothing, and a caller with no scope is to see nobody.
+func orderScopes(principal authz.Principal, permission authz.Permission) []authz.Scope {
+	scopes := principal.ScopesFor(permission)
+	if scopes == nil {
+		return []authz.Scope{}
+	}
+	return scopes
+}
+
+// selectorFilter is the host query of a selector that is not an explicit
+// list, cut to the caller's scopes: the typed expression expanded of its
+// groups when there is one, the flat filters otherwise. The count of a
+// preview and the snapshot of an order run this same filter.
+func (s *Server) selectorFilter(r *http.Request, principal authz.Principal,
+	permission authz.Permission, chosen campaigns.Selector) (hosts.ListFilter, error) {
+	scopes := orderScopes(principal, permission)
+	if chosen.Expression != nil {
+		expanded, err := selector.Expand(r.Context(), chosen.Expression, s.groups)
+		if err != nil {
+			return hosts.ListFilter{}, err
+		}
+		return hosts.ListFilter{Expression: expanded, Scopes: scopes}, nil
+	}
+	return hosts.ListFilter{
 		Site:        chosen.Site,
 		Environment: chosen.Environment,
 		OSFamily:    chosen.OSFamily,
-	})
+		Scopes:      scopes,
+	}, nil
+}
+
+// resolveListedHosts reads an explicit host list in strict mode. The hosts
+// come back in the order they were named, each once.
+func (s *Server) resolveListedHosts(r *http.Request, scopes []authz.Scope,
+	chosen campaigns.Selector) ([]hosts.Host, error) {
+	var refusals []targetRefusal
+	seen := map[string]bool{}
+	ids := make([]string, 0, len(chosen.HostIDs))
+	for _, hostID := range chosen.HostIDs {
+		hostID = strings.TrimSpace(hostID)
+		if hostID == "" || seen[hostID] {
+			continue
+		}
+		seen[hostID] = true
+		if _, err := uuid.Parse(hostID); err != nil {
+			refusals = append(refusals, targetRefusal{HostID: hostID, Reason: TargetInvalidHostID})
+			continue
+		}
+		ids = append(ids, hostID)
+	}
+	if len(ids) > maxCampaignSnapshot {
+		return nil, fmt.Errorf("%w: the host list names more than %d hosts", ErrSelectorTooBroad, maxCampaignSnapshot)
+	}
+	found, err := s.pageHosts(r.Context(), hosts.ListFilter{IDs: ids, Scopes: scopes})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]hosts.Host, len(found))
+	for _, host := range found {
+		byID[host.ID] = host
+	}
+	result := make([]hosts.Host, 0, len(ids))
+	for _, hostID := range ids {
+		host, inScope := byID[hostID]
+		switch {
+		case !inScope:
+			// The host was not in the narrowed query: either it is not a
+			// host at all or it lies outside the caller's scope. The two
+			// are told apart, so the operator knows whether to fix the
+			// list or to ask for the right.
+			_, err := s.hosts.Get(r.Context(), hostID)
+			if errors.Is(err, hosts.ErrNotFound) {
+				refusals = append(refusals, targetRefusal{HostID: hostID, Reason: TargetUnknownHost})
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			refusals = append(refusals, targetRefusal{HostID: hostID, Reason: TargetOutOfScope})
+		case chosen.Excluded(hostID):
+			refusals = append(refusals, targetRefusal{HostID: hostID, Reason: TargetExcludedAndListed})
+		default:
+			result = append(result, host)
+		}
+	}
+	if len(refusals) > 0 {
+		return nil, &targetsInvalidError{Refusals: refusals}
+	}
+	return result, nil
+}
+
+// orderPermission is the permission the resolver cuts the fleet by: the
+// operation's own where there is one, and the right to order a campaign
+// where the preview asks only how many hosts a selector covers.
+func orderPermission(action opspec.ActionType) authz.Permission {
+	if action == "" {
+		return authz.PermCampaignCreate
+	}
+	return authz.Permission(action.Permission())
 }
 
 // excludeHosts takes the hosts on the exclusion list out of the candidate
@@ -746,10 +915,13 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
+	// The host list is read the way the order reads it, so the preview of
+	// a list and the order of the same list resolve the same hosts.
 	chosen := campaigns.Selector{
 		Site:          query.Get("site"),
 		Environment:   query.Get("environment"),
 		OSFamily:      query.Get("os_family"),
+		HostIDs:       query["host_id"],
 		Exclude:       query["exclude"],
 		ExcludeReason: query.Get("exclude_reason"),
 	}
@@ -779,6 +951,13 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(action))
 		return
 	}
+	// A preview of an operation is a step of ordering it: the caller has to
+	// hold the operation's permission somewhere, the way the order will
+	// ask. The right to read campaigns alone counts nobody's hosts.
+	permission := orderPermission(action)
+	if _, ok := s.authorizeCollection(w, r, permission, "campaign"); !ok {
+		return
+	}
 	// A compensation previews what the order would do: the same check,
 	// the same default host list, so the wizard shows the refusal before
 	// the form is filled in rather than after.
@@ -787,37 +966,7 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The count comes from the same query the snapshot will run: a preview
-	// counted differently than the creation would be worse than none.
-	filter := hosts.ListFilter{Site: chosen.Site, Environment: chosen.Environment, OSFamily: chosen.OSFamily}
-	if chosen.Expression != nil {
-		expanded, err := selector.Expand(r.Context(), chosen.Expression, s.groups)
-		if err != nil {
-			s.selectorProblem(w, err)
-			return
-		}
-		filter = hosts.ListFilter{Expression: expanded}
-	}
-	var count int
-	var listed []hosts.Host
-	if len(chosen.HostIDs) > 0 {
-		// A list of hosts is not a filter the host table counts; it is
-		// resolved the way the order resolves it, and counted.
-		listed, ok = s.materialize(w, r, chosen)
-		if !ok {
-			return
-		}
-		count = len(listed)
-	} else {
-		var err error
-		count, err = s.hosts.Count(r.Context(), filter)
-		if err != nil {
-			s.fail(w, err)
-			return
-		}
-	}
 	response := map[string]any{
-		"count":    count,
 		"limit":    maxCampaignSnapshot,
 		"selector": chosen.Expression.Describe(),
 	}
@@ -828,17 +977,43 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if action == "" {
-		sample := listed
-		if len(chosen.HostIDs) == 0 {
-			var err error
-			sample, err = s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
-			if err != nil {
-				s.fail(w, err)
-				return
-			}
+	// Without an operation the answer is a count and a sample, from the
+	// same filter the order would page through - in the caller's scopes -
+	// but counted in the database, so a selector wider than one campaign
+	// may carry is answered with its size rather than refused: the screen
+	// says "more than the limit" from the number.
+	if action == "" && len(chosen.HostIDs) == 0 {
+		filter, err := s.selectorFilter(r, principal, permission, chosen)
+		if err != nil {
+			s.selectorProblem(w, err)
+			return
 		}
+		count, err := s.hosts.Count(r.Context(), filter)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		sample, err := s.hosts.Page(r.Context(), filter, "", "", previewSampleSize)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		response["count"] = count
 		response["sample"] = hostNames(sample[:min(len(sample), previewSampleSize)])
+		writeJSON(w, http.StatusOK, response)
+		return
+	}
+
+	// The count comes from the same resolver the order runs, in the same
+	// scopes: a preview counted differently than the creation would be
+	// worse than none.
+	candidates, ok := s.materialize(w, r, principal, permission, chosen)
+	if !ok {
+		return
+	}
+	response["count"] = len(candidates)
+	if action == "" {
+		response["sample"] = hostNames(candidates[:min(len(candidates), previewSampleSize)])
 		writeJSON(w, http.StatusOK, response)
 		return
 	}
@@ -847,10 +1022,6 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// the campaign. A preview computed differently than the creation would be
 	// worse than none: the operator would approve one campaign and get
 	// another.
-	candidates, ok := s.materialize(w, r, chosen)
-	if !ok {
-		return
-	}
 	if compensation != nil && !compensation.covers(w, candidates, action) {
 		return
 	}

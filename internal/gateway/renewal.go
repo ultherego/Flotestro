@@ -95,7 +95,7 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
 		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
-		issued.IssuerSubject, issued.IssuerSerial); err != nil {
+		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("writing the certificate: %w", err))
 	}
 	if err := s.audit.RecordTx(ctx, tx, audit.Event{
@@ -125,6 +125,8 @@ func (s *AgentService) RenewCertificate(ctx context.Context,
 		// CA at an ordinary renewal, without a separate distribution.
 		CaBundlePem: trust,
 		NotAfter:    timestamppb.New(issued.NotAfter),
+		// The capability keys travel the same way, for the same reason.
+		HelperTrust: s.helperTrustFor(hostID),
 	}), nil
 }
 

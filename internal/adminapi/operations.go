@@ -122,6 +122,13 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
+	// The content of the order can ask for more than the operation does: an
+	// entry for root, a write allowed to skip its validator. Each such
+	// permission is checked in the scope of the host, like the operation's
+	// own, and the refusal names what the payload asked for.
+	if _, ok := s.authorizePayload(w, r, action, payload, scope, "host", hostID); !ok {
+		return
+	}
 	class, ok := requestedClass(request.Class)
 	if !ok {
 		problem(w, http.StatusBadRequest, "invalid_request",

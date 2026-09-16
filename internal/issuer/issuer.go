@@ -34,6 +34,10 @@ type Certificate struct {
 	// concerns.
 	IssuerSubject string
 	IssuerSerial  string
+	// IssuerID is the stable identifier of the issuing CA, recorded with
+	// the certificate so the installation's cryptographic state can be
+	// checked against what the hosts hold.
+	IssuerID string
 	// The network names issued in the certificate. Empty for hosts: only a
 	// relay appears to anyone as a server.
 	DNSNames    []string
@@ -101,7 +105,7 @@ func fromPKI(issued *pki.IssuedCert) *Certificate {
 		PEM: issued.PEM, Serial: issued.Serial, Fingerprint: issued.Fingerprint,
 		NotBefore: issued.NotBefore, NotAfter: issued.NotAfter,
 		CommonName:    issued.CommonName,
-		IssuerSubject: issued.IssuerSubject, IssuerSerial: issued.IssuerSerial,
+		IssuerSubject: issued.IssuerSubject, IssuerSerial: issued.IssuerSerial, IssuerID: issued.IssuerID,
 		DNSNames: issued.DNSNames, IPAddresses: issued.IPAddresses,
 	}
 }

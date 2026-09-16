@@ -1,6 +1,12 @@
 package gateway
 
-import "testing"
+import (
+	"errors"
+	"fmt"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
+)
 
 func TestSplitTheNotificationAboutAnEpoch(t *testing.T) {
 	hostID, epoch, gateway, ok := splitNotification(
@@ -33,5 +39,28 @@ func TestADamagedNotificationDoesNotCloseASession(t *testing.T) {
 				t.Fatalf("the damaged notification %q was accepted", payload)
 			}
 		})
+	}
+}
+
+// Only the unique index on the host's epoch makes a session try the next
+// number: any other refusal of the insert is an error to report, not a
+// race to retry.
+func TestOnlyATakenEpochIsRetried(t *testing.T) {
+	taken := &pgconn.PgError{Code: "23505", ConstraintName: "agent_sessions_host_epoch_key"}
+	if !epochTaken(taken) || !epochTaken(fmt.Errorf("opening: %w", taken)) {
+		t.Fatal("a taken epoch was not recognised")
+	}
+	for _, err := range []error{
+		nil,
+		errors.New("connection reset"),
+		&pgconn.PgError{Code: "23505", ConstraintName: "agent_sessions_pkey"},
+		&pgconn.PgError{Code: "23503", ConstraintName: "agent_sessions_host_epoch_key"},
+	} {
+		if epochTaken(err) {
+			t.Errorf("%v was taken for a taken epoch", err)
+		}
+	}
+	if sessionEpochAttempts < 2 {
+		t.Fatalf("a single attempt at an epoch retries nothing: %d", sessionEpochAttempts)
 	}
 }

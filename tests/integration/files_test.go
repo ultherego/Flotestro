@@ -233,3 +233,64 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// TestAMissingValidatorRefusesTheWrite closes the hole where a validator
+// the host did not have counted as a passed check. The order names the
+// nginx check for a file the allowlist covers; a host without nginx
+// refuses with validator_unavailable and writes nothing. A host that does
+// have nginx runs the check instead, so the test says so and stops.
+func TestAMissingValidatorRefusesTheWrite(t *testing.T) {
+	h := newHarness(t)
+	host := h.hostByFamily("debian")
+	const path = "/etc/flotestro-validator-test.conf"
+
+	job, attempts := h.runOperation(host.ID, map[string]any{
+		"action": "file.ensure", "reason": filesReason,
+		"payload": map[string]any{"file": map[string]any{
+			"path": path, "content": "key = value\n", "validator": "nginx"}},
+	}, 2*time.Minute)
+	if job.State == "succeeded" {
+		t.Cleanup(func() {
+			state := managedFile(t, h, host.ID, path)
+			h.runOperation(host.ID, map[string]any{
+				"action": "file.remove", "reason": filesReason,
+				"payload": map[string]any{"file": map[string]any{
+					"path": path, "expected_sha256": state.ObservedSHA256}},
+			}, 2*time.Minute)
+		})
+		t.Fatalf("the host wrote a file whose validator it may not have: %s", lastMessage(attempts))
+	}
+	if len(attempts) == 0 {
+		t.Fatal("no attempt was recorded")
+	}
+	last := attempts[len(attempts)-1]
+	if last.ErrorCode == "malformed_request" && strings.Contains(last.Message, "the validator nginx:") {
+		t.Skipf("the host has nginx, so the check ran instead of being missing: %s", last.Message)
+	}
+	if last.ErrorCode != "validator_unavailable" {
+		t.Fatalf("refusal = %s, want validator_unavailable", lastMessage(attempts))
+	}
+	if !strings.Contains(last.Message, "nothing was written") {
+		t.Errorf("the refusal does not say the write did not happen: %q", last.Message)
+	}
+
+	// The host reads the file back through a plan: an absent file is the
+	// proof that nothing was written.
+	plan, planAttempts := h.runOperation(host.ID, map[string]any{
+		"action": "file.plan", "reason": filesReason,
+		"payload": map[string]any{"file": map[string]any{
+			"path": path, "content": "key = value\n", "validator": "nginx"}},
+	}, 2*time.Minute)
+	if plan.State != "succeeded" {
+		t.Fatalf("planning after the refusal: state = %s, %s", plan.State, lastMessage(planAttempts))
+	}
+	planMessage := lastMessage(planAttempts)
+	if !strings.Contains(planMessage, "the file will be created") {
+		t.Errorf("the file exists after a refused write: %q", planMessage)
+	}
+	// The plan names the missing check the same way the write refuses it,
+	// so the operator sees it before approving anything.
+	if !strings.Contains(planMessage, "validator: unavailable") {
+		t.Errorf("the plan does not report the missing validator: %q", planMessage)
+	}
+}

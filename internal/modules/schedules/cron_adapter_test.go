@@ -65,12 +65,40 @@ func TestIdentifierMustBeValidFileName(t *testing.T) {
 	}
 }
 
+// The user stands between the expression and the command, separated by
+// whitespace only: a value with a space or a newline would end the field
+// early and run the rest as root. Such a value never reaches the line, and
+// neither does an entry that names no user at all - root is not a default.
+func TestWriteEntryRefusesAUserThatWouldNotStayInItsField(t *testing.T) {
+	dir := t.TempDir()
+	for _, user := range []string{
+		"", "root; /bin/sh", "root\t/bin/sh", "root\n* * * * * root /bin/sh", "Root",
+		"root#", "-root", "a.b", "user$", "0user", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	} {
+		entry := Schedule{
+			ID: "probe", Expression: "0 3 * * *", Enabled: true, User: user,
+			Command: []string{"/usr/bin/true"},
+		}
+		if err := WriteEntry(dir, entry); err == nil {
+			t.Errorf("accepted user %q", user)
+		}
+		if _, err := os.Stat(EntryPath(dir, "probe")); err == nil {
+			t.Fatalf("an entry with user %q was written", user)
+		}
+	}
+	for _, user := range []string{"root", "backup", "www-data", "_apt", "svc_backup-2"} {
+		if !ValidUser(user) {
+			t.Errorf("rejected user %q", user)
+		}
+	}
+}
+
 // An entry created by the panel is recognised as managed and has a stable
 // identifier; an entry found on the host belongs to the host administrator.
 func TestManagedEntriesAreDistinguished(t *testing.T) {
 	dir := t.TempDir()
 	entry := Schedule{
-		ID: "nightly-backup", Expression: "0 3 * * *", Enabled: true,
+		ID: "nightly-backup", Expression: "0 3 * * *", Enabled: true, User: "root",
 		Command: []string{"/usr/local/bin/backup.sh"}, Comment: "database backup",
 	}
 	if err := WriteEntry(dir, entry); err != nil {
@@ -120,7 +148,7 @@ func TestManagedEntriesAreDistinguished(t *testing.T) {
 func TestDisabledEntryKeepsContentWithoutDate(t *testing.T) {
 	dir := t.TempDir()
 	entry := Schedule{
-		ID: "nightly-backup", Expression: "0 3 * * *", Enabled: false,
+		ID: "nightly-backup", Expression: "0 3 * * *", Enabled: false, User: "root",
 		Command: []string{"/usr/local/bin/backup.sh"},
 	}
 	if err := WriteEntry(dir, entry); err != nil {

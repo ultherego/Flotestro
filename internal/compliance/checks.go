@@ -530,14 +530,17 @@ func evaluateRootWithoutPassword(input Input) Result {
 	}
 	passwordless := policy.RootWithoutPassword()
 	if len(passwordless) == 0 {
+		// A line the parser skipped or an included file it could not open
+		// may hold the very grant the check looks for. The absence of a
+		// finding in what was read says nothing about what was not, so the
+		// policy is undetermined rather than clean - a parser problem must
+		// never read as a host without a dangerous rule.
+		if note := sudoParseProblems(policy); note != "" {
+			return unknown(ReasonParseError, "the sudo policy was not fully understood: "+note)
+		}
 		observed := "no passwordless root grant"
 		if equivalent := len(policy.RootEquivalentRules()); equivalent > 0 {
 			observed += "; root-equivalent rules with a password: " + strconv.Itoa(equivalent)
-		}
-		if len(policy.Problems) > 0 {
-			// A line the parser skipped may be the very grant the check
-			// looks for, so the pass names what it did not read.
-			observed += "; lines not understood: " + strconv.Itoa(len(policy.Problems))
 		}
 		return Result{Passed: true, Observed: observed}
 	}
@@ -557,6 +560,28 @@ func evaluateRootWithoutPassword(input Input) Result {
 		Remediation: &Remediation{Note: "edit the named file with visudo and drop NOPASSWD from the grant, " +
 			"or move the grant to a directory rule with a password; the panel does not write sudoers files"},
 	}
+}
+
+// sudoParseProblems names what the sudoers parser did not read: the lines
+// it skipped and the files it could not open. Empty means the whole policy
+// was understood.
+func sudoParseProblems(policy sudoers.Snapshot) string {
+	var notes []string
+	for _, file := range policy.Files {
+		if file.Reason != "" {
+			notes = append(notes, file.Path+": "+file.Reason)
+		}
+	}
+	if len(policy.Problems) > 0 {
+		first := policy.Problems[0]
+		note := "lines not understood: " + strconv.Itoa(len(policy.Problems)) +
+			" (first " + first.Source + ":" + strconv.Itoa(first.Line)
+		if first.Reason != "" {
+			note += ", " + first.Reason
+		}
+		notes = append(notes, note+")")
+	}
+	return strings.Join(notes, "; ")
 }
 
 func protectiveState(input Input) (security.Snapshot, bool) {

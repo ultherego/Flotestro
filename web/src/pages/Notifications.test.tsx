@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  channelBody, deliveryParams, deliveryWords, describeChannel, describeFilter, emptyForm, formOf, recipients,
+  addressWithheld, channelBody, deliveryParams, deliveryWords, describeChannel, describeFilter, emptyForm, formOf, recipients,
   type Channel,
 } from "./Notifications";
 
@@ -56,6 +56,20 @@ describe("channelBody", () => {
     expect(channelBody(form).body?.config).toEqual({ url: "https://hooks.example.com/flotestro", secret_set: true });
     expect(channelBody({ ...form, secret: "fresh" }).body?.config).toEqual({ url: "https://hooks.example.com/flotestro", secret: "fresh" });
     expect(channelBody({ ...form, keepSecret: false }).body?.config).toEqual({ url: "https://hooks.example.com/flotestro" });
+  });
+
+  it("keeps the withheld address of an incoming webhook unless a new one is typed", () => {
+    const slack: Channel = { ...stored, kind: "slack_webhook", config: { url_set: true } };
+    const form = { ...formOf(slack), reason: "edited the events" };
+    expect(form.url).toBe("");
+    expect(form.urlSet).toBe(true);
+    expect(channelBody(form).body?.config).toEqual({ url_set: true });
+    expect(channelBody({ ...form, url: "https://hooks.example.com/T0/B0/new" }).body?.config)
+      .toEqual({ url: "https://hooks.example.com/T0/B0/new" });
+    // A new channel has nothing stored to keep, so an empty address is a problem.
+    expect(channelBody({ ...emptyForm("slack_webhook"), name: "x", reason: "a proper reason" }).problem).toBe("url");
+    expect(addressWithheld(slack)).toBe(true);
+    expect(addressWithheld(stored)).toBe(false);
   });
 });
 

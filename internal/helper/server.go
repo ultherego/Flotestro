@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/systemd"
@@ -53,11 +54,38 @@ type Server struct {
 	// scopes wraps the tools of a heavy operation in a transient resource
 	// scope. A test stands in a host without systemd-run through it.
 	scopes scopeRunner
+
+	// policy decides whether a mutating request is authorized by the
+	// panel's capability, and what to do with one that carries none.
+	// SO_PEERCRED above says who asks; the policy says whether the panel
+	// approved what is asked. A server built without a keyring runs the
+	// default mode with nothing to verify against: a request without a
+	// capability passes as a legacy one, a request with one is refused,
+	// because a capability that cannot be checked is not a verified one.
+	policy *helpercap.Policy
+	// trust is the root-owned keyring and host identity the trust update
+	// writes.
+	trust helpercap.TrustStore
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
 	return &Server{allowedUID: allowedUID, log: log, traffic: make(chan struct{}, 1),
-		scopes: newScopeRunner(log)}
+		scopes: newScopeRunner(log), policy: helpercap.NewPolicy(helpercap.ModePrefer, nil)}
+}
+
+// SetCapabilityPolicy installs the capability policy and the trust store
+// it verifies against.
+func (s *Server) SetCapabilityPolicy(policy *helpercap.Policy, trust helpercap.TrustStore) {
+	s.policy = policy
+	s.trust = trust
+}
+
+// CapabilityMode is the mode the server runs in.
+func (s *Server) CapabilityMode() helpercap.Mode {
+	if s.policy == nil {
+		return helpercap.ModePrefer
+	}
+	return s.policy.Mode
 }
 
 // Serve accepts connections until the context is closed or until the idle
@@ -201,6 +229,9 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 
 	response := s.handle(ctx, &request, progress)
 	response.Final = true
+	// Every answer says which mode the helper runs in, so the agent can
+	// tell the panel what this host does with a capability.
+	response.CapabilityMode = string(s.CapabilityMode())
 	sendMu.Lock()
 	defer sendMu.Unlock()
 	if err := WriteMessage(conn, response); err != nil {
@@ -226,6 +257,89 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 			fmt.Sprintf("the task expired at %s", expires.AsTime().Format(time.RFC3339)))
 	}
 
+	// The keyring update proves itself with the bundle's own signature and
+	// goes before the capability check: it is how the keys the check needs
+	// reach the host in the first place.
+	if update, ok := request.GetAction().(*helperv1.HelperRequest_TrustUpdate); ok {
+		return s.applyTrustUpdate(request, update.TrustUpdate)
+	}
+	// The capability: the panel's proof that this operation was approved
+	// for this host. A refusal here runs nothing.
+	refused, capabilityID := s.authorize(request)
+	if refused != nil {
+		return refused
+	}
+
+	response := s.perform(ctx, request, progress)
+	// The verified capability travels back with the answer, so the agent
+	// can put it next to the task on its own side of the audit trail.
+	response.CapabilityId = capabilityID
+	return response
+}
+
+// authorize applies the capability policy to a request. It returns the
+// refusal to answer with, or nil and the identifier of the capability that
+// was verified. The log carries every path: a legacy request under prefer
+// is the telemetry of the rollout, a refusal is what the operator looks
+// for when a task ends with a capability code.
+func (s *Server) authorize(request *helperv1.HelperRequest) (*helperv1.HelperResponse, string) {
+	if s.policy == nil {
+		return nil, ""
+	}
+	decision := s.policy.Decide(request)
+	switch decision.Outcome {
+	case helpercap.OutcomeLegacy:
+		legacy, verified, refused, observed := s.policy.Counters()
+		s.log.Warn("legacy_helper_request: a mutating request without a capability of the panel",
+			"task_id", request.GetTaskId(), "kind", helpercap.Expect(request).Kind,
+			"mode", string(s.policy.Mode),
+			"legacy_total", legacy, "verified_total", verified, "refused_total", refused, "observed_total", observed)
+	case helpercap.OutcomeObserved:
+		s.log.Warn("the capability failed verification; observe mode lets the request through",
+			"task_id", request.GetTaskId(), "capability_id", decision.CapabilityID,
+			"code", decision.Code, "reason", decision.Message)
+	case helpercap.OutcomeRefused:
+		s.log.Warn("the request was refused by the capability policy",
+			"task_id", request.GetTaskId(), "capability_id", decision.CapabilityID,
+			"kind", helpercap.Expect(request).Kind, "mode", string(s.policy.Mode),
+			"code", decision.Code, "reason", decision.Message)
+		return reject(decision.Code, decision.Message), ""
+	case helpercap.OutcomeVerified:
+		s.log.Info("the capability of the panel was verified",
+			"task_id", request.GetTaskId(), "capability_id", decision.CapabilityID,
+			"action", request.GetCapability().GetActionType(), "key_id", request.GetCapability().GetKeyId())
+	}
+	return nil, decision.CapabilityID
+}
+
+// applyTrustUpdate writes the panel's keyring and the host identity.
+func (s *Server) applyTrustUpdate(request *helperv1.HelperRequest,
+	update *helperv1.HelperTrustUpdateRequest) *helperv1.HelperResponse {
+	if s.trust.Dir == "" || s.trust.HostIDPath == "" {
+		return reject(ErrorUnsupported, "this helper keeps no keyring")
+	}
+	result, err := s.trust.Apply(update.GetBundle())
+	if err != nil {
+		if code := helpercap.CodeOf(err); code != "" {
+			s.log.Warn("the trust bundle was refused", "code", code, "reason", err.Error())
+			return reject(code, err.Error())
+		}
+		s.log.Error("the trust bundle was not written", "err", err)
+		return reject(ErrorExecFailed, err.Error())
+	}
+	if result.Changed {
+		s.log.Info("the keyring of the helper was updated",
+			"host_id", result.HostID, "key_ids", result.KeyIDs, "bootstrap", result.Bootstrap,
+			"signed_by", update.GetBundle().GetSignedByKeyId())
+	}
+	return &helperv1.HelperResponse{Accepted: true, TrustResult: &helperv1.HelperTrustResult{
+		HostId: result.HostID, KeyIds: result.KeyIDs, Changed: result.Changed}}
+}
+
+// perform carries the request out. Every check that can refuse it without
+// touching the host is behind.
+func (s *Server) perform(ctx context.Context, request *helperv1.HelperRequest,
+	progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	switch action := request.GetAction().(type) {
 	case *helperv1.HelperRequest_UnitAction:
 		return s.applyUnitAction(ctx, request, action.UnitAction)

@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,8 @@ type Trust struct {
 	// retired ones are still recognised but sign nothing any more.
 	retired []*CA
 	dir     string
+	// onActivate runs after a handover of signing; see SetActivationHook.
+	onActivate func(active *CA)
 }
 
 // retiredDir holds the CAs withdrawn from signing.
@@ -53,21 +56,64 @@ const (
 	pendingAtFile = "ca-pending.at"
 )
 
-// EnsureTrust reads the set of CAs from the state directory, creating the
-// first CA on the first start.
+// EnsureTrust reads the set of CAs from the state directory when it
+// holds material and creates the first CA only when it holds nothing.
 func EnsureTrust(dir string) (*Trust, error) {
-	active, err := EnsureCA(dir)
-	if err != nil {
+	if HasAnyMaterial(dir) {
+		return OpenTrust(dir)
+	}
+	return InitTrust(dir)
+}
+
+// InitTrust creates the first CA of an installation. It refuses a
+// directory that already holds material, the same way Init does.
+func InitTrust(dir string) (*Trust, error) {
+	if _, err := Init(dir); err != nil {
+		return nil, err
+	}
+	return OpenTrust(dir)
+}
+
+// OpenTrust reads the set of CAs and creates nothing.
+//
+// An activation interrupted between its two files is recognised here and
+// finished: the key is written before the certificate, and the pending
+// certificate stays on disk until both are in place, so a key that
+// matches the pending certificate rather than the active one is an
+// activation that got as far as the key. Any other mismatch is an error
+// the operator has to look at.
+func OpenTrust(dir string) (*Trust, error) {
+	active, err := Open(dir)
+	if errors.Is(err, ErrStateMismatch) {
+		recovered, finished, finishErr := finishInterruptedActivation(dir)
+		if finishErr != nil {
+			return nil, finishErr
+		}
+		if !finished {
+			return nil, err
+		}
+		active = recovered
+	} else if err != nil {
 		return nil, err
 	}
 	trust := &Trust{active: active, dir: dir}
 
 	certPEM, certErr := os.ReadFile(filepath.Join(dir, pendingCertFile))
 	keyPEM, keyErr := os.ReadFile(filepath.Join(dir, pendingKeyFile))
-	if certErr == nil && keyErr == nil {
+	switch {
+	case certErr == nil && keyErr == nil:
 		pending, err := parseCA(certPEM, keyPEM)
 		if err != nil {
+			return nil, fmt.Errorf("%w: %s: %v", ErrStateMismatch, pendingCertFile, err)
+		}
+		if err := pending.VerifyPair(); err != nil {
 			return nil, fmt.Errorf("%s: %w", pendingCertFile, err)
+		}
+		if pending.Certificate.Equal(active.Certificate) {
+			// The activation wrote both files and was interrupted before
+			// it removed the pending ones: nothing is pending any more.
+			removePending(dir)
+			break
 		}
 		trust.pending = pending
 		// A missing or damaged marker must not stop the panel. We then take
@@ -85,8 +131,17 @@ func EnsureTrust(dir string) (*Trust, error) {
 			[]byte(trust.pendingAt.Format(time.RFC3339)), 0o644); err != nil {
 			return nil, err
 		}
-	} else if certErr != nil && !os.IsNotExist(certErr) {
+	case os.IsNotExist(certErr) && os.IsNotExist(keyErr):
+	case certErr != nil && !os.IsNotExist(certErr):
 		return nil, certErr
+	case keyErr != nil && !os.IsNotExist(keyErr):
+		return nil, keyErr
+	default:
+		// One pending file without the other is a preparation that was
+		// interrupted or a key removed by hand; either way the pair is
+		// not one the panel may ever sign with.
+		return nil, fmt.Errorf("%w: %s and %s do not come as a pair",
+			ErrStateMismatch, pendingCertFile, pendingKeyFile)
 	}
 
 	entries, err := os.ReadDir(filepath.Join(dir, retiredDir))
@@ -106,12 +161,69 @@ func EnsureTrust(dir string) (*Trust, error) {
 		// and keeping a key without need only increases the risk.
 		cert, err := parseCertificateOnly(certPEM)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
+			return nil, fmt.Errorf("%w: %s: %v", ErrStateMismatch, entry.Name(), err)
 		}
 		trust.retired = append(trust.retired, &CA{Certificate: cert, PEM: certPEM})
 	}
 	return trust, nil
 }
+
+// finishInterruptedActivation completes an activation that wrote the new
+// key and not yet the new certificate. It returns false when the state on
+// disk is not that: the caller then reports the mismatch it found.
+func finishInterruptedActivation(dir string) (*CA, bool, error) {
+	keyPEM, err := os.ReadFile(filepath.Join(dir, caKeyFile))
+	if err != nil {
+		return nil, false, nil
+	}
+	pendingPEM, err := os.ReadFile(filepath.Join(dir, pendingCertFile))
+	if err != nil {
+		return nil, false, nil
+	}
+	candidate, err := parseCA(pendingPEM, keyPEM)
+	if err != nil || candidate.VerifyPair() != nil {
+		return nil, false, nil
+	}
+	if err := writeFileAtomic(filepath.Join(dir, caCertFile), pendingPEM, 0o644); err != nil {
+		return nil, false, err
+	}
+	removePending(dir)
+	active, err := Open(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	return active, true, nil
+}
+
+// removePending deletes the files of the CA prepared to take over.
+func removePending(dir string) {
+	_ = os.Remove(filepath.Join(dir, pendingCertFile))
+	_ = os.Remove(filepath.Join(dir, pendingKeyFile))
+	_ = os.Remove(filepath.Join(dir, pendingAtFile))
+}
+
+// SetActivationHook registers what runs once a prepared CA has taken over
+// signing on disk. The installation record in the database names the
+// issuer, and the hook is how it learns of the change; it runs after the
+// files, because a record pointing at a CA whose files never landed would
+// stop the next start, while a record behind the files is caught up by
+// the startup guard. The hook reports its own failures: the handover on
+// disk is done by then and is not undone.
+func (t *Trust) SetActivationHook(hook func(active *CA)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.onActivate = hook
+}
+
+// Retired returns the withdrawn CAs that are still recognised.
+func (t *Trust) Retired() []*CA {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return append([]*CA(nil), t.retired...)
+}
+
+// Dir returns the state directory the set is read from.
+func (t *Trust) Dir() string { return t.dir }
 
 // Active returns the CA signing new certificates.
 func (t *Trust) Active() *CA {
@@ -226,11 +338,14 @@ func (t *Trust) Prepare() (Authority, error) {
 	created.AgentTTL = t.active.AgentTTL
 	created.ReservedNames = t.active.ReservedNames
 
-	if err := writeFileAtomic(filepath.Join(t.dir, pendingCertFile), certPEM, 0o644); err != nil {
+	// The CA key is the most sensitive material in the system. It goes
+	// first: a certificate without its key is the state the open refuses,
+	// and a key without its certificate is one it reports the same way,
+	// so an interruption here never looks like a CA ready to sign.
+	if err := writeFileAtomic(filepath.Join(t.dir, pendingKeyFile), keyPEM, 0o600); err != nil {
 		return Authority{}, err
 	}
-	// The CA key is the most sensitive material in the system.
-	if err := writeFileAtomic(filepath.Join(t.dir, pendingKeyFile), keyPEM, 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(t.dir, pendingCertFile), certPEM, 0o644); err != nil {
 		return Authority{}, err
 	}
 	now := time.Now().UTC()
@@ -252,38 +367,77 @@ func (t *Trust) Prepare() (Authority, error) {
 // The caller checks beforehand that every host already has the new CA
 // locally; here we only guard the consistency of the set itself.
 func (t *Trust) Activate() (Authority, error) {
+	authority, hook, active, err := t.activate()
+	if err != nil {
+		return authority, err
+	}
+	// The hook runs outside the lock: it reads the set it is told about.
+	if hook != nil {
+		hook(active)
+	}
+	return authority, nil
+}
+
+// activate is the handover under the lock; it hands back the hook to run
+// once the lock is released.
+func (t *Trust) activate() (Authority, func(*CA), *CA, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	if t.pending == nil {
-		return Authority{}, fmt.Errorf("there is no CA prepared to take over")
+		return Authority{}, nil, nil, fmt.Errorf("there is no CA prepared to take over")
 	}
 
 	// We record the previous CA as withdrawn before the new one becomes the
 	// signing one: an interruption at this point leaves the fleet with a CA
 	// the panel still recognises.
 	if err := os.MkdirAll(filepath.Join(t.dir, retiredDir), 0o700); err != nil {
-		return Authority{}, err
+		return Authority{}, nil, nil, err
 	}
 	previous := filepath.Join(t.dir, retiredDir,
 		t.active.Certificate.SerialNumber.String()+".pem")
 	if err := os.WriteFile(previous, t.active.PEM, 0o644); err != nil {
-		return Authority{}, err
+		return Authority{}, nil, nil, err
 	}
 
 	pendingKey, err := os.ReadFile(filepath.Join(t.dir, pendingKeyFile))
 	if err != nil {
-		return Authority{}, err
+		return Authority{}, nil, nil, err
 	}
-	if err := writeFileAtomic(filepath.Join(t.dir, "ca.pem"), t.pending.PEM, 0o644); err != nil {
-		return Authority{}, err
+	// The pair on disk is checked before anything is replaced: a pending
+	// key that does not match the pending certificate would become the
+	// signing pair of the fleet and nothing would say so until the first
+	// renewal failed.
+	incoming, err := parseCA(t.pending.PEM, pendingKey)
+	if err != nil {
+		return Authority{}, nil, nil, fmt.Errorf("%w: %v", ErrStateMismatch, err)
 	}
-	if err := writeFileAtomic(filepath.Join(t.dir, "ca.key"), pendingKey, 0o600); err != nil {
-		return Authority{}, err
+	if err := incoming.VerifyPair(); err != nil {
+		return Authority{}, nil, nil, err
 	}
-	_ = os.Remove(filepath.Join(t.dir, pendingCertFile))
-	_ = os.Remove(filepath.Join(t.dir, pendingKeyFile))
-	_ = os.Remove(filepath.Join(t.dir, pendingAtFile))
+	// The key goes first and the certificate second. Between the two the
+	// directory holds the new key with the old certificate, and the
+	// pending certificate still on disk lets the next open finish the
+	// handover rather than report a broken CA; the other order would
+	// leave an old key under a new certificate, which nothing can tell
+	// from a swapped file.
+	if err := writeFileAtomic(filepath.Join(t.dir, caKeyFile), pendingKey, 0o600); err != nil {
+		return Authority{}, nil, nil, err
+	}
+	if err := writeFileAtomic(filepath.Join(t.dir, caCertFile), t.pending.PEM, 0o644); err != nil {
+		return Authority{}, nil, nil, err
+	}
+	// Read back what landed: the pair on disk is what the next start will
+	// sign with, and it has to be the one that was just checked.
+	landed, err := Open(t.dir)
+	if err != nil {
+		return Authority{}, nil, nil, err
+	}
+	if !landed.Certificate.Equal(incoming.Certificate) {
+		return Authority{}, nil, nil, fmt.Errorf("%w: the CA read back after the handover is not the prepared one",
+			ErrStateMismatch)
+	}
+	removePending(t.dir)
 
 	t.retired = append(t.retired, &CA{Certificate: t.active.Certificate, PEM: t.active.PEM})
 	// The policy of the authority - the lifetime it issues and the names it
@@ -297,7 +451,7 @@ func (t *Trust) Activate() (Authority, error) {
 	}
 	t.active = t.pending
 	t.pending = nil
-	return describe(t.active, "active"), nil
+	return describe(t.active, "active"), t.onActivate, t.active, nil
 }
 
 // Pending returns the CA prepared to take over together with the moment it was prepared.
@@ -327,9 +481,7 @@ func (t *Trust) Retire(fingerprint string, hostsUsing int) error {
 		// Abandoning a prepared CA is allowed: nothing has been signed with
 		// it yet, and the agents that got it will simply stop knowing it at
 		// their next renewal.
-		_ = os.Remove(filepath.Join(t.dir, pendingCertFile))
-		_ = os.Remove(filepath.Join(t.dir, pendingKeyFile))
-		_ = os.Remove(filepath.Join(t.dir, pendingAtFile))
+		removePending(t.dir)
 		t.pending = nil
 		t.pendingAt = time.Time{}
 		return nil

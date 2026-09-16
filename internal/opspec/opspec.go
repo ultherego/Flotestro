@@ -583,6 +583,37 @@ func PayloadRisk(action ActionType, payload Payload) RiskLevel {
 	return risk
 }
 
+// Permissions an order needs on top of the one of its operation. The
+// names are the ones the roles use; the constants live here so that the
+// contract of an operation and the roles do not drift apart in spelling.
+const (
+	// PermissionScheduleRootExec lets an entry run as root. Writing
+	// schedules for a service account and putting a command into root's
+	// crontab are two levels of trust, so root needs a grant of its own.
+	PermissionScheduleRootExec = "schedule.root.exec"
+	// PermissionFileWriteUnvalidated lets a file be written when the host
+	// lacks the validator the order relies on. Without it a missing
+	// validator refuses the write.
+	PermissionFileWriteUnvalidated = "file.write.unvalidated"
+)
+
+// PayloadPermissions returns the permissions the content of one order
+// requires beyond the operation's own: an entry for root, a write that
+// may skip its validator. The registry's permission opens the operation;
+// these open what the payload asks for, and the handlers check them the
+// same way, in the scope of the host.
+func PayloadPermissions(action ActionType, payload Payload) []string {
+	var required []string
+	if action == ActionScheduleEnsure && payload.Schedule != nil && payload.Schedule.User == "root" {
+		required = append(required, PermissionScheduleRootExec)
+	}
+	if (action == ActionFileEnsure || action == ActionFileRollback) &&
+		payload.File != nil && payload.File.AllowMissingValidator {
+		required = append(required, PermissionFileWriteUnvalidated)
+	}
+	return required
+}
+
 // PayloadRequiresFreshAuth says whether one order needs the operator to
 // confirm their identity right before placing it: the registry's answer,
 // or the raised one where the content of the order calls for it.
@@ -1303,6 +1334,28 @@ func checkScheduleCommand(arguments []string) error {
 		if strings.ContainsAny(argument, scheduleShellCharacters) {
 			return fmt.Errorf("the argument %q contains a shell character", argument)
 		}
+		// A zero byte ends the string for the tools that read the line; it
+		// is not a shell character and the list above would not see it.
+		if strings.ContainsRune(argument, 0) {
+			return fmt.Errorf("the argument %q contains a zero byte", argument)
+		}
+	}
+	return nil
+}
+
+// checkScheduleUser refuses an account name that would not stay in the
+// user field of a cron line, and an entry that names none.
+//
+// The user is separated from the command by whitespace only: a value with
+// a space or a newline ends the field early and runs the rest as root. The
+// same words as on the host, so the panel refuses what the host would; the
+// host still checks that the account exists, which only it can know.
+func checkScheduleUser(name string) error {
+	if name == "" {
+		return fmt.Errorf("a schedule requires a user; root is not a default")
+	}
+	if !schedules.ValidUser(name) {
+		return fmt.Errorf("invalid user %q: an account name is lower-case letters, digits, underscore and hyphen", name)
 	}
 	return nil
 }
@@ -1993,6 +2046,11 @@ type FilePayload struct {
 	// visible in the plan, or it comes from the store and exists nowhere
 	// outside it.
 	ContentSecret *SecretRef `json:"content_secret,omitempty"`
+	// AllowMissingValidator lets the write go on when the host lacks the
+	// validator; without it a missing validator refuses the write. Saying
+	// so in the order is not enough on its own: the principal also needs
+	// the permission file.write.unvalidated.
+	AllowMissingValidator bool `json:"allow_missing_validator,omitempty"`
 }
 
 // Secrets lists the references the host will have to reach for.
@@ -2210,8 +2268,11 @@ type SchedulePayload struct {
 	Expression string `json:"expression,omitempty"`
 	// Command is an array of arguments, never a shell line.
 	Command []string `json:"command,omitempty"`
-	User    string   `json:"user,omitempty"`
-	Comment string   `json:"comment,omitempty"`
+	// User is the account the entry runs as. It is required for
+	// schedule.ensure and root is not a default: an entry for root needs
+	// the permission schedule.root.exec on top of schedule.write.
+	User    string `json:"user,omitempty"`
+	Comment string `json:"comment,omitempty"`
 	// Enabled concerns schedule.disable only: true enables, false disables.
 	// Disabling does not delete the content of the entry.
 	Enabled bool `json:"enabled,omitempty"`
@@ -2712,7 +2773,10 @@ func Validate(action ActionType, payload Payload) error {
 		if len(payload.Schedule.Command) == 0 {
 			return fmt.Errorf("a schedule requires a command")
 		}
-		return checkScheduleCommand(payload.Schedule.Command)
+		if err := checkScheduleCommand(payload.Schedule.Command); err != nil {
+			return err
+		}
+		return checkScheduleUser(payload.Schedule.User)
 
 	case ActionFilePlan:
 		return nil

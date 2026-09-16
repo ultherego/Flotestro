@@ -73,6 +73,7 @@ export function stateMeaning(state: string): string {
     canceled: "Stopped before it started, or the running work was left to finish.",
     partially_applied: "Some of the change landed and some did not; the result lists both.",
     paused: "No new hosts start until resumed; work under way finishes on its own.",
+    pausing: "A pause was ordered; the hosts still carrying their tasks finish, then the campaign is paused.",
     completed: "Every host is settled and every host that took part got through.",
     completed_with_issues: "Every host is settled under the threshold, but some failed or ended unknown; the report names them.",
     plan_failed: "Planning left no host to run on: every plan was refused, failed or never computed. Nothing was approved and nothing ran.",
@@ -113,7 +114,7 @@ export function stateName(state: string): string {
     completed_with_issues: "completed with issues", plan_failed: "planning failed",
     lease_expired: "lease expired", superseded_by_result: "superseded",
     rejected: "rejected", replayed: "replayed",
-    active: "active", paused: "paused", completed: "completed",
+    active: "active", paused: "paused", pausing: "pausing", completed: "completed",
     partially_applied: "partially applied",
     denied: "denied", success: "success", failure: "failure",
   };

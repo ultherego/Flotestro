@@ -3,6 +3,7 @@ package secrets
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -11,12 +12,15 @@ import (
 
 // Store holds the secrets and the leases.
 type Store struct {
-	pool   *pgxpool.Pool
-	cipher *Cipher
+	pool *pgxpool.Pool
+	keys KeyProvider
 }
 
-func NewStore(pool *pgxpool.Pool, cipher *Cipher) *Store {
-	return &Store{pool: pool, cipher: cipher}
+// NewStore builds the store over the provider that holds the key
+// encryption keys. The store never sees those keys: it hands data keys to
+// the provider to wrap and gets them back unwrapped.
+func NewStore(pool *pgxpool.Pool, keys KeyProvider) *Store {
+	return &Store{pool: pool, keys: keys}
 }
 
 // Pool exposes the pool for transactions combined with other writes.
@@ -86,14 +90,16 @@ func (s *Store) Rotate(ctx context.Context, name string, value []byte, author st
 // saveVersion records the encrypted value and moves the current version.
 func (s *Store) saveVersion(ctx context.Context, tx pgx.Tx, secretID string,
 	version int, value []byte, author string) error {
-	nonce, ciphertext, err := s.cipher.Encrypt(value, secretID, version)
+	envelope, err := Seal(ctx, s.keys, value, AssociatedData(secretID, version, kindSecret, EnvelopeVersion))
 	if err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
-		insert into secret_versions (secret_id, version, nonce, ciphertext, size_bytes, created_by)
-		values ($1, $2, $3, $4, $5, $6)`,
-		secretID, version, nonce, ciphertext, len(value), author); err != nil {
+		insert into secret_versions (secret_id, version, nonce, ciphertext, size_bytes, created_by,
+		                             envelope_version, key_id, wrapped_dek)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+		secretID, version, envelope.Nonce, envelope.Ciphertext, len(value), author,
+		envelope.Version, envelope.KeyID, envelope.WrappedDEK); err != nil {
 		return err
 	}
 	_, err = tx.Exec(ctx, `
@@ -148,7 +154,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Secret
 
 func (s *Store) versions(ctx context.Context, secretID string) ([]Version, error) {
 	rows, err := s.pool.Query(ctx, `
-		select version, size_bytes, created_by, created_at, destroyed_at
+		select version, size_bytes, created_by, created_at, destroyed_at,
+		       envelope_version, coalesce(key_id, '')
 		  from secret_versions where secret_id = $1 order by version desc`, secretID)
 	if err != nil {
 		return nil, err
@@ -159,7 +166,7 @@ func (s *Store) versions(ctx context.Context, secretID string) ([]Version, error
 	for rows.Next() {
 		var version Version
 		if err := rows.Scan(&version.Version, &version.SizeBytes, &version.CreatedBy,
-			&version.CreatedAt, &version.Destroyed); err != nil {
+			&version.CreatedAt, &version.Destroyed, &version.EnvelopeVersion, &version.KeyID); err != nil {
 			return nil, err
 		}
 		versions = append(versions, version)
@@ -191,7 +198,7 @@ func (s *Store) Retire(ctx context.Context, name string) error {
 func (s *Store) Destroy(ctx context.Context, name string, version int) error {
 	tag, err := s.pool.Exec(ctx, `
 		update secret_versions
-		   set ciphertext = '\x'::bytea, nonce = '\x'::bytea, destroyed_at = now()
+		   set ciphertext = '\x'::bytea, nonce = '\x'::bytea, wrapped_dek = null, destroyed_at = now()
 		 where secret_id = (select id from secrets where name = $1)
 		   and version = $2 and destroyed_at is null`, name, version)
 	if err != nil {
@@ -284,22 +291,7 @@ func (s *Store) Redeem(ctx context.Context, jobID, hostID, name string, version 
 		return nil, 0, err
 	}
 
-	var nonce, ciphertext []byte
-	var destroyed *time.Time
-	if err := tx.QueryRow(ctx, `
-		select nonce, ciphertext, destroyed_at from secret_versions
-		 where secret_id = $1 and version = $2`, secretID, issuedVersion).
-		Scan(&nonce, &ciphertext, &destroyed); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, 0, ErrNotFound
-		}
-		return nil, 0, err
-	}
-	if destroyed != nil || len(ciphertext) == 0 {
-		return nil, 0, ErrDestroyed
-	}
-
-	value, err := s.cipher.Decrypt(nonce, ciphertext, secretID, issuedVersion)
+	value, err := s.open(ctx, tx, secretID, issuedVersion)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -378,11 +370,37 @@ func (s *Store) ReadCurrent(ctx context.Context, name string) ([]byte, error) {
 	if retired != nil || version == 0 {
 		return nil, ErrRetired
 	}
-	var nonce, ciphertext []byte
+	return s.open(ctx, s.pool, secretID, version)
+}
+
+// kindSecret labels the envelopes of the store in the associated data;
+// the installation sentinel carries a kind of its own, so the two never
+// open in each other's place.
+const kindSecret = "secret"
+
+// querier is what open reads through: the pool outside a transaction, the
+// transaction inside one.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// open reads and decrypts one version by the form it was written in.
+//
+// A row of the second form opens through the provider. A row of the first
+// form opens with the legacy key, which the provider holds only after
+// adopting an installation from before the envelope; without it the row
+// is refused with the key's own error rather than a decryption failure,
+// because the two mean different things to whoever reads the log.
+func (s *Store) open(ctx context.Context, q querier, secretID string, version int) ([]byte, error) {
+	var nonce, ciphertext, wrapped []byte
 	var destroyed *time.Time
-	if err := s.pool.QueryRow(ctx, `
-		select nonce, ciphertext, destroyed_at from secret_versions
-		 where secret_id = $1 and version = $2`, secretID, version).Scan(&nonce, &ciphertext, &destroyed); err != nil {
+	var envelopeVersion int
+	var keyID *string
+	if err := q.QueryRow(ctx, `
+		select nonce, ciphertext, destroyed_at, envelope_version, key_id, wrapped_dek
+		  from secret_versions
+		 where secret_id = $1 and version = $2`, secretID, version).
+		Scan(&nonce, &ciphertext, &destroyed, &envelopeVersion, &keyID, &wrapped); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrNotFound
 		}
@@ -391,5 +409,154 @@ func (s *Store) ReadCurrent(ctx context.Context, name string) ([]byte, error) {
 	if destroyed != nil || len(ciphertext) == 0 {
 		return nil, ErrDestroyed
 	}
-	return s.cipher.Decrypt(nonce, ciphertext, secretID, version)
+	if envelopeVersion < EnvelopeVersion {
+		legacy, ok := s.keys.(LegacyOpener)
+		if !ok {
+			return nil, fmt.Errorf("%w: the provider holds no legacy key for a version of the first form", ErrKeyUnavailable)
+		}
+		cipher, ok := legacy.LegacyCipher()
+		if !ok {
+			return nil, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
+		}
+		return cipher.Decrypt(nonce, ciphertext, secretID, version)
+	}
+	envelope := Envelope{Version: envelopeVersion, Nonce: nonce, Ciphertext: ciphertext, WrappedDEK: wrapped}
+	if keyID != nil {
+		envelope.KeyID = *keyID
+	}
+	return envelope.Open(ctx, s.keys, AssociatedData(secretID, version, kindSecret, envelopeVersion))
+}
+
+// LegacyFormLabel is the label VersionsByKey counts the versions of the
+// first form under: they are on the legacy key, but not yet in an
+// envelope, and the rewrap has them to do even while that key is active.
+const LegacyFormLabel = LegacyKeyID + "/v1"
+
+// VersionsByKey counts the live versions by the key they are wrapped
+// with; a version of the first form counts under LegacyFormLabel. The
+// status screen shows it, and a key rotation is finished only when every
+// count but the active key's is zero.
+func (s *Store) VersionsByKey(ctx context.Context) (map[string]int, error) {
+	rows, err := s.pool.Query(ctx, `
+		select case when envelope_version < $1 then $2 else coalesce(key_id, '') end, count(*)
+		  from secret_versions
+		 where destroyed_at is null
+		 group by 1`, EnvelopeVersion, LegacyFormLabel)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	counts := map[string]int{}
+	for rows.Next() {
+		var keyID string
+		var count int
+		if err := rows.Scan(&keyID, &count); err != nil {
+			return nil, err
+		}
+		counts[keyID] = count
+	}
+	return counts, rows.Err()
+}
+
+// RewrapBatch moves up to limit live versions onto the active key and
+// says how many remain.
+//
+// A version of the first form is decrypted with the legacy key and sealed
+// afresh in an envelope; one of the second form has its data key rewrapped
+// alone. The batch runs in one transaction with the rows locked, so two
+// panels rewrapping at once do not undo each other; and it is resumable,
+// because a row is chosen by what key it is on rather than by a cursor
+// anybody has to keep.
+func (s *Store) RewrapBatch(ctx context.Context, limit int) (moved, remaining int, err error) {
+	active, err := s.keys.ActiveKeyID(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	rows, err := tx.Query(ctx, `
+		select secret_id, version, nonce, ciphertext, envelope_version, key_id, wrapped_dek
+		  from secret_versions
+		 where destroyed_at is null
+		   and (envelope_version < $1 or key_id is distinct from $2)
+		 order by secret_id, version
+		 limit $3
+		   for update skip locked`, EnvelopeVersion, active, limit)
+	if err != nil {
+		return 0, 0, err
+	}
+	type pending struct {
+		secretID string
+		version  int
+		envelope Envelope
+	}
+	var batch []pending
+	for rows.Next() {
+		var row pending
+		var keyID *string
+		if err := rows.Scan(&row.secretID, &row.version, &row.envelope.Nonce, &row.envelope.Ciphertext,
+			&row.envelope.Version, &keyID, &row.envelope.WrappedDEK); err != nil {
+			rows.Close()
+			return 0, 0, err
+		}
+		if keyID != nil {
+			row.envelope.KeyID = *keyID
+		}
+		batch = append(batch, row)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, 0, err
+	}
+
+	for _, row := range batch {
+		var fresh Envelope
+		associated := AssociatedData(row.secretID, row.version, kindSecret, EnvelopeVersion)
+		if row.envelope.Version < EnvelopeVersion {
+			legacy, ok := s.keys.(LegacyOpener)
+			if !ok {
+				return moved, 0, fmt.Errorf("%w: a version of the first form cannot be rewrapped without the legacy key", ErrKeyUnavailable)
+			}
+			cipher, ok := legacy.LegacyCipher()
+			if !ok {
+				return moved, 0, fmt.Errorf("%w: the legacy key is not registered", ErrKeyUnavailable)
+			}
+			value, err := cipher.Decrypt(row.envelope.Nonce, row.envelope.Ciphertext, row.secretID, row.version)
+			if err != nil {
+				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
+			}
+			fresh, err = SealWith(ctx, s.keys, active, value, associated)
+			if err != nil {
+				return moved, 0, err
+			}
+		} else {
+			fresh, err = row.envelope.Rewrap(ctx, s.keys, active)
+			if err != nil {
+				return moved, 0, fmt.Errorf("secret %s version %d: %w", row.secretID, row.version, err)
+			}
+		}
+		if _, err := tx.Exec(ctx, `
+			update secret_versions
+			   set nonce = $3, ciphertext = $4, envelope_version = $5, key_id = $6, wrapped_dek = $7
+			 where secret_id = $1 and version = $2`,
+			row.secretID, row.version, fresh.Nonce, fresh.Ciphertext, fresh.Version, fresh.KeyID, fresh.WrappedDEK); err != nil {
+			return moved, 0, err
+		}
+		moved++
+	}
+	if err := tx.QueryRow(ctx, `
+		select count(*) from secret_versions
+		 where destroyed_at is null
+		   and (envelope_version < $1 or key_id is distinct from $2)`, EnvelopeVersion, active).
+		Scan(&remaining); err != nil {
+		return moved, 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, 0, err
+	}
+	return moved, remaining, nil
 }

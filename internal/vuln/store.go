@@ -13,6 +13,11 @@ import (
 // ErrNoSnapshot means a provider without an active snapshot.
 var ErrNoSnapshot = errors.New("this provider has no active snapshot")
 
+// ErrFeedEmpty means a fetch with no findings offered in place of a
+// snapshot that had them. The store refuses it: the previous snapshot
+// stays active and the scheduler marks the source with ReasonFeedEmpty.
+var ErrFeedEmpty = errors.New("the feed came back empty")
+
 // Store holds feed snapshots, vendor findings and the results of the
 // assessment.
 type Store struct {
@@ -40,13 +45,32 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// A snapshot with no findings does not replace one that had them. The
+	// vendor trackers never go from thousands of findings to none; such a
+	// fetch is a truncated download or a parser that stopped reading, and
+	// activating it would assess the whole fleet as clean. The count of the
+	// active snapshot is what the refusal is judged against, on both paths
+	// below: a fresh empty fetch and a repeat of an earlier empty one.
+	var activeCount int
+	err = tx.QueryRow(ctx,
+		`select advisory_count from vuln_snapshots where provider = $1 and active`,
+		snapshot.Provider).Scan(&activeCount)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+
 	// The same digest means the same data: a repeated fetch does not create
 	// a second snapshot, it only refreshes the timestamp.
 	var id string
+	var existingCount int
 	const existing = `
-		select id::text from vuln_snapshots where provider = $1 and digest = $2`
-	err = tx.QueryRow(ctx, existing, snapshot.Provider, snapshot.Digest).Scan(&id)
+		select id::text, advisory_count from vuln_snapshots where provider = $1 and digest = $2`
+	err = tx.QueryRow(ctx, existing, snapshot.Provider, snapshot.Digest).Scan(&id, &existingCount)
 	if err == nil {
+		if feedReplacementRefused(activeCount, existingCount) {
+			return "", fmt.Errorf("%w: the previous snapshot of %s carries %d findings",
+				ErrFeedEmpty, snapshot.Provider, activeCount)
+		}
 		const refresh = `
 			update vuln_snapshots set fetched_at = now(), checked_at = now(),
 			                          etag = $2, error = ''
@@ -64,6 +88,13 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return "", err
+	}
+
+	// The empty row is not written at all: an inactive empty snapshot
+	// would only be pruned.
+	if feedReplacementRefused(activeCount, len(advisories)) {
+		return "", fmt.Errorf("%w: the previous snapshot of %s carries %d findings",
+			ErrFeedEmpty, snapshot.Provider, activeCount)
 	}
 
 	const insert = `
@@ -106,6 +137,16 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 		return "", err
 	}
 	return id, tx.Commit(ctx)
+}
+
+// feedReplacementRefused says whether a fetch of the given size may take
+// the place of the active snapshot with the given count. Only a fetch with
+// nothing in it is refused, and only when there was something to lose: a
+// first fetch of a provider with no findings for its releases is a fact
+// the panel can start from, and it is the assessment that says how much
+// the feed covers.
+func feedReplacementRefused(previousCount, fetched int) bool {
+	return fetched == 0 && previousCount > 0
 }
 
 // InactiveSnapshotsKept says how many previous fetches stay next to the

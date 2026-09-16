@@ -9,17 +9,9 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"testing"
 	"time"
-
-	"connectrpc.com/connect"
-	"github.com/google/uuid"
-	"golang.org/x/net/http2"
-
-	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
-	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
 // The fault of chapter 23, "expired agent certificate": the gateway turns
@@ -112,42 +104,11 @@ func (h *harness) hostRefusal(hostID string) *struct {
 	return view.LastConnectionRefusal
 }
 
-// knock opens the agent stream with the identity, sends Hello and waits for
-// the session configuration, then hangs up. Nil means a session opened; the
-// error is the gateway's refusal otherwise.
+// knock opens the agent stream at the test gateway with the identity,
+// sends Hello and waits for the session configuration, then hangs up. Nil
+// means a session opened; the error is the gateway's refusal otherwise.
 func knock(ctx context.Context, identity tls.Certificate) error {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	client := agentv1connect.NewAgentServiceClient(&http.Client{
-		Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{identity},
-				RootCAs:      testTrustPool(),
-				MinVersion:   tls.VersionTLS13,
-			},
-		},
-	}, envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway), connect.WithGRPC())
-
-	stream := client.Connect(ctx)
-	defer func() {
-		_ = stream.CloseRequest()
-		_ = stream.CloseResponse()
-	}()
-	// A refused stream may already be closed by the time Hello goes out;
-	// the answer that counts is what comes back.
-	_ = stream.Send(&agentv1.AgentMessage{
-		Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
-			AgentVersion: "test", BootId: uuid.NewString(),
-		}},
-	})
-	first, err := stream.Receive()
-	if err != nil {
-		return err
-	}
-	if first.GetSessionConfig() == nil {
-		return errors.New("the server answered Hello with something other than the session configuration")
-	}
-	return nil
+	return knockAs(ctx, envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway), identity, nil)
 }
 
 // enrollSyntheticHostWithIdentity brings a machine that does not exist into

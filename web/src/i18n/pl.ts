@@ -4343,4 +4343,9 @@ export const pl: Record<string, string> = {
   "host repository metadata": "metadane repozytoriów hosta",
   "read on {n} hosts": "odczytane na {n} hostach",
   "More": "Więcej",
+  "pausing": "wstrzymywanie w toku",
+  "A pause was ordered; the hosts still carrying their tasks finish, then the campaign is paused.": "Zlecono wstrzymanie; hosty, które jeszcze wykonują zadania, kończą je, a potem kampania jest wstrzymana.",
+  "URL is set": "Adres URL jest ustawiony",
+  "URL is set; leave the field empty to keep it, or type a new one. The address is the credential of the channel and is never shown back.": "Adres URL jest ustawiony; zostaw pole puste, aby go zachować, albo wpisz nowy. Adres jest poświadczeniem kanału i nigdy nie jest pokazywany ponownie.",
+  "Relayed session without the host certificate": "Sesja przez relay bez certyfikatu hosta",
 };

@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,23 +12,27 @@ import (
 func testCipher(t *testing.T) *Cipher {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "key")
-	cipher, created, err := OpenCipher(path)
+	cipher, err := InitCipher(path)
 	if err != nil {
 		t.Fatal(err)
-	}
-	if !created {
-		t.Fatal("the key existed before the first open")
 	}
 	return cipher
 }
 
 // The key lies in a file outside the database: it, and not a column, decides
-// whether anything can be read out of the ciphertext.
+// whether anything can be read out of the ciphertext. It comes into being
+// only through the explicit initialisation; an open never creates one.
 func TestTheKeyLivesInAFileAndComesBackTheSame(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "key")
-	first, created, err := OpenCipher(path)
-	if err != nil || !created {
-		t.Fatalf("first open: %v, created=%v", err, created)
+	if _, err := OpenCipher(path); !errors.Is(err, ErrKeyMissing) {
+		t.Fatalf("opening a missing key: err = %v, want %v", err, ErrKeyMissing)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("opening a missing key created one")
+	}
+	first, err := InitCipher(path)
+	if err != nil {
+		t.Fatalf("initialising the key: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -37,14 +42,19 @@ func TestTheKeyLivesInAFileAndComesBackTheSame(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("permissions of the key file = %v", info.Mode().Perm())
 	}
+	// A second initialisation must not replace the key underneath a store
+	// that already sealed something with it.
+	if _, err := InitCipher(path); err == nil {
+		t.Fatal("a second initialisation replaced the key")
+	}
 
 	nonce, ciphertext, err := first.Encrypt([]byte("secret"), "id-1", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, created, err := OpenCipher(path)
-	if err != nil || created {
-		t.Fatalf("second open: %v, created=%v", err, created)
+	second, err := OpenCipher(path)
+	if err != nil {
+		t.Fatalf("second open: %v", err)
 	}
 	value, err := second.Decrypt(nonce, ciphertext, "id-1", 1)
 	if err != nil || string(value) != "secret" {

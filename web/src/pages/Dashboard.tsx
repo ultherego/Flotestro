@@ -79,7 +79,7 @@ export function Dashboard() {
   // ones at work, the ones waiting for a consent or a go-ahead, and the
   // ones still computing their plans.
   const activeCampaigns = (campaigns.data?.items ?? []).filter((campaign) =>
-    ["planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "paused"].includes(campaign.state),
+    ["planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "pausing", "paused"].includes(campaign.state),
   );
   const denied = denials.data?.items ?? [];
   const a = activity.data;

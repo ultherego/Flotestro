@@ -3,8 +3,11 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/hosts"
@@ -47,12 +50,10 @@ func (o *Orchestrator) holdOffline(ctx context.Context, campaign Campaign,
 	if campaign.DeadlineAt != nil {
 		until = "until " + campaign.DeadlineAt.UTC().Format(time.RFC3339)
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetQueuedOffline, "offline",
+	if err := o.store.UpdateTarget(ctx, target, TargetQueuedOffline, "offline",
 		fmt.Sprintf("%s; the policy %s waits for it %s", detail, campaign.OfflinePolicy, until)); err != nil {
 		return err
 	}
-	target.State = TargetQueuedOffline
-	target.ErrorCode = "offline"
 	// A host that was waiting for a budget holds a place in the queue of
 	// the budget; a host waiting for its connection holds none.
 	o.releaseCapacity(ctx, target)
@@ -103,12 +104,10 @@ func (o *Orchestrator) serviceOfflineQueue(ctx context.Context, campaign Campaig
 			}
 			continue
 		}
-		if err := o.store.UpdateTarget(ctx, target.ID, TargetPending, "",
+		if err := o.store.UpdateTarget(ctx, target, TargetPending, "",
 			"the host came back; waiting for its turn"); err != nil {
 			return err
 		}
-		target.State = TargetPending
-		target.ErrorCode = ""
 		o.log.Info("an offline host came back to the campaign queue",
 			"campaign_id", campaign.ID, "host_id", target.HostID)
 	}
@@ -146,21 +145,29 @@ func (o *Orchestrator) replanTarget(ctx context.Context, campaign Campaign,
 	if target.PlanJobID != nil {
 		previous = *target.PlanJobID
 	}
-	jobID, err := o.submitJob(ctx, campaign, host, action, planPayload(action, change, payload),
-		"campaign:"+campaign.ID+":replan:"+target.HostID+":after:"+previous)
-	if err != nil {
+	// The plan computed again is the next attempt of the same plan step:
+	// the strip shows one plan with two attempts, not two plans. The task
+	// and the transition commit together under the campaign's lock, like
+	// every launch.
+	jobID, err := o.launch(ctx, &campaign, target,
+		func(tx pgx.Tx) (string, error) {
+			return o.submitJobTx(ctx, tx, campaign, host, action, planPayload(action, change, payload),
+				"campaign:"+campaign.ID+":replan:"+target.HostID+":after:"+previous)
+		},
+		func(jobID string) stepStart {
+			return stepStart{
+				Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning,
+				Message: "the host came back; its plan is computed again before the change",
+			}
+		})
+	var refused *createRefusal
+	if errors.As(err, &refused) {
 		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_create_failed", err.Error())
 		return nil
 	}
-	// The plan computed again is the next attempt of the same plan step:
-	// the strip shows one plan with two attempts, not two plans.
-	if err := o.startStep(ctx, target, stepStart{
-		Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning,
-		Message: "the host came back; its plan is computed again before the change",
-	}); err != nil {
+	if err != nil {
 		return err
 	}
-	target.PlanJobID = &jobID
 	o.log.Info("the campaign is planning a returned host again",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", jobID)
 	return nil
@@ -288,10 +295,11 @@ func (o *Orchestrator) connectivityLost(ctx context.Context, job *jobs.Job, targ
 // pauseOnConnectivityLoss holds a campaign back once too many hosts lost
 // their session mid-task. A change that cuts hosts off does not show up as
 // failures - the hosts simply stop answering - so it has its own threshold.
-func (o *Orchestrator) pauseOnConnectivityLoss(ctx context.Context, campaign Campaign, lost int) error {
+func (o *Orchestrator) pauseOnConnectivityLoss(ctx context.Context, campaign Campaign, targets []Target,
+	lost int) error {
 	reason := fmt.Sprintf("connectivity_lost: %d hosts lost their session while their task ran; the limit is %d",
 		lost, campaign.ConnectivityLostAbsolute)
-	if err := o.store.SetState(ctx, campaign.ID, StatePaused, reason); err != nil {
+	if err := o.pause(ctx, &campaign, targets, reason); err != nil {
 		return err
 	}
 	o.audit.Record(ctx, audit.Event{
@@ -313,7 +321,7 @@ func (o *Orchestrator) enterGate(ctx context.Context, campaign Campaign) error {
 	if campaign.State == StateManualGate {
 		return nil
 	}
-	if err := o.store.SetState(ctx, campaign.ID, StateManualGate, ""); err != nil {
+	if err := o.store.SetState(ctx, &campaign, StateManualGate, ""); err != nil {
 		return err
 	}
 	o.audit.Record(ctx, audit.Event{

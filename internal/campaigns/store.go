@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/authz"
+	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/metrics"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
@@ -26,6 +27,29 @@ var (
 	// ErrRepeated says the order carried an idempotency key already used:
 	// the campaign returned with it is the existing one, not a new one.
 	ErrRepeated = errors.New("the campaign was already created with this idempotency key")
+	// ErrConcurrentTransition says the row moved under the writer: its
+	// revision, its state or its claim token is not the one the writer
+	// read. The decision was made on a stale picture; the writer reads the
+	// row again and decides afresh rather than repeating it.
+	ErrConcurrentTransition = errors.New("the row changed since it was read; the transition was not applied")
+	// ErrIllegalTransition says the state machine has no such move: a
+	// settled host asked to move again, a finished campaign asked to run.
+	ErrIllegalTransition = errors.New("the transition is not one the state machine allows")
+	// ErrLeaseLost says the orchestrator no longer holds the runner lease of
+	// the campaign: another instance took it over, and this one stops
+	// writing to the campaign until it claims the lease again.
+	ErrLeaseLost = errors.New("the runner lease of the campaign is held by another instance")
+)
+
+// The runner lease of a campaign. One orchestrator drives a campaign at a
+// time; it renews the lease while it works, and a holder that stopped
+// renewing - a dead process, a stalled tick - loses it after the term, so
+// the next instance takes over without waiting for anyone to give it up.
+// The term is long against a tick and short against an operator's
+// patience: a campaign stands still for at most that long after a crash.
+const (
+	RunnerLeaseTerm    = 45 * time.Second
+	RunnerLeaseRenewal = 15 * time.Second
 )
 
 // Store provides access to the campaign tables.
@@ -238,7 +262,8 @@ func (s *Store) CreatePlanned(ctx context.Context, tx pgx.Tx, spec Spec, hosts [
 	}
 	if _, err := tx.Exec(ctx, `
 		update campaigns
-		   set plan_set_hash = $2, approval_fingerprint = $3, updated_at = now()
+		   set plan_set_hash = $2, approval_fingerprint = $3, updated_at = now(),
+		       revision = revision + 1
 		 where id = $1`, campaign.ID, planSetHash, fingerprint); err != nil {
 		return nil, fmt.Errorf("recording the plan set: %w", err)
 	}
@@ -266,7 +291,8 @@ func AssignWave(index, canarySize, waveSize int) (wave, position int) {
 // Approve approves a campaign and lets it start.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID string, approval Approval) (*Campaign, error) {
 	const query = `
-		update campaigns set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
+		update campaigns set state = $2, approved_by = $3, approved_at = now(), updated_at = now(),
+		                     revision = revision + 1
 		where id = $1 and state = $4
 		returning created_by, approval_fingerprint`
 	var requestedBy, fingerprint string
@@ -344,14 +370,28 @@ func (s *Store) approvalsFrom(ctx context.Context, q approvalQuerier, campaignID
 // Pause holds a campaign back. The hosts already started finish their tasks.
 // A campaign standing at the manual gate can be paused too: the gate is a
 // question, and a pause is the answer "not now".
+//
+// A campaign with hosts under way is pausing rather than paused: nothing
+// new starts from this moment, but the hosts carrying a task settle first,
+// with their leases renewed meanwhile, and only then is the campaign
+// paused. The decision is made on the target rows under the campaign's
+// lock, so a host dispatched a moment before the pause is counted, and a
+// host the orchestrator is about to dispatch finds the campaign pausing
+// and does not start.
 func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	const query = `
-		update campaigns set state = $2, paused_by = $3, paused_at = now(),
-		                     pause_reason = $4, updated_at = now()
+		update campaigns set
+			state = case when exists (select 1 from campaign_targets t
+			                           where t.campaign_id = campaigns.id
+			                             and t.state in ('dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying'))
+			             then $2 else $3 end,
+			paused_by = $4, paused_at = now(), pause_reason = $5, updated_at = now(),
+			revision = revision + 1
 		where id = $1 and state in ('planned', 'canary', 'manual_gate', 'running')
 		returning id`
 	var updated string
-	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePaused), actor, nullable(reason)).Scan(&updated)
+	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePausing), string(StatePaused),
+		actor, nullable(reason)).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrConflict
 	}
@@ -361,15 +401,19 @@ func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*C
 	return s.Get(ctx, campaignID)
 }
 
-// Resume restarts a campaign that was held back.
+// Resume restarts a campaign that was held back. A campaign still pausing
+// resumes too: its hosts under way were never stopped, and the queue
+// simply opens again.
 func (s *Store) Resume(ctx context.Context, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, paused_by = null, paused_at = null,
-		                     pause_reason = null, updated_at = now()
-		where id = $1 and state = $3
+		                     pause_reason = null, updated_at = now(),
+		                     revision = revision + 1
+		where id = $1 and state in ($3, $4)
 		returning id`
 	var updated string
-	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePlanned), string(StatePaused)).Scan(&updated)
+	err := s.pool.QueryRow(ctx, query, campaignID, string(StatePlanned),
+		string(StatePaused), string(StatePausing)).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrConflict
 	}
@@ -410,8 +454,66 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	// waiting for their connection included, and the ones computing a
 	// plan: a plan is a read, and a cancel does not wait for a read.
 	if _, err := tx.Exec(ctx, `
-		update campaign_targets set state = 'canceled', finished_at = now(), state_since = now()
-		where campaign_id = $1 and state in ('pending', 'awaiting_budget', 'queued_offline', 'planning')`,
+		update campaign_targets
+		   set state = 'canceled', finished_at = now(), settled_at = now(), state_since = now(),
+		       revision = revision + 1
+		 where campaign_id = $1 and state in ('pending', 'awaiting_budget', 'queued_offline', 'planning')`,
+		campaignID); err != nil {
+		return nil, err
+	}
+	// The tasks the campaign created that are still in the panel's queue
+	// never reached a host, and a cancel takes them back: a host that came
+	// online an hour later would otherwise carry out a change of a
+	// campaign that no longer exists. The reboot and the verification owed
+	// to a host whose change landed are kept - the host settles the way it
+	// always does - and a task the agent already holds is not taken away
+	// either: the request is recorded on the target, and the host settles
+	// or acknowledges it.
+	why := "the campaign was canceled by " + actor
+	if reason != "" {
+		why += ": " + reason
+	}
+	owed, err := s.followUpJobs(ctx, tx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	takenBack, err := jobs.CancelQueuedOf(ctx, tx, campaignID, actor, why, owed)
+	if err != nil {
+		return nil, fmt.Errorf("taking back the queued tasks of the campaign: %w", err)
+	}
+	if len(takenBack) > 0 {
+		// A host whose task was taken back before it left the panel never
+		// started: it ends canceled, like the hosts that were waiting.
+		if _, err := tx.Exec(ctx, `
+			update campaign_targets
+			   set state = 'canceled', error_code = 'canceled',
+			       message = 'the task was still queued in the panel when the campaign was canceled',
+			       finished_at = now(), settled_at = now(), state_since = now(), blocker = '',
+			       revision = revision + 1
+			 where campaign_id = $1 and job_id = any($2::uuid[])
+			   and state in ('dispatched', 'awaiting_lock', 'running')`,
+			campaignID, takenBack); err != nil {
+			return nil, err
+		}
+	}
+	// The hosts still carrying a task keep it, and the row says the cancel
+	// reached them while they worked: the campaign waits for them, and the
+	// acknowledgement of the agent - once the protocol carries one - will
+	// say whether the task was interrupted or ran to its end.
+	if _, err := tx.Exec(ctx, `
+		update campaign_targets
+		   set cancel_requested_at = coalesce(cancel_requested_at, now()), revision = revision + 1
+		 where campaign_id = $1
+		   and state in ('dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`,
+		campaignID); err != nil {
+		return nil, err
+	}
+	// The tokens of the hosts that will not start go back now: a lease
+	// held by a host that does nothing stops the next campaign until it
+	// expires.
+	if _, err := tx.Exec(ctx, `
+		delete from budget_leases
+		 where owner in (select id::text from campaign_targets where campaign_id = $1 and state = 'canceled')`,
 		campaignID); err != nil {
 		return nil, err
 	}
@@ -422,10 +524,6 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	// otherwise; a plan step already open on a planning host is closed the
 	// same way. Hosts already at work keep their steps open; they finish
 	// on their own, like the target rows say.
-	why := "the campaign was canceled by " + actor
-	if reason != "" {
-		why += ": " + reason
-	}
 	step := StepExecute
 	if previous == string(StatePlanning) {
 		step = StepPlan
@@ -465,7 +563,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	if _, err := tx.Exec(ctx, `
 		update campaigns set state = $2, canceled_by = $3, canceled_at = now(),
-		                     pause_reason = $4, updated_at = now(),
+		                     pause_reason = $4, updated_at = now(), revision = revision + 1,
 		                     finished_at = case when $2 = 'canceled' then now() else finished_at end
 		where id = $1`, campaignID, string(next), actor, nullable(reason)); err != nil {
 		return nil, err
@@ -485,6 +583,30 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	return s.Get(ctx, campaignID)
 }
 
+// followUpJobs lists the reboot and verification tasks of the hosts whose
+// change is done: a cancel does not take those back, because a host left
+// with its change applied and its reboot never ordered is a host the cancel
+// would have half-done.
+func (s *Store) followUpJobs(ctx context.Context, tx pgx.Tx, campaignID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `
+		select j::text from campaign_targets t
+		 cross join lateral (values (t.reboot_job_id), (t.health_job_id)) as owed (j)
+		 where t.campaign_id = $1 and j is not null`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	owed := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		owed = append(owed, id)
+	}
+	return owed, rows.Err()
+}
+
 // Advance lets a campaign standing at the manual gate into the waves. The
 // decision is recorded on the campaign: who let it through and when, so
 // that a later return to the queue of an offline canary host does not
@@ -492,7 +614,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, gate_advanced_by = $3, gate_advanced_at = now(),
-		                     updated_at = now()
+		                     updated_at = now(), revision = revision + 1
 		where id = $1 and state = $4
 		returning id`
 	var updated string
@@ -507,7 +629,17 @@ func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaig
 	return s.Get(ctx, campaignID)
 }
 
-// SetState changes the state of a campaign.
+// SetState changes the state of a campaign on behalf of the orchestrator
+// that drives it.
+//
+// The write is a compare-and-swap: it names the revision the orchestrator
+// read and the runner lease it holds, and touches nothing when either
+// moved. A campaign that moved is read again, and the transition is
+// applied only when the state machine still allows it from where the
+// campaign stands now - a pause committed meanwhile is respected, a
+// threshold pause repeated after an operator's resume is not. The record
+// passed in is refreshed with what was written, so the caller goes on
+// with the current revision.
 //
 // A terminal state is written together with the final report, in one
 // transaction: the report is the durable record of how the campaign
@@ -515,28 +647,81 @@ func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaig
 // history depends on its target rows staying around. The reason column is
 // the pause reason by name and the reason the campaign stopped in fact:
 // a campaign that expired or failed to plan says why in the same place a
-// paused one does, because that is where the screen reads it.
-func (s *Store) SetState(ctx context.Context, campaignID string, state State, reason string) error {
+// paused one does, because that is where the screen reads it. A campaign
+// that finishes pausing keeps the reason and the author of the pause: the
+// transition closes the pause, it does not order a new one.
+func (s *Store) SetState(ctx context.Context, campaign *Campaign, state State, reason string) error {
 	const query = `
-		update campaigns set state = $2, updated_at = now(),
-			pause_reason = case when $2 in ('paused', 'plan_failed', 'expired') then $3 else pause_reason end,
-			paused_at    = case when $2 = 'paused' then now() else paused_at end,
-			paused_by    = case when $2 = 'paused' then 'system' else paused_by end,
+		update campaigns set state = $2, updated_at = now(), revision = revision + 1,
+			pause_reason = case when ($2 in ('pausing', 'paused') and state <> 'pausing')
+			                      or $2 in ('plan_failed', 'expired') then $3 else pause_reason end,
+			paused_at    = case when $2 in ('pausing', 'paused') and state <> 'pausing' then now() else paused_at end,
+			paused_by    = case when $2 in ('pausing', 'paused') and state <> 'pausing' then 'system' else paused_by end,
 			started_at   = coalesce(started_at, case when $2 in ('canary', 'running') then now() end),
 			finished_at  = case when $2 in ('completed', 'completed_with_issues', 'failed', 'plan_failed',
 			                                'expired', 'canceled')
 			                    then now() else finished_at end
-		where id = $1`
-	if !state.Terminal() {
-		_, err := s.pool.Exec(ctx, query, campaignID, string(state), nullable(reason))
-		return err
+		where id = $1 and revision = $4
+		  and ($5::uuid is null or (runner_id = $5::uuid and runner_token = $6))
+		returning revision`
+	// Three tries are two re-reads: a campaign that moves twice under one
+	// tick of the orchestrator is a campaign somebody else is driving.
+	for attempt := 0; attempt < 3; attempt++ {
+		if !campaign.State.mayBecome(state) {
+			return fmt.Errorf("%w: %s cannot become %s", ErrIllegalTransition, campaign.State, state)
+		}
+		var runner any
+		if campaign.RunnerID != "" {
+			runner = campaign.RunnerID
+		}
+		args := []any{campaign.ID, string(state), nullable(reason), campaign.Revision, runner, campaign.RunnerToken}
+		var revision int64
+		var err error
+		if !state.Terminal() {
+			err = s.pool.QueryRow(ctx, query, args...).Scan(&revision)
+		} else {
+			err = s.withReport(ctx, campaign.ID, func(tx pgx.Tx) error {
+				return tx.QueryRow(ctx, query, args...).Scan(&revision)
+			})
+		}
+		if err == nil {
+			campaign.State = state
+			campaign.Revision = revision
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		// The row moved, or the lease did. Read it again: what is there now
+		// decides whether the transition still makes sense.
+		fresh, err := s.Get(ctx, campaign.ID)
+		if err != nil {
+			return err
+		}
+		if campaign.RunnerID != "" && (fresh.RunnerID != campaign.RunnerID || fresh.RunnerToken != campaign.RunnerToken) {
+			return ErrLeaseLost
+		}
+		if fresh.State != campaign.State {
+			// Somebody moved the campaign: an operator paused or canceled
+			// it, or another pass settled it. The decision the caller made
+			// was made about another campaign than this one.
+			*campaign = *fresh
+			return fmt.Errorf("%w: the campaign is %s now", ErrConcurrentTransition, fresh.State)
+		}
+		*campaign = *fresh
 	}
+	return ErrConcurrentTransition
+}
+
+// withReport runs a terminal transition together with the campaign's
+// report in one transaction.
+func (s *Store) withReport(ctx context.Context, campaignID string, write func(tx pgx.Tx) error) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, query, campaignID, string(state), nullable(reason)); err != nil {
+	if err := write(tx); err != nil {
 		return err
 	}
 	if err := s.recordReport(ctx, tx, campaignID); err != nil {
@@ -550,9 +735,20 @@ func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
 	// Planning is an active state: the campaign changes nothing yet, but
 	// the orchestrator has work to do - every host computes its own plan.
 	// A campaign awaiting its approval is watched for the age of its
-	// plans, and a canceling one for its last host.
-	return s.query(ctx,
-		"where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'canceling') order by created_at")
+	// plans, and a canceling or pausing one for the hosts still carrying a
+	// task: their leases are renewed and their results read, whatever the
+	// operator decided about the rest of the fleet. A paused campaign is on
+	// the list for as long as it has such hosts - a pause written directly
+	// by a threshold, or before the pausing state existed, may have left
+	// some - and off it once they settled, so a campaign paused for a week
+	// costs nothing on every tick.
+	return s.query(ctx, `
+		where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'pausing', 'canceling')
+		   or (state = 'paused' and exists (select 1 from campaign_targets t
+		                                     where t.campaign_id = campaigns.id
+		                                       and t.state in ('dispatched', 'awaiting_lock', 'running',
+		                                                       'rebooting', 'verifying')))
+		order by created_at`)
 }
 
 // OldestPlan returns when the oldest plan of the campaign was computed;
@@ -694,7 +890,8 @@ func (s *Store) FinishPlanning(ctx context.Context, campaignID, planSetHash,
 	fingerprint string, next State) error {
 	const query = `
 		update campaigns
-		   set plan_set_hash = $2, approval_fingerprint = $3, state = $4, updated_at = now()
+		   set plan_set_hash = $2, approval_fingerprint = $3, state = $4, updated_at = now(),
+		       revision = revision + 1
 		 where id = $1 and state = $5`
 	tag, err := s.pool.Exec(ctx, query, campaignID, planSetHash, fingerprint,
 		string(next), string(StatePlanning))
@@ -778,7 +975,7 @@ func (s *Store) ActiveTargets(ctx context.Context) (map[string]string, error) {
 		  from campaign_targets t
 		  join campaigns c on c.id = t.campaign_id
 		 where c.state in ('planning', 'planned', 'awaiting_approval', 'canary',
-		                   'manual_gate', 'running', 'canceling')
+		                   'manual_gate', 'running', 'pausing', 'canceling')
 		   and t.state in ('pending', 'planning', 'awaiting_budget', 'queued_offline',
 		                   'dispatched', 'awaiting_lock', 'running', 'rebooting', 'verifying')`
 	rows, err := s.pool.Query(ctx, query)
@@ -983,7 +1180,8 @@ const campaignColumns = `
 	       coalesce((select o.name from campaigns o where o.id = campaigns.retries_campaign_id), ''),
 	       coalesce((select jsonb_agg(jsonb_build_object('id', c.id, 'name', c.name, 'state', c.state)
 	                                  order by c.created_at)
-	                   from campaigns c where c.retries_campaign_id = campaigns.id), '[]'::jsonb)
+	                   from campaigns c where c.retries_campaign_id = campaigns.id), '[]'::jsonb),
+	       revision, coalesce(runner_id::text, ''), runner_token, runner_until
 	from campaigns `
 
 // changedTargetCondition tells a target whose change landed on the host,
@@ -1025,7 +1223,8 @@ func scanCampaigns(rows pgx.Rows) ([]Campaign, error) {
 			&c.GateAdvancedAt, &c.ConnectivityLostAbsolute, &c.RebootTimeoutSeconds,
 			&c.CompensatesCampaignID, &c.CompensatesCampaignName, &c.CompensatedBy, &c.ChangedHosts,
 			&c.PolicyID, &c.PolicyVersion,
-			&c.RetriesCampaignID, &c.RetriesCampaignName, &c.RetriedBy); err != nil {
+			&c.RetriesCampaignID, &c.RetriesCampaignName, &c.RetriedBy,
+			&c.Revision, &c.RunnerID, &c.RunnerToken, &c.RunnerUntil); err != nil {
 			return nil, err
 		}
 		campaigns = append(campaigns, c)
@@ -1134,7 +1333,8 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		       t.state, t.job_id, t.plan_job_id, t.reboot_job_id, t.health_job_id,
 		       coalesce(t.boot_id_before, ''),
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at,
-		       t.state_since, t.blocker
+		       t.state_since, t.blocker,
+		       t.revision, coalesce(t.claimed_by::text, ''), t.claim_token, t.cancel_requested_at
 		from campaign_targets t
 		left join hosts h on h.id = t.host_id ` + where + `
 		order by t.wave, t.position`
@@ -1154,7 +1354,8 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		var t Target
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
 			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
-			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince, &t.Blocker); err != nil {
+			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince, &t.Blocker,
+			&t.Revision, &t.ClaimedBy, &t.ClaimToken, &t.CancelRequestedAt); err != nil {
 			return page, err
 		}
 		page.Items = append(page.Items, t)
@@ -1171,80 +1372,126 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 }
 
 // UpdateTarget records the state of a campaign target.
-func (s *Store) UpdateTarget(ctx context.Context, targetID string, state TargetState,
+//
+// The write is a compare-and-swap against the revision, the state and the
+// claim token the caller read: the target in memory is what the caller
+// decided on, and a row that moved since fails the write with
+// ErrConcurrentTransition. On success the target in memory carries the
+// new revision and state.
+func (s *Store) UpdateTarget(ctx context.Context, target *Target, state TargetState,
 	errorCode, message string) error {
-	return s.updateTarget(ctx, s.pool, targetID, state, errorCode, message)
+	revision, err := s.updateTarget(ctx, s.pool, target, state, errorCode, message)
+	if err != nil {
+		return err
+	}
+	target.Revision = revision
+	target.State = state
+	target.ErrorCode = errorCode
+	target.Message = message
+	return nil
 }
 
 // UpdateTargetTx records the state inside the caller's transaction. The
 // step rows are written next to the transition, and a transition without
 // its step - or a step without its transition - must not be able to
-// commit alone.
-func (s *Store) UpdateTargetTx(ctx context.Context, tx pgx.Tx, targetID string, state TargetState,
-	errorCode, message string) error {
-	return s.updateTarget(ctx, tx, targetID, state, errorCode, message)
+// commit alone. It returns the revision the row will carry once the
+// transaction commits; the caller applies it to the target in memory
+// after the commit, so a rolled-back transaction leaves the picture as it
+// was.
+func (s *Store) UpdateTargetTx(ctx context.Context, tx pgx.Tx, target *Target, state TargetState,
+	errorCode, message string) (int64, error) {
+	return s.updateTarget(ctx, tx, target, state, errorCode, message)
 }
 
-func (s *Store) updateTarget(ctx context.Context, q stepQuerier, targetID string, state TargetState,
-	errorCode, message string) error {
+func (s *Store) updateTarget(ctx context.Context, q stepQuerier, target *Target, state TargetState,
+	errorCode, message string) (int64, error) {
+	if !target.State.mayBecome(state) {
+		return 0, fmt.Errorf("%w: a %s host cannot become %s", ErrIllegalTransition, target.State, state)
+	}
 	// The previous state and the moment it was entered come back with the
 	// update: the time spent in a state is measured when it is left, and
-	// only this statement knows both ends.
+	// only this statement knows both ends. The row is written only when it
+	// still carries the revision, the state and the claim token the caller
+	// read; a row that moved is left as it is.
 	const query = `
 		update campaign_targets t set
-			state       = $2,
-			error_code  = $3,
-			message     = $4,
+			state       = $5,
+			revision    = t.revision + 1,
+			error_code  = $6,
+			message     = $7,
 			started_at  = coalesce(t.started_at,
-			                       case when $2 not in ('pending', 'awaiting_budget', 'queued_offline')
+			                       case when $5 not in ('pending', 'awaiting_budget', 'queued_offline')
 			                            then now() end),
-			finished_at = case when $2 in ('succeeded', 'no_change', 'failed', 'unknown', 'skipped', 'canceled')
+			finished_at = case when $5 in ('succeeded', 'no_change', 'failed', 'unknown', 'skipped', 'canceled')
 			                   then now() else t.finished_at end,
-			state_since = case when t.state <> $2 then now() else t.state_since end,
-			blocker     = case when $2 in ('succeeded', 'no_change', 'failed', 'unknown', 'skipped', 'canceled')
+			settled_at  = case when $5 in ('succeeded', 'no_change', 'failed', 'unknown', 'skipped', 'canceled')
+			                   then now() else t.settled_at end,
+			state_since = case when t.state <> $5 then now() else t.state_since end,
+			blocker     = case when $5 in ('succeeded', 'no_change', 'failed', 'unknown', 'skipped', 'canceled')
 			                   then '' else t.blocker end
 		from (select t.id, t.state, t.state_since, c.action_type
 		        from campaign_targets t join campaigns c on c.id = t.campaign_id
 		       where t.id = $1 for update of t) old
-		where t.id = old.id
-		returning old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
+		where t.id = old.id and t.revision = $2 and t.state = $3 and t.claim_token = $4
+		returning t.revision, old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
 	var previous, actionType string
 	var seconds float64
-	err := q.QueryRow(ctx, query, targetID, string(state), nullable(errorCode), nullable(message)).
-		Scan(&previous, &seconds, &actionType)
+	var revision int64
+	err := q.QueryRow(ctx, query, target.ID, target.Revision, string(target.State), target.ClaimToken,
+		string(state), nullable(errorCode), nullable(message)).
+		Scan(&revision, &previous, &seconds, &actionType)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return 0, ErrConcurrentTransition
 	}
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if previous != string(state) {
 		metrics.TargetStateDuration.Observe(seconds, previous, actionType)
 	}
-	return nil
+	return revision, nil
+}
+
+// TransitionTarget moves a target from one state to another against the
+// revision and the claim token the caller read. It is the bare
+// compare-and-swap of the document: the row is written only when it still
+// carries that revision, that state and that token, and the caller gets
+// ErrConcurrentTransition otherwise - the cue to read the row again rather
+// than repeat the decision. The new revision comes back on success.
+func (s *Store) TransitionTarget(ctx context.Context, id string, expectedRevision int64,
+	from, to TargetState, token int64) (int64, error) {
+	target := Target{ID: id, Revision: expectedRevision, State: from, ClaimToken: token}
+	return s.updateTarget(ctx, s.pool, &target, to, "", "")
 }
 
 // FollowTask records where the open task of a target stands: dispatched,
 // waiting for a lock with the blocker the agent named, or running. The
 // three are one step of the host - the change - so the step row is not
 // touched; the state and the blocker are, and the time in the state is
-// measured like every other transition.
-func (s *Store) FollowTask(ctx context.Context, targetID string, state TargetState, blocker string) error {
+// measured like every other transition. The write is fenced like every
+// other: the row must still be what the caller read.
+func (s *Store) FollowTask(ctx context.Context, target *Target, state TargetState, blocker string) error {
+	if !target.State.mayBecome(state) {
+		return fmt.Errorf("%w: a %s host cannot become %s", ErrIllegalTransition, target.State, state)
+	}
 	const query = `
 		update campaign_targets t set
-			state       = $2,
-			blocker     = $3,
-			state_since = case when t.state <> $2 then now() else t.state_since end
+			state       = $5,
+			revision    = t.revision + 1,
+			blocker     = $6,
+			state_since = case when t.state <> $5 then now() else t.state_since end
 		from (select t.id, t.state, t.state_since, c.action_type
 		        from campaign_targets t join campaigns c on c.id = t.campaign_id
 		       where t.id = $1 for update of t) old
-		where t.id = old.id and (old.state <> $2 or t.blocker <> $3)
-		returning old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
+		where t.id = old.id and t.revision = $2 and t.state = $3 and t.claim_token = $4
+		returning t.revision, old.state, extract(epoch from now() - old.state_since)::float8, old.action_type`
 	var previous, actionType string
 	var seconds float64
-	err := s.pool.QueryRow(ctx, query, targetID, string(state), blocker).Scan(&previous, &seconds, &actionType)
+	var revision int64
+	err := s.pool.QueryRow(ctx, query, target.ID, target.Revision, string(target.State), target.ClaimToken,
+		string(state), blocker).Scan(&revision, &previous, &seconds, &actionType)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+		return ErrConcurrentTransition
 	}
 	if err != nil {
 		return err
@@ -1252,51 +1499,71 @@ func (s *Store) FollowTask(ctx context.Context, targetID string, state TargetSta
 	if previous != string(state) {
 		metrics.TargetStateDuration.Observe(seconds, previous, actionType)
 	}
+	target.Revision = revision
+	target.State = state
+	target.Blocker = blocker
 	return nil
 }
 
 // AttachJob binds a target to the task that was created.
-func (s *Store) AttachJob(ctx context.Context, targetID, column, jobID string) error {
-	return s.attachJob(ctx, s.pool, targetID, column, jobID)
+func (s *Store) AttachJob(ctx context.Context, target *Target, column, jobID string) error {
+	return s.attachJob(ctx, s.pool, target, column, jobID)
 }
 
 // AttachJobTx binds the task inside the caller's transaction.
-func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, targetID, column, jobID string) error {
-	return s.attachJob(ctx, tx, targetID, column, jobID)
+func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, target *Target, column, jobID string) error {
+	return s.attachJob(ctx, tx, target, column, jobID)
 }
 
-func (s *Store) attachJob(ctx context.Context, q stepQuerier, targetID, column, jobID string) error {
+// attachJob writes the task identifier under the claim the caller holds.
+// The revision does not move - the course of the host has not changed,
+// and the transition written next to it in the same transaction moves it
+// - but a caller that lost the claim writes nothing.
+func (s *Store) attachJob(ctx context.Context, q stepQuerier, target *Target, column, jobID string) error {
 	var query string
 	switch column {
 	case "job_id":
-		query = `update campaign_targets set job_id = $2 where id = $1`
+		query = `update campaign_targets set job_id = $2 where id = $1 and revision = $3 and claim_token = $4`
 	case "reboot_job_id":
-		query = `update campaign_targets set reboot_job_id = $2 where id = $1`
+		query = `update campaign_targets set reboot_job_id = $2 where id = $1 and revision = $3 and claim_token = $4`
 	case "health_job_id":
-		query = `update campaign_targets set health_job_id = $2 where id = $1`
+		query = `update campaign_targets set health_job_id = $2 where id = $1 and revision = $3 and claim_token = $4`
 	case "plan_job_id":
-		query = `update campaign_targets set plan_job_id = $2 where id = $1`
+		query = `update campaign_targets set plan_job_id = $2 where id = $1 and revision = $3 and claim_token = $4`
 	default:
 		return fmt.Errorf("unknown task column %q", column)
 	}
-	_, err := q.Exec(ctx, query, targetID, jobID)
-	return err
+	tag, err := q.Exec(ctx, query, target.ID, jobID, target.Revision, target.ClaimToken)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrConcurrentTransition
+	}
+	return nil
 }
 
 // SetBootIDBefore records the boot ID from before the reboot.
-func (s *Store) SetBootIDBefore(ctx context.Context, targetID, bootID string) error {
-	return s.setBootIDBefore(ctx, s.pool, targetID, bootID)
+func (s *Store) SetBootIDBefore(ctx context.Context, target *Target, bootID string) error {
+	return s.setBootIDBefore(ctx, s.pool, target, bootID)
 }
 
 // SetBootIDBeforeTx records the boot ID inside the caller's transaction.
-func (s *Store) SetBootIDBeforeTx(ctx context.Context, tx pgx.Tx, targetID, bootID string) error {
-	return s.setBootIDBefore(ctx, tx, targetID, bootID)
+func (s *Store) SetBootIDBeforeTx(ctx context.Context, tx pgx.Tx, target *Target, bootID string) error {
+	return s.setBootIDBefore(ctx, tx, target, bootID)
 }
 
-func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, targetID, bootID string) error {
-	_, err := q.Exec(ctx,
-		`update campaign_targets set boot_id_before = $2 where id = $1`, targetID, nullable(bootID))
-	return err
+func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, target *Target, bootID string) error {
+	tag, err := q.Exec(ctx,
+		`update campaign_targets set boot_id_before = $2 where id = $1 and revision = $3 and claim_token = $4`,
+		target.ID, nullable(bootID), target.Revision, target.ClaimToken)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrConcurrentTransition
+	}
+	return nil
 }
 
 // Counts returns the number of targets in each state.

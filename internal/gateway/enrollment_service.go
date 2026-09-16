@@ -15,6 +15,8 @@ import (
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/issuer"
 	"github.com/ultherego/flotestro/internal/relays"
@@ -38,6 +40,22 @@ type EnrollmentService struct {
 	// gets more than a few attempts a minute.
 	perIP      *rateLimiter
 	perMachine *rateLimiter
+	// helperSigner signs the trust bundle a new host hands to its root
+	// helper: the host identifier and the panel's capability keys. Nil is a
+	// panel without a signing key, and then no bundle goes out.
+	helperSigner *helpercap.Signer
+}
+
+// SetHelperSigner connects the capability key.
+func (s *EnrollmentService) SetHelperSigner(signer *helpercap.Signer) { s.helperSigner = signer }
+
+// helperTrustFor is the signed keyring for one host, or nil on a panel
+// without a signing key.
+func (s *EnrollmentService) helperTrustFor(hostID string) *helperv1.HelperTrustBundle {
+	if s.helperSigner == nil {
+		return nil
+	}
+	return s.helperSigner.TrustBundle(hostID, time.Now())
 }
 
 func NewEnrollmentService(certIssuer issuer.Issuer, hostStore *hosts.Store,
@@ -205,6 +223,7 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 			HostId:         replayed.HostID,
 			CertificatePem: replayed.CertificatePEM,
 			CaBundlePem:    replayed.CABundlePEM,
+			HelperTrust:    s.helperTrustFor(replayed.HostID),
 		}), nil
 	}
 
@@ -284,7 +303,7 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 
 	if err := s.hosts.SaveCertificate(ctx, tx, hostID, issued.Serial, issued.CommonName,
 		issued.Fingerprint, issued.NotBefore, issued.NotAfter,
-		issued.IssuerSubject, issued.IssuerSerial); err != nil {
+		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -336,6 +355,10 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		CertificatePem: issued.PEM,
 		CaBundlePem:    trust,
 		NotAfter:       timestamppb.New(issued.NotAfter),
+		// The helper of the new host takes its identity and the panel's
+		// capability keys from this bundle, signed, rather than from what
+		// the agent says about itself.
+		HelperTrust: s.helperTrustFor(hostID),
 	}), nil
 }
 

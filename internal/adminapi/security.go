@@ -628,7 +628,10 @@ func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return nil, false
 	}
-	candidates, ok := s.materialize(w, r, chosen)
+	// The fleet is resolved within the scopes the caller may read findings
+	// in: a preview of the remediation is a read of the findings, and the
+	// order checks the remediation right host by host below.
+	candidates, ok := s.materialize(w, r, principal, authz.PermSecurityRead, chosen)
 	if !ok {
 		return nil, false
 	}

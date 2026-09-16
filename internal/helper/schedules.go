@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -14,6 +15,97 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
+
+// Refusals of a schedule order. They are part of the contract: the panel
+// shows the code and the guide says what to do next.
+const (
+	// ErrorUserRequired means an entry that names no account. Root is not a
+	// default here: it is the account that needs a grant of its own.
+	ErrorUserRequired = "user_required"
+	// ErrorUnknownUser means an account the host does not have, or a name
+	// that would not stay in the user field of a cron line.
+	ErrorUnknownUser = "unknown_user"
+	// ErrorRootGrantRequired means an entry for root ordered without the
+	// grant that allows it.
+	ErrorRootGrantRequired = "root_grant_required"
+)
+
+// PermissionScheduleRootExec is the grant a root entry needs on top of the
+// right to write schedules. The name repeats the panel's permission: the
+// grant travels in the capability under the same name it has in the role.
+const PermissionScheduleRootExec = "schedule.root.exec"
+
+// grantsOf returns the grants the capability of a request carries, or nil
+// when the request has no capability. A capability without grants is an
+// empty list, not nil: it is present and it grants nothing, and a request
+// with a capability is judged by what the capability says. The grants are
+// under the panel's signature, which the server verified before any
+// handler ran, so they are the panel's word and not the agent's.
+func grantsOf(request *helperv1.HelperRequest) []string {
+	capability := request.GetCapability()
+	if capability == nil {
+		return nil
+	}
+	grants := capability.GetGrants()
+	if grants == nil {
+		return []string{}
+	}
+	return grants
+}
+
+// hasGrant says whether the list names the grant.
+func hasGrant(grants []string, wanted string) bool {
+	for _, grant := range grants {
+		if grant == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+// checkScheduleUser judges the account an entry is to run as.
+//
+// This is the ValidateSchedule of the remediation document: the name has to
+// fit the user field of a cron line, the account has to exist on this host
+// under exactly that name, and root needs its grant. The lookup result is
+// compared with the name asked for, because a resolver may answer a lookup
+// of one spelling with an account of another - and the line would carry
+// the spelling, not the account.
+func checkScheduleUser(name string, grants []string) *helperv1.HelperResponse {
+	if name == "" {
+		return reject(ErrorUserRequired, "the entry names no user; the account it runs as has to be named, root is not a default")
+	}
+	if !schedules.ValidUser(name) {
+		return reject(ErrorUnknownUser, fmt.Sprintf("the user %q is not a valid account name for a cron entry", name))
+	}
+	account, err := user.Lookup(name)
+	if err != nil || account.Username != name {
+		return reject(ErrorUnknownUser, fmt.Sprintf("the user %q does not exist on this host", name))
+	}
+	// A request without a capability is judged by the panel alone, as before
+	// the capability existed; one with a capability has to carry the grant.
+	if name == "root" && grants != nil && !hasGrant(grants, PermissionScheduleRootExec) {
+		return reject(ErrorRootGrantRequired, "an entry for root needs the grant "+PermissionScheduleRootExec)
+	}
+	return nil
+}
+
+// checkScheduleCommand refuses what the line composer would not catch: a
+// zero byte ends the string for the tools that will read the line.
+func checkScheduleCommand(command []string) *helperv1.HelperResponse {
+	if len(command) == 0 {
+		return reject(ErrorMalformed, "the entry has no command")
+	}
+	if !filepath.IsAbs(command[0]) {
+		return reject(ErrorMalformed, fmt.Sprintf("the command must be an absolute path, is %q", command[0]))
+	}
+	for _, argument := range command {
+		if strings.ContainsRune(argument, 0) {
+			return reject(ErrorMalformed, "a command argument contains a zero byte")
+		}
+	}
+	return nil
+}
 
 // applySchedule handles recurring jobs.
 //
@@ -45,7 +137,7 @@ func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequ
 		return scheduleResponse(s.readSchedules(actionCtx), "")
 
 	case helperv1.ScheduleRequest_OPERATION_ENSURE:
-		return s.ensureEntry(actionCtx, action)
+		return s.ensureEntry(actionCtx, request, action)
 
 	case helperv1.ScheduleRequest_OPERATION_DISABLE:
 		return s.toggleEntry(actionCtx, action)
@@ -64,7 +156,17 @@ func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequ
 }
 
 // ensureEntry creates or updates a managed entry.
-func (s *Server) ensureEntry(ctx context.Context, action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
+func (s *Server) ensureEntry(ctx context.Context, request *helperv1.HelperRequest,
+	action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
+	// The account and the command are judged before anything on the host is
+	// read: an order the line composer would turn into something else is
+	// refused with its own code, not with a write error.
+	if refusal := checkScheduleUser(action.GetUser(), grantsOf(request)); refusal != nil {
+		return refusal
+	}
+	if refusal := checkScheduleCommand(action.GetCommand()); refusal != nil {
+		return refusal
+	}
 	// An entry with the same identifier may already exist as a found one.
 	// Overwriting it without operator consent would erase somebody else's work.
 	collision := s.foundEntry(ctx, action.GetId())

@@ -43,8 +43,10 @@ func (o *Orchestrator) takeCapacity(ctx context.Context, campaign Campaign,
 	// tokens between changes, not between machines. Otherwise a campaign on a
 	// thousand hosts would have a thousand times the share of a campaign on
 	// one.
-	refusal, err := o.budgets.Acquire(ctx, target.ID, "campaign:"+campaign.ID,
-		budgets.ClassMaintenance, budgets.Needs(action, where, repository))
+	// The lease carries the claim token of the target: a runner that lost
+	// the target cannot renew or release what this one holds.
+	refusal, err := o.budgets.AcquireFenced(ctx, target.ID, "campaign:"+campaign.ID,
+		budgets.ClassMaintenance, budgets.Needs(action, where, repository), target.ClaimToken)
 	if err != nil {
 		return false, err
 	}
@@ -56,13 +58,11 @@ func (o *Orchestrator) takeCapacity(ctx context.Context, campaign Campaign,
 	// looks like a forgotten host. The state and the message name the budget
 	// and how much of it is taken.
 	if target.State != TargetAwaitingBudget || target.ErrorCode != budgetCode(refusal) {
-		if err := o.store.UpdateTarget(ctx, target.ID, TargetAwaitingBudget,
+		if err := o.store.UpdateTarget(ctx, target, TargetAwaitingBudget,
 			budgetCode(refusal), refusal.Describe()); err != nil {
 			return false, err
 		}
 	}
-	target.State = TargetAwaitingBudget
-	target.ErrorCode = budgetCode(refusal)
 	return false, nil
 }
 
@@ -80,7 +80,10 @@ func (o *Orchestrator) releaseCapacity(ctx context.Context, target *Target) {
 	if o.budgets == nil {
 		return
 	}
-	if err := o.budgets.Release(ctx, target.ID); err != nil {
+	// The release names the claim token: a runner that lost the target
+	// to another one releases nothing, because the tokens are the other
+	// runner's now.
+	if err := o.budgets.ReleaseFenced(ctx, target.ID, target.ClaimToken); err != nil {
 		o.log.Error("the capacity of a campaign target was not released",
 			"host_id", target.HostID, "err", err)
 	}
@@ -95,16 +98,18 @@ func (o *Orchestrator) renewCapacity(ctx context.Context, targets []Target) {
 	if o.budgets == nil {
 		return
 	}
-	working := make([]string, 0, len(targets))
+	// Every renewal names the claim token the runner reads on the target;
+	// a lease that moved to another runner is left alone.
+	working := make([]budgets.Fenced, 0, len(targets))
 	for _, target := range targets {
 		if !target.State.Finished() && !target.State.Waiting() {
-			working = append(working, target.ID)
+			working = append(working, budgets.Fenced{Owner: target.ID, Token: target.ClaimToken})
 		}
 	}
 	if len(working) == 0 {
 		return
 	}
-	if err := o.budgets.Renew(ctx, working); err != nil {
+	if err := o.budgets.RenewFenced(ctx, working); err != nil {
 		o.log.Error("the capacity of a campaign was not renewed", "err", err)
 	}
 }

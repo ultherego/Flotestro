@@ -51,6 +51,11 @@ const (
 	ReasonPermissionDenied = "permission_denied"
 	// ReasonStaleInventory: the read is too old to judge anything from it.
 	ReasonStaleInventory = "inventory_stale"
+	// ReasonParseError: the fact was read, but the parser did not
+	// understand all of it - a line it skipped or an included file it
+	// could not open. What it did not read may be the very thing the check
+	// looks for, so the check cannot pass on what it did read.
+	ReasonParseError = "parse_error"
 )
 
 // MaxReadAge sets how old a fact may be for an assessment to rest on it.

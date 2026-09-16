@@ -22,6 +22,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/config"
 	"github.com/ultherego/flotestro/internal/helper"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/packages"
 )
 
@@ -49,6 +50,9 @@ func run() error {
 		idleTimeout = flag.Duration("idle-timeout",
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"the idle time after which the helper finishes its work")
+		configPath = flag.String("config",
+			config.Env("FLOTESTRO_HELPER_CONFIG", DefaultConfigPath),
+			"the configuration file of the helper (optional)")
 	)
 	flag.Parse()
 
@@ -153,6 +157,31 @@ func run() error {
 	// fifth minute.
 	server := helper.NewServer(allowedUID, log)
 	server.IdleTimeout = *idleTimeout
+
+	// The capability of the panel: the keyring and the host identity are
+	// root's, the replay store is root's, and the mode is the owner's
+	// decision. A helper that cannot open its replay store does not start:
+	// without it a consumed nonce could be consumed again.
+	settings, err := loadCapabilitySettings(*configPath)
+	if err != nil {
+		return err
+	}
+	replay, err := helpercap.OpenReplayStore(settings.ReplayDir)
+	if err != nil {
+		return fmt.Errorf("the replay store of the helper: %w", err)
+	}
+	defer replay.Close()
+	trust := helpercap.TrustStore{Dir: settings.TrustDir, HostIDPath: settings.HostIDPath, RequireRoot: true}
+	server.SetCapabilityPolicy(helpercap.NewPolicy(settings.Mode, helpercap.NewVerifier(trust, replay, log)), trust)
+	hostID, _ := trust.HostID()
+	keyring, skipped, _ := trust.Keyring()
+	log.Info("the capability policy of the helper",
+		"mode", string(settings.Mode), "mode_source", settings.Source,
+		"trusted_keys", keyring.IDs(), "skipped_keys", len(skipped),
+		"host_id", hostID, "trust_dir", settings.TrustDir, "replay_dir", settings.ReplayDir)
+	if settings.Mode == helpercap.ModeEnforce && (keyring.Empty() || hostID == "") {
+		log.Warn("enforce mode with no trusted key or no host identity: every mutating request will be refused until the panel's trust bundle reaches this host")
+	}
 	return server.Serve(ctx, listener)
 }
 

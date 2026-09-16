@@ -25,6 +25,11 @@ var (
 	ErrNotFound = errors.New("the task does not exist")
 	// ErrConflict means an attempt at a transition forbidden in this state.
 	ErrConflict = errors.New("the operation is not allowed in the current state of the task")
+	// ErrSessionStale means a delivery over a session that is no longer the
+	// host's open one: another gateway took the host over between the send
+	// and the record. The task was not marked dispatched, and the caller
+	// gives the lease back so the host's current session delivers it.
+	ErrSessionStale = errors.New("session_stale: the session is no longer the open session of the host")
 )
 
 // Spec describes the task to create.
@@ -613,6 +618,26 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, s
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// The delivery counts only over the host's open session. A gateway
+	// whose stream the host has left - the takeover closed its row, the
+	// notification is late or lost - must not record a delivery the host
+	// will never answer on: the database, not the memory of the process,
+	// says whose session it is. The row is locked so that a takeover in
+	// flight waits for the answer rather than racing it.
+	var openSession string
+	err = tx.QueryRow(ctx, `
+		select s.id::text
+		  from agent_sessions s join jobs j on j.host_id = s.host_id
+		 where s.id = nullif($2, '')::uuid and j.id = $1 and s.ended_at is null
+		   for update of s`,
+		jobID, sessionID).Scan(&openSession)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSessionStale
+	}
+	if err != nil {
+		return err
+	}
+
 	if _, err := tx.Exec(ctx,
 		`update jobs set state = $2, updated_at = now() where id = $1 and state = $3`,
 		jobID, string(StateDispatched), string(StateLeased)); err != nil {
@@ -931,6 +956,31 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	if !record {
 		return false, tx.Commit(ctx)
 	}
+
+	// A final state is final: a result that arrived after a cancellation or
+	// after another settlement does not undo the decision - and does not
+	// rewrite what the attempt says either. The output and the detail of a
+	// settled job are what the operator read and the approver consented
+	// to; a late or replayed copy must not overwrite them. An attempt still
+	// open under a settled job is closed with the bare facts of the result
+	// - its status, exit code and error code - so that it does not stay
+	// open forever, and nothing more.
+	if currentState.Terminal() || currentState.Validate(jobState) != nil {
+		if previousStatus == "" {
+			if _, err := tx.Exec(ctx, `
+				update job_attempts set
+					status = $2, exit_code = $3, error_code = $4, replayed = $5,
+					message = 'the result arrived after the job was settled',
+					finished_at = now(), lease_expires_at = null
+				where id = $1 and finished_at is null`,
+				attemptID, result.Status, result.ExitCode, nullable(result.ErrorCode),
+				result.Replayed); err != nil {
+				return false, err
+			}
+		}
+		return false, tx.Commit(ctx)
+	}
+
 	// The agent is asked to bound its output, but the bound is the task's
 	// and holds here whatever the agent sent: an agent that ignores it must
 	// not fill the database with one result.
@@ -960,15 +1010,6 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	}
 	if staleReason(result.ErrorCode) {
 		metrics.PlanStale.Inc(actionType, result.ErrorCode)
-	}
-
-	// A final state is final: a result that arrived after a cancellation or
-	// after another settlement does not undo the decision.
-	if currentState.Terminal() {
-		return false, tx.Commit(ctx)
-	}
-	if err := currentState.Validate(jobState); err != nil {
-		return false, tx.Commit(ctx)
 	}
 
 	// The attempt was given up on, the job was delivered again, and the

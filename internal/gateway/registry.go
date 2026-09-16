@@ -27,6 +27,18 @@ type Session struct {
 	// say which relay attested the identity of a host: these are two different
 	// grounds of trust rather than a detail of the route.
 	RelayID string
+	// RelayIdentity says how the host was identified through the relay:
+	// attested, when the relay named the certificate the host presented and
+	// the gateway checked it, or weak, when the relay named the host alone.
+	// Empty for a direct connection.
+	RelayIdentity string
+	// HelperCapabilitySupported says the agent forwards a signed capability
+	// to its root helper, and HelperCapabilityMode is what the helper does
+	// with one - observe, prefer, enforce, or empty for a helper that has
+	// not said. The scheduler mints a capability only for a host that
+	// announces the support; an older agent gets the envelope it knows.
+	HelperCapabilitySupported bool
+	HelperCapabilityMode      string
 	// Epoch grows within a host and settles which session is the right one.
 	// Two gateways do not see each other; they see a shared database, so the
 	// number comes from it and it points at the winner.

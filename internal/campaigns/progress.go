@@ -176,11 +176,9 @@ func (o *Orchestrator) followJob(ctx context.Context, target *Target, job *jobs.
 	if state == target.State && blocker == target.Blocker {
 		return nil
 	}
-	if err := o.store.FollowTask(ctx, target.ID, state, blocker); err != nil {
+	if err := o.store.FollowTask(ctx, target, state, blocker); err != nil {
 		return fmt.Errorf("recording where the task of the target stands: %w", err)
 	}
-	target.State = state
-	target.Blocker = blocker
 	return nil
 }
 
@@ -525,11 +523,13 @@ func (o *Orchestrator) finishTarget(ctx context.Context, campaign Campaign, targ
 // open, and a step cannot close without the target that carried it.
 func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign, target *Target,
 	state TargetState, errorCode, message string, outcomes ...stepOutcome) {
-	if err := o.settleTarget(ctx, campaign, target, state, errorCode, message, outcomes); err != nil {
+	revision, err := o.settleTarget(ctx, campaign, target, state, errorCode, message, outcomes)
+	if err != nil {
 		o.log.Error("the state of a campaign target was not recorded",
 			"campaign_id", campaign.ID, "host_id", target.HostID, "err", err)
 		return
 	}
+	target.Revision = revision
 	target.State = state
 	// The code stays on the target in memory as it is in the row: the pass
 	// that settled the host reads it back to decide whether the campaign
@@ -562,9 +562,9 @@ func (o *Orchestrator) finishTargetSteps(ctx context.Context, campaign Campaign,
 // pauseOnThreshold holds a campaign back once the failure threshold is
 // crossed. The hosts already started finish their tasks; new ones do not
 // start.
-func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign,
+func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign, targets []Target,
 	reason string, failed, finished int) error {
-	if err := o.store.SetState(ctx, campaign.ID, StatePaused, reason); err != nil {
+	if err := o.pause(ctx, &campaign, targets, reason); err != nil {
 		return err
 	}
 	o.audit.Record(ctx, audit.Event{
@@ -592,7 +592,8 @@ func (o *Orchestrator) pauseOnThreshold(ctx context.Context, campaign Campaign,
 // document keeps such a host failed and says it blocks its failure
 // domain; where it is silent about the campaign, the campaign stops and
 // asks.
-func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaign, hostIDs []string) error {
+func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaign, targets []Target,
+	hostIDs []string) error {
 	// The judgement only closes a host this way under a window with an
 	// end; the guard is for a row somebody settled by hand with the code.
 	ended := "an unknown time"
@@ -601,7 +602,7 @@ func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaig
 	}
 	reason := fmt.Sprintf("%s: %d hosts were still rebooting when the maintenance window ended at %s",
 		PauseWindowClosedMidReboot, len(hostIDs), ended)
-	if err := o.store.SetState(ctx, campaign.ID, StatePaused, reason); err != nil {
+	if err := o.pause(ctx, &campaign, targets, reason); err != nil {
 		return err
 	}
 	o.audit.Record(ctx, audit.Event{
@@ -618,12 +619,22 @@ func (o *Orchestrator) pauseOnWindowClosed(ctx context.Context, campaign Campaig
 	return nil
 }
 
+// pause holds a campaign back by the machinery's own decision - a
+// threshold crossed, a window closed, sessions lost. With hosts still
+// carrying a task the campaign is pausing rather than paused: nothing new
+// starts, the hosts under way settle with their leases renewed, and the
+// campaign is paused with the last of them. The reason is recorded either
+// way, because it is what the operator reads first.
+func (o *Orchestrator) pause(ctx context.Context, campaign *Campaign, targets []Target, reason string) error {
+	return o.store.SetState(ctx, campaign, pauseState(targets), reason)
+}
+
 // complete closes a campaign whose hosts have all settled and records the
 // report in the audit trail. The state is the verdict on the tally:
 // completed, completed with issues, or failed when nothing got through.
 func (o *Orchestrator) complete(ctx context.Context, campaign Campaign, targets []Target) error {
 	state := settleCampaignState(tallyTargets(targets))
-	if err := o.store.SetState(ctx, campaign.ID, state, ""); err != nil {
+	if err := o.store.SetState(ctx, &campaign, state, ""); err != nil {
 		return err
 	}
 	// The hosts gave their tokens back as they finished one by one. What
@@ -678,20 +689,21 @@ func firstNonEmpty(values ...string) string {
 // step is recorded as it ended, so that the strip says "skipped: the host
 // is in a maintenance window" instead of showing no step at all.
 func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, target *Target,
-	state TargetState, errorCode, message string, outcomes []stepOutcome) error {
+	state TargetState, errorCode, message string, outcomes []stepOutcome) (int64, error) {
 	tx, err := o.store.Pool().Begin(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, state, errorCode, message); err != nil {
-		return err
+	revision, err := o.store.UpdateTargetTx(ctx, tx, target, state, errorCode, message)
+	if err != nil {
+		return 0, err
 	}
 	for _, outcome := range outcomes {
 		settled, err := o.store.FinishStep(ctx, tx, target.ID, outcome.Key, outcome.State, outcome.Reason)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if settled {
 			continue
@@ -701,15 +713,18 @@ func (o *Orchestrator) settleTarget(ctx context.Context, campaign Campaign, targ
 			DependsOn: dependencyOf(outcome.Key, campaignPlans(campaign), target.RebootJobID != nil),
 			State:     outcome.State, Reason: outcome.Reason,
 		}); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if campaign.CompensatesCampaignID != "" && state.Finished() {
 		if err := o.closeCompensation(ctx, tx, campaign, target, state, errorCode, message); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return revision, nil
 }
 
 // openCompensation records, on the original campaign's target for the same
@@ -817,11 +832,27 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	revision, err := o.startStepTx(ctx, tx, target, start)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	o.applyStart(target, start, revision)
+	return nil
+}
 
+// startStepTx writes the start of a step inside the caller's transaction
+// and returns the revision the target will carry once it commits. Every
+// write is fenced by the revision and the claim token the target carries
+// in memory: a row that moved fails the whole transaction with
+// ErrConcurrentTransition, and the caller reads the host again.
+func (o *Orchestrator) startStepTx(ctx context.Context, tx pgx.Tx, target *Target, start stepStart) (int64, error) {
 	for _, done := range start.Closes {
 		settled, err := o.store.FinishStep(ctx, tx, target.ID, done.Key, done.State, done.Reason)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if settled {
 			continue
@@ -831,42 +862,62 @@ func (o *Orchestrator) startStep(ctx context.Context, target *Target, start step
 			DependsOn: dependencyOf(done.Key, start.Planned, target.RebootJobID != nil),
 			State:     done.State, Reason: done.Reason,
 		}); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if start.Column != "" {
-		if err := o.store.AttachJobTx(ctx, tx, target.ID, start.Column, start.JobID); err != nil {
-			return err
+		if err := o.store.AttachJobTx(ctx, tx, target, start.Column, start.JobID); err != nil {
+			return 0, err
 		}
 	}
 	if start.BootID != nil {
-		if err := o.store.SetBootIDBeforeTx(ctx, tx, target.ID, *start.BootID); err != nil {
-			return err
+		if err := o.store.SetBootIDBeforeTx(ctx, tx, target, *start.BootID); err != nil {
+			return 0, err
 		}
 	}
-	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, start.State, "", start.Message); err != nil {
-		return err
+	revision, err := o.store.UpdateTargetTx(ctx, tx, target, start.State, "", start.Message)
+	if err != nil {
+		return 0, err
 	}
 	if err := o.store.StartStep(ctx, tx, StepRecord{
 		Target: *target, Key: start.Key, DependsOn: start.DependsOn,
 		PlanHash: start.PlanHash, JobID: start.JobID, Reason: start.Note,
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	if start.Compensates != "" {
 		if err := o.openCompensation(ctx, tx, start.Compensates, target, start); err != nil {
-			return err
+			return 0, err
 		}
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
+	return revision, nil
+}
+
+// applyStart copies a committed start onto the target in memory: the
+// state the step runs in, the revision the row carries now, the task and
+// the boot ID, so the rest of the pass reads the host as the database has
+// it.
+func (o *Orchestrator) applyStart(target *Target, start stepStart, revision int64) {
+	target.Revision = revision
 	target.State = start.State
 	target.ErrorCode = ""
+	target.Message = start.Message
 	if start.BootID != nil {
 		target.BootIDBefore = *start.BootID
 	}
-	return nil
+	if start.Column != "" && start.JobID != "" {
+		jobID := start.JobID
+		switch start.Column {
+		case "job_id":
+			target.JobID = &jobID
+		case "reboot_job_id":
+			target.RebootJobID = &jobID
+		case "health_job_id":
+			target.HealthJobID = &jobID
+		case "plan_job_id":
+			target.PlanJobID = &jobID
+		}
+	}
 }
 
 // campaignPlans says whether the targets of this campaign have a plan step

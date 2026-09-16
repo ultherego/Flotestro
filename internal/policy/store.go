@@ -576,7 +576,7 @@ func (s *Store) OpenRemediation(ctx context.Context, policyID string) (string, e
 	err := s.pool.QueryRow(ctx, `
 		select id::text from campaigns
 		 where policy_id = $1
-		   and state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate', 'running', 'paused', 'canceling')
+		   and state in ('planning', 'planned', 'awaiting_approval', 'canary', 'manual_gate', 'running', 'pausing', 'paused', 'canceling')
 		 order by created_at desc limit 1`, policyID).Scan(&campaignID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil

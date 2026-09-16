@@ -15,6 +15,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/systemd"
 )
@@ -185,12 +186,18 @@ func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	// finish reporting on. Each is answered when its task is delivered again;
 	// the log names them now, so that the restart is visible on the host too.
 	executor.reportInFlight()
+	// The session reports the helper's capability mode and hands it the
+	// panel's keys through this client.
+	registerSessionHelper(helperClient)
 	return executor
 }
 
 // SetReadOnlyMode turns on observation mode: the agent performs no mutation.
+// The helper has no right to run on such a host, so it is not asked about
+// its mode and gets no keys either.
 func (e *TaskExecutor) SetReadOnlyMode(readOnly bool) {
 	e.readOnly = readOnly
+	helperProbeDisabled.Store(readOnly)
 }
 
 // Execute carries out a task and always returns a result - also when the task
@@ -250,6 +257,22 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 			e.settle(task, e.outcomeUnknown(ctx, marker), marker.StartedAt)
 		}
 	}()
+	// The panel's authorization of the task rides on every helper request
+	// made for it, attached by the client in one place. The agent checks
+	// only what it can: that the capability binds the payload it was
+	// handed. It holds no key to check the signature, and it does not have
+	// to - the helper does, against its own root-owned keyring.
+	if capability := task.GetHelperCapability(); capability != nil {
+		if !bytes.Equal(helpercap.PayloadDigest(task.GetCanonicalPayload()), capability.GetPayloadSha256()) {
+			result := rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+				"the helper capability does not bind the payload of the task")
+			e.settle(task, result, started)
+			settled = true
+			return result
+		}
+		e.helper.Attach(taskID, capability, task.GetHelperCapabilitySignature(), task.GetCanonicalPayload())
+		defer e.helper.Detach(taskID)
+	}
 	result := e.run(ctx, task, started)
 	switch result.GetErrorCode() {
 	case RejectResourceBusy, StatusAbandoned:
@@ -1131,6 +1154,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Group:          file.GetGroup(),
 			ExpectedSHA256: file.GetExpectedSha256(),
 			Validator:      file.GetValidator(),
+			// Part of the payload hash: a flag the agent added on its own
+			// would not match the approved plan.
+			AllowMissingValidator: file.GetAllowMissingValidator(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Security:

@@ -84,11 +84,94 @@ message HelperRequest {
     // file, with the host's own credentials. The directory has already
     // retired the old key; nothing is issued or carried by the panel.
     KeytabRenewRequest keytab_renew = 54;
+    // The keyring of the helper: the host identifier and the public keys
+    // of the panel that sign capabilities. The first bundle on a host with
+    // an empty keyring is taken on trust at enrollment; every later one
+    // has to be signed by a key the helper already trusts.
+    HelperTrustUpdateRequest trust_update = 55;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
   // for the operation result.
   bool want_progress = 28;
+
+  // The proof that the panel authorized this very operation on this very
+  // host: a capability signed by the control plane and the canonical
+  // payload it binds. SO_PEERCRED says which local user is asking; the
+  // capability says the panel approved what is asked. An agent from before
+  // the capability sends none, and the helper's mode decides whether that
+  // is still allowed. The fields are optional additions to the version 1
+  // contract, so the protocol version does not change.
+  HelperCapability capability = 60;
+  bytes capability_signature = 61;
+  bytes canonical_payload = 62;
+}
+
+// HelperCapability is the panel's authorization of one operation on one
+// host. The control plane signs its deterministic byte form with Ed25519;
+// the agent cannot mint one, because it never holds the signing key, and
+// cannot alter one, because the signature covers every field.
+message HelperCapability {
+  // The layout version of the capability; the helper refuses one it does
+  // not know instead of guessing the meaning of the fields.
+  uint32 schema_version = 1;
+  // The identifier of the control plane key that signed the capability.
+  string key_id = 2;
+  // A UUID the audit trail carries on both sides.
+  string capability_id = 3;
+  // The host the capability is for, compared with the root-owned host
+  // identity on the host rather than with what the agent says.
+  string host_id = 4;
+  string task_id = 5;
+  // The operation type of the registry, e.g. unit.restart.
+  string action_type = 6;
+  // The SHA-256 of the canonical payload, 32 bytes.
+  bytes payload_sha256 = 7;
+  int64 not_before_unix = 8;
+  int64 expires_unix = 9;
+  // 32 random bytes; the helper remembers each one it consumed.
+  bytes nonce = 10;
+  uint64 policy_revision = 11;
+  // The grants the creator of the task held that matter to the operation,
+  // e.g. schedule.root.exec for a root cron entry.
+  repeated string grants = 12;
+}
+
+// HelperTrustKey is one public key of the control plane.
+message HelperTrustKey {
+  // The first 16 hex characters of the SHA-256 of the raw public key.
+  string key_id = 1;
+  // The raw Ed25519 public key, 32 bytes.
+  bytes public_key = 2;
+}
+
+// HelperTrustBundle is the complete set of the panel's capability keys
+// together with the host's identifier, signed by the panel. The helper
+// replaces its keyring with the set: a key missing from the bundle is a
+// key the panel retired.
+message HelperTrustBundle {
+  string host_id = 1;
+  repeated HelperTrustKey keys = 2;
+  int64 issued_unix = 3;
+  // The key that signed the bundle; it has to be one the helper trusts,
+  // or one of the bundle itself on a host without a keyring yet.
+  string signed_by_key_id = 4;
+  bytes signature = 5;
+}
+
+// HelperTrustUpdateRequest hands the helper the bundle the panel returned
+// at enrollment or at a certificate renewal.
+message HelperTrustUpdateRequest {
+  HelperTrustBundle bundle = 1;
+}
+
+// HelperTrustResult says what the keyring holds after the update.
+message HelperTrustResult {
+  string host_id = 1;
+  repeated string key_ids = 2;
+  // Changed says whether the update wrote anything; a repeated hand-over
+  // of the same bundle changes nothing.
+  bool changed = 3;
 }
 
 // LocalAccountsRequest reads the account data that requires root: the lock
@@ -280,6 +363,14 @@ message HelperResponse {
   FinalWipeResult final_wipe_result = 40;
   SystemResult system_result = 41;
   KeytabRenewResult keytab_renew_result = 42;
+  HelperTrustResult trust_result = 43;
+  // The capability mode the helper runs in - observe, prefer or enforce -
+  // reported with every answer, so the agent can tell the panel what the
+  // host does. A helper from before the capability leaves it empty.
+  string capability_mode = 44;
+  // The capability the helper verified for this answer; empty for a
+  // request that carried none.
+  string capability_id = 45;
 }
 
 // SystemRequest names the facts of the system module the helper is to
@@ -1003,6 +1094,10 @@ message FileRequest {
   // records that in its registry and stops reporting the digest of such a
   // file: for a short value the digest alone is a hint.
   bool from_secret = 9;
+  // AllowMissingValidator says the order may go on when the validator is
+  // not installed. The helper honours it only together with the grant
+  // file.write.unvalidated in the capability.
+  bool allow_missing_validator = 10;
 }
 
 message FileResult {

@@ -11,8 +11,10 @@ import (
 
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/buildinfo"
+	"github.com/ultherego/flotestro/internal/cryptostate"
 	"github.com/ultherego/flotestro/internal/housekeeping"
 	"github.com/ultherego/flotestro/internal/relays"
+	"github.com/ultherego/flotestro/internal/secrets"
 )
 
 // The status screen: is this panel well, and if not, which part of it is
@@ -34,6 +36,10 @@ var processStarted = time.Now()
 // API server. The settings screen shows the switches; the status screen
 // reads the loops.
 type Process struct {
+	// Crypto is the cryptographic state of the installation as the
+	// startup guard left it; nil means a panel started without the guard,
+	// which the status screen reports as unknown.
+	Crypto *cryptostate.Runtime
 	// Housekeeping is the retention sweeper; nil means a panel started
 	// without one, which the status screen reports as unknown.
 	Housekeeping *housekeeping.Sweeper
@@ -42,6 +48,9 @@ type Process struct {
 	DispatchRate int
 	// ClonePolicy is the gateway's reaction to a copied identity.
 	ClonePolicy string
+	// RelayIdentity is what the gateway does with a relayed session that
+	// names the host without the certificate it presented.
+	RelayIdentity string
 	// SessionGroupRefresh is how often the group snapshot of a live panel
 	// session is confirmed with the identity provider; zero means never.
 	SessionGroupRefresh time.Duration
@@ -116,6 +125,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"directory":           s.directoryStatus(),
 		"vulnerability_feeds": s.feedsStatus(ctx),
 		"certificates":        s.certificatesStatus(ctx),
+		"crypto":              s.cryptoStatus(ctx),
 		"housekeeping":        s.housekeepingStatus(),
 		"build":               s.buildStatus(),
 	}
@@ -546,6 +556,61 @@ func (s *Server) certificatesStatus(ctx context.Context) statusBlock {
 		block.Attention = strconv.Itoa(within7) + " hosts hold a certificate that expires within a week"
 	}
 	return block
+}
+
+// cryptoStatus repeats the self-test of the startup guard: the active
+// key is there and opens the installation sentinel, and the CA on disk is
+// the recorded issuer. The counts by key are what a key rotation is
+// judged by - the old key may go only when nothing names it.
+func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
+	if s.process == nil || s.process.Crypto == nil {
+		return statusUnknown("this panel started without the cryptographic state guard", nil)
+	}
+	report := s.process.Crypto.Report(ctx)
+	facts := map[string]any{
+		"installation_id":    report.InstallationID,
+		"provider":           report.Provider,
+		"active_key_id":      report.ActiveKeyID,
+		"issuer_id":          report.IssuerID,
+		"issuer_fingerprint": report.IssuerFingerprint,
+		"revision":           report.Revision,
+		"initialized_at":     report.InitializedAt.UTC(),
+		"keys":               report.Keys,
+		"versions_by_key":    report.VersionsByKey,
+		"pending_rewrap":     report.PendingRewrap,
+		"initialised":        report.Initialised,
+		"adopted":            report.Adopted,
+	}
+	if report.Err != nil {
+		return statusFailed("the cryptographic state of the installation is not usable: "+report.Err.Error(), facts)
+	}
+	block := statusOK(facts)
+	if report.PendingRewrap > 0 {
+		block.Attention = strconv.Itoa(report.PendingRewrap) + " secret versions are still on another key or in the old form; the rewrap runs in the background"
+	} else if unused := unusedKeys(report); len(unused) > 0 {
+		block.Attention = "keys that no version names any more may be removed: " + strings.Join(unused, ", ")
+	}
+	return block
+}
+
+// unusedKeys lists the keys the provider holds that are neither active
+// nor named by any live version - the ones a finished rotation leaves
+// behind. A version of the first form counts for the legacy key.
+func unusedKeys(report cryptostate.Report) []string {
+	var unused []string
+	for _, key := range report.Keys {
+		if key == report.ActiveKeyID {
+			continue
+		}
+		inUse := report.VersionsByKey[key] > 0
+		if key == secrets.LegacyKeyID {
+			inUse = inUse || report.VersionsByKey[secrets.LegacyFormLabel] > 0
+		}
+		if !inUse {
+			unused = append(unused, key)
+		}
+	}
+	return unused
 }
 
 // housekeepingStatus reads the record of the last retention sweep.

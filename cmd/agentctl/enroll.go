@@ -85,6 +85,9 @@ func enrollmentCommand(args []string, in_ io.Reader, out, errOut io.Writer) int 
 	if *name != "" {
 		request.Hostname = *name
 	}
+	// The helper takes its host identity and the panel's capability keys
+	// from the enrollment answer; the daemon repeats it at every session.
+	request.HelperSocket = cfg.Helper.Socket
 	identity, err := agent.Enroll(ctx, request)
 	if err != nil {
 		// The code goes first: it is what the operator matches against the

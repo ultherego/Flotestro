@@ -15,8 +15,10 @@ package identitystore
 
 import (
 	"crypto"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -36,6 +38,9 @@ const (
 	CurrentName    = "current"
 	nextName       = ".current-next"
 	newPrefix      = ".new-"
+	// stalePrefix marks a complete generation of a serial that is being
+	// written again: set aside rather than deleted, and swept by Clean.
+	stalePrefix = ".stale-"
 
 	KeyName         = "agent.key"
 	CertificateName = "agent.pem"
@@ -224,16 +229,28 @@ func (m *Store) Commit(g Generation) (*Identity, error) {
 		return nil, err
 	}
 	target := filepath.Join(generations, serial)
-	// The same serial number means the same certificate: a write repeated
-	// after an interrupted start is to give the same result rather than an
-	// error.
-	if _, err := os.Stat(target); err == nil {
-		if err := os.RemoveAll(target); err != nil {
+	// The name has to be free: the store never removes a generation to
+	// make room for another. The same serial number means the same
+	// certificate, so a repeat after an interrupted start meets either the
+	// active generation - which stays, and is used if it is whole - or a
+	// complete copy nobody switched to, which is set aside for Clean.
+	if err := renameNoReplace(temporary, target); err != nil {
+		if !errors.Is(err, os.ErrExist) {
 			return nil, err
 		}
-	}
-	if err := os.Rename(temporary, target); err != nil {
-		return nil, err
+		if m.isCurrent(serial) {
+			if _, err := load(target, m.source); err == nil {
+				return m.Current()
+			}
+			return nil, fmt.Errorf("%w: the active generation %s is damaged and cannot be replaced in place",
+				ErrKeyPair, serial)
+		}
+		if _, err := setAside(generations, serial); err != nil {
+			return nil, err
+		}
+		if err := renameNoReplace(temporary, target); err != nil {
+			return nil, err
+		}
 	}
 	committed = true
 	if err := syncDir(generations); err != nil {
@@ -247,6 +264,38 @@ func (m *Store) Commit(g Generation) (*Identity, error) {
 		return nil, err
 	}
 	return m.Current()
+}
+
+// isCurrent says whether "current" points at the named generation.
+func (m *Store) isCurrent(serial string) bool {
+	target, err := os.Readlink(filepath.Join(m.root, CurrentName))
+	return err == nil && filepath.Base(target) == serial
+}
+
+// setAside moves a generation directory that is not the active one under
+// a stale name, so its serial is free for the copy being written.
+func setAside(generations, serial string) (string, error) {
+	suffix := make([]byte, 8)
+	if _, err := rand.Read(suffix); err != nil {
+		return "", err
+	}
+	aside := filepath.Join(generations, stalePrefix+serial+"-"+hex.EncodeToString(suffix))
+	if err := renameNoReplace(filepath.Join(generations, serial), aside); err != nil {
+		return "", err
+	}
+	return aside, nil
+}
+
+// renameNoReplaceFallback is the check-then-move for a filesystem without
+// the atomic form. The window between the two is small and it errs
+// towards refusing, never towards replacing.
+func renameNoReplaceFallback(oldPath, newPath string) error {
+	if _, err := os.Lstat(newPath); err == nil {
+		return &os.LinkError{Op: "rename", Old: oldPath, New: newPath, Err: os.ErrExist}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return os.Rename(oldPath, newPath)
 }
 
 // switchTo replaces the "current" symlink in one atomic move.
@@ -318,8 +367,11 @@ func (m *Store) Clean() error {
 		}
 		return err
 	}
+	// A half-written generation and a copy set aside by a repeated write
+	// are never pointed at by "current"; both are rubbish rather than
+	// state.
 	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), newPrefix) {
+		if strings.HasPrefix(entry.Name(), newPrefix) || strings.HasPrefix(entry.Name(), stalePrefix) {
 			_ = os.RemoveAll(filepath.Join(generations, entry.Name()))
 		}
 	}
@@ -362,7 +414,7 @@ func (m *Store) generations() ([]string, error) {
 	}
 	var collected []generationEntry
 	for _, entry := range entries {
-		if !entry.IsDir() || strings.HasPrefix(entry.Name(), newPrefix) {
+		if !entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 			continue
 		}
 		info, err := entry.Info()

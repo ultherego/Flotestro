@@ -38,6 +38,22 @@ func ValidIdentifier(id string) bool {
 	return entryIdentifier.MatchString(id)
 }
 
+// userName allows the account names a cron line can carry safely.
+//
+// The user stands between the expression and the command in a /etc/cron.d
+// line, separated by whitespace only. A value with a space, a tab or a
+// newline would end the user field early and let the rest of it run as the
+// command - as root, because that is where the panel puts the user. The
+// character set is the conservative POSIX one: the panel does not need to
+// schedule jobs for accounts with unusual names, and an account that does
+// not fit is refused before the line is composed.
+var userName = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+
+// ValidUser checks the name of the account an entry runs as.
+func ValidUser(name string) bool {
+	return userName.MatchString(name)
+}
+
 // EntryPath returns the file of a managed entry.
 func EntryPath(dir, id string) string {
 	return filepath.Join(dir, FilePrefix+id)
@@ -193,10 +209,17 @@ func WriteEntry(dir string, entry Schedule) error {
 	if err != nil {
 		return err
 	}
-	user := entry.User
-	if user == "" {
-		user = "root"
+	// An entry without a user is not an entry for root: the account is a
+	// decision of the operator, and root is the one that needs a grant of its
+	// own. A name outside the allowed set would not stay in the user field
+	// of the line.
+	if entry.User == "" {
+		return fmt.Errorf("the entry has no user; the account it runs as has to be named")
 	}
+	if !ValidUser(entry.User) {
+		return fmt.Errorf("invalid user name %q", entry.User)
+	}
+	user := entry.User
 
 	prefix := ""
 	if !entry.Enabled {

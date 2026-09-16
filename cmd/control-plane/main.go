@@ -30,6 +30,7 @@ import (
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/config"
+	"github.com/ultherego/flotestro/internal/cryptostate"
 	"github.com/ultherego/flotestro/internal/database"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
@@ -37,6 +38,7 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
+	"github.com/ultherego/flotestro/internal/helpercap"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/housekeeping"
 	"github.com/ultherego/flotestro/internal/identity"
@@ -126,7 +128,13 @@ func run() error {
 	// in.
 	secretsKeyFile := flag.String("secrets-key-file",
 		config.Env("FLOTESTRO_SECRETS_KEY_FILE", ""),
-		"the file with the key of the secret store; without a copy of it the secrets cannot be recovered")
+		"the key file of a secret store from before the key provider; adopted as the key \"legacy\" at the first start")
+	secretsKeyCredential := flag.String("secrets-key-credential",
+		config.Env("FLOTESTRO_SECRETS_KEY_CREDENTIAL", ""),
+		"the name of a systemd credential (LoadCredential) that holds a key of the secret store under that key id")
+	secretsKeyRotateTo := flag.String("secrets-key-rotate-to",
+		config.Env("FLOTESTRO_SECRETS_KEY_ROTATE_TO", ""),
+		"the id of the key the secret store switches to at this start; created when missing, a no-op once active")
 	webRoot := flag.String("web-root",
 		config.Env("FLOTESTRO_WEB_ROOT", ""), "the directory with the built panel")
 	publicURL := flag.String("public-url",
@@ -195,9 +203,26 @@ func run() error {
 	clonePolicyValue := flag.String("clone-policy",
 		config.Env("FLOTESTRO_CLONE_POLICY", ""),
 		"what to do with the same identity alive on two boots: report or quarantine (the default)")
+	// What the gateway does with a session through a relay that names the
+	// host without the certificate it presented: observe and prefer let it
+	// in - prefer marks the host as weakly identified - and enforce refuses
+	// it until the relay is upgraded to one that attests the certificate.
+	relayIdentityValue := flag.String("relay-identity",
+		config.Env("FLOTESTRO_RELAY_IDENTITY", ""),
+		"a relayed session without the host's certificate: observe, prefer (the default) or enforce")
 	stepUpTokens := flag.String("stepup-tokens",
 		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
+	// The rollout stage of the root helper's signed capability on the
+	// panel's side: observe and prefer dispatch to every host, prefer
+	// reports a host whose agent forwards no capability, enforce holds a
+	// mutating task back from such a host.
+	helperCapabilityModeValue := flag.String("helper-capability-mode",
+		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "prefer"),
+		"the stage of the helper capability rollout: observe, prefer (the default) or enforce")
+	helperSigningKey := flag.String("helper-signing-key",
+		config.Env("FLOTESTRO_HELPER_SIGNING_KEY", ""),
+		"the Ed25519 key that signs helper capabilities; the default is helper-signing.key in the state directory")
 	vulnerabilities := config.Vulnerabilities{}
 	flag.BoolVar(&vulnerabilities.Enabled, "vulnerability-correlator",
 		config.Env("FLOTESTRO_VULN_ENABLED", "true") == "true",
@@ -290,10 +315,42 @@ func run() error {
 	}
 	log.Info("the database schema is current")
 
-	trust, err := pki.EnsureTrust(cfg.StateDir)
+	// The cryptographic identity of the installation is checked before
+	// anything touches the secret store or the CA. A missing key or a
+	// missing part of the CA next to an existing database stops the
+	// start here, with the state named; nothing is ever created anew in
+	// place of what is missing.
+	legacyKeyPath := *secretsKeyFile
+	if legacyKeyPath == "" {
+		legacyKeyPath = filepath.Join(cfg.StateDir, "secrets.key")
+	}
+	keyProvider, err := cryptostate.NewLocalProvider(filepath.Join(cfg.StateDir, cryptostate.KeysDir),
+		*secretsKeyCredential)
 	if err != nil {
+		return fmt.Errorf("the key provider: %w", err)
+	}
+	cryptoRuntime, err := cryptostate.Open(ctx, cryptostate.Options{
+		Storage:       cryptostate.NewPostgres(pool),
+		Provider:      keyProvider,
+		CADir:         cfg.StateDir,
+		LegacyKeyPath: legacyKeyPath,
+		RotateTo:      *secretsKeyRotateTo,
+		Log:           log,
+	})
+	if err != nil {
+		var fatal *cryptostate.FatalError
+		if errors.As(err, &fatal) {
+			// The code is what the runbook indexes; the reason names the
+			// file or row; the hint is the one line that stops somebody
+			// from "fixing" it by generating material.
+			log.Error("the control plane refuses to start: the cryptographic state of the installation is not usable",
+				"code", fatal.Code, "reason", fatal.Reason, "detail", errorText(fatal.Err),
+				"hint", cryptostate.RunbookHint)
+			return fmt.Errorf("%s: %s", fatal.Code, fatal.Reason)
+		}
 		return err
 	}
+	trust := cryptoRuntime.Trust()
 	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
 	// The names of the panel are reserved: a relay certificate carrying one
@@ -466,6 +523,39 @@ func run() error {
 	}
 	agentService.SetClonePolicy(clonePolicy)
 	log.Info("a copied identity is handled by policy", "clone_policy", string(clonePolicy))
+	relayIdentity, err := gateway.ParseRelayIdentityMode(*relayIdentityValue)
+	if err != nil {
+		return fmt.Errorf("FLOTESTRO_RELAY_IDENTITY: %w", err)
+	}
+	agentService.SetRelayIdentityMode(relayIdentity)
+	log.Info("a relayed session without the host's certificate is handled by mode",
+		"relay_identity", string(relayIdentity))
+
+	// The key that signs the root helper's capabilities lies in the state
+	// directory next to the CA key and the secret store key, and nowhere
+	// else: a copy of the database must not be enough to mint an
+	// authorization for root. The hosts learn the public key at every
+	// session, at enrollment and at renewal.
+	helperCapabilityMode, err := helpercap.ParseMode(*helperCapabilityModeValue)
+	if err != nil {
+		return fmt.Errorf("FLOTESTRO_HELPER_CAPABILITY_MODE: %w", err)
+	}
+	signingKeyPath := *helperSigningKey
+	if signingKeyPath == "" {
+		signingKeyPath = filepath.Join(cfg.StateDir, "helper-signing.key")
+	}
+	helperSigner, created, err := helpercap.LoadOrGenerateSigner(signingKeyPath)
+	if err != nil {
+		return fmt.Errorf("the helper signing key: %w", err)
+	}
+	if created {
+		log.Warn("the helper signing key was generated; the hosts learn it at their next session",
+			"path", signingKeyPath, "key_id", helperSigner.KeyID())
+	}
+	log.Info("the helper capability policy of the panel",
+		"mode", string(helperCapabilityMode), "key_id", helperSigner.KeyID(),
+		"trusted_keys", len(helperSigner.TrustedKeys()))
+	agentService.SetHelperSigner(helperSigner)
 	// The session rows stay open after a crash of the process and inflate
 	// every measurement that counts connections from the database.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
@@ -483,6 +573,7 @@ func run() error {
 	// that drift apart silently over time.
 	enrollmentService := gateway.NewEnrollmentService(certIssuer, hostStore, relayStore,
 		tokenStore, recorder, log)
+	enrollmentService.SetHelperSigner(helperSigner)
 	relayService := gateway.NewRelayService(relayStore, certIssuer, recorder, registry,
 		enrollmentService, log)
 
@@ -640,21 +731,15 @@ func run() error {
 	packageStore := vuln.NewPackageStore(pool)
 	panelServer.SetVulnerabilities(vulnStore, packageStore, vulnerabilities.MaxSnapshotAge)
 
-	// The secret store. The key lies in a file outside the database: a copy of
-	// the database without it is not enough to read anything.
-	keyPath := *secretsKeyFile
-	if keyPath == "" {
-		keyPath = filepath.Join(cfg.StateDir, "secrets.key")
-	}
-	cipher, created, err := secrets.OpenCipher(keyPath)
-	if err != nil {
-		return fmt.Errorf("the secret store: %w", err)
-	}
-	if created {
-		log.Warn("the key of the secret store was generated; without a copy of "+
-			"this file the secrets cannot be recovered", "path", keyPath)
-	}
-	secretStore := secrets.NewStore(pool, cipher)
+	// The secret store. The key encryption keys lie in files outside the
+	// database, behind the provider the startup guard checked: a copy of
+	// the database without them is not enough to read anything. The rows
+	// still on another key - the legacy one after an upgrade, the
+	// previous one after a rotation - are moved onto the active key in
+	// the background.
+	secretStore := secrets.NewStore(pool, keyProvider)
+	cryptoRuntime.SetSecrets(secretStore)
+	go cryptoRuntime.Maintain(ctx)
 	panelServer.SetSecrets(secretStore)
 	agentService.SetSecrets(secretStore)
 	agentService.SetSecretLeases(secretStore)
@@ -731,7 +816,7 @@ func run() error {
 		MetricsRawRetention:    metricsRetention.RawRetention,
 		MetricsRollupRetention: metricsRetention.RollupRetention,
 		AuditRetention:         *auditRetention,
-		SecretsKeyFile:         keyPath,
+		SecretsKeyFile:         keyProvider.Dir(),
 	})
 
 	adminServer := &http.Server{
@@ -787,9 +872,11 @@ func run() error {
 	// The status and settings screens read the loops and the switches of
 	// this process that the effective configuration does not carry.
 	panelServer.SetProcess(adminapi.Process{
+		Crypto:              cryptoRuntime,
 		Housekeeping:        sweeper,
 		DispatchRate:        max(*dispatchRate, 0),
 		ClonePolicy:         string(clonePolicy),
+		RelayIdentity:       string(relayIdentity),
 		SessionGroupRefresh: *sessionGroupRefresh,
 		OIDCAdminLogout:     *oidcAdminLogout,
 	})
@@ -809,6 +896,12 @@ func run() error {
 	// The leases of the secrets are created at the moment a job is delivered:
 	// the short window starts when the host starts working.
 	dispatcher.SetSecrets(secretStore)
+	// The root helper's capability is minted at the same moment, with the
+	// grants of whoever created the task.
+	dispatcher.SetHelperCapabilities(scheduler.HelperCapabilities{
+		Signer: helperSigner, Mode: helperCapabilityMode,
+		Permissions: subjectPermissions{store: authzStore},
+	})
 	// The same budget store the campaigns lease from: a single job and a
 	// campaign target compete for the same tokens.
 	dispatcher.SetBudgets(budgetStore)
@@ -820,10 +913,15 @@ func run() error {
 	go budgetStore.Run(ctx)
 
 	// The orchestrator carries the campaigns through the canary and the
-	// waves, creating the jobs the scheduler delivers.
+	// waves, creating the jobs the scheduler delivers. Every instance of
+	// the control plane runs one, and each campaign is driven by one of
+	// them at a time under a runner lease in the database; the identifier
+	// logged here is the one the campaign rows name as their runner.
 	orchestrator := campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
 		budgetStore, log, 5*time.Second)
 	orchestrator.Authorizer = authzStore
+	log.Info("the campaign orchestrator drives campaigns under a runner lease",
+		"runner_id", orchestrator.Runner(), "lease", campaigns.RunnerLeaseTerm.String())
 	go orchestrator.Run(ctx)
 
 	// The scheduled campaigns: the loop places the stored orders at their
@@ -1034,6 +1132,14 @@ func checkKeytabPermissions(path string) error {
 	return nil
 }
 
+// errorText renders an optional error for a log line.
+func errorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
+}
+
 func splitList(value string) []string {
 	var items []string
 	for _, part := range strings.Split(value, ",") {
@@ -1070,4 +1176,22 @@ func defaultGatewayID() string {
 		return "gateway-1"
 	}
 	return name
+}
+
+// subjectPermissions reads the permissions of a task's creator for the
+// grants of a helper capability. A subject the store does not know grants
+// nothing beyond the action's own permission.
+type subjectPermissions struct {
+	store *authz.Store
+}
+
+func (p subjectPermissions) PermissionsOfSubject(ctx context.Context, subject string) ([]string, error) {
+	principal, err := p.store.PrincipalBySubject(ctx, subject)
+	if errors.Is(err, authz.ErrNotFound) || errors.Is(err, authz.ErrUnauthenticated) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return principal.Permissions(), nil
 }

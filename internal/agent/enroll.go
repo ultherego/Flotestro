@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -155,6 +156,11 @@ type IdentityRequest struct {
 	OSFamily     string
 	OSVersion    string
 	Architecture string
+	// HelperSocket is the socket of the root helper on this host. When it is
+	// given, the enrollment hands the helper the panel's trust bundle - the
+	// host identifier and the capability keys - right after the identity is
+	// written. Empty means the daemon will do it at its first session.
+	HelperSocket string
 }
 
 // LocalIdentityRequest fills the request in from the system.
@@ -337,6 +343,9 @@ type Enrollment struct {
 	// Now and Random default to the real clock and crypto/rand.
 	Now    func() time.Time
 	Random io.Reader
+	// Log receives what happened with the helper's trust bundle. Nil means
+	// the default logger.
+	Log *slog.Logger
 }
 
 // Run carries the enrollment out.
@@ -418,6 +427,14 @@ func (e *Enrollment) Run(ctx context.Context) (*Identity, error) {
 	// under a new number. Should this removal fail, the next attempt
 	// recognises the record by the key of the identity that is now current.
 	_ = e.Store.RemovePending()
+	// The helper learns the host identity and the panel's keys from the
+	// panel's signed bundle, never from the agent's word. It is handed over
+	// now when the socket is known, and by the daemon at its first session
+	// otherwise; a helper that is not up yet is not a failed enrollment.
+	if e.Request.HelperSocket != "" && response.GetHelperTrust() != nil {
+		registerSessionHelper(NewHelperClient(e.Request.HelperSocket))
+		deliverHelperTrust(ctx, response.GetHelperTrust(), e.Log)
+	}
 	return fromIdentity(identity), nil
 }
 

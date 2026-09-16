@@ -3,9 +3,12 @@ package campaigns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -179,18 +182,26 @@ func (o *Orchestrator) orderPlan(ctx context.Context, campaign Campaign, target 
 		return o.holdOffline(ctx, campaign, target, host)
 	}
 
-	jobID, err := o.submitJob(ctx, campaign, host, action, planPayload(action, change, payload),
-		"campaign:"+campaign.ID+":plan:"+target.HostID)
-	if err != nil {
+	// The plan task and the host's transition commit together under the
+	// campaign's lock: a cancel that closed the planning phase a moment
+	// earlier is seen, and no plan task is left queued for a campaign
+	// that is gone.
+	jobID, err := o.launch(ctx, &campaign, target,
+		func(tx pgx.Tx) (string, error) {
+			return o.submitJobTx(ctx, tx, campaign, host, action, planPayload(action, change, payload),
+				"campaign:"+campaign.ID+":plan:"+target.HostID)
+		},
+		func(jobID string) stepStart {
+			return stepStart{Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning}
+		})
+	var refused *createRefusal
+	if errors.As(err, &refused) {
 		o.finishTarget(ctx, campaign, target, TargetFailed, "plan_create_failed", err.Error())
 		return nil
 	}
-	if err := o.startStep(ctx, target, stepStart{
-		Key: StepPlan, JobID: jobID, Column: "plan_job_id", State: TargetPlanning,
-	}); err != nil {
+	if err != nil {
 		return err
 	}
-	target.PlanJobID = &jobID
 	o.log.Info("the campaign is planning a host",
 		"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", jobID)
 	return nil
@@ -213,12 +224,10 @@ func (o *Orchestrator) recheckOfflinePlanning(ctx context.Context, campaign Camp
 		}
 		return false, nil
 	}
-	if err := o.store.UpdateTarget(ctx, target.ID, TargetPending, "",
+	if err := o.store.UpdateTarget(ctx, target, TargetPending, "",
 		"the host came back; its plan is ordered"); err != nil {
 		return false, err
 	}
-	target.State = TargetPending
-	target.ErrorCode = ""
 	return true, nil
 }
 
@@ -365,7 +374,8 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target
 	if err := o.store.SavePlanTx(ctx, tx, campaign.ID, target.HostID, hash, plan); err != nil {
 		return err
 	}
-	if err := o.store.UpdateTargetTx(ctx, tx, target.ID, TargetPending, "", message); err != nil {
+	revision, err := o.store.UpdateTargetTx(ctx, tx, target, TargetPending, "", message)
+	if err != nil {
 		return err
 	}
 	if _, err := o.store.FinishStep(ctx, tx, target.ID, StepPlan, StepSucceeded, "plan "+shortHash(hash)); err != nil {
@@ -374,8 +384,10 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target
 	if err := tx.Commit(ctx); err != nil {
 		return err
 	}
+	target.Revision = revision
 	target.State = TargetPending
 	target.ErrorCode = ""
+	target.Message = message
 	return nil
 }
 
@@ -885,7 +897,7 @@ func (o *Orchestrator) failPlanning(ctx context.Context, campaign Campaign,
 		}
 		o.finishTarget(ctx, campaign, &targets[i], TargetSkipped, "plan_failed", reason)
 	}
-	if err := o.store.SetState(ctx, campaign.ID, StatePlanFailed, why); err != nil {
+	if err := o.store.SetState(ctx, &campaign, StatePlanFailed, why); err != nil {
 		return err
 	}
 	if o.budgets != nil {

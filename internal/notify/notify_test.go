@@ -142,3 +142,48 @@ func asSendError(err error, target *SendError) bool {
 	}
 	return ok
 }
+
+// The address of an incoming webhook is the credential that posts to the
+// channel: the store shows only that it is set, and an edit that says so
+// without typing one keeps the stored address. A new channel has nothing
+// stored, so "set" without an address is refused at the store, not here.
+func TestTheSlackAddressIsRedactedLikeASecret(t *testing.T) {
+	shown := redact(KindSlackWebhook, json.RawMessage(`{"url":"https://hooks.example.com/T0/B0/secret"}`))
+	var config map[string]any
+	if err := json.Unmarshal(shown, &config); err != nil {
+		t.Fatal(err)
+	}
+	if url, present := config["url"]; present && url != "" {
+		t.Fatalf("the address left the store: %s", shown)
+	}
+	if config["url_set"] != true {
+		t.Fatalf("the redacted configuration does not say the address is set: %s", shown)
+	}
+	if empty := redact(KindSlackWebhook, json.RawMessage(`{}`)); string(empty) != `{}` {
+		t.Errorf("a channel without an address reads as having one: %s", empty)
+	}
+
+	kept := Channel{Name: "ops", Kind: KindSlackWebhook, Events: []string{"alert.fired"},
+		Config: json.RawMessage(`{"url_set":true}`)}
+	config2, err := kept.Validate()
+	if err != nil {
+		t.Fatalf("an edit that keeps the address was refused: %v", err)
+	}
+	if slack := config2.(SlackConfig); slack.URL != "" || !slack.URLSet {
+		t.Errorf("the kept address is not marked as kept: %+v", slack)
+	}
+	fresh := Channel{Name: "ops", Kind: KindSlackWebhook, Events: []string{"alert.fired"},
+		Config: json.RawMessage(`{"url":"https://hooks.example.com/T0/B0/new"}`)}
+	config3, err := fresh.Validate()
+	if err != nil {
+		t.Fatalf("a fresh address was refused: %v", err)
+	}
+	if slack := config3.(SlackConfig); slack.URL == "" || slack.URLSet {
+		t.Errorf("a typed address was not taken: %+v", slack)
+	}
+	none := Channel{Name: "ops", Kind: KindSlackWebhook, Events: []string{"alert.fired"},
+		Config: json.RawMessage(`{}`)}
+	if _, err := none.Validate(); err == nil {
+		t.Error("a channel with neither an address nor a kept one was accepted")
+	}
+}

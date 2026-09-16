@@ -284,3 +284,82 @@ func TestMigrationFromTheOldLayout(t *testing.T) {
 		t.Fatalf("the second migration = %v, error = %v", again, err)
 	}
 }
+
+// TestARepeatedWriteNeverReplacesAGenerationInPlace guards the rule of
+// the document: the name of a generation has to be free, and the active
+// one is never deleted to make room. A repeat of the same certificate
+// after an interrupted start meets either the active generation, which
+// stays, or a complete copy nobody switched to, which is set aside.
+func TestARepeatedWriteNeverReplacesAGenerationInPlace(t *testing.T) {
+	store, ca, _ := storeWithIdentity(t)
+	first, err := store.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	same := Generation{
+		KeyPEM:         mustRead(t, filepath.Join(first.Dir, KeyName)),
+		CertificatePEM: mustRead(t, filepath.Join(first.Dir, CertificateName)),
+		TrustPEM:       first.TrustPEM,
+	}
+	info, err := os.Stat(first.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same generation again: the active directory is neither removed
+	// nor replaced - the same inode answers afterwards.
+	if _, err := store.Commit(same); err != nil {
+		t.Fatalf("repeating the active generation: %v", err)
+	}
+	again, err := os.Stat(first.Dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(info, again) {
+		t.Fatal("the active generation was replaced in place")
+	}
+	current, err := store.Current()
+	if err != nil || current.Dir != first.Dir {
+		t.Fatalf("current = %+v, err = %v", current, err)
+	}
+
+	// A complete copy of a new serial that nobody switched to: the write
+	// sets it aside, lands its own copy and switches to that.
+	next := generation(t, ca, testHost)
+	serial, err := serialNumber(next.CertificatePEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	generations := filepath.Join(store.Dir(), GenerationsDir)
+	unswitched := filepath.Join(generations, serial)
+	if err := os.MkdirAll(unswitched, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unswitched, KeyName), next.KeyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Commit(next); err != nil {
+		t.Fatalf("writing over an unswitched copy: %v", err)
+	}
+	current, err = store.Current()
+	if err != nil || filepath.Base(current.Dir) != serial {
+		t.Fatalf("current = %+v, err = %v", current, err)
+	}
+	entries, err := os.ReadDir(generations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.Name()[0] == '.' {
+			t.Errorf("rubbish left in the generations directory: %s", entry.Name())
+		}
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}

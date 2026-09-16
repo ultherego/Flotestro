@@ -259,6 +259,15 @@ var (
 	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
+	// RelaySessionIdentity counts the sessions opened through a relay by
+	// how the host was identified: attested, when the relay named the
+	// certificate the host presented and the gateway checked it, or weak,
+	// when the relay named the host alone. The gateway increments it
+	// where it identifies the peer (agent_service.go); a fleet with weak
+	// sessions has relays to upgrade before the mode can be enforced.
+	RelaySessionIdentity = Default.NewCounter("flotestro_relay_session_identity_total",
+		"Agent sessions opened through a relay, by the strength of the host's identity.",
+		"strength")
 	// AgentRenewal counts the certificate renewals by how they ended. The
 	// gateway increments it where the renewal is settled (renewal.go):
 	// renewed, refused, or failed - a refusal is the panel's decision, a

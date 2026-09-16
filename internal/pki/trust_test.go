@@ -2,6 +2,7 @@ package pki
 
 import (
 	"crypto/x509"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -188,5 +189,103 @@ func TestWithdrawalProtectsTheHosts(t *testing.T) {
 	}
 	if err := trust.Retire(trust.Authorities()[0].Fingerprint, 0); err == nil {
 		t.Error("the CA that signs must not be removed")
+	}
+}
+
+// An activation interrupted between the key and the certificate is
+// finished at the next open rather than reported as a broken CA: the key
+// goes first, the pending certificate stays until both are in place, and
+// that combination is unmistakable.
+func TestAnInterruptedActivationIsFinishedAtTheNextOpen(t *testing.T) {
+	dir := t.TempDir()
+	trust, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := trust.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Replay the crash: the new key landed, the certificate did not.
+	pendingKey, err := os.ReadFile(filepath.Join(dir, pendingKeyFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ca.key"), pendingKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir); !errors.Is(err, ErrStateMismatch) {
+		t.Fatalf("the half-done handover reads as %v, want %v", err, ErrStateMismatch)
+	}
+	recovered, err := OpenTrust(dir)
+	if err != nil {
+		t.Fatalf("the half-done handover was not finished: %v", err)
+	}
+	if recovered.Active().Certificate.SerialNumber.String() != prepared.Serial {
+		t.Errorf("after the recovery %s signs, want %s",
+			recovered.Active().Certificate.SerialNumber, prepared.Serial)
+	}
+	if pending, _ := recovered.Pending(); pending != nil {
+		t.Error("the finished handover left a CA pending")
+	}
+	if err := recovered.Active().VerifyPair(); err != nil {
+		t.Error(err)
+	}
+
+	// A key that matches neither the active nor the pending certificate
+	// is not an interrupted handover: it stops the panel.
+	broken := t.TempDir()
+	if _, err := EnsureTrust(broken); err != nil {
+		t.Fatal(err)
+	}
+	foreign := t.TempDir()
+	if _, err := Init(foreign); err != nil {
+		t.Fatal(err)
+	}
+	foreignKey, err := os.ReadFile(filepath.Join(foreign, "ca.key"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "ca.key"), foreignKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := OpenTrust(broken); !errors.Is(err, ErrStateMismatch) {
+		t.Fatalf("a foreign key opened as %v, want %v", err, ErrStateMismatch)
+	}
+}
+
+// The handover tells the installation record about the new issuer once
+// the files are in place, and never before.
+func TestTheActivationHookRunsAfterTheFiles(t *testing.T) {
+	dir := t.TempDir()
+	trust, err := EnsureTrust(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen string
+	trust.SetActivationHook(func(active *CA) {
+		onDisk, err := Open(dir)
+		if err != nil {
+			t.Errorf("the hook ran before the pair landed: %v", err)
+			return
+		}
+		if !onDisk.Certificate.Equal(active.Certificate) {
+			t.Error("the hook ran with a CA other than the one on disk")
+		}
+		seen = active.IssuerID()
+	})
+	prepared, err := trust.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen != "" {
+		t.Fatal("preparing a CA ran the activation hook")
+	}
+	active, err := trust.Activate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active.Serial != prepared.Serial || seen != trust.Active().IssuerID() {
+		t.Fatalf("hook saw %q, active issuer %q", seen, trust.Active().IssuerID())
 	}
 }

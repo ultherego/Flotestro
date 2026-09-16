@@ -2,10 +2,14 @@ package helper
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -23,6 +27,29 @@ import (
 // what the files managed by the panel look like now - also when the panel is
 // not asking. Without it a drift would show only at the next operation.
 const FileRegistryPath = "/var/lib/flotestro-helper/files.json"
+
+// ErrorValidatorUnavailable means a content check the order relies on that
+// this host cannot run: the tool is not installed. The write does not
+// happen, because a write nobody checked is not the write that was ordered.
+const ErrorValidatorUnavailable = "validator_unavailable"
+
+// PermissionFileWriteUnvalidated is the grant that, together with an order
+// saying so, lets a file be written when its validator is missing. The name
+// repeats the panel's permission.
+const PermissionFileWriteUnvalidated = "file.write.unvalidated"
+
+// allowsMissingValidator says whether an order may go on without its
+// validator: the order has to say so and the capability has to carry the
+// grant. A request without a capability carries no grant, so a missing
+// validator refuses the write - the safe side - whatever the order says.
+func allowsMissingValidator(request *helperv1.HelperRequest, action *helperv1.FileRequest) bool {
+	return action.GetAllowMissingValidator() && hasGrant(grantsOf(request), PermissionFileWriteUnvalidated)
+}
+
+// errValidatorUnavailable marks a validator whose tool the host lacks. The
+// caller tells it from a failed check: one refuses with its own code, the
+// other reports the tool's verdict.
+var errValidatorUnavailable = errors.New("the validator is not installed on this host")
 
 // applyFile handles the operations on configuration files.
 func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
@@ -44,11 +71,11 @@ func (s *Server) applyFile(ctx context.Context, request *helperv1.HelperRequest,
 	case helperv1.FileRequest_OPERATION_READ:
 		return s.readFile(allowlist, action)
 	case helperv1.FileRequest_OPERATION_ENSURE:
-		return s.writeFile(actionCtx, allowlist, action)
+		return s.writeFile(actionCtx, request, allowlist, action)
 	case helperv1.FileRequest_OPERATION_REMOVE:
 		return s.removeFile(allowlist, action)
 	case helperv1.FileRequest_OPERATION_PLAN:
-		return s.planFile(actionCtx, allowlist, action)
+		return s.planFile(actionCtx, request, allowlist, action)
 	}
 	return reject(ErrorUnknownAction, "unknown file operation")
 }
@@ -106,8 +133,8 @@ func (s *Server) readFile(allowlist files.Allowlist, action *helperv1.FileReques
 // is checked with a validator - and only then is it written, atomically. A
 // write before the check would leave a file on the host that no service can
 // load.
-func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
-	action *helperv1.FileRequest) *helperv1.HelperResponse {
+func (s *Server) writeFile(ctx context.Context, request *helperv1.HelperRequest,
+	allowlist files.Allowlist, action *helperv1.FileRequest) *helperv1.HelperResponse {
 	path := action.GetPath()
 	if response := checkScope(allowlist, path); response != nil {
 		return response
@@ -150,9 +177,22 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 		return reject(ErrorMalformed, err.Error())
 	}
 	validatorOutput := ""
+	unvalidated := ""
 	if hasValidator {
 		validatorOutput, err = s.checkContent(ctx, validator, path, action.GetContent())
-		if err != nil {
+		switch {
+		case errors.Is(err, errValidatorUnavailable) && allowsMissingValidator(request, action):
+			// The order said the check may be skipped and the grant allows
+			// it: the write goes on, and the result says it went unchecked.
+			unvalidated = "; the validator " + validator.Name + " is not installed on this host, " +
+				"so the content was written unchecked as the order allows"
+		case errors.Is(err, errValidatorUnavailable):
+			// A tool the host does not have is not faked and is not skipped:
+			// the write was ordered with a check, so without the check it is
+			// a different write than the one ordered.
+			return reject(ErrorValidatorUnavailable, "the validator "+validator.Name+
+				" is not installed on this host ("+validator.Command[0]+"); nothing was written")
+		case err != nil:
 			return reject(ErrorMalformed, "the validator "+validator.Name+": "+err.Error()+
 				" "+validatorOutput)
 		}
@@ -163,7 +203,7 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 	}
 	s.rememberManagedFile(path, action.GetFromSecret())
 
-	message := "the file was written"
+	message := "the file was written" + unvalidated
 	if !hasValidator {
 		// A missing check is a fact, not silence: the operator is to know that
 		// the host accepted the content without checking its meaning.
@@ -182,8 +222,8 @@ func (s *Server) writeFile(ctx context.Context, allowlist files.Allowlist,
 //
 // The input checks are the same as during a write. A plan that passed and a
 // write that falls out on the mode validation would be an untrue plan.
-func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
-	action *helperv1.FileRequest) *helperv1.HelperResponse {
+func (s *Server) planFile(ctx context.Context, request *helperv1.HelperRequest,
+	allowlist files.Allowlist, action *helperv1.FileRequest) *helperv1.HelperResponse {
 	path := action.GetPath()
 	if response := checkScope(allowlist, path); response != nil {
 		return response
@@ -238,7 +278,16 @@ func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
 		if hasValidator {
 			output, err := s.checkContent(ctx, validator, path, action.GetContent())
 			plan.ValidatorOutput = output
-			if err != nil {
+			switch {
+			case errors.Is(err, errValidatorUnavailable):
+				// A missing tool is not a passed check. The plan says so in
+				// the same place a failed check would, because the write that
+				// follows this plan will refuse for the same reason - unless
+				// the order allows an unchecked write and the grant is there.
+				plan.ValidatorFailed = !allowsMissingValidator(request, action)
+				plan.ValidatorOutput = "validator: unavailable; " + validator.Name +
+					" is not installed on this host (" + validator.Command[0] + ")"
+			case err != nil:
 				// Content the validator does not accept is a result of the plan
 				// and not a failure: the operator is to see it before approving,
 				// instead of finding out during a write on half the fleet.
@@ -252,7 +301,11 @@ func (s *Server) planFile(ctx context.Context, allowlist files.Allowlist,
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	response := fileResponse(s.fileState(), describePlan(plan), nil, plan.SHA256)
+	message := describePlan(plan)
+	if strings.HasPrefix(plan.ValidatorOutput, "validator: unavailable") {
+		message += "; validator: unavailable"
+	}
+	response := fileResponse(s.fileState(), message, nil, plan.SHA256)
 	if response.GetFileResult() != nil {
 		response.FileResult.Plan = encoded
 	}
@@ -298,30 +351,147 @@ func (s *Server) removeFile(allowlist files.Allowlist, action *helperv1.FileRequ
 	return fileResponse(s.fileState(), "the file was removed", nil, "")
 }
 
-// checkContent runs the validator on the content written next to the target
+// checkContent runs the validator on the content staged next to the target
 // file.
 //
-// The validator gets a temporary file in the same directory, because some tools
-// read relative paths relative to the file they check.
+// The validator gets a temporary file in the same directory, because some
+// tools read relative paths relative to the file they check. The staging is
+// what makes this safe to do as root: the directory is opened without
+// following symlinks, and the file is created where nobody could have put a
+// link in advance - it has no name at all, or a name nobody can guess.
 func (s *Server) checkContent(ctx context.Context, validator files.Validator,
 	path string, content []byte) (string, error) {
 	if validator.BuiltIn != nil {
 		return "", validator.BuiltIn(string(content))
 	}
 	if !exists(validator.Command[0]) {
-		// A tool the host does not have is not faked: a write without a check is
-		// then a deliberate decision and not an oversight.
-		return "", nil
+		return "", errValidatorUnavailable
 	}
-	temporary := filepath.Join(filepath.Dir(path), ".flotestro-validation-"+filepath.Base(path))
-	if err := os.WriteFile(temporary, content, 0o600); err != nil {
+
+	directory, err := files.OpenWithoutSymlinks(filepath.Dir(path), unix.O_RDONLY|unix.O_DIRECTORY, 0)
+	if err != nil {
 		return "", err
 	}
-	defer os.Remove(temporary)
+	defer directory.Close()
 
-	arguments := append(append([]string{}, validator.Command...), temporary)
-	output, err := runTool(ctx, arguments)
-	return output, err
+	staged, err := stageForValidation(int(directory.Fd()), content, 0o600,
+		filepath.Ext(path), !validator.NeedsName)
+	if err != nil {
+		return "", err
+	}
+	defer staged.Discard(int(directory.Fd()))
+
+	arguments := append([]string{}, validator.Command...)
+	cmd := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
+	cmd.Env = toolEnvironment()
+	if staged.Anonymous {
+		// The file has no name, so the tool gets the descriptor: it lands as
+		// the first descriptor after the standard three and the path names it
+		// in the tool's own process, not in the helper's.
+		cmd.ExtraFiles = []*os.File{staged.File}
+		cmd.Args = append(cmd.Args, "/proc/self/fd/3")
+	} else {
+		cmd.Args = append(cmd.Args, filepath.Join(filepath.Dir(path), staged.Name))
+	}
+	output, err := cmd.CombinedOutput()
+	return strings.TrimSpace(string(output)), err
+}
+
+// stagedContent is the content put in front of a validator: an anonymous
+// file, or one under a name nobody could guess.
+type stagedContent struct {
+	File *os.File
+	// Name is the entry in the directory when the file has one; empty for
+	// an anonymous file.
+	Name      string
+	Anonymous bool
+}
+
+// Discard removes the staged content. An anonymous file disappears with its
+// descriptor; a named one is unlinked through the same directory descriptor
+// it was created in, so a directory swapped in the meantime is not touched.
+func (c *stagedContent) Discard(dirfd int) {
+	if c == nil || c.File == nil {
+		return
+	}
+	_ = c.File.Close()
+	if !c.Anonymous && c.Name != "" {
+		_ = unix.Unlinkat(dirfd, c.Name, 0)
+	}
+}
+
+// stageForValidation puts the content into the directory for a validator
+// to read.
+//
+// The file used to be written under a name derived from the target, with a
+// call that follows symlinks: anyone able to plant a link under that name
+// in the directory had the helper overwrite a file of their choosing, as
+// root. Now the file is created relative to an already-opened directory
+// descriptor and either has no name at all - O_TMPFILE - or gets a random
+// 128-bit name, created with O_EXCL and O_NOFOLLOW, so a link planted in
+// advance is refused instead of followed. The content is synced before the
+// tool reads it. A tool that infers the kind of file from its name gets a
+// named file that keeps the suffix of the target; a file system without
+// O_TMPFILE gets the named file too.
+func stageForValidation(dirfd int, content []byte, mode uint32,
+	suffix string, anonymousAllowed bool) (*stagedContent, error) {
+	if anonymousAllowed {
+		fd, err := unix.Openat(dirfd, ".", unix.O_TMPFILE|unix.O_RDWR|unix.O_CLOEXEC, mode)
+		if err == nil {
+			file := os.NewFile(uintptr(fd), "validation")
+			if err := writeFsyncRewind(file, content); err != nil {
+				_ = file.Close()
+				return nil, err
+			}
+			return &stagedContent{File: file, Anonymous: true}, nil
+		}
+	}
+	name, err := randomStagingName(suffix)
+	if err != nil {
+		return nil, err
+	}
+	return stageNamed(dirfd, name, content, mode)
+}
+
+// stageNamed creates the staging file under the given name in the opened
+// directory. The name has to be new: an entry already there, a symlink
+// above all, is refused rather than opened.
+func stageNamed(dirfd int, name string, content []byte, mode uint32) (*stagedContent, error) {
+	fd, err := unix.Openat(dirfd, name,
+		unix.O_CREAT|unix.O_EXCL|unix.O_RDWR|unix.O_CLOEXEC|unix.O_NOFOLLOW, mode)
+	if err != nil {
+		return nil, fmt.Errorf("staging the content for validation: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), name)
+	if err := writeFsyncRewind(file, content); err != nil {
+		_ = file.Close()
+		_ = unix.Unlinkat(dirfd, name, 0)
+		return nil, err
+	}
+	return &stagedContent{File: file, Name: name}, nil
+}
+
+// randomStagingName returns a name with 128 bits of randomness. The suffix
+// of the target is kept for the tools that read the kind of file from it.
+func randomStagingName(suffix string) (string, error) {
+	var random [16]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return "", err
+	}
+	return ".flotestro-validate-" + hex.EncodeToString(random[:]) + suffix, nil
+}
+
+// writeFsyncRewind writes the content, syncs it and moves the offset back to
+// the start, so a tool given the descriptor reads from the beginning.
+func writeFsyncRewind(file *os.File, content []byte) error {
+	if _, err := file.Write(content); err != nil {
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		return err
+	}
+	_, err := file.Seek(0, io.SeekStart)
+	return err
 }
 
 // fileState describes the files the panel has written on this host.

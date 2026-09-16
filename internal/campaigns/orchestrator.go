@@ -6,7 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
@@ -41,6 +45,17 @@ type Orchestrator struct {
 	// A permission withdrawn after the approval must stop the hosts that
 	// have not started. Nil skips the check, for tests of the machinery.
 	Authorizer Authorizer
+	// runner names this orchestrator among the instances of the control
+	// plane. Every campaign is driven by one runner at a time, under a
+	// lease the runner renews while it works; the targets it claims and
+	// the budget leases it takes carry the claim token of that runner, so
+	// a runner that lost a campaign cannot write to it any more.
+	runner string
+	// held lists the campaigns this runner holds the lease of, with the
+	// token, so the leases can be given back when the process stops rather
+	// than run out under the next instance's feet.
+	mu   sync.Mutex
+	held map[string]int64
 }
 
 // Authorizer answers whether a subject holds a permission in a scope now.
@@ -56,20 +71,46 @@ func NewOrchestrator(store *Store, jobStore *jobs.Store, hostStore *hosts.Store,
 	}
 	return &Orchestrator{store: store, jobs: jobStore, hosts: hostStore,
 		audit: recorder, budgets: budgetStore, log: log, interval: interval,
-		remediation: remediation.NewStore(store.Pool())}
+		remediation: remediation.NewStore(store.Pool()),
+		runner:      uuid.NewString(), held: map[string]int64{}}
 }
 
-// Run drives the campaigns until the context is closed.
+// Runner names this orchestrator: the identifier its claims are recorded
+// under.
+func (o *Orchestrator) Runner() string { return o.runner }
+
+// Run drives the campaigns until the context is closed. The leases held at
+// that moment are given back, so the next instance takes the campaigns at
+// once rather than after the lease term.
 func (o *Orchestrator) Run(ctx context.Context) {
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			o.releaseLeases()
 			return
 		case <-ticker.C:
 			o.tick(ctx)
 		}
+	}
+}
+
+// releaseLeases gives back every runner lease this orchestrator holds. The
+// context that ran the loop is closed by now; the release gets a moment of
+// its own, because a lease left behind costs the next instance the term.
+func (o *Orchestrator) releaseLeases() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for campaignID, token := range o.held {
+		campaign := Campaign{ID: campaignID, RunnerID: o.runner, RunnerToken: token}
+		if err := o.store.ReleaseRunner(ctx, &campaign); err != nil {
+			o.log.Warn("the runner lease of a campaign was not released at shutdown",
+				"campaign_id", campaignID, "err", err)
+		}
+		delete(o.held, campaignID)
 	}
 }
 
@@ -79,11 +120,100 @@ func (o *Orchestrator) tick(ctx context.Context) {
 		o.log.Error("the active campaigns could not be read", "err", err)
 		return
 	}
+	seen := map[string]bool{}
 	for _, campaign := range active {
-		if err := o.advance(ctx, campaign); err != nil {
+		seen[campaign.ID] = true
+		// One runner per campaign: the lease is taken or renewed before
+		// anything is read, and a campaign another instance drives is left
+		// to it. The targets are adopted under this runner's claim in the
+		// same breath, so the rows read below carry the token this runner
+		// writes with.
+		token, held, err := o.store.ClaimRunner(ctx, campaign.ID, o.runner)
+		if err != nil {
+			o.log.Error("the runner lease of a campaign could not be claimed",
+				"campaign_id", campaign.ID, "err", err)
+			continue
+		}
+		if !held {
+			o.forget(campaign.ID)
+			continue
+		}
+		o.remember(campaign.ID, token)
+		campaign.RunnerID = o.runner
+		campaign.RunnerToken = token
+		// A campaign waiting for its approval has no host to drive; its
+		// targets are adopted once it is let through.
+		if campaign.State != StateAwaitingApproval {
+			if err := o.store.AdoptTargets(ctx, campaign.ID, o.runner); err != nil {
+				o.log.Error("the targets of a campaign could not be adopted",
+					"campaign_id", campaign.ID, "err", err)
+				continue
+			}
+		}
+		err = o.advance(ctx, campaign)
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrLeaseLost):
+			// Another instance holds the campaign now; whatever this pass
+			// still meant to write is its business. Nothing was written
+			// under the old token.
+			o.forget(campaign.ID)
+			o.log.Warn("the runner lease of a campaign was lost during a pass",
+				"campaign_id", campaign.ID)
+		case errors.Is(err, ErrConcurrentTransition):
+			// The campaign or one of its hosts moved under this pass - an
+			// operator paused or canceled it, a result landed. The next
+			// pass reads the fresh picture; the stale decision is dropped.
+			o.log.Info("a campaign moved under the pass; it is read again on the next",
+				"campaign_id", campaign.ID, "detail", err.Error())
+		default:
 			o.log.Error("failure while running a campaign", "campaign_id", campaign.ID, "err", err)
 		}
 	}
+	// A campaign that left the active list - it finished, or the operator
+	// closed it - is no longer held; its lease row went with it.
+	o.mu.Lock()
+	for campaignID := range o.held {
+		if !seen[campaignID] {
+			delete(o.held, campaignID)
+		}
+	}
+	o.mu.Unlock()
+}
+
+func (o *Orchestrator) remember(campaignID string, token int64) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.held[campaignID] = token
+}
+
+func (o *Orchestrator) forget(campaignID string) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	delete(o.held, campaignID)
+}
+
+// leaseKeeper renews the runner lease of a campaign while a pass takes
+// its time - a wave of many hosts, a slow database. The lease term is
+// long against a tick, but a pass is not bounded by the tick; without the
+// renewal a long pass would lose the campaign halfway through, and the
+// second half of its writes would fail on the token.
+type leaseKeeper struct {
+	campaign *Campaign
+	renewed  time.Time
+}
+
+// keep renews the lease once the renewal interval has passed. It returns
+// ErrLeaseLost when the lease is gone: the caller stops writing.
+func (o *Orchestrator) keep(ctx context.Context, keeper *leaseKeeper) error {
+	if time.Since(keeper.renewed) < RunnerLeaseRenewal {
+		return nil
+	}
+	if err := o.store.RenewRunner(ctx, keeper.campaign); err != nil {
+		return err
+	}
+	keeper.renewed = time.Now()
+	return nil
 }
 
 // advance moves a campaign forward by one step.
@@ -119,6 +249,15 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	// nothing starts, and the campaign ends with the last of them.
 	if campaign.State == StateCanceling {
 		return o.drain(ctx, campaign, targets)
+	}
+	// A pausing or paused campaign is looked after the same way, without
+	// the end: the hosts under way settle, nothing starts, and a pausing
+	// campaign is paused once none is in flight. A paused campaign is on
+	// the list too: a pause written directly - by a threshold, or before
+	// the pausing state existed - may have left hosts in flight, and those
+	// are still followed and their leases still renewed.
+	if campaign.State == StatePausing || campaign.State == StatePaused {
+		return o.settle(ctx, campaign, targets)
 	}
 
 	// We renew the token leases before settling anything: a host that is just
@@ -156,18 +295,18 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	// before the threshold has its say: the reason the operator reads is
 	// to name the window, not a percentage the window pushed over.
 	if len(windowClosed) > 0 {
-		return o.pauseOnWindowClosed(ctx, campaign, windowClosed)
+		return o.pauseOnWindowClosed(ctx, campaign, targets, windowClosed)
 	}
 	// We check the stop threshold before starting anything new.
 	if exceeded, reason := ThresholdExceeded(failed, finished, len(targets),
 		campaign.FailureThresholdPercent, campaign.FailureThresholdAbsolute); exceeded {
-		return o.pauseOnThreshold(ctx, campaign, reason, failed, finished)
+		return o.pauseOnThreshold(ctx, campaign, targets, reason, failed, finished)
 	}
 	// A lost session is a different signal from a failed change: a firewall
 	// campaign that cuts hosts off looks like hosts that merely stopped
 	// answering. It has its own threshold, and the first case can be enough.
 	if campaign.ConnectivityLostAbsolute > 0 && lost >= campaign.ConnectivityLostAbsolute {
-		return o.pauseOnConnectivityLoss(ctx, campaign, lost)
+		return o.pauseOnConnectivityLoss(ctx, campaign, targets, lost)
 	}
 
 	if allFinished(targets) {
@@ -216,7 +355,7 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 		desiredState = StateCanary
 	}
 	if campaign.State != desiredState {
-		if err := o.store.SetState(ctx, campaign.ID, desiredState, ""); err != nil {
+		if err := o.store.SetState(ctx, &campaign, desiredState, ""); err != nil {
 			return err
 		}
 		o.log.Info("the campaign enters a phase",
@@ -226,7 +365,39 @@ func (o *Orchestrator) advance(ctx context.Context, campaign Campaign) error {
 	return o.launchWave(ctx, campaign, targets, wave)
 }
 
+// settle looks after a pausing or paused campaign: the hosts carrying a
+// task keep their leases and are followed to their end, nothing new
+// starts, and a pausing campaign becomes paused once no host is in
+// flight. The reason and the author of the pause stay as they were
+// recorded; the transition closes the pause rather than ordering one.
+func (o *Orchestrator) settle(ctx context.Context, campaign Campaign, targets []Target) error {
+	o.renewCapacity(ctx, targets)
+	for i := range targets {
+		if err := o.progressTarget(ctx, campaign, &targets[i]); err != nil {
+			o.log.Error("failure while settling a host of a paused campaign",
+				"campaign_id", campaign.ID, "host_id", targets[i].HostID, "err", err)
+		}
+	}
+	if campaign.State != StatePausing || !cancelSettled(targets) {
+		return nil
+	}
+	if err := o.store.SetState(ctx, &campaign, StatePaused, campaign.PauseReason); err != nil {
+		return err
+	}
+	o.log.Info("the campaign finished pausing: no host carries a task any more",
+		"campaign_id", campaign.ID)
+	return nil
+}
+
 // launchWave starts the hosts of the current wave within the concurrency limit.
+//
+// The hosts to start are claimed first: the queue of the wave is read
+// with skip locked, up to the free slots, and every claimed row comes back
+// with the revision and the token this runner writes with. A host another
+// runner claimed a moment ago is not on the list, and a host claimed here
+// and not started - offline, in a maintenance window, out of capacity -
+// stays in the queue for the next pass. The lease of the campaign is
+// renewed along the way, because a wave of many hosts outlasts a tick.
 func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 	targets []Target, wave int) error {
 	running := 0
@@ -238,20 +409,34 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			running++
 		}
 	}
-
+	if running >= campaign.MaxConcurrent {
+		return nil
+	}
+	claimed, err := o.store.ClaimWaveTargets(ctx, campaign.ID, wave, o.runner, campaign.MaxConcurrent-running)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*Target, len(targets))
 	for i := range targets {
-		target := &targets[i]
-		if target.Wave != wave || !target.State.Waiting() {
+		byID[targets[i].ID] = &targets[i]
+	}
+	keeper := &leaseKeeper{campaign: &campaign, renewed: time.Now()}
+
+	for _, claim := range claimed {
+		target, known := byID[claim.ID]
+		if !known || !target.State.Waiting() || target.State == TargetQueuedOffline {
+			// The claim reads the queue as it is now; the pass read it a
+			// moment ago. A host that moved between the two is left to the
+			// next pass, which reads both afresh.
 			continue
 		}
-		// A host waiting for its connection belongs to the offline queue,
-		// which is walked before the wave: it comes back here as pending -
-		// or, under replan_on_reconnect, only after its plan is checked.
-		if target.State == TargetQueuedOffline {
-			continue
-		}
+		target.Revision = claim.Revision
+		target.ClaimToken = claim.ClaimToken
 		if running >= campaign.MaxConcurrent {
 			return nil
+		}
+		if err := o.keep(ctx, keeper); err != nil {
+			return err
 		}
 
 		host, err := o.hosts.Get(ctx, target.HostID)
@@ -312,8 +497,31 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			continue
 		}
 
-		jobID, planHash, err := o.createJob(ctx, campaign, target, host)
-		if err != nil {
+		// The task, the boot ID, the transition and the step go in one
+		// transaction, under the campaign's lock: a pause or a cancel
+		// committed a moment earlier is seen, and no task comes into
+		// being for a campaign that stopped. The host is dispatched, not
+		// running: the agent says when the operation starts, and until it
+		// does the panel has handed a task over and heard nothing back.
+		// A compensating campaign opens, with its own change step, the
+		// compensate step on the original's target for this host: the two
+		// records agree from the first moment that the reverse change runs.
+		var planHash string
+		jobID, err := o.launch(ctx, &campaign, target,
+			func(tx pgx.Tx) (string, error) {
+				id, hash, err := o.createJob(ctx, tx, campaign, target, host)
+				planHash = hash
+				return id, err
+			},
+			func(jobID string) stepStart {
+				return stepStart{
+					Key: StepExecute, DependsOn: dependencyOf(StepExecute, campaignPlans(campaign), false),
+					PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetDispatched,
+					BootID: &host.BootID, Compensates: campaign.CompensatesCampaignID,
+				}
+			})
+		var refused *createRefusal
+		if errors.As(err, &refused) {
 			// The task was not created, so the tokens have nothing to guard.
 			o.releaseCapacity(ctx, target)
 			code := "job_create_failed"
@@ -323,20 +531,10 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			o.finishTarget(ctx, campaign, target, TargetFailed, code, err.Error())
 			continue
 		}
-		// The task, the boot ID, the transition and the step go in one
-		// transaction: a host that is under way has its change step open,
-		// and a step that is open has a host that is under way. The host is
-		// dispatched, not running: the agent says when the operation starts,
-		// and until it does the panel has handed a task over and heard
-		// nothing back.
-		// A compensating campaign opens, with its own change step, the
-		// compensate step on the original's target for this host: the two
-		// records agree from the first moment that the reverse change runs.
-		if err := o.startStep(ctx, target, stepStart{
-			Key: StepExecute, DependsOn: dependencyOf(StepExecute, campaignPlans(campaign), false),
-			PlanHash: planHash, JobID: jobID, Column: "job_id", State: TargetDispatched,
-			BootID: &host.BootID, Compensates: campaign.CompensatesCampaignID,
-		}); err != nil {
+		if err != nil {
+			// The campaign stopped, or the lease is gone: the tokens go
+			// back and the wave ends here. Nothing was created.
+			o.releaseCapacity(ctx, target)
 			return err
 		}
 		running++
@@ -346,6 +544,59 @@ func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 			"wave", wave, "job_id", jobID)
 	}
 	return nil
+}
+
+// createRefusal says the task of a launch could not be created: the plan
+// is stale, the payload does not validate, the host has no plan. The
+// launch transaction is rolled back, and the host is settled with the
+// reason; the campaign goes on with the next host.
+type createRefusal struct {
+	err error
+}
+
+func (r *createRefusal) Error() string { return r.err.Error() }
+func (r *createRefusal) Unwrap() error { return r.err }
+
+// launch creates the task of a step and starts the step on the host in
+// one transaction under the campaign's lock.
+//
+// The lock is taken first: the campaign has to be one that starts hosts
+// now, under the lease this runner holds. A pause, a cancel or a takeover
+// that committed before the lock ends the launch with nothing written -
+// the task never comes into being - and one that waits behind the lock
+// finds the host dispatched and counts it. That is the document's CAM-02:
+// either the task exists before the pause and is followed, or there is no
+// task.
+//
+// The create callback creates the task inside the transaction; its
+// failure is a refusal of this host, wrapped as createRefusal, and the
+// caller settles the host. Every other error - the lock, the step, the
+// commit - is the campaign's, and the caller stops the wave.
+func (o *Orchestrator) launch(ctx context.Context, campaign *Campaign, target *Target,
+	create func(tx pgx.Tx) (string, error), step func(jobID string) stepStart) (string, error) {
+	tx, err := o.store.Pool().Begin(ctx)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := o.store.LockForLaunch(ctx, tx, campaign); err != nil {
+		return "", err
+	}
+	jobID, err := create(tx)
+	if err != nil {
+		return "", &createRefusal{err: err}
+	}
+	start := step(jobID)
+	revision, err := o.startStepTx(ctx, tx, target, start)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	o.applyStart(target, start, revision)
+	return jobID, nil
 }
 
 // creatorMayDispatch says whether the campaign's creator still holds
@@ -378,10 +629,11 @@ func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign
 	return false, ""
 }
 
-// createJob creates the campaign's main task for a host. It returns the
-// task together with the digest of the plan the task runs under - empty
-// for a campaign without a planner - so the step record can name it.
-func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
+// createJob creates the campaign's main task for a host inside the launch
+// transaction. It returns the task together with the digest of the plan
+// the task runs under - empty for a campaign without a planner - so the
+// step record can name it.
+func (o *Orchestrator) createJob(ctx context.Context, tx pgx.Tx, campaign Campaign,
 	target *Target, host *hosts.Host) (string, string, error) {
 	var payload opspec.Payload
 	if len(campaign.Payload) > 0 {
@@ -420,7 +672,7 @@ func (o *Orchestrator) createJob(ctx context.Context, campaign Campaign,
 		planHash = hash
 	}
 
-	jobID, err := o.submitJob(ctx, campaign, host, action, payload,
+	jobID, err := o.submitJobTx(ctx, tx, campaign, host, action, payload,
 		"campaign:"+campaign.ID+":main:"+target.HostID)
 	return jobID, planHash, err
 }
@@ -466,11 +718,19 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 		return nil
 	}
 
+	// The plan, its audit record, the transition and the step go in one
+	// transaction under the campaign's lock, like the task of an ordinary
+	// host: a pause committed a moment earlier is seen, and no plan comes
+	// into being for a campaign that stopped.
 	tx, err := o.remediation.Pool().Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := o.store.LockForLaunch(ctx, tx, &campaign); err != nil {
+		o.releaseCapacity(ctx, target)
+		return err
+	}
 
 	created, err := o.remediation.Create(ctx, tx, remediation.Spec{
 		HostID:          host.ID,
@@ -503,20 +763,22 @@ func (o *Orchestrator) startRemediation(ctx context.Context, campaign Campaign,
 	}); err != nil {
 		return err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return err
-	}
-
 	// The change step of a remediation has no task of its own: the plan
 	// runs its steps in the remediation store. The step row names the
 	// plan instead, so the strip still says what the host is carrying.
-	if err := o.startStep(ctx, target, stepStart{
+	start := stepStart{
 		Key: StepExecute, PlanHash: hash, State: TargetRunning,
 		Message: fmt.Sprintf("remediation plan %s: %d steps", created.ID, len(created.Steps)),
 		Note:    "remediation plan " + created.ID, BootID: &host.BootID,
-	}); err != nil {
+	}
+	revision, err := o.startStepTx(ctx, tx, target, start)
+	if err != nil {
 		return err
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	o.applyStart(target, start, revision)
 	o.log.Info("the campaign started a host's remediation plan",
 		"campaign_id", campaign.ID, "host_id", host.ID, "plan_id", created.ID,
 		"wave", target.Wave, "steps", len(created.Steps))
@@ -557,7 +819,21 @@ func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *h
 		return "", err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	jobID, err := o.submitJobTx(ctx, tx, campaign, host, action, payload, idempotencyKey)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return jobID, nil
+}
 
+// submitJobTx creates the task and its audit record inside the caller's
+// transaction: the launch of a host commits the task together with the
+// host's transition, so there is no task without a host that follows it.
+func (o *Orchestrator) submitJobTx(ctx context.Context, tx pgx.Tx, campaign Campaign, host *hosts.Host,
+	action opspec.ActionType, payload opspec.Payload, idempotencyKey string) (string, error) {
 	job, err := o.jobs.Create(ctx, tx, jobs.Spec{
 		HostID:           host.ID,
 		Action:           action,
@@ -586,9 +862,6 @@ func (o *Orchestrator) submitJob(ctx context.Context, campaign Campaign, host *h
 			"action_type": string(action), "approved_by": campaign.ApprovedBy,
 		},
 	}); err != nil {
-		return "", err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return "", err
 	}
 	return job.ID, nil
@@ -656,7 +929,7 @@ func (o *Orchestrator) expire(ctx context.Context, campaign Campaign, oldest tim
 		}
 		o.finishTarget(ctx, campaign, &targets[i], TargetSkipped, "plan_stale", why)
 	}
-	if err := o.store.SetState(ctx, campaign.ID, StateExpired, why); err != nil {
+	if err := o.store.SetState(ctx, &campaign, StateExpired, why); err != nil {
 		return err
 	}
 	if o.budgets != nil {
@@ -698,7 +971,7 @@ func (o *Orchestrator) drain(ctx context.Context, campaign Campaign, targets []T
 	if !cancelSettled(targets) {
 		return nil
 	}
-	if err := o.store.SetState(ctx, campaign.ID, StateCanceled, ""); err != nil {
+	if err := o.store.SetState(ctx, &campaign, StateCanceled, ""); err != nil {
 		return err
 	}
 	if o.budgets != nil {
