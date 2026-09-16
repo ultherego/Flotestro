@@ -289,6 +289,33 @@ func (t TrustStore) Apply(bundle *helperv1.HelperTrustBundle) (*TrustUpdate, err
 	return &TrustUpdate{HostID: bundle.GetHostId(), KeyIDs: ids, Changed: changed, Bootstrap: bootstrap}, nil
 }
 
+// Reset forgets the host identity and every trusted key, so the next
+// bundle is taken on trust again. It is the decision a root operator
+// takes when the host is enrolled afresh: the agent's identity is gone,
+// the panel that signed the old bundle may be gone with it, and what the
+// helper trusted belonged to that identity. Nothing but root can do it -
+// the files belong to root - and a failure leaves what is there.
+func (t TrustStore) Reset() error {
+	if err := os.Remove(t.HostIDPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	entries, err := os.ReadDir(t.Dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".pub") {
+			if err := os.Remove(filepath.Join(t.Dir, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // checkBundle reads the keys of a bundle and refuses a malformed one.
 func checkBundle(bundle *helperv1.HelperTrustBundle) (map[string]ed25519.PublicKey, error) {
 	if bundle == nil || bundle.GetHostId() == "" {

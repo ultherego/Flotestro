@@ -45,6 +45,8 @@ func runWithInput(args []string, in_ io.Reader, out, errOut io.Writer) int {
 		return renewCommand(args[1:], out, errOut)
 	case "identity":
 		return identityCommands(args[1:], in_, out, errOut)
+	case "helper-trust":
+		return helperTrustCommands(args[1:], out, errOut)
 	case "version":
 		// The version number alone is not enough when a package behaves
 		// differently than it should: the first question is "which commit is
@@ -70,6 +72,10 @@ func usage(where io.Writer) {
                                     replaces the identity with a recovery token from the panel;
                                     the current one is kept until the new one is verified
   identity reset  --discard-pending abandons the record of an unfinished enrollment attempt
+  helper-trust show                 the host identity and the panel keys the root helper trusts (as root)
+  helper-trust reset --confirm HOSTNAME
+                                    forgets them, so the next session's bundle is taken afresh; for a host
+                                    enrolled anew with a panel the helper does not know (as root)
   config validate [--config FILE]   checks the configuration file and the permissions on it
   config show     [--config FILE]   shows the settings once the defaults are filled in
   config migrate  [--write]         converts the environment file of the service into agent.yaml

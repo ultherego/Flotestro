@@ -1,4 +1,4 @@
-package main
+package helpercap
 
 import (
 	"errors"
@@ -8,7 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ultherego/flotestro/internal/config"
-	"github.com/ultherego/flotestro/internal/helpercap"
 )
 
 // DefaultConfigPath is where a packaged helper reads its file from. The
@@ -34,10 +33,12 @@ type helperConfig struct {
 	} `yaml:"capabilities"`
 }
 
-// capabilitySettings is what the helper runs with after the file and the
-// environment were read.
-type capabilitySettings struct {
-	Mode       helpercap.Mode
+// Settings is what the helper runs with after the file and the
+// environment were read. The agent's control tool reads the same file, so
+// a root enrollment finds the trust the helper keeps where the helper
+// keeps it.
+type Settings struct {
+	Mode       Mode
 	TrustDir   string
 	ReplayDir  string
 	HostIDPath string
@@ -45,18 +46,18 @@ type capabilitySettings struct {
 	Source string
 }
 
-// loadCapabilitySettings reads the file when it exists and lets the
+// LoadSettings reads the file when it exists and lets the
 // environment override it: FLOTESTRO_HELPER_CAPABILITY_MODE,
 // FLOTESTRO_HELPER_TRUST_DIR, FLOTESTRO_HELPER_REPLAY_DIR and
 // FLOTESTRO_HELPER_HOST_ID_FILE. A file that cannot be parsed is an error
 // rather than a fallback to the defaults: the owner wrote a decision down
 // and the helper must not run on another one.
-func loadCapabilitySettings(path string) (capabilitySettings, error) {
-	settings := capabilitySettings{
-		Mode:       helpercap.ModePrefer,
-		TrustDir:   helpercap.DefaultTrustDir,
-		ReplayDir:  helpercap.DefaultReplayDir,
-		HostIDPath: helpercap.DefaultHostIDPath,
+func LoadSettings(path string) (Settings, error) {
+	settings := Settings{
+		Mode:       ModePrefer,
+		TrustDir:   DefaultTrustDir,
+		ReplayDir:  DefaultReplayDir,
+		HostIDPath: DefaultHostIDPath,
 		Source:     "default",
 	}
 	raw, err := os.ReadFile(path)
@@ -67,7 +68,7 @@ func loadCapabilitySettings(path string) (capabilitySettings, error) {
 			return settings, fmt.Errorf("%s: %w", path, err)
 		}
 		if file.Capabilities.Mode != "" {
-			mode, err := helpercap.ParseMode(file.Capabilities.Mode)
+			mode, err := ParseMode(file.Capabilities.Mode)
 			if err != nil {
 				return settings, fmt.Errorf("%s: capabilities.mode: %w", path, err)
 			}
@@ -88,7 +89,7 @@ func loadCapabilitySettings(path string) (capabilitySettings, error) {
 		return settings, fmt.Errorf("%s: %w", path, err)
 	}
 	if value := os.Getenv("FLOTESTRO_HELPER_CAPABILITY_MODE"); value != "" {
-		mode, err := helpercap.ParseMode(value)
+		mode, err := ParseMode(value)
 		if err != nil {
 			return settings, fmt.Errorf("FLOTESTRO_HELPER_CAPABILITY_MODE: %w", err)
 		}

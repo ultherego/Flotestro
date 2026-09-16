@@ -97,6 +97,23 @@ every change carries a reason.
 3. The row stays `retired`; the machine id is withheld from new enrollments for 30 days, then
    released under `retired:<id>:<machine_id>` so the machine can enroll as a new host.
 
+### A machine enrolled as a new host
+
+The root helper keeps its own view of who the host is: the host identifier and the panel's
+capability keys, handed to it in a bundle the panel signs at enrollment and at every session.
+Once it holds them, only that panel can change them. A machine that is enrolled anew - after a
+decommission, after a `purge` of the agent package on another system than Debian, or with a
+panel rebuilt without its state directory - therefore answers the new bundle with
+`trust_bundle_untrusted` in the helper's journal, and the panel's `job.dispatch` events for the
+host carry a capability the helper will refuse. As root, before or right after the enrollment:
+
+1. `flotestro-agentctl helper-trust show`: the identity, the keys and the mode.
+2. `flotestro-agentctl helper-trust reset --confirm <hostname>`: forgets both; the next session
+   of the agent hands the helper the current panel's bundle, which is taken on trust.
+
+A Debian `apt purge` of `flotestro-agent` does this on its own, together with the agent's
+identity.
+
 ## Verification
 
 - `GET /api/v1/hosts/{id}`: `lifecycle_state` as intended, `connection_state` `online` after a

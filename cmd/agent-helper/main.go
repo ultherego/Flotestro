@@ -51,7 +51,7 @@ func run() error {
 			time.Duration(config.EnvInt("FLOTESTRO_HELPER_IDLE_SECONDS", 300))*time.Second,
 			"the idle time after which the helper finishes its work")
 		configPath = flag.String("config",
-			config.Env("FLOTESTRO_HELPER_CONFIG", DefaultConfigPath),
+			config.Env("FLOTESTRO_HELPER_CONFIG", helpercap.DefaultConfigPath),
 			"the configuration file of the helper (optional)")
 	)
 	flag.Parse()
@@ -162,7 +162,7 @@ func run() error {
 	// root's, the replay store is root's, and the mode is the owner's
 	// decision. A helper that cannot open its replay store does not start:
 	// without it a consumed nonce could be consumed again.
-	settings, err := loadCapabilitySettings(*configPath)
+	settings, err := helpercap.LoadSettings(*configPath)
 	if err != nil {
 		return err
 	}

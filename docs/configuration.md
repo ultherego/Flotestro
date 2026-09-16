@@ -146,6 +146,11 @@ package updates.
 | `FLOTESTRO_HELPER_SOCKET` | `/run/flotestro/helper.sock` | The socket path when there is no socket activation. | yes | |
 | `FLOTESTRO_AGENT_USER` | `flotestro-agent` | The user allowed to issue commands over the socket. | yes | Anybody else on the socket is refused. |
 | `FLOTESTRO_HELPER_IDLE_SECONDS` | `300` | The idle time after which the helper exits; systemd starts it again on the next command. | yes | |
+| `FLOTESTRO_HELPER_CONFIG` | `/etc/flotestro/helper.yaml` | The helper's own file, optional: `capabilities.mode`, `capabilities.trusted_keys_dir`, `capabilities.replay_dir`, `identity.host_id_file`. The file belongs to root, so a compromised agent cannot lower what it says. | yes | |
+| `FLOTESTRO_HELPER_CAPABILITY_MODE` | `prefer` | What the helper does with a request that changes the host. Every such request is meant to carry a capability the panel signed for exactly this host, task, action and payload. `observe` runs a request without one or with a bad one and logs it; `prefer` runs a request without one (an agent from before the capability) but refuses a bad one; `enforce` refuses a request without one with `capability_required`. Reads never need a capability. | yes | Set `enforce` on every host once the panel's `flotestro_helper_capability_total{outcome="legacy_agent"}` stays at zero. |
+| `FLOTESTRO_HELPER_TRUST_DIR` | `/etc/flotestro/helper-trust.d` | The panel's capability keys, one `<key_id>.pub` each, root-owned. Filled from the panel's signed bundle at enrollment and at every session; the first bundle is taken on trust only while the helper has neither a key nor a host identity. | yes | A key file that is not root's or is writable by others is not a key. |
+| `FLOTESTRO_HELPER_REPLAY_DIR` | `/var/lib/flotestro-helper/replay` | Where the helper remembers the nonce of every capability it ran, so the same capability cannot run twice. | yes | |
+| `FLOTESTRO_HELPER_HOST_ID_FILE` | `/var/lib/flotestro-helper/host-id` | The host identifier the helper answers to; a capability for another host is refused. `flotestro-agentctl helper-trust show` prints it with the keys, and `helper-trust reset --confirm <hostname>` (as root) forgets both for a host enrolled anew with a panel the helper does not know. | yes | |
 
 ## Relay (`flotestro-relay`)
 

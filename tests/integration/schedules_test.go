@@ -425,6 +425,16 @@ func TestScheduleForAnUnknownUserIsRefusedByTheHost(t *testing.T) {
 			"payload": map[string]any{"schedule": map[string]any{"id": id}},
 		})
 	})
+	// A helper from before the account check may have left the entry on
+	// the host; the test starts from a host without it.
+	for _, remaining := range schedulesOf(t, h, host.ID).Schedules {
+		if remaining.ID == id {
+			h.runOperation(host.ID, map[string]any{
+				"action": "schedule.remove", "reason": scheduleReason,
+				"payload": map[string]any{"schedule": map[string]any{"id": id}},
+			}, 90*time.Second)
+		}
+	}
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "schedule.ensure", "reason": scheduleReason,
 		"payload": map[string]any{"schedule": map[string]any{

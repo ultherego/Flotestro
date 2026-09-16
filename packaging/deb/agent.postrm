@@ -8,6 +8,10 @@ purge)
     # panel.
     rm -rf /var/lib/flotestro-agent
     rm -f /etc/flotestro/agent.env
+    # The helper's trust belongs to the purged identity: the host
+    # identifier, the panel's keys and the nonces it has seen go with it.
+    rm -f /var/lib/flotestro-helper/host-id
+    rm -rf /etc/flotestro/helper-trust.d /var/lib/flotestro-helper/replay
     rmdir /etc/flotestro 2>/dev/null || true
     if getent passwd flotestro-agent >/dev/null; then
         deluser --system flotestro-agent >/dev/null 2>&1 || true

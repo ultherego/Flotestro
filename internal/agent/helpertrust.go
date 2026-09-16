@@ -69,7 +69,8 @@ func helperCapabilityMode(ctx context.Context) string {
 // the latest. A helper from before the bundle is logged once as such; a
 // refused bundle is logged as a refusal, because a helper that trusts
 // another panel than the one this agent talks to is a host the operator
-// has to look at.
+// has to look at - and one flotestro-agentctl helper-trust reset, run as
+// root, starts afresh when the host was deliberately re-enrolled.
 func deliverHelperTrust(ctx context.Context, bundle *helperv1.HelperTrustBundle, log *slog.Logger) {
 	if bundle == nil || helperProbeDisabled.Load() {
 		return
