@@ -4,8 +4,8 @@ import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import {
-  Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
-  Summary, Table, Widgets, countWhere, useHost, useModule,
+  Check, Fact, Facts, Field, Fields, Form, FormActions, FormNote, Message, ModuleFreshness, ModuleHeader, ModulePage,
+  Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
@@ -30,6 +30,17 @@ type Snapshot = {
 };
 
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
+
+/**
+ * A boot identifier in the dashed form the kernel prints. The journal
+ * lists the same identifier without dashes, and the two spellings side by
+ * side read as two different boots.
+ */
+export function dashedBootID(id: string): string {
+  const bare = id.replace(/-/g, "");
+  if (!/^[0-9a-f]{32}$/i.test(bare)) return id;
+  return `${bare.slice(0, 8)}-${bare.slice(8, 12)}-${bare.slice(12, 16)}-${bare.slice(16, 20)}-${bare.slice(20)}`;
+}
 
 /** The uptime in a form that reads without arithmetic in one's head. */
 function uptime(seconds: number) {
@@ -118,7 +129,6 @@ export function Power() {
           { label: t("blocking"), value: countWhere(inhibitors, (inhibitor) => inhibitor.mode === "block"), tone: "warn" },
           { label: t("delaying"), value: countWhere(inhibitors, (inhibitor) => inhibitor.mode !== "block"), tone: "info" },
           { label: t("reboot reasons"), value: known ? (known.reboot_reasons ?? []).length : undefined, tone: known?.reboot_required ? "error" : "neutral" },
-          { label: t("earlier boots"), value: known ? (known.last_boots ?? []).length : undefined, tone: "neutral" },
         ]}
       />
       <Section title={t("This boot")} span={4} flush>
@@ -141,6 +151,7 @@ export function Power() {
               ? <><span className="badge warn">{snapshot.scheduled_shutdown.mode}</span> <Time value={snapshot.scheduled_shutdown.at} /></>
               : t("none")}
           </Fact>
+          <Fact label={t("Boots in the journal")}>{known ? (known.last_boots ?? []).length : unknown}</Fact>
         </Facts>
       </Section>
 
@@ -206,9 +217,10 @@ export function Power() {
               <input
                 value={shutdownReason}
                 onChange={(e) => setShutdownReason(e.target.value)}
-                placeholder={t("Reason for shutting this host down")}
+                placeholder={t("disk replacement, ticket 1234")}
               />
             </Field>
+            <FormNote>{t("A reboot asks for its reason at the confirmation. A shutdown needs one here first, at least 10 characters: nobody will read the panel to find out why the host is dark.")}</FormNote>
           </Fields>
           <Check checked={ignoreInhibitors} onChange={setIgnoreInhibitors}>
             {t("override inhibitors")}
@@ -269,7 +281,12 @@ export function Power() {
               {[...snapshot.last_boots].reverse().map((boot) => (
                 <tr key={boot.boot_id}>
                   <td className="hm-num">{boot.index}</td>
-                  <td className="hm-mono">{boot.boot_id}</td>
+                  {/* The journal numbers boots back from the current one:
+                      0 is this boot, -1 the one before. */}
+                  <td className="hm-mono">
+                    {dashedBootID(boot.boot_id)}
+                    {boot.index === 0 && <span className="badge ok"> {t("this boot")}</span>}
+                  </td>
                   <td><Time value={boot.first_entry} /></td>
                   <td><Time value={boot.last_entry} /></td>
                 </tr>
@@ -354,7 +371,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
       <div className="hm-section-body">
         <Form>
           <Fields>
-            <Field label={t("minutes")} narrow>
+            <Field label={t("Duration (minutes)")} narrow help={t("Counted from now; the window ends on its own.")}>
               <input
                 type="number"
                 min={1}
@@ -362,11 +379,11 @@ function MaintenanceWindow({ host }: { host: Host }) {
                 onChange={(e) => setMinutes(Number(e.target.value))}
               />
             </Field>
-            <Field label={t("Reason")} wide>
+            <Field label={t("Reason")} wide help={t("Shown to whoever finds the host in a window; kept in the audit trail.")}>
               <input
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder={t("Reason")}
+                placeholder={t("disk swap, ticket 1234")}
               />
             </Field>
           </Fields>

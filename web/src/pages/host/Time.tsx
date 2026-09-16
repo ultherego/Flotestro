@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time as Timestamp, Empty } from "../../components/ui";
+import { absoluteTime } from "../../lib/format";
 import { Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
@@ -164,7 +165,9 @@ export function Time() {
           <span>{t("Clock state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
         </p>
       )}
-      {snapshot?.write_reason && (
+      {/* The write reason repeats the read reason on a host without a
+          daemon; one sentence is enough. */}
+      {snapshot?.write_reason && snapshot.write_reason !== snapshot.unavailable_reason && (
         <p className="warning">
           <span>{snapshot.write_reason}</span>
         </p>
@@ -225,7 +228,17 @@ export function Time() {
 
       <Section title={t("Time")} span={12} flush>
         <Facts>
-          <Fact label={t("Host time")}>{snapshot?.now ? <Timestamp value={snapshot.now} /> : unknown}</Fact>
+          {/* The host's clock as it read at the observation: an absolute
+              value, because "19 minutes ago" is the age of the read and
+              says nothing about the clock. */}
+          <Fact label={t("Host time")}>
+            {snapshot?.now ? (
+              <>
+                <span className="hm-mono">{absoluteTime(snapshot.now)}</span>
+                {snapshot.observed_at && <span className="source"> · {t("read")} <Timestamp value={snapshot.observed_at} /></span>}
+              </>
+            ) : unknown}
+          </Fact>
           <Fact label={t("Timezone")}>{snapshot?.timezone || unknown}</Fact>
           <Fact label={t("UTC offset")}>
             {snapshot?.utc_offset_seconds === undefined || snapshot?.utc_offset_seconds === null
@@ -261,7 +274,11 @@ export function Time() {
           forms: four short blocks in two rows rather than a strip of four. */}
       <Section title={t("Sources")} count={snapshot?.sources?.length} span={7} flush>
         {!snapshot?.sources?.length ? (
-          <Empty>{t("The time daemon reports no sources on this host.")}</Empty>
+          <Empty>
+            {snapshot?.unavailable_reason
+              ? t("No time daemon answers on this host, so there are no sources to list.")
+              : t("The time daemon reports no sources on this host.")}
+          </Empty>
         ) : (
           <Table>
             <thead>

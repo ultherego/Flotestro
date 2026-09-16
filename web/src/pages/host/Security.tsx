@@ -12,13 +12,33 @@ import { capability } from "./modules";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
+/**
+ * One listening socket, with its reach as the host names it: on the
+ * loopback, on one of the host's own addresses, or on every interface.
+ * Neither says "visible from the internet" - that cannot be read off an
+ * address - so the panel names the reach and leaves the judgement.
+ */
 type Listener = {
   protocol: string;
   address: string;
   port: number;
   process?: string;
-  exposed: boolean;
+  reach: "loopback" | "host-network" | "all-interfaces" | string;
 };
+
+/** Whether the socket stands outside the loopback: the same test the checks apply. */
+function beyondLoopback(socket: Listener): boolean {
+  return socket.reach !== "loopback" && socket.reach !== "";
+}
+
+/** The reach of a socket as a badge: every interface is the loud one. */
+function ReachBadge({ reach }: { reach: string }) {
+  const t = useT();
+  if (reach === "all-interfaces") return <span className="badge warn">{t("every interface")}</span>;
+  if (reach === "host-network") return <span className="badge">{t("host address")}</span>;
+  if (reach === "loopback") return <span className="source">{t("loopback")}</span>;
+  return <span className="badge unknown">{reach || t("unknown")}</span>;
+}
 
 type Snapshot = {
   mac: {
@@ -30,13 +50,24 @@ type Snapshot = {
     profiles_complain?: number | null;
     reason?: string;
   };
-  audit: { present: boolean; active?: boolean | null; rules?: number | null; reason?: string };
+  audit: {
+    present: boolean;
+    active?: boolean | null;
+    // The rules the kernel knows and the rules written in files are two
+    // numbers: a file written but not loaded describes an audit that does
+    // not exist. A null is a read that failed, not an absence of rules.
+    rules_loaded?: number | null;
+    rules_configured?: number | null;
+    reason?: string;
+  };
   fips_enabled?: boolean | null;
   secure_boot?: boolean | null;
   secure_boot_reason?: string;
   lockdown?: string;
   listening?: Listener[];
   listening_known?: boolean;
+  /** Whether the sockets carry their owner; without root the list is complete but nameless. */
+  owners_known?: boolean;
   observed_at?: string;
   unavailable_reason?: string;
 };
@@ -213,7 +244,10 @@ export function Security() {
   const findings = report.data?.findings ?? [];
   const fixable = findings.filter((f) => !f.passed && !f.unknown && f.remediation?.action);
   const counts = report.data?.counts;
-  const exposed = (snapshot?.listening ?? []).filter((socket) => socket.exposed).length;
+  const sockets = snapshot?.listening ?? [];
+  const everyInterface = sockets.filter((socket) => socket.reach === "all-interfaces").length;
+  const hostAddress = sockets.filter((socket) => socket.reach === "host-network").length;
+  const loopback = sockets.filter((socket) => socket.reach === "loopback").length;
   // The failing findings by severity: what happens when nobody does
   // anything, read before the list. Unknown until the report is computed.
   const failing = report.data ? findings.filter((f) => f.applicable && !f.passed && !f.unknown) : undefined;
@@ -275,14 +309,18 @@ export function Security() {
         ) : (
           <p className="source" style={{ margin: 0 }}>{t("Computing findings…")}</p>
         )}
-        <p className="widget-subhead">{t("Exposed services")}</p>
-        <Breakdown
-          items={[
-            { label: t("exposed"), value: snapshot?.listening_known ? exposed : 0, tone: "warn" },
-            { label: "loopback", value: snapshot?.listening_known ? (snapshot.listening ?? []).length - exposed : 0, tone: "ok" },
-          ]}
-        />
-        {!snapshot?.listening_known && (
+        <p className="widget-subhead">{t("Listening sockets")}</p>
+        {/* By reach, as the host names it; an unread list is a sentence,
+            not a row of zeros. */}
+        {snapshot?.listening_known ? (
+          <Breakdown
+            items={[
+              { label: t("every interface"), value: everyInterface, tone: "warn" },
+              { label: t("host address"), value: hostAddress, tone: "info" },
+              { label: t("loopback"), value: loopback, tone: "ok" },
+            ]}
+          />
+        ) : (
           <p className="source" style={{ margin: 0 }}>{t("This host did not report its listening sockets.")}</p>
         )}
       </Section>
@@ -316,7 +354,7 @@ export function Security() {
                 {" "}
                 <button
                   type="button"
-                  className="link"
+                  className="hm-link"
                   disabled={operation !== null}
                   onClick={() =>
                     setOperation({
@@ -338,16 +376,20 @@ export function Security() {
             {!snapshot?.audit?.present
               ? snapshot?.audit?.reason || t("not installed")
               : <>
-                  {flag(snapshot.audit.active)}
-                  {snapshot.audit.rules !== undefined && snapshot.audit.rules !== null
-                    ? ` · ${t("{n} rules", { n: snapshot.audit.rules })}`
+                  {snapshot.audit.active === true ? t("running") : snapshot.audit.active === false ? t("not running") : unknown}
+                  {snapshot.audit.rules_loaded !== undefined && snapshot.audit.rules_loaded !== null
+                    ? ` · ${t("{n} rules loaded", { n: snapshot.audit.rules_loaded })}`
                     : ""}
+                  {snapshot.audit.rules_configured !== undefined && snapshot.audit.rules_configured !== null
+                    && snapshot.audit.rules_configured !== snapshot.audit.rules_loaded && (
+                      <span className="badge warn"> {t("{n} in files", { n: snapshot.audit.rules_configured })}</span>
+                    )}
                   {auditWritable && (
                     <>
                       {" "}
                       <button
                         type="button"
-                        className="link"
+                        className="hm-link"
                         disabled={operation !== null}
                         onClick={() =>
                           setOperation({
@@ -382,10 +424,10 @@ export function Security() {
       </Section>
 
       <Section
-        title={t("Exposed services")}
-        count={snapshot?.listening_known ? (snapshot.listening ?? []).length : undefined}
+        title={t("Listening sockets")}
+        count={snapshot?.listening_known ? sockets.length : undefined}
         span={7}
-        description={t("Sockets listening beyond the loopback interface. Each one is a way into this host for anyone who can see its network.")}
+        description={t("Every socket the host listens on, the ones beyond the loopback first. A socket on every interface is a way into this host for anyone who can see its network; the panel names the reach and does not rule what is visible from where.")}
         flush
       >
         {!snapshot?.listening_known ? (
@@ -394,26 +436,25 @@ export function Security() {
           <Table>
             <thead><tr><th>{t("Proto")}</th><th>{t("Address")}</th><th className="hm-num">{t("Port")}</th><th>{t("Process")}</th><th>{t("Reach")}</th></tr></thead>
             <tbody>
-              {(snapshot.listening ?? [])
+              {sockets
                 .slice()
-                .sort((a, b) => Number(b.exposed) - Number(a.exposed) || a.port - b.port)
+                .sort((a, b) => Number(beyondLoopback(b)) - Number(beyondLoopback(a)) || a.port - b.port)
                 .map((socket, i) => (
                   <tr key={`${socket.protocol}-${socket.address}-${socket.port}-${i}`}>
                     <td>{socket.protocol}</td>
                     <td className="hm-mono">{socket.address}</td>
                     <td className="hm-num">{socket.port}</td>
-                    <td className="hm-mono">{socket.process || "—"}</td>
-                    <td>
-                      {socket.exposed ? (
-                        <span className="badge warn">{t("exposed")}</span>
-                      ) : (
-                        <span className="source">loopback</span>
-                      )}
+                    <td className="hm-mono">
+                      {socket.process || <span className="source">{snapshot.owners_known === false ? t("not readable") : "—"}</span>}
                     </td>
+                    <td><ReachBadge reach={socket.reach} /></td>
                   </tr>
                 ))}
             </tbody>
           </Table>
+        )}
+        {snapshot?.listening_known && snapshot.owners_known === false && (
+          <Foot>{t("The owners of the sockets are not known: the agent could not read them without root.")}</Foot>
         )}
       </Section>
 
@@ -534,9 +575,9 @@ export function Security() {
             {t("{n} of the findings that need action have an operation behind them", { n: fixable.length })}
           </span>
           {report.data?.generated_at && (
-            <span>
-              {t("Findings computed")} <Time value={report.data.generated_at} /> · {t("plan")}{" "}
-              {report.data.plan_hash.slice(0, 12)} ({t("canonical form v{n}", { n: report.data.plan_hash_version })})
+            <span title={t("The fingerprint of this set of findings; a remediation is bound to it and refused when the host changed meanwhile.") + ` ${report.data.plan_hash} (${t("canonical form v{n}", { n: report.data.plan_hash_version })})`}>
+              {t("Findings computed")} <Time value={report.data.generated_at} /> · {t("fingerprint")}{" "}
+              <span className="hm-mono">{report.data.plan_hash.slice(0, 12)}</span>
             </span>
           )}
         </Foot>

@@ -181,7 +181,7 @@ export function FleetSecurity() {
           <table>
             <thead>
               <tr>
-                {remediates && <th>{t("Fix")}</th>}
+                {remediates && <th title={t("Tick the checks to fix on the fleet; a check without a remediating operation cannot be ticked.")}>{t("Fix")}</th>}
                 <th>{t("Check")}</th><th className="num">{t("Need action")}</th><th className="num">{t("Passed")}</th><th className="num">{t("Unknown")}</th><th className="num">{t("N/A")}</th><th>{t("Expected")}</th><th className="num">{t("Fixable")}</th>
               </tr>
             </thead>
@@ -217,7 +217,14 @@ export function FleetSecurity() {
                         {expanded === check.check_id ? "▾" : "▸"}
                       </button>
                       {check.title}
-                      <div className="source mono">{check.check_id}</div>
+                      {/* The severity stands under the title, because the
+                          colour of the count alone does not say why one
+                          finding is red and another amber. */}
+                      <div className="source">
+                        <span className="mono">{check.check_id}</span>
+                        {" · "}
+                        <span className={`badge ${severityTone(check.severity)}`}>{check.severity}</span>
+                      </div>
                     </td>
                     <td className="num">{severityBadge(check.severity, check.failed)}</td>
                     <td className="num">{check.passed}</td>

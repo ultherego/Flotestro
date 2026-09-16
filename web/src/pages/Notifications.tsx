@@ -363,6 +363,7 @@ export function Notifications() {
   return (
     <>
       <PageHeader
+        icon="notifications"
         title={t("Notifications")}
         description={t("Where the fleet reports to when nobody is looking at the panel: a webhook, a mailbox, a chat room. Every attempt is in the log below with its reason.")}
         breadcrumb={[{ label: t("Monitoring"), to: "/monitoring" }]}
@@ -460,7 +461,7 @@ export function Notifications() {
           ) : !deliveries.data ? (
             <Empty>{t("Loading…")}</Empty>
           ) : deliveries.data.items.length === 0 ? (
-            <Empty>{t("No delivery matches the filter.")}</Empty>
+            <Empty>{items.length === 0 && channels.data ? t("Nothing has been sent yet: there is no channel to send to.") : t("No delivery matches the filter.")}</Empty>
           ) : (
             <table>
               <thead>

@@ -1,7 +1,8 @@
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { ErrorBox, Time, Empty } from "../components/ui";
+import { ErrorBox, Empty } from "../components/ui";
+import { absoluteTime, relativeTime } from "../lib/format";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { ColumnChooser, Td, Th, useColumns, useSort, type ColumnDef } from "../components/SortableTable";
@@ -32,6 +33,17 @@ type View = {
   timeline?: { reason: string; count: number }[];
   thresholds: { critical_days: number; warning_days: number };
 };
+
+/**
+ * A deadline is read as a date, not as a distance: the badge beside it
+ * already says how many days are left, and a rotation is planned on the
+ * calendar. The exact time and the distance are on hover.
+ */
+function Deadline({ value }: { value: string }) {
+  const absolute = absoluteTime(value);
+  if (!absolute) return <>—</>;
+  return <span title={`${absolute} · ${relativeTime(value)}`}>{absolute.slice(0, 10)}</span>;
+}
 
 function ExpiryBadge({ status, days }: { status: string; days?: number }) {
   const t = useT();
@@ -157,7 +169,7 @@ export function FleetCertificates() {
                     <Td columns={columns} name="expires">
                       <ExpiryBadge status={item.status} days={item.days_to_expiry} />
                       {item.not_after && (
-                        <div className="source"><Time value={item.not_after} /></div>
+                        <div className="source"><Deadline value={item.not_after} /></div>
                       )}
                     </Td>
                     <Td columns={columns} name="host">
@@ -305,7 +317,7 @@ function Trust({ leaves }: { leaves: Item[] }) {
                   {issued}
                   {issued > 0 && <div className="source">{t("rotate the leaves before withdrawing")}</div>}
                 </td>
-                <td>{anchor.not_after ? <Time value={anchor.not_after} /> : "—"}</td>
+                <td>{anchor.not_after ? <Deadline value={anchor.not_after} /> : "—"}</td>
                 <td className="source mono">{(anchor.fingerprint_sha256 ?? "").slice(0, 16) || "—"}</td>
                 <td>
                   {!covered ? (

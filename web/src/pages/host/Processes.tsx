@@ -33,6 +33,25 @@ type Snapshot = { processes?: Process[]; total?: number; truncated?: boolean };
 type Row = { process: Process; depth: number; children: number };
 
 /**
+ * The scheduler state in words. procfs prints one letter, and "D" tells
+ * an operator nothing until they remember it is the one that cannot be
+ * killed; the letter stays on hover, because it is what ps prints.
+ */
+export function stateWords(state: string): string {
+  switch (state.charAt(0)) {
+    case "R": return "running";
+    case "S": return "sleeping";
+    case "D": return "waiting on disk";
+    case "Z": return "zombie";
+    case "T":
+    case "t": return "stopped";
+    case "I": return "idle";
+    case "X": return "dead";
+    default: return state;
+  }
+}
+
+/**
  * The host's processes.
  *
  * The module is a diagnostic, not an observability system: the snapshot is
@@ -213,7 +232,11 @@ export function Processes() {
             <Table>
               <thead>
                 <tr>
-                  <th className="hm-num">PID</th><th>{t("User")}</th><th>{t("Memory")}</th><th>{t("CPU share")}</th><th className="hm-num">{t("Threads")}</th>
+                  <th className="hm-num">PID</th><th>{t("User")}</th><th>{t("Memory")}</th>
+                  {/* The snapshot has no rate: the share is of the CPU time
+                      the slice has used since its processes started. */}
+                  <th title={t("The share of the CPU time used so far by the processes in this slice, not a load of the moment.")}>{t("CPU time share")}</th>
+                  <th className="hm-num">{t("Threads")}</th>
                   <th>{t("State")}</th><th>{t("Managed by")}</th><th>{t("Command")}</th><th>{t("Actions")}</th>
                 </tr>
               </thead>
@@ -232,7 +255,7 @@ export function Processes() {
                       />
                     </td>
                     <td className="hm-num">{process.threads}</td>
-                    <td>{process.state}</td>
+                    <td title={process.state}>{t(stateWords(process.state))}</td>
                     {/* The PID alone says nothing about whose process it is. */}
                     <td className="hm-mono">
                       {process.container

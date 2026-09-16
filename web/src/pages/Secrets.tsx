@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
+import { absoluteTime } from "../lib/format";
 import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
@@ -371,16 +372,20 @@ function SecretRow({
         </td>
         <td>
           {secret.retired_at ? (
-            <span className="badge error">{t("retired")}</span>
+            <span className="badge error" title={absoluteTime(secret.retired_at)}>{t("retired")}</span>
           ) : (
             <span className="badge ok">{t("issuable")}</span>
           )}
         </td>
         <td className="actions-cell">
           <div className="row-actions">
-            <button className="secondary" onClick={onCopy} title={secretReference(secret.name, secret.current_version)}>
-              {copied ? t("Copied") : t("Copy reference")}
-            </button>
+            {/* A reference to a retired secret is a job that fails at
+                delivery, so the button goes with the lease. */}
+            {!secret.retired_at && (
+              <button className="secondary" onClick={onCopy} title={secretReference(secret.name, secret.current_version)}>
+                {copied ? t("Copied") : t("Copy reference")}
+              </button>
+            )}
             {!secret.retired_at && canRotate && (
               <button className="secondary" aria-expanded={open === "rotate"} aria-label={open === "rotate" ? undefined : t("Rotate {name}", { name: secret.name })} onClick={() => onToggle("rotate")} disabled={busy}>
                 {open === "rotate" ? t("Close") : t("Rotate")}

@@ -38,6 +38,15 @@ type Snapshot = {
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
 /**
+ * Whether the snapshot carries nothing of what "sshd -T" prints. The
+ * server always names a port and a root login policy; a snapshot with
+ * neither came from a read that got no output and left no reason.
+ */
+export function effectiveConfigurationMissing(snapshot: Pick<Snapshot, "ports" | "permit_root_login" | "password_authentication" | "pubkey_authentication">): boolean {
+  return (snapshot.ports ?? []).length === 0 && !snapshot.permit_root_login && !snapshot.password_authentication && !snapshot.pubkey_authentication;
+}
+
+/**
  * The sshd server.
  *
  * The panel writes only its own file in sshd_config.d: the main file belongs
@@ -79,10 +88,18 @@ export function SshServer() {
     [t("Keyboard interactive"), snapshot?.kbd_interactive_authentication],
     ["GSSAPI", snapshot?.gssapi_authentication],
   ];
-  // An unread configuration has nothing to count; the bar shows dashes then.
-  const known = snapshot?.unavailable_reason ? undefined : snapshot;
+  // An unread configuration has nothing to count; the bar shows dashes
+  // then. A snapshot without a reason but without a single setting from
+  // "sshd -T" is unread too: the host keys came from the disk, the
+  // effective configuration did not, and a zero port count would say the
+  // server listens nowhere.
+  const effectiveMissing = !!snapshot && !snapshot.unavailable_reason && effectiveConfigurationMissing(snapshot);
+  const known = snapshot?.unavailable_reason || effectiveMissing ? undefined : snapshot;
   const knownMethods = known ? methods : undefined;
   const risky = (value?: string) => value === "yes" ? "badge warn" : value === "no" ? "badge ok" : "badge unknown";
+  // MaxAuthTries is never zero in a configuration sshd printed; a zero is
+  // the value of a field the read left empty.
+  const maxAuthTries = snapshot?.max_auth_tries ? snapshot.max_auth_tries : undefined;
 
   return (
     <ModulePage>
@@ -101,6 +118,11 @@ export function SshServer() {
       {snapshot?.unavailable_reason && (
         <p className="warning">
           <span>{t("sshd configuration could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
+        </p>
+      )}
+      {effectiveMissing && (
+        <p className="warning">
+          <span>{t("The host returned no effective configuration: the read of sshd -T gave nothing, so the ports, the methods and the limits are unknown. The host keys were read from disk.")}</span>
         </p>
       )}
 
@@ -130,7 +152,7 @@ export function SshServer() {
           <Fact label={t("Password")}>
             <span className={risky(snapshot?.password_authentication)}>{snapshot?.password_authentication || t("unknown")}</span>
           </Fact>
-          <Fact label={t("Max auth tries")}>{snapshot?.max_auth_tries ?? "—"}</Fact>
+          <Fact label={t("Max auth tries")}>{maxAuthTries ?? <span className="badge unknown">{t("unknown")}</span>}</Fact>
           <Fact label={t("Access lists")} wide>
             {known ? (
               <Breakdown
@@ -155,7 +177,7 @@ export function SshServer() {
           <Fact label={t("Port")}><span className="hm-mono">{(snapshot?.ports ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Listening on")}><span className="hm-mono">{(snapshot?.listen_addresses ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Root login")}>{snapshot?.permit_root_login || "—"}</Fact>
-          <Fact label={t("Max auth tries")}>{snapshot?.max_auth_tries ?? "—"}</Fact>
+          <Fact label={t("Max auth tries")}>{maxAuthTries ?? "—"}</Fact>
           <Fact label={t("Allow users")}><span className="hm-mono">{(snapshot?.allow_users ?? []).join(" ") || "—"}</span></Fact>
           <Fact label={t("Allow groups")}><span className="hm-mono">{(snapshot?.allow_groups ?? []).join(" ") || "—"}</span></Fact>
           <Fact label={t("Deny users")}><span className="hm-mono">{(snapshot?.deny_users ?? []).join(" ") || "—"}</span></Fact>

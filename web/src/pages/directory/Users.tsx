@@ -5,6 +5,7 @@ import type { DirectoryChange, DirectoryUser, RevealedSecret } from "../../lib/t
 import { ErrorBox, Empty, Time } from "../../components/ui";
 import { Actions, Card, Field, FieldGrid, Toolbar } from "../../components/layout";
 import { useT } from "../../i18n";
+import { absoluteTime } from "../../lib/format";
 import {
   DirectoryConfirmation, Forbidden, ListField, PlanImpact, ReasonField, lines, names, useDirectoryChange,
 } from "./shared";
@@ -35,11 +36,13 @@ function Expiry({ value, label }: { value?: string; label: string }) {
   if (!value) return null;
   const at = new Date(value).getTime();
   const left = at - Date.now();
-  const text = `${label} ${new Date(value).toLocaleDateString()}`;
+  // The date in the ISO shape every screen uses, not the browser locale's:
+  // two operators reading the same account must read the same day.
+  const text = `${label} ${absoluteTime(value).slice(0, 10)}`;
   if (Number.isNaN(at)) return <span className="badge unknown" title={value}>{label}</span>;
-  if (left < 0) return <span className="badge error" title={value}>{t("{what} expired", { what: text })}</span>;
-  if (left < 14 * DAY) return <span className="badge warn" title={value}>{text}</span>;
-  return <span className="badge" title={value}>{text}</span>;
+  if (left < 0) return <span className="badge error" title={absoluteTime(value)}>{t("{what} expired", { what: text })}</span>;
+  if (left < 14 * DAY) return <span className="badge warn" title={absoluteTime(value)}>{text}</span>;
+  return <span className="badge" title={absoluteTime(value)}>{text}</span>;
 }
 
 /** A datetime-local value for an RFC3339 stamp, in the browser's zone. */
@@ -238,10 +241,10 @@ export function Users() {
                       {user.disabled
                         ? <button className="secondary" onClick={() => { setIntent({ kind: "enable", user }); setForm(null); }}>{t("Unlock")}</button>
                         : <button className="secondary" onClick={() => { setIntent({ kind: "disable", user }); setForm(null); }}>{t("Lock")}</button>}
-                      <button className="secondary" onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
-                      <button className="secondary" onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
-                      <button className="secondary" onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
-                      <button className="secondary" onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
+                      <button className="secondary" title={t("Set or clear the expiry of the account and of the password")} onClick={() => { setIntent({ kind: "expire", user }); setForm(null); }}>{t("Expire")}</button>
+                      <button className="secondary" title={t("Change the UID, GID, home directory or login shell")} onClick={() => { setIntent({ kind: "posix", user }); setForm(null); }}>{t("POSIX")}</button>
+                      <button className="secondary" title={t("Issue a one-time password that expires at the first login")} onClick={() => { setIntent({ kind: "password", user }); setForm(null); }}>{t("Reset password")}</button>
+                      <button className="secondary" title={t("Soft-delete: the UID and the trail stay, nobody signs in")} onClick={() => { setIntent({ kind: "preserve", user }); setForm(null); }}>{t("Preserve")}</button>
                     </div>
                   </td>
                 </tr>
@@ -452,7 +455,7 @@ function RecentChanges() {
         <Empty>{t("No directory changes yet.")}</Empty>
       ) : (
         <table>
-          <thead><tr><th>{t("Change")}</th><th>{t("Type")}</th><th>{t("State")}</th><th>{t("Ordered by")}</th><th>{t("Result")}</th><th></th></tr></thead>
+          <thead><tr><th>{t("Change")}</th><th>{t("Type")}</th><th>{t("State")}</th><th>{t("Ordered by")}</th><th>{t("When")}</th><th>{t("Result")}</th><th></th></tr></thead>
           <tbody>
             {(changes.data?.items ?? []).map((item) => (
               <tr key={item.id}>
@@ -460,6 +463,9 @@ function RecentChanges() {
                 <td className="mono">{item.action_type}</td>
                 <td><span className={item.state === "succeeded" ? "badge ok" : item.state === "failed" || item.state === "partially_applied" ? "badge error" : "badge"}>{item.state.replace("_", " ")}</span></td>
                 <td>{item.created_by || "—"}</td>
+                {/* A change is read by when it ended; one still running
+                    is read by when it was ordered. */}
+                <td><Time value={item.finished_at || item.created_at} /></td>
                 <td className="source">{item.result_message || "—"}</td>
                 <td className="num">
                   {item.action_type === "identity.user.password.reset" && item.secret_available && (

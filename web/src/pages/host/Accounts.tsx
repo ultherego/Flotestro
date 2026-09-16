@@ -70,7 +70,7 @@ export function HostAccounts() {
       />
       {accounts.length > 0 && (
         <p className="hm-freshness">
-          <span>{t("Observed")}: <Time value={accounts[0].observed_at} />.</span>
+          <span>{t("Source: the agent's report, observed")} <Time value={accounts[0].observed_at} /></span>
         </p>
       )}
 
@@ -177,7 +177,7 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
             <span className="source">{t("none")}</span>
           ) : (
             account.ssh_keys.map((key) => (
-              <div key={key.fingerprint} title={key.fingerprint} className="hm-mono">
+              <div key={key.fingerprint} title={`${t("fingerprint")} ${key.fingerprint}`} className="hm-mono">
                 {key.type || "?"} · {key.fingerprint.replace(/^SHA256:/, "").slice(0, 12)}…
                 {key.comment && <span className="source"> {key.comment}</span>}
               </div>
@@ -265,7 +265,11 @@ function Expiry({ account }: { account: LocalAccount }) {
   const t = useT();
   if (account.expires_at) {
     const expired = account.expires_at < new Date().toISOString().slice(0, 10);
-    return <span className={expired ? "badge error" : "badge warn"}>{account.expires_at}</span>;
+    return (
+      <span className={expired ? "badge error" : "badge warn"} title={expired ? t("The account stopped accepting logins on that day.") : t("The account stops accepting logins on that day.")}>
+        {account.expires_at}
+      </span>
+    );
   }
   if (account.unavailable_reason) return <span className="badge unknown">{t("unknown")}</span>;
   return <span className="source">{t("never")}</span>;
@@ -421,11 +425,13 @@ function Access({ account }: { account: LocalAccount }) {
   if (account.locked === null) {
     return <span className="badge unknown">{t("unknown")}</span>;
   }
-  if (account.locked) return <span className="badge error">{t("locked")}</span>;
+  // The tones are the ones of the bar above the table: a key is the
+  // desired way in, a password is worth a look, a lock is deliberate.
+  if (account.locked) return <span className="badge">{t("locked")}</span>;
   if (account.ssh_keys.length > 0) {
-    return <span className="badge">{t("SSH key")}</span>;
+    return <span className="badge ok">{t("SSH key")}</span>;
   }
-  if (account.password_set === true) return <span className="badge">{t("password")}</span>;
+  if (account.password_set === true) return <span className="badge warn">{t("password")}</span>;
   if (account.password_set === false) {
     // An account without a password and without a key is reachable by
     // nobody. It is usually a trace of access half taken away, and worth

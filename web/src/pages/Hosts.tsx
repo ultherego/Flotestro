@@ -248,8 +248,11 @@ export function Hosts() {
   const columns = useColumns("hosts", [
     { key: "host", label: t("Host"), sort: "hostname", fixed: true },
     { key: "state", label: t("State"), sort: "connection_state" },
-    { key: "address", label: t("Management address"), secondary: true },
-    { key: "owner", label: t("Owner"), sort: "owner", secondary: true },
+    { key: "address", label: t("Address"), secondary: true },
+    // The owner is empty on most fleets until somebody records it; the
+    // column stays off the screen until chosen, and the filter is always
+    // there.
+    { key: "owner", label: t("Owner"), sort: "owner", secondary: true, hidden: true },
     { key: "system", label: t("System"), secondary: true },
     { key: "site", label: t("Site"), sort: "site" },
     { key: "environment", label: t("Environment"), sort: "environment" },
@@ -365,8 +368,13 @@ export function Hosts() {
             <ColumnChooser columns={columns} />
             <ExportButton path="/api/v1/hosts" params={params} />
           </>}>
+            {/* The box is narrower than the sentence that says what it
+                searches; the short placeholder fits and the sentence stays
+                on hover and for the screen reader. */}
             <input
-              placeholder={t("Search hostname, address, machine ID or owner")}
+              placeholder={t("Search hosts…")}
+              title={t("Search hostname, address, machine ID or owner")}
+              aria-label={t("Search hostname, address, machine ID or owner")}
               value={filters.q}
               onChange={(e) => setFilter("q", e.target.value)}
             />
@@ -432,14 +440,14 @@ export function Hosts() {
               <option value="false">{t("no security updates")}</option>
             </select>
             <input
-              placeholder={t("domain, e.g. corp.example")}
-              title={t("the directory domain the host is joined to")}
+              placeholder={t("directory domain")}
+              title={t("the directory domain the host is joined to, e.g. corp.example")}
               value={filters.identity_domain}
               onChange={(e) => setFilter("identity_domain", e.target.value)}
             />
             <input
-              placeholder={t("failure domain, e.g. rack-a")}
-              title={t("the rack, zone or cluster an operator placed the host in")}
+              placeholder={t("failure domain")}
+              title={t("the rack, zone or cluster an operator placed the host in, e.g. rack-a")}
               value={filters.failure_domain}
               onChange={(e) => setFilter("failure_domain", e.target.value)}
             />

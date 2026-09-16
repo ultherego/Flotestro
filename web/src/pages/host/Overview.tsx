@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, JobState } from "../../components/ui";
+import { Time, OptionalFlag, OptionalNumber, Empty, ErrorBox, ErrorCode, JobState } from "../../components/ui";
 import { Icon, type IconName } from "../../components/icons";
 import { Meter } from "../../components/widgets";
 import { api, ApiError, loadedItems } from "../../lib/api";
@@ -84,7 +84,16 @@ export function Overview() {
             { label: t("Updates waiting"), value: host.pending_updates ?? undefined, tone: "warn" },
             { label: t("Security updates"), value: host.pending_security_updates ?? undefined, tone: "error" },
           ]}
-        />
+        >
+          {/* A dash is not a zero: the host has not counted, and the
+              operator is told where the count comes from. */}
+          {(host.pending_updates === null || host.pending_updates === undefined) && (
+            <p className="source" style={{ margin: "8px 0 0" }}>
+              {t("The update counts are unknown until the host plans its updates.")}{" "}
+              <Link to={`/hosts/${host.id}/packages`}>{t("Packages")}</Link>
+            </p>
+          )}
+        </Summary>
 
         <Section title={t("System")} span={7} flush>
           <Facts>
@@ -1335,7 +1344,8 @@ function linkOf(host: Host, item: HostTimelineItem): string | undefined {
 function ActivityState({ item }: { item: HostTimelineItem }) {
   const t = useT();
   if (!item.state) return <>—</>;
-  const errorCode = item.error_code ? <span className="source"> {item.error_code}</span> : null;
+  // The code keeps its guide on hover: what happened and what to do next.
+  const errorCode = item.error_code ? <> <ErrorCode code={item.error_code} /></> : null;
   switch (item.kind) {
     case "job":
     case "campaign":
@@ -1370,6 +1380,25 @@ function lifecycleTone(state: string): string {
 }
 
 /**
+ * The page an adapter serves, by the adapter's name: the row of the
+ * registry links there, so "packages.pacman is available" is one click
+ * from the packages themselves. An adapter without a page of its own
+ * (the audit trail, the MAC switch) stays text.
+ */
+export function adapterSegment(name: string): string | undefined {
+  const bySegment: Record<string, string> = {
+    backup: "backups", certificates: "certificates", "certificates.renew": "certificates",
+    dns: "dns", docker: "containers", "docker.compose": "compose", "files.managed": "files",
+    firewall: "firewall", journald: "logs", kernel: "kernel", monitoring: "monitoring",
+    network: "network", schedules: "schedules", security: "security", sshd: "ssh",
+    storage: "storage", systemd: "services", time: "time",
+  };
+  if (bySegment[name]) return bySegment[name];
+  if (name.startsWith("packages.")) return "packages";
+  return undefined;
+}
+
+/**
  * The host's adapter registry. The operator sees not only what is missing
  * but also why - the reason comes from the host, not from browser code.
  */
@@ -1385,7 +1414,11 @@ function Adapters({ host }: { host: ReturnType<typeof useHost> }) {
       <tbody>
         {adapters.map((adapter) => (
           <tr key={adapter.name}>
-            <td className="hm-mono">{adapter.name}</td>
+            <td className="hm-mono">
+              {adapterSegment(adapter.name)
+                ? <Link to={`/hosts/${host.id}/${adapterSegment(adapter.name)}`}>{adapter.name}</Link>
+                : adapter.name}
+            </td>
             <td>
               {!adapter.available ? (
                 <span className="badge">{t("unavailable")}</span>

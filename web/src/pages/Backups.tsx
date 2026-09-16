@@ -125,7 +125,7 @@ export function FleetBackups() {
             it what nobody has checked: a copy nobody has ever restored is a
             hope, not a copy. The panel does not force a trial - it is to
             say there was none. */}
-        <Card className="span-8" title={t("Age")} description={t("{n} hosts visible", { n: data.hosts_total })}>
+        <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} hosts", { n: data.items.length, hosts: data.hosts_total })}>
           <StatusBar segments={[
             { label: t("Never ran"), value: never, tone: "error" },
             { label: t("Stale"), value: stale, tone: "error" },
@@ -153,6 +153,8 @@ export function FleetBackups() {
           {!data.items.length ? (
             <Empty>
               {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
+              {" "}
+              <Link to="/hosts">{t("Hosts")}</Link>
             </Empty>
           ) : (
             <table>
@@ -199,7 +201,7 @@ export function FleetBackups() {
           )}
         </Card>
 
-        <Card className="span-3" title={t("By tool")} description={listed}>
+        <Card className="span-3" title={t("By tool")} description={data.items.length ? listed : undefined}>
           {!data.items.length ? (
             <p className="fp-blank">{t("No backup definition yet.")}</p>
           ) : (

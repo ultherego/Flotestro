@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Alert, Host, HostMetrics, HostMonitoring, MetricPoint, MetricRange, RuleCatalogue, Silence } from "../../lib/types";
-import { bytes } from "../../lib/format";
+import { absoluteTime, bytes } from "../../lib/format";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { AreaChart, ChartLegend, Meter, type AreaSeries } from "../../components/widgets";
 import {
@@ -20,10 +20,15 @@ const RANGES: { value: MetricRange; label: string }[] = [
   { value: "30d", label: "30 days" },
 ];
 
-/** How an instant reads on the time axis: the hour in a short window, the day in a long one. */
-function axisLabel(range: MetricRange): (iso: string) => string {
-  const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const day = (iso: string) => new Date(iso).toLocaleDateString([], { day: "2-digit", month: "2-digit" });
+/**
+ * How an instant reads on the time axis: the hour in a short window, the
+ * day in a long one. The parts are cut from the same absolute time every
+ * other screen shows - the 24-hour clock, in the zone the operator
+ * prefers - so a chart and the trail beside it agree on when.
+ */
+export function axisLabel(range: MetricRange): (iso: string) => string {
+  const time = (iso: string) => absoluteTime(iso).slice(11, 16);
+  const day = (iso: string) => absoluteTime(iso).slice(5, 10);
   if (range === "3h" || range === "24h") return time;
   if (range === "7d") return (iso) => `${day(iso)} ${time(iso)}`;
   return day;
@@ -99,7 +104,7 @@ export function Monitoring() {
     onSuccess: (created) => {
       setMessage(t("{rule} is silenced until {until}.", {
         rule: created.rule_name ?? t("Every rule"),
-        until: new Date(created.until).toLocaleString(),
+        until: absoluteTime(created.until),
       }));
       setSilenceReason("");
       refresh();
@@ -143,8 +148,10 @@ export function Monitoring() {
   const memoryTop = Math.max(0, ...points.map((point) => point.memory_total));
   const cpuSeries: AreaSeries[] = [{ name: t("CPU"), tone: "accent", values: points.map((point) => point.cpu_percent) }];
   const loadSeries: AreaSeries[] = [
+    // The accent and the info tone are the same blue on the light theme,
+    // so the second line of every chart takes a hue of its own.
     { name: t("1 min"), tone: "accent", values: points.map((point) => point.load1) },
-    { name: t("5 min"), tone: "info", values: points.map((point) => point.load5), line: true },
+    { name: t("5 min"), tone: "warn", values: points.map((point) => point.load5), line: true },
     { name: t("15 min"), tone: "unknown", values: points.map((point) => point.load15), line: true },
   ];
   const memorySeries: AreaSeries[] = [
@@ -156,12 +163,12 @@ export function Monitoring() {
   // that exists only while it runs.
   const agentMemorySeries: AreaSeries[] = [
     { name: t("Agent RSS"), tone: "accent", values: points.map((point) => point.agent_rss_bytes) },
-    { name: t("Helper RSS"), tone: "info", values: points.map((point) => point.helper_rss_bytes), line: true },
+    { name: t("Helper RSS"), tone: "warn", values: points.map((point) => point.helper_rss_bytes), line: true },
   ];
   const agentCPUSeries: AreaSeries[] = [{ name: t("Agent CPU"), tone: "accent", values: points.map((point) => point.agent_cpu_percent) }];
   const agentReported = points.some((point) => point.agent_rss_bytes !== undefined || point.agent_cpu_percent !== undefined);
   const networkSeries: AreaSeries[] = link ? [
-    { name: t("{name} received", { name: link.name }), tone: "info", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
+    { name: t("{name} received", { name: link.name }), tone: "ok", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.rx_bytes_per_second) },
     { name: t("{name} sent", { name: link.name }), tone: "accent", values: points.map((point) => point.interfaces?.find((item) => item.name === link.name)?.tx_bytes_per_second), line: true },
   ] : [];
 

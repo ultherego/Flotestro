@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
+import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage,
@@ -133,7 +134,11 @@ export function Firewall() {
         title={t("Firewall")}
         description={t("Read from the kernel with nft. Flotestro owns one table of its own — docker, firewalld and iptables-nft rewrite theirs without asking, so a rule placed in those would vanish at the next container start or reload.")}
         actions={
-          <button onClick={() => setWizard((open) => !open)} disabled={!snapshot?.writable}>
+          <button
+            onClick={() => setWizard((open) => !open)}
+            disabled={!snapshot?.writable}
+            title={snapshot?.writable ? undefined : snapshot?.read_only_reason || t("The panel cannot write rules on this host.")}
+          >
             {wizard ? t("Cancel") : t("New rule")}
           </button>
         }
@@ -250,8 +255,17 @@ export function Firewall() {
         }
         flush
       >
+        {/* An empty rule set and an empty match are two different things:
+            a host without rules filters nothing, and that is worth a
+            sentence of its own. */}
         {!rules.length ? (
-          <Empty>{t("No rules match.")}</Empty>
+          <Empty>
+            {snapshot?.unavailable_reason
+              ? t("The rules could not be read.")
+              : (snapshot?.rules ?? []).length === 0
+                ? t("This host has no firewall rules: nothing filters its traffic.")
+                : t("No rules match.")}
+          </Empty>
         ) : (
           <Table>
             <thead>
@@ -279,7 +293,7 @@ export function Firewall() {
                     {rule.packets === undefined ? (
                       <span className="badge unknown">{t("no counter")}</span>
                     ) : (
-                      <Meter value={rule.packets} max={maxPackets} tone="info" text={`${rule.packets} pkt / ${rule.bytes} B`} />
+                      <Meter value={rule.packets} max={maxPackets} tone="info" text={`${rule.packets} pkt / ${bytes(rule.bytes ?? 0)}`} />
                     )}
                   </td>
                   <td>

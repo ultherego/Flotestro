@@ -389,7 +389,9 @@ export function FleetMonitoring() {
                       </div>
                     </td>
                     <td className="hm-mono">{describeCondition(rule)}</td>
-                    <td>{t("{n} min", { n: rule.for_minutes })}</td>
+                    {/* A rule that waits no minutes fires on the first
+                        sample past the threshold; "0 min" reads as a gap. */}
+                    <td>{rule.for_minutes > 0 ? t("{n} min", { n: rule.for_minutes }) : t("at once")}</td>
                     <td><SeverityBadge severity={rule.severity} /></td>
                     <td className="source">{describeSelector(rule.selector)}</td>
                     <td>

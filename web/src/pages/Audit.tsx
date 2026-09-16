@@ -5,7 +5,7 @@ import { api, ApiError, loadedItems, LIST_PAGE, type Page } from "../lib/api";
 import { useDebounced } from "../lib/debounce";
 import { toInstant } from "../lib/format";
 import type { AuditEvent } from "../lib/types";
-import { ErrorBox, Time, Empty, JobState } from "../components/ui";
+import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
@@ -125,9 +125,14 @@ export function Audit() {
   const hourly = eventsPerHour(events);
   // The actors behind the listed events, the busiest first: a trail
   // dominated by one token or one operator is read here at a glance.
-  const byActor = Object.entries(
-    events.reduce<Record<string, number>>((acc, event) => { acc[event.actor_id] = (acc[event.actor_id] ?? 0) + 1; return acc; }, {}),
-  ).sort((x, y) => y[1] - x[1]).slice(0, 8);
+  const byActor = Object.values(
+    events.reduce<Record<string, { event: AuditEvent; count: number }>>((acc, event) => {
+      const entry = acc[event.actor_id] ?? { event, count: 0 };
+      entry.count += 1;
+      acc[event.actor_id] = entry;
+      return acc;
+    }, {}),
+  ).sort((x, y) => y.count - x.count).slice(0, 8);
   const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit" });
 
   return (
@@ -173,7 +178,7 @@ export function Audit() {
               ) : byActor.length === 0 ? (
                 <p className="fp-blank">{t("No events.")}</p>
               ) : (
-                <Breakdown tone="neutral" items={byActor.map(([actor, n]) => ({ label: <span className="mono">{actor}</span>, value: n }))} />
+                <Breakdown tone="neutral" items={byActor.map((entry) => ({ label: <span className="mono"><ActorCell event={entry.event} /></span>, value: entry.count }))} />
               )}
             </div>
           </div>
@@ -252,7 +257,7 @@ export function Audit() {
                           </div>
                         </td>
                         <td className="mono">
-                          {event.actor_id}
+                          <ActorCell event={event} />
                           {/* The session and how it was authenticated stand
                               under the actor: they say which sign-in acted,
                               which the name alone does not. */}
@@ -268,7 +273,7 @@ export function Audit() {
                         <td>{event.actor_type}</td>
                         <td className="mono">{event.action}</td>
                         <td className="mono"><TargetCell event={event} /></td>
-                        <td><JobState state={event.outcome} /></td>
+                        <td><OutcomeBadge outcome={event.outcome} /></td>
                         <td className="source">{digest(event.detail)}</td>
                       </tr>
                       {/* What an approval rests on and what a change did,
@@ -366,11 +371,26 @@ function eventsPerHour(events: AuditEvent[]): { labels: string[]; success: numbe
  */
 export function targetLink(targetType?: string, targetID?: string): string | null {
   if (!targetType || !targetID) return null;
+  const id = encodeURIComponent(targetID);
   switch (targetType) {
-    case "host": return `/hosts/${encodeURIComponent(targetID)}/overview`;
-    case "campaign": return `/campaigns/${encodeURIComponent(targetID)}`;
-    case "job": return `/jobs/${encodeURIComponent(targetID)}`;
-    case "principal": return `/access?tab=identities&q=${encodeURIComponent(targetID)}`;
+    case "host": return `/hosts/${id}/overview`;
+    case "campaign": return `/campaigns/${id}`;
+    case "job": return `/jobs/${id}`;
+    case "principal": return `/access?tab=identities&q=${id}`;
+    case "host_group": return `/groups/${id}`;
+    case "relay": return `/relays/${id}`;
+    case "policy": return `/policies/${id}`;
+    case "read": return `/reads/${id}`;
+    // The trail names a secret by its name, which is what its page is
+    // addressed by.
+    case "secret": return `/secrets/${id}`;
+    // The rest have a list but no page of their own; the list is where
+    // the object is found.
+    case "alert_rule": return "/monitoring";
+    case "budget": return "/budgets";
+    case "notification_channel": return "/notifications";
+    case "tag": return "/tags";
+    case "pki": return "/access?tab=ca";
     default: return null;
   }
 }
@@ -408,7 +428,10 @@ function TargetCell({ event }: { event: AuditEvent }) {
   if (!event.target_type) return <>—</>;
   const ref = `${event.target_type}/${event.target_id ?? ""}`;
   const to = targetLink(event.target_type, event.target_id);
-  const short = `${event.target_type}/${(event.target_id ?? "").slice(0, 8)}`;
+  // A name is shown whole; an identifier by its first eight characters,
+  // the way every other screen shortens one.
+  const named = event.target_type === "secret" || event.target_type === "tag" || event.target_type === "settings";
+  const short = `${event.target_type}/${named ? event.target_id ?? "" : (event.target_id ?? "").slice(0, 8)}`;
   if (!event.target_hostname && !event.target_address) {
     return to ? <Link to={to} title={ref}>{short}</Link> : <span title={ref}>{short}</span>;
   }
@@ -419,6 +442,35 @@ function TargetCell({ event }: { event: AuditEvent }) {
       {event.target_address && <span className="fp-host-address">{event.target_address}</span>}
     </span>
   );
+}
+
+/**
+ * The outcome in the colours of the bar above the list: a denial is not a
+ * job state, and the grey badge of an unknown state is not what a refusal
+ * looks like.
+ */
+function OutcomeBadge({ outcome }: { outcome: AuditEvent["outcome"] }) {
+  const t = useT();
+  const tone = outcome === "success" ? "ok" : outcome === "failure" ? "error" : outcome === "denied" ? "warn" : "unknown";
+  const name = outcome === "success" ? t("success") : outcome === "failure" ? t("failure") : outcome === "denied" ? t("denied") : outcome;
+  return <span className={`badge ${tone}`}>{name}</span>;
+}
+
+/**
+ * The actor of an event as the trail names it, with a way to it where the
+ * panel has one: an agent is its host, a campaign has its page. A person
+ * and a token are shown by name.
+ */
+function ActorCell({ event }: { event: AuditEvent }) {
+  const t = useT();
+  if (event.actor_type === "agent") {
+    return <Link to={`/hosts/${encodeURIComponent(event.actor_id)}/overview`} title={event.actor_id}>{t("agent")} {event.actor_id.slice(0, 8)}</Link>;
+  }
+  if (event.actor_id.startsWith("campaign:")) {
+    const id = event.actor_id.slice("campaign:".length);
+    return <Link to={`/campaigns/${encodeURIComponent(id)}`} title={event.actor_id}>{t("campaign")} {id.slice(0, 8)}</Link>;
+  }
+  return <>{event.actor_id}</>;
 }
 
 type Change = { key: string; before: string; after: string };
@@ -436,7 +488,10 @@ function changedKeys(before: unknown, after: unknown): Change[] {
   const keys = Array.from(new Set([...Object.keys(left), ...Object.keys(right)])).sort();
   return keys
     .filter((key) => JSON.stringify(left[key]) !== JSON.stringify(right[key]))
-    .map((key) => ({ key, before: renderSide(left[key]), after: renderSide(right[key]) }));
+    .map((key) => ({ key, before: renderSide(left[key]), after: renderSide(right[key]) }))
+    // An empty string against a missing key is the same nothing on both
+    // sides; a line reading "— → —" says a change happened where none did.
+    .filter((change) => change.before !== change.after);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -452,7 +507,7 @@ function renderSide(value: unknown): string {
 function digest(detail: Record<string, unknown>): string {
   const interesting = ["reason", "action_type", "hostname", "state", "permission", "scope"];
   const parts = interesting
-    .filter((key) => detail?.[key] !== undefined)
+    .filter((key) => detail?.[key] !== undefined && detail[key] !== null && detail[key] !== "")
     .map((key) => `${key}=${String(detail[key])}`);
   return parts.join(" ").slice(0, 90);
 }

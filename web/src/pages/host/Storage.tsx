@@ -311,7 +311,15 @@ export function Storage() {
                 {/* Identification goes by UUID and serial: /dev/sdX depends on
                     the detection order and points at another disk after a
                     reboot. */}
-                <td className="source hm-mono">
+                <td
+                  className="source hm-mono"
+                  title={[
+                    device.uuid ? `UUID=${device.uuid}` : "",
+                    device.label ? `LABEL=${device.label}` : "",
+                    device.model ?? "",
+                    device.serial ? `${t("serial")} ${device.serial}` : "",
+                  ].filter(Boolean).join(" · ") || undefined}
+                >
                   {device.uuid ? `UUID=${device.uuid.slice(0, 13)}…` : ""}
                   {device.serial ? ` ${device.model ?? ""} ${device.serial}` : ""}
                   {!device.uuid && !device.serial && "—"}

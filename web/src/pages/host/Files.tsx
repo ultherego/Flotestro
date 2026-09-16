@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { EmptyState } from "../../components/layout";
+import { absoluteTime, bytes } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
   Field, Fields, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
@@ -149,8 +151,12 @@ export function Files() {
       {adding && <NewFile onIntent={setIntent} />}
 
       <Section title={t("Files")} count={list.length} span={12} flush>
-        {!list.length ? (
-          <Empty>{t("The panel does not manage any file on this host yet.")}</Empty>
+        {!files.data ? (
+          <Empty>{t("Loading…")}</Empty>
+        ) : !list.length ? (
+          <EmptyState action={!adding && <button onClick={() => setAdding(true)}>{t("Manage a file")}</button>}>
+            {t("The panel does not manage any file on this host yet. A managed file is written from here, compared with what the host has at every report, and kept in versions.")}
+          </EmptyState>
         ) : (
           <Table>
             <thead>
@@ -202,11 +208,12 @@ export function Files() {
                     <div className="operations">
                       <button
                         className="secondary"
+                        title={t("Ask the host for the file as it is now: its checksum, mode and owner refresh in this list once the job reports back.")}
                         onClick={() =>
                           request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
                         }
                       >
-                        {t("Read")}
+                        {t("Read from host")}
                       </button>
                       <button
                         className="hm-danger"
@@ -317,7 +324,7 @@ function History({
                     <span className="badge ok"> {t("current")}</span>
                   )}
                 </td>
-                <td className="hm-num">{version.sha256 ? `${version.size_bytes} B` : "—"}</td>
+                <td className="hm-num" title={version.sha256 ? t("{n} bytes", { n: version.size_bytes }) : undefined}>{version.sha256 ? bytes(version.size_bytes) : "—"}</td>
                 <td><Time value={version.applied_at} /></td>
                 <td>{version.applied_by}</td>
                 <td>
@@ -333,7 +340,7 @@ function History({
                           action: "file.rollback",
                           label: t("Roll back file"),
                           description: t("{path} on {host} goes back to version {version} from {when}.", {
-                            path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: new Date(version.applied_at).toLocaleString(),
+                            path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: absoluteTime(version.applied_at),
                           }),
                           payload: {
                             file: {
@@ -446,15 +453,15 @@ function NewFile({ onIntent }: { onIntent: (intent: Intent) => void }) {
           <Field label={t("Path")} wide>
             <input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/etc/example.conf" />
           </Field>
-          <Field label={t("Mode")} narrow>
-            <input value={mode} onChange={(e) => setMode(e.target.value)} placeholder={t("Mode")} />
+          <Field label={t("Mode")} narrow help={t("Octal, as chmod takes it.")}>
+            <input value={mode} onChange={(e) => setMode(e.target.value)} placeholder="0644" />
           </Field>
-          <Field label={t("Expected sha256 (existing file)")}>
-            <input value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} />
+          <Field label={t("Expected sha256")} help={t("For a file that already exists: the checksum of the content you reviewed. Leave empty for a new file.")}>
+            <input value={fingerprint} onChange={(e) => setFingerprint(e.target.value)} placeholder="e3b0c442…" />
           </Field>
           <Field
-            label={t("From a secret (leave empty to write the content below)")}
-            help={fromSecret ? t("The value never travels in the job: the host fetches it from the store when it starts the operation. The panel keeps no copy and no checksum of it, so it will not be able to tell you later whether somebody changed this file on the host — only which secret version was deployed.") : undefined}
+            label={t("From a secret")}
+            help={fromSecret ? t("The value never travels in the job: the host fetches it from the store when it starts the operation. The panel keeps no copy and no checksum of it, so it will not be able to tell you later whether somebody changed this file on the host — only which secret version was deployed.") : t("Leave empty to write the content typed below.")}
           >
             <input
               value={secret}

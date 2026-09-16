@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, type Collection } from "../lib/api";
@@ -85,7 +85,12 @@ export function Bulk() {
 
   const params = new URLSearchParams();
   const expression = expressionOf(order);
-  if (expression) {
+  if (order.hostIDs.length > 0) {
+    // A list of hosts is the order itself: the preview resolves the
+    // same identifiers the creation will, and nothing else is sent next
+    // to them - a filter beside a list would be ignored on the server.
+    for (const hostID of order.hostIDs) params.append("host_id", hostID);
+  } else if (expression) {
     // The typed selector decides alone; the flat filters are not sent
     // next to it, so the preview asks exactly what the order will.
     params.set("expression", JSON.stringify(expression));
@@ -100,10 +105,14 @@ export function Bulk() {
   // A compensation previews against its original: the server names the
   // hosts that changed and refuses the rest, before anything is created.
   if (order.compensates) params.set("compensates", order.compensates);
+  // A host list with nobody on it yet is not previewed: without the
+  // identifiers the query would count the whole fleet, and the count
+  // would open a gate the operator has not earned.
+  const listEmpty = order.targetMode === "hosts" && order.hostIDs.length === 0;
   const preview = useQuery({
     queryKey: ["campaign-preview", params.toString()],
     queryFn: () => api.get<Preview>(`/api/v1/campaigns/preview?${params}`),
-    enabled: Boolean(order.action),
+    enabled: Boolean(order.action) && !listEmpty,
   });
 
   const campaign = useQuery({
@@ -147,65 +156,118 @@ export function Bulk() {
         targets={eligible} risk={chosenOperation?.risk} />
 
       <ol className="bulk-steps">
-        {STEPS.map((title, index) => (
-          <li key={title}>
-            <button
-              className={index === step ? "step active" : "step"}
-              onClick={() => setStep(index)}
-              disabled={index > 0 && !gates[index - 1].open}
-            >
-              <span className="number">{index + 1}</span>
-              <span className="title">{t(title)}</span>
-              {/* A closed gate says what is missing. A step greyed out
-                  without a reason looks like an interface defect. */}
-              {index > 0 && !gates[index - 1].open && (
-                <span className="reason">{gates[index - 1].reason}</span>
-              )}
-            </button>
-          </li>
-        ))}
+        {STEPS.map((title, index) => {
+          // A step opens once every gate before it is open. The first
+          // step behind a closed gate says what is missing; the ones after
+          // it are closed for the same reason, and repeating the sentence
+          // on every pill would drown it. A step greyed out without any
+          // reason looks like an interface defect, so the later pills
+          // still carry it on hover.
+          const closed = gates.slice(0, index).find((gate) => !gate.open);
+          const first = closed === gates[index - 1];
+          return (
+            <li key={title}>
+              <button
+                className={index === step ? "step active" : "step"}
+                onClick={() => setStep(index)}
+                disabled={Boolean(closed)}
+                title={closed?.reason}
+              >
+                <span className="number">{index + 1}</span>
+                <span className="title">{t(title)}</span>
+                {closed && first && <span className="reason">{closed.reason}</span>}
+              </button>
+            </li>
+          );
+        })}
       </ol>
 
-      {step === 0 && (
-        <ScopeStep
-          order={order}
-          change={change}
-          bulk={bulk}
-          refusals={refusals}
-          preview={preview.data}
-          refusal={refusal}
-        />
-      )}
-      {step === 1 && <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} />}
-      {step === 2 && <EligibilityStep order={order} preview={preview.data} checking={preview.isLoading} />}
-      {step === 3 && (
-        <RolloutStep
-          order={order}
-          change={change}
-          targets={eligible}
-          declaredPolicy={chosenOperation?.offline_policy}
-        />
-      )}
-      {step === 4 && <WindowStep order={order} change={change} operation={chosenOperation} />}
-      {step === 5 && (
-        <CreateStep
-          order={order}
-          change={change}
-          targets={eligible}
-          compensates={preview.data?.compensates}
-          campaignID={campaignID}
-          onCreated={(id) => {
-            // The order is placed: the draft would only reopen an order
-            // that already became a campaign.
-            clearDraft(sessionStorageOrNull());
-            setCampaignID(id);
-            setStep(6);
-          }}
-        />
-      )}
-      {step === 6 && <PlansStep campaignID={campaignID} campaign={campaign.data} />}
-      {step === 7 && <ApprovalStep campaignID={campaignID} campaign={campaign.data} />}
+      {/* Every step ends with the same two buttons: back, and on to the
+          next step by its name. The pills above do the same, but a form
+          without a button at its end reads as one that is not finished. */}
+      {(() => {
+        const nav = <StepNav step={step} setStep={setStep} gates={gates} />;
+        switch (step) {
+          case 0:
+            return (
+              <ScopeStep
+                order={order}
+                change={change}
+                bulk={bulk}
+                refusals={refusals}
+                preview={preview.data}
+                refusal={refusal}
+                nav={nav}
+              />
+            );
+          case 1:
+            return <TargetsStep order={order} change={change} preview={preview.data} refusal={preview.error} nav={nav} />;
+          case 2:
+            return <EligibilityStep order={order} preview={preview.data} checking={preview.isLoading} nav={nav} />;
+          case 3:
+            return (
+              <RolloutStep
+                order={order}
+                change={change}
+                targets={eligible}
+                declaredPolicy={chosenOperation?.offline_policy}
+                nav={nav}
+              />
+            );
+          case 4:
+            return <WindowStep order={order} change={change} operation={chosenOperation} nav={nav} />;
+          case 5:
+            return (
+              <CreateStep
+                order={order}
+                change={change}
+                targets={eligible}
+                compensates={preview.data?.compensates}
+                campaignID={campaignID}
+                onCreated={(id) => {
+                  // The order is placed: the draft would only reopen an order
+                  // that already became a campaign.
+                  clearDraft(sessionStorageOrNull());
+                  setCampaignID(id);
+                  setStep(6);
+                }}
+                nav={nav}
+              />
+            );
+          case 6:
+            return <PlansStep campaignID={campaignID} campaign={campaign.data} nav={nav} />;
+          default:
+            return <ApprovalStep campaignID={campaignID} campaign={campaign.data} nav={nav} />;
+        }
+      })()}
     </>
+  );
+}
+
+/**
+ * The buttons at the end of a step: back to the previous one, and on to
+ * the next by its name. A closed gate keeps the button off and says next
+ * to it what is still missing - the same sentence the pill above shows,
+ * so the operator reads one reason, not two.
+ */
+function StepNav({ step, setStep, gates }: { step: number; setStep: (step: number) => void; gates: Gate[] }) {
+  const t = useT();
+  const gate = gates[step];
+  const last = step >= STEPS.length - 1;
+  return (
+    <Actions>
+      <button type="button" className="secondary" onClick={() => setStep(step - 1)} disabled={step === 0}
+        title={step === 0 ? t("This is the first step.") : undefined}>
+        {t("Back")}
+      </button>
+      {!last && (
+        <button type="button" onClick={() => setStep(step + 1)} disabled={!gate.open}
+          title={gate.open ? undefined : gate.reason}>
+          {t("Next: {step}", { step: t(STEPS[step + 1]) })}
+        </button>
+      )}
+      {!last && !gate.open && <span className="source">{t("Before going on: {reason}.", { reason: gate.reason })}</span>}
+    </Actions>
   );
 }
 
@@ -272,7 +334,9 @@ export function prefilledOrder(params: URLSearchParams): Draft | null {
       hostIDs: params.getAll("host_id"),
       reason: params.get("reason") ?? "",
       group,
-      targetMode: group ? "expression" : "filters",
+      // The way the targets are named follows what the address carries:
+      // a host list from a campaign row, a group from the group page.
+      targetMode: params.has("host_id") ? "hosts" : group ? "expression" : "filters",
     },
     step: 0,
   };
@@ -482,18 +546,20 @@ type Order = {
   // on a finished campaign. Empty for an ordinary campaign. The server
   // holds the rules: the reverse operation, the hosts that changed.
   compensates: string;
-  // Hosts named by identifier in the address - a compensation of one host
-  // from the campaign page. When present they are the order's targets and
-  // the filters below are not sent; the server checks them against the
-  // original the way it checks any selector.
+  // Hosts named by identifier: picked one by one from the host list, or
+  // handed over in the address as a compensation of one host from the
+  // campaign page. When present they are the order's targets and the
+  // filters are not sent; the server checks them against the original
+  // the way it checks any selector.
   hostIDs: string[];
   site: string;
   environment: string;
   osFamily: string;
-  // How the targets are named: by the flat filters of the next step, or
-  // by a group and tag rules compiled into one expression. The expression,
-  // when present, decides alone.
-  targetMode: "filters" | "expression";
+  // How the targets are named: by the flat filters, by a group and tag
+  // rules compiled into one expression, or by a list of hosts picked by
+  // hand. The expression, when present, decides alone; a host list
+  // decides over both.
+  targetMode: TargetMode;
   group: string;
   rules: Rule[];
   combine: "all" | "any";
@@ -544,6 +610,9 @@ type Order = {
   // its approval like any other.
   schedule: ScheduleChoice;
 };
+
+/** The three ways of naming the targets of an order. */
+export type TargetMode = "filters" | "expression" | "hosts";
 
 /** The moment an order is kept for, and the rule of the moments after it. */
 export type ScheduleChoice = { enabled: boolean; startAt: string; recurrence: RecurrenceForm };
@@ -914,21 +983,25 @@ function stepGates(
   const hasAction = Boolean(order.action && order.name) &&
     (!UNIT_OPERATIONS.includes(order.action) || order.unit !== "") &&
     orderPayload(order) !== null;
-  const hasTargets = (preview?.count ?? 0) > 0;
+  const hasTargets = order.targetMode === "hosts"
+    ? order.hostIDs.length > 0
+    : (preview?.count ?? 0) > 0;
   const hasEligible = (preview?.eligible ?? 0) > 0;
   const exclusionsExplained = order.exclude.length === 0 || order.excludeReason.trim() !== "";
   const window = windowWords(t, windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date()));
   const schedule = scheduleWords(t, scheduleProblem(order.schedule, new Date()));
   const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
   return [
-    { open: hasAction && exclusionsExplained && !refusal, reason: refusal
+    { open: hasAction && !refusal, reason: refusal
       ? t("the catalogue refuses this operation in bulk: {reason}", { reason: refusal })
-      : exclusionsExplained
-        ? order.action === RENAME_OPERATION
-          ? t("pick an operation, name the campaign and give at least one host its new name")
-          : t("pick an operation, name the campaign and give it a valid payload")
-        : t("give the exclusions a reason") },
-    { open: hasAction && hasTargets, reason: t("the selector matches no host") },
+      : order.action === RENAME_OPERATION
+        ? t("pick an operation, name the campaign and give at least one host its new name")
+        : t("pick an operation, name the campaign and give it a valid payload") },
+    { open: hasAction && hasTargets && exclusionsExplained, reason: !exclusionsExplained
+      ? t("give the exclusions a reason")
+      : order.targetMode === "hosts" && order.hostIDs.length === 0
+        ? t("pick at least one host from the list")
+        : t("the selector matches no host") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: hasEligible, reason: t("no matched host can run this operation") },
     { open: window === "" && schedule === "" && timeoutFits, reason: window || schedule || t("the job timeout is out of bounds") },
@@ -976,7 +1049,7 @@ function ScopeBar({
         <span>
           {t("targets")}: <strong>{targets}</strong>
           {order.hostIDs.length > 0
-            ? <> {t("named by identifier")}</>
+            ? <> {t("picked by name")}</>
             : preview && preview.eligible !== undefined && preview.eligible !== preview.count && (
               <> {t("of {n} matched", { n: preview.count })}</>
             )}
@@ -1021,6 +1094,7 @@ function ScopeStep({
   refusals,
   preview,
   refusal,
+  nav,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
@@ -1031,6 +1105,7 @@ function ScopeStep({
   // so the refusal is read here and not from the server after the form
   // is filled in.
   refusal?: string;
+  nav: ReactNode;
 }) {
   const t = useT();
   const needsUnit = UNIT_OPERATIONS.includes(order.action);
@@ -1040,7 +1115,7 @@ function ScopeStep({
   return (
     <Card
       title={`1. ${t("Scope")}`}
-      description={t("The registry decides what may run on many hosts at once. An operation with no bulk mode is a deliberate refusal, not a missing screen.")}
+      description={t("Name the campaign and pick what it does on every host; the next step chooses the hosts. Only operations the registry opens to the fleet are listed - an operation missing here is a deliberate refusal, not a missing screen.")}
     >
       {refusal && (
         <p className="page-error">
@@ -1048,14 +1123,17 @@ function ScopeStep({
         </p>
       )}
       <FieldGrid>
-        <Field label={t("Name")}>
+        <Field label={t("Name")} hint={t("How the campaign is listed and searched for, e.g. \"September security updates, web tier\".")}>
           <input
             placeholder={t("campaign name")}
             value={order.name}
             onChange={(e) => change({ name: e.target.value })}
           />
         </Field>
-        <Field label={t("Operation")}>
+        <Field label={t("Operation")}
+          hint={chosen
+            ? t("The same operation the host page runs one host at a time; the word after the dot is its risk class.")
+            : t("Named as on the host page and in the job list, e.g. packages.upgrade for the pending updates or unit.restart for a service; the word after the dot is the risk class.")}>
           <select
             value={order.action}
             onChange={(e) => {
@@ -1095,14 +1173,21 @@ function ScopeStep({
           </Field>
         )}
         {order.action === "packages.upgrade" && (
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={order.securityOnly}
-              onChange={(e) => change({ securityOnly: e.target.checked })}
-            />{" "}
-            {t("security updates only")}
-          </label>
+          <div className="field">
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={order.securityOnly}
+                onChange={(e) => change({ securityOnly: e.target.checked })}
+              />{" "}
+              {t("security updates only")}
+            </label>
+            <span className="field-hint">
+              {order.securityOnly
+                ? t("Only the updates the distribution marks as security fixes; every other pending update stays as it is.")
+                : t("Every pending update on every host, security fixes included.")}
+            </span>
+          </div>
         )}
         {order.action === RENAME_OPERATION && (
           <MappingEditor order={order} change={change} hosts={preview?.hosts} />
@@ -1126,7 +1211,6 @@ function ScopeStep({
           </Field>
         )}
       </FieldGrid>
-      <TargetChoice order={order} change={change} />
       {preview?.requires_plan && (
         <p className="subtitle">
           {order.action === RENAME_OPERATION
@@ -1152,6 +1236,7 @@ function ScopeStep({
           </table>
         </details>
       )}
+      {nav}
     </Card>
   );
 }
@@ -1243,7 +1328,7 @@ function MappingEditor({
         </table>
         <span className="field-hint">
           {rows.length === 0
-            ? t("Pick the targets first: the rows come from the hosts the selector matches.")
+            ? t("No host matched yet: the rows come from the hosts the Targets step names, and with nothing set there, from the whole fleet.")
             : t("{named} of {n} matched hosts have a new name. A host without one stays in the snapshot as ineligible; nothing is renamed to a default.", { named, n: rows.length })}
         </span>
       </div>
@@ -1260,7 +1345,8 @@ function MappingEditor({
           {t("One host per line: hostname,fqdn. The hostname is matched to the rows above, full or short; a line that matches no host stays in the box.")}
         </span>
         <Actions>
-          <button type="button" className="secondary" onClick={applyPaste} disabled={!pasted.trim()}>
+          <button type="button" className="secondary" onClick={applyPaste} disabled={!pasted.trim()}
+            title={pasted.trim() ? undefined : t("Paste at least one line first.")}>
             {t("Apply the pasted names")}
           </button>
         </Actions>
@@ -1270,15 +1356,36 @@ function MappingEditor({
 }
 
 /**
- * How the targets are named: by the flat filters of the next step, or by
- * a saved group and tag rules. The second way builds the typed expression
- * the server compiles into the host query - it is shown here as the
- * campaign will carry it, so what the approver reads is what was sent.
- * Under it, the hosts left out by name, with the reason that goes into
- * the snapshot next to each of them.
+ * The words for each way of naming the targets: a short label for the
+ * choice and one sentence for what it means, so a first-time operator
+ * reads the three ways side by side before picking one.
  */
-function TargetChoice({ order, change }: { order: Order; change: (delta: Partial<Order>) => void }) {
+const TARGET_WAYS: [mode: TargetMode, label: string, meaning: string][] = [
+  ["filters", "by site, environment and OS", "Every host that matches the fields; leave a field empty to match any value. Hosts added later do not join: the list is frozen when the campaign is created."],
+  ["expression", "by groups and tags", "A saved group, tag rules, or both; the expression is resolved on the server the moment the campaign is created."],
+  ["hosts", "a list of hosts picked by hand", "Tick the hosts one by one; nothing else decides. The right way for a handful of named machines."],
+];
+
+function TargetsStep({
+  order,
+  change,
+  preview,
+  refusal,
+  nav,
+}: {
+  order: Order;
+  change: (delta: Partial<Order>) => void;
+  preview?: Preview;
+  // The server's refusal of the selector, when there is one: a
+  // compensation narrowed to a host the original did not change is
+  // refused here, with the host named, rather than at the creation.
+  refusal?: unknown;
+  nav: ReactNode;
+}) {
   const t = useT();
+  // The values the fleet really has, offered under each field; free text
+  // still goes through, and the count below says what it matched.
+  const facets = useFleetFacets();
   const groups = useQuery({
     queryKey: ["host-groups"],
     queryFn: () => api.get<Collection<{ id: string; name: string; kind: string }>>("/api/v1/host-groups"),
@@ -1287,31 +1394,105 @@ function TargetChoice({ order, change }: { order: Order; change: (delta: Partial
   });
   const [excluding, setExcluding] = useState(false);
   const expression = expressionOf(order);
+  // Changing the way clears what the other ways typed: a host list kept
+  // from an earlier choice would win over the filters on the server
+  // without a word on screen.
+  const chooseMode = (mode: TargetMode) => change({
+    targetMode: mode,
+    hostIDs: mode === "hosts" ? order.hostIDs : [],
+  });
+  const count = preview?.count ?? 0;
   return (
-    <>
-      <h4 className="widget-subhead">{t("Targets")}</h4>
+    <Card
+      title={`2. ${t("Targets")}`}
+      description={t("Choose the hosts one of three ways: by site, environment and OS; by groups and tags; or by picking them from a list. The count below is the server's answer; the next step says which of those hosts can run the operation.")}
+      footer={
+        <div>
+          {refusal ? <ErrorBox error={refusal} /> : null}
+          {/* A compensation may only name hosts the original changed; with
+              the filters empty it takes all of them, and the operator is
+              told so instead of reading it off an empty form. */}
+          {order.compensates && preview?.compensates && (
+            <p>
+              {t("This campaign compensates {name}: only the {changed} hosts that campaign changed can be its targets. Leave the filters empty to take all of them, or narrow them to a part.", {
+                name: preview.compensates.name, changed: preview.compensates.changed,
+              })}
+            </p>
+          )}
+          <p>
+            {order.targetMode === "hosts"
+              ? order.hostIDs.length === 0
+                ? t("No host is picked yet; tick at least one in the list above.")
+                : t("{n} hosts picked by hand; the campaign is created on those alone.", { n: order.hostIDs.length })
+              : t("The selector matches {n} hosts", { n: count })}
+            {order.targetMode !== "hosts" && preview && preview.count > preview.limit && (
+              <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
+            )}
+            {order.targetMode !== "hosts" && "."}
+          </p>
+          <div className="source">{(preview?.sample ?? []).join(", ")}</div>
+          <Distribution preview={preview} />
+          {nav}
+        </div>
+      }
+    >
       <FieldGrid>
-        <Field label={t("Named by")} hint={order.targetMode === "expression"
-          ? t("The expression decides alone; the site, environment and OS filters of the next step do not apply.")
-          : t("Site, environment and OS family, set in the next step.")}>
-          <select value={order.targetMode} onChange={(e) => change({ targetMode: e.target.value as Order["targetMode"] })}>
-            <option value="filters">{t("site, environment and OS")}</option>
-            <option value="expression">{t("groups and tags")}</option>
-          </select>
-        </Field>
-        {order.targetMode === "expression" && (
-          <Field label={t("Group")} hint={t("Optional; the rules below narrow it further.")}>
-            <select value={order.group} onChange={(e) => change({ group: e.target.value })}>
-              <option value="">{t("no group")}</option>
-              {(groups.data?.items ?? []).map((group) => (
-                <option key={group.id} value={group.name}>{group.name} · {group.kind}</option>
-              ))}
-            </select>
-          </Field>
-        )}
+        {TARGET_WAYS.map(([mode, label, meaning]) => (
+          <div key={mode} className="field">
+            <label className="toggle">
+              <input type="radio" name="bulk-target-mode" value={mode}
+                checked={order.targetMode === mode} onChange={() => chooseMode(mode)} />{" "}
+              {t(label)}
+            </label>
+            <span className="field-hint">{t(meaning)}</span>
+          </div>
+        ))}
       </FieldGrid>
+
+      {order.targetMode === "filters" && (
+        <FieldGrid>
+          <Field label={t("Site")} hint={t("Pick one the fleet has, or type any; empty means every site.")}>
+            <input
+              placeholder={t("any site")}
+              value={order.site}
+              list="bulk-sites"
+              onChange={(e) => change({ site: e.target.value })}
+            />
+            <FacetList id="bulk-sites" facets={facets.data?.by_site} />
+          </Field>
+          <Field label={t("Environment")} hint={t("Pick one the fleet has, or type any; empty means every environment.")}>
+            <input
+              placeholder={t("any environment")}
+              value={order.environment}
+              list="bulk-environments"
+              onChange={(e) => change({ environment: e.target.value })}
+            />
+            <FacetList id="bulk-environments" facets={facets.data?.by_environment} />
+          </Field>
+          <Field label={t("OS family")} hint={t("Pick one the fleet has, or type any; empty means every family.")}>
+            <input
+              placeholder={t("any OS family")}
+              value={order.osFamily}
+              list="bulk-os-families"
+              onChange={(e) => change({ osFamily: e.target.value })}
+            />
+            <FacetList id="bulk-os-families" facets={facets.data?.by_os_family} />
+          </Field>
+        </FieldGrid>
+      )}
+
       {order.targetMode === "expression" && (
         <>
+          <FieldGrid>
+            <Field label={t("Group")} hint={t("Optional; the rules below narrow it further.")}>
+              <select value={order.group} onChange={(e) => change({ group: e.target.value })}>
+                <option value="">{t("no group")}</option>
+                {(groups.data?.items ?? []).map((group) => (
+                  <option key={group.id} value={group.name}>{group.name} · {group.kind}</option>
+                ))}
+              </select>
+            </Field>
+          </FieldGrid>
           <SelectorBuilder
             rules={order.rules}
             combine={order.combine}
@@ -1328,127 +1509,55 @@ function TargetChoice({ order, change }: { order: Order; change: (delta: Partial
         </>
       )}
 
-      <h4 className="widget-subhead">{t("Exclude")}</h4>
-      <p className="subtitle">
-        {order.exclude.length === 0
-          ? t("No host is left out by name. An excluded host stays in the snapshot as excluded, with the reason and your name next to it.")
-          : t("{n} hosts left out by name; each stays in the snapshot as excluded, with the reason and your name next to it.", { n: order.exclude.length })}
-      </p>
-      {order.exclude.length > 0 && (
-        <FieldGrid>
-          <Field label={t("Reason for the exclusions")} hint={t("Required; it is what the approver reads next to every excluded host.")} wide>
-            <input
-              placeholder={t("e.g. the database primary; failing over first")}
-              value={order.excludeReason}
-              onChange={(e) => change({ excludeReason: e.target.value })}
-            />
-          </Field>
-        </FieldGrid>
+      {order.targetMode === "hosts" && (
+        <HostChooser
+          title={t("Hosts")}
+          selected={new Set(order.hostIDs)}
+          onChange={(next) => change({ hostIDs: [...next] })}
+        />
       )}
-      {excluding ? (
-        <>
-          <HostChooser selected={new Set(order.exclude)} onChange={(next) => change({ exclude: [...next] })} />
-          <Actions>
-            <button type="button" className="secondary" onClick={() => setExcluding(false)}>{t("Done choosing")}</button>
-          </Actions>
-        </>
-      ) : (
-        <Actions>
-          <button type="button" className="secondary" onClick={() => setExcluding(true)}>
-            {order.exclude.length === 0 ? t("Exclude hosts by name") : t("Change the excluded hosts")}
-          </button>
-          {order.exclude.length > 0 && (
-            <button type="button" className="secondary" onClick={() => change({ exclude: [], excludeReason: "" })}>{t("Clear the exclusions")}</button>
-          )}
-        </Actions>
-      )}
-    </>
-  );
-}
 
-function TargetsStep({
-  order,
-  change,
-  preview,
-  refusal,
-}: {
-  order: Order;
-  change: (delta: Partial<Order>) => void;
-  preview?: Preview;
-  // The server's refusal of the selector, when there is one: a
-  // compensation narrowed to a host the original did not change is
-  // refused here, with the host named, rather than at the creation.
-  refusal?: unknown;
-}) {
-  const t = useT();
-  // The values the fleet really has, offered under each field; free text
-  // still goes through, and the count below says what it matched.
-  const facets = useFleetFacets();
-  return (
-    <Card
-      title={`2. ${t("Targets")}`}
-      description={t("The count comes from the database, not from the first page of a list. The snapshot is frozen when the campaign is created; hosts added later do not join it.")}
-      footer={
-        <div>
-          {refusal ? <ErrorBox error={refusal} /> : null}
-          {/* A compensation may only name hosts the original changed; with
-              the filters empty it takes all of them, and the operator is
-              told so instead of reading it off an empty form. */}
-          {order.compensates && preview?.compensates && (
-            <p>
-              {t("This campaign compensates {name}: only the {changed} hosts that campaign changed can be its targets. Leave the filters empty to take all of them, or narrow them to a part.", {
-                name: preview.compensates.name, changed: preview.compensates.changed,
-              })}
-            </p>
-          )}
-          {/* The preview cannot count a host list, so the operator is told
-              which number binds: the hosts the address named. */}
-          {order.hostIDs.length > 0 && (
-            <p>
-              {t("The order names {n} hosts by identifier, from the campaign page; the campaign is created on those alone, whatever the filters below match.", { n: order.hostIDs.length })}
-            </p>
-          )}
-          <p>
-            {t("The selector matches {n} hosts", { n: preview?.count ?? 0 })}
-            {preview && preview.count > preview.limit && (
-              <> — {t("more than the {n} one campaign may carry", { n: preview.limit })}</>
-            )}
-            .
+      {/* A host list has nothing to exclude from: a host not wanted is
+          simply not ticked. The two selectors may match a host the change
+          must not touch, and that host is left out by name, with a reason. */}
+      {order.targetMode !== "hosts" && (
+        <>
+          <h4 className="widget-subhead">{t("Exclude")}</h4>
+          <p className="subtitle">
+            {order.exclude.length === 0
+              ? t("Optional. A host the selector matches but the change must not touch is left out here by name; it stays in the snapshot as excluded, with the reason and your name next to it.")
+              : t("{n} hosts left out by name; each stays in the snapshot as excluded, with the reason and your name next to it.", { n: order.exclude.length })}
           </p>
-          <div className="source">{(preview?.sample ?? []).join(", ")}</div>
-          <Distribution preview={preview} />
-        </div>
-      }
-    >
-      <FieldGrid>
-        <Field label={t("Site")} hint={t("Pick one the fleet has, or type any.")}>
-          <input
-            placeholder={t("site")}
-            value={order.site}
-            list="bulk-sites"
-            onChange={(e) => change({ site: e.target.value })}
-          />
-          <FacetList id="bulk-sites" facets={facets.data?.by_site} />
-        </Field>
-        <Field label={t("Environment")} hint={t("Pick one the fleet has, or type any.")}>
-          <input
-            placeholder={t("environment")}
-            value={order.environment}
-            list="bulk-environments"
-            onChange={(e) => change({ environment: e.target.value })}
-          />
-          <FacetList id="bulk-environments" facets={facets.data?.by_environment} />
-        </Field>
-        <Field label={t("OS family")} hint={t("Pick one the fleet has, or type any.")}>
-          <input
-            placeholder={t("os family")}
-            value={order.osFamily}
-            list="bulk-os-families"
-            onChange={(e) => change({ osFamily: e.target.value })}
-          />
-          <FacetList id="bulk-os-families" facets={facets.data?.by_os_family} />
-        </Field>
-      </FieldGrid>
+          {order.exclude.length > 0 && (
+            <FieldGrid>
+              <Field label={t("Reason for the exclusions")} hint={t("Required; it is what the approver reads next to every excluded host.")} wide>
+                <input
+                  placeholder={t("e.g. the database primary; failing over first")}
+                  value={order.excludeReason}
+                  onChange={(e) => change({ excludeReason: e.target.value })}
+                />
+              </Field>
+            </FieldGrid>
+          )}
+          {excluding ? (
+            <>
+              <HostChooser title={t("Hosts to leave out")} selected={new Set(order.exclude)} onChange={(next) => change({ exclude: [...next] })} />
+              <Actions>
+                <button type="button" className="secondary" onClick={() => setExcluding(false)}>{t("Done choosing")}</button>
+              </Actions>
+            </>
+          ) : (
+            <Actions>
+              <button type="button" className="secondary" onClick={() => setExcluding(true)}>
+                {order.exclude.length === 0 ? t("Exclude hosts by name") : t("Change the excluded hosts")}
+              </button>
+              {order.exclude.length > 0 && (
+                <button type="button" className="secondary" onClick={() => change({ exclude: [], excludeReason: "" })}>{t("Clear the exclusions")}</button>
+              )}
+            </Actions>
+          )}
+        </>
+      )}
     </Card>
   );
 }
@@ -1485,7 +1594,7 @@ function Distribution({ preview }: { preview?: Preview }) {
   );
 }
 
-function EligibilityStep({ order, preview, checking }: { order: Order; preview?: Preview; checking: boolean }) {
+function EligibilityStep({ order, preview, checking, nav }: { order: Order; preview?: Preview; checking: boolean; nav: ReactNode }) {
   const t = useT();
   if (checking) return <Empty>{t("Checking every matched host…")}</Empty>;
   // A rename names every host in its mapping; a matched host the mapping
@@ -1506,10 +1615,13 @@ function EligibilityStep({ order, preview, checking }: { order: Order; preview?:
   return (
     <Card
       title={`3. ${t("Eligibility")}`}
-      description={t("A host that cannot run this operation stays in the snapshot with its reason. Dropping it quietly would hide a decision nobody made.")}
-      footer={!excluded.length && !notes.length && (
-        <p>{t("Every matched host can run this operation.")}</p>
-      )}
+      description={t("Nothing to fill in here: read which of the matched hosts can run the operation and why the rest cannot, then go on to the rollout. A host that cannot run it stays in the snapshot with its reason; dropping it quietly would hide a decision nobody made.")}
+      footer={
+        <>
+          {!excluded.length && !notes.length && <p>{t("Every matched host can run this operation.")}</p>}
+          {nav}
+        </>
+      }
       flush
     >
       <table>
@@ -1572,11 +1684,13 @@ function RolloutStep({
   change,
   targets,
   declaredPolicy,
+  nav,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   targets: number;
   declaredPolicy?: string;
+  nav: ReactNode;
 }) {
   const t = useT();
   const policyNames: Record<string, string> = {
@@ -1596,41 +1710,44 @@ function RolloutStep({
       title={`4. ${t("Rollout")}`}
       description={
         <>
-          {t("Canary is wave zero. The concurrency limit says how many hosts move at once in this change; fleet and site budgets say how much the system carries in total, and a host waiting for capacity says so instead of standing still.")}
+          {t("Decide how many hosts change at once and when the campaign stops itself; the defaults suit a first campaign. A canary goes first as wave zero, the rest follow in waves, and a host waiting for capacity says so instead of standing still.")}
           {" "}
           <Link to="/budgets">{t("See the budgets.")}</Link>
         </>
       }
       footer={
-        <p>
-          {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
-            targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
-          })}
-        </p>
+        <>
+          <p>
+            {t("{targets} hosts, canary {canary}, then waves of {wave} with at most {concurrent} at a time.", {
+              targets, canary: order.canary, wave: order.wave, concurrent: order.concurrent,
+            })}
+          </p>
+          {nav}
+        </>
       }
     >
       <FieldGrid>
-        <Field label={t("Canary")}>
+        <Field label={t("Canary hosts")} hint={t("How many hosts go first, alone, before any wave; 0 skips the canary.")}>
           <input type="number" min={0} value={order.canary}
             onChange={(e) => change({ canary: +e.target.value })} />
         </Field>
-        <Field label={t("Wave")}>
+        <Field label={t("Wave size")} hint={t("How many hosts each wave after the canary holds; the next wave starts when the previous one is done.")}>
           <input type="number" min={1} value={order.wave}
             onChange={(e) => change({ wave: +e.target.value })} />
         </Field>
-        <Field label={t("Concurrent hosts")}>
+        <Field label={t("Concurrent hosts")} hint={t("How many hosts of a wave change at the same moment.")}>
           <input type="number" min={1} value={order.concurrent}
             onChange={(e) => change({ concurrent: +e.target.value })} />
         </Field>
-        <Field label={t("threshold %")}>
+        <Field label={t("Failure threshold (%)")} hint={t("Pause the campaign once this share of the finished hosts failed; 0 turns the share off.")}>
           <input type="number" min={0} max={100} value={order.thresholdPercent}
             onChange={(e) => change({ thresholdPercent: +e.target.value })} />
         </Field>
-        <Field label={t("threshold count")}>
+        <Field label={t("Failure threshold (hosts)")} hint={t("Pause the campaign once this many hosts failed, whatever the share; 0 turns the count off.")}>
           <input type="number" min={0} value={order.thresholdCount}
             onChange={(e) => change({ thresholdCount: +e.target.value })} />
         </Field>
-        <Field label={t("Reboot policy")}>
+        <Field label={t("Reboot policy")} hint={t("Whether a host is rebooted after its change: never, only when the host reports a reboot is required, or always.")}>
           <select value={order.rebootPolicy}
             onChange={(e) => change({ rebootPolicy: e.target.value })}>
             <option value="never">{t("reboot: never")}</option>
@@ -1639,13 +1756,15 @@ function RolloutStep({
           </select>
         </Field>
         <Field label={t("Reboot timeout (seconds)")}
-          hint={t("How long a rebooted host is waited for before it fails; a host still away when the maintenance window ends fails at once and pauses the campaign.")}>
+          hint={order.rebootPolicy === "never"
+            ? t("Not used: the reboot policy is never.")
+            : t("How long a rebooted host is waited for before it fails; a host still away when the maintenance window ends fails at once and pauses the campaign.")}>
           <input type="number" min={REBOOT_TIMEOUT.min} max={REBOOT_TIMEOUT.max} step={60}
             value={order.rebootTimeoutSeconds}
             disabled={order.rebootPolicy === "never"}
             onChange={(e) => change({ rebootTimeoutSeconds: +e.target.value })} />
         </Field>
-        <Field label={t("connectivity loss threshold")}
+        <Field label={t("Connectivity loss threshold (hosts)")}
           hint={t("Pause once this many hosts lose their session mid-task; 0 turns the check off. A change that cuts hosts off shows up here, not among the failures.")}>
           <input type="number" min={0} value={order.connectivityLost}
             onChange={(e) => change({ connectivityLost: +e.target.value })} />
@@ -1699,10 +1818,12 @@ function WindowStep({
   order,
   change,
   operation,
+  nav,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
   operation?: Operation;
+  nav: ReactNode;
 }) {
   const t = useT();
   const problem = windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date());
@@ -1715,7 +1836,8 @@ function WindowStep({
   return (
     <Card
       title={`5. ${t("Window and verification")}`}
-      description={t("No host is started outside the maintenance window, and every host is checked once its change is done. Both go into the fingerprint the approver signs.")}
+      description={t("Say when the change may run and what is checked afterwards; everything here is optional, and left empty the campaign runs as soon as it is approved and verifies nothing. Both go into the fingerprint the approver signs; the next step creates the campaign.")}
+      footer={nav}
     >
       <FieldGrid>
         <Field label={t("Window opens")}
@@ -1806,6 +1928,7 @@ function CreateStep({
   compensates,
   campaignID,
   onCreated,
+  nav,
 }: {
   order: Order;
   change: (delta: Partial<Order>) => void;
@@ -1813,6 +1936,7 @@ function CreateStep({
   compensates?: Preview["compensates"];
   campaignID: string;
   onCreated: (id: string) => void;
+  nav: ReactNode;
 }) {
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
@@ -1845,7 +1969,10 @@ function CreateStep({
   return (
     <Card
       title={`6. ${t("Create")}`}
-      description={t("Creating the campaign freezes the snapshot. Nothing changes on any host yet.")}
+      description={scheduling
+        ? t("Give the reason and record the schedule: the order is placed at its moments, and each campaign it places waits for its approval. Nothing changes on any host now.")
+        : t("Give the reason and create the campaign: this freezes the host list and every host starts computing its plan. Nothing changes on any host yet; that takes the approval two steps on.")}
+      footer={nav}
     >
       {/* The link is part of what is created: the operator is to read
           which campaign this one undoes before pressing the button, not
@@ -1879,13 +2006,18 @@ function CreateStep({
       </FieldGrid>
       <Actions>
         {scheduling ? (
-          <button onClick={() => schedule.mutate()} disabled={schedule.isPending || Boolean(scheduled) || !reasonOK}>
+          <button onClick={() => schedule.mutate()} disabled={schedule.isPending || Boolean(scheduled) || !reasonOK}
+            title={scheduled ? t("The schedule is already recorded.") : !reasonOK ? t("Give a reason of at least {n} characters first.", { n: MIN_REASON }) : undefined}>
             {schedule.isPending ? t("Scheduling…") : t("Schedule a campaign on {n} hosts", { n: targets })}
           </button>
         ) : (
-          <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID) || !reasonOK}>
+          <button onClick={() => create.mutate()} disabled={create.isPending || Boolean(campaignID) || !reasonOK}
+            title={campaignID ? t("The campaign is already created.") : !reasonOK ? t("Give a reason of at least {n} characters first.", { n: MIN_REASON }) : undefined}>
             {create.isPending ? t("Creating…") : t("Create a campaign on {n} hosts", { n: targets })}
           </button>
+        )}
+        {!reasonOK && !campaignID && !scheduled && (
+          <span className="source">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
         )}
         {scheduled && (
           <span className="source">
@@ -1899,7 +2031,7 @@ function CreateStep({
   );
 }
 
-function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
+function PlansStep({ campaignID, campaign, nav }: { campaignID: string; campaign?: Campaign; nav: ReactNode }) {
   const t = useT();
   const targets = useTargets(campaignID, {});
   // The consent covers the set of plans, so the operator is to see that set
@@ -1919,8 +2051,9 @@ function PlansStep({ campaignID, campaign }: { campaignID: string; campaign?: Ca
     <Card
       title={`7. ${t("Plans")}`}
       description={planning
-        ? t("Each host is computing its own diff. Nothing is applied while this runs.")
-        : t("Every host has its plan. The fingerprint below covers the whole set: a host whose plan changed refuses the change.")}
+        ? t("Wait: each host is computing what it would change, and the page refreshes by itself. Nothing is applied while this runs; the approval opens once every plan is in.")
+        : t("Read what every host would change - hosts with the same change are shown as one group - then go on to approve. The fingerprint covers the whole set: a host whose plan changed refuses the change.")}
+      footer={nav}
       flush
     >
       {/* One group is one shape of the change: its hosts, fingerprint and
@@ -1945,7 +2078,7 @@ export type PlanGroups = {
   plan_ttl_seconds?: number;
 };
 
-function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?: Campaign }) {
+function ApprovalStep({ campaignID, campaign, nav }: { campaignID: string; campaign?: Campaign; nav: ReactNode }) {
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
   // The reason and the change ticket go into the approval record next to
@@ -1973,13 +2106,16 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
   return (
     <Card
       title={`8. ${t("Approval and run")}`}
-      description={t("You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
+      description={t("Give the reason and approve: the campaign starts at once, canary first, and its progress is followed on the campaign page. You are approving this operation, this payload, this list of hosts, this rollout policy and this set of plans - together, as one fingerprint.")}
+      footer={nav}
       flush
     >
       <p className="source mono">{t("fingerprint")} {campaign.approval_fingerprint}</p>
       {errorMessage && <p className="page-error">{errorMessage}</p>}
       {campaign.state === "awaiting_approval" ? (
-        <>
+        // The card is flush for the target table under it; the form
+        // keeps the card's own padding so it does not touch the edges.
+        <div style={{ padding: "14px var(--card-pad-x)" }}>
           <FieldGrid>
             {/* The consent is what the audit record keeps next to the
                 fingerprint; a consent without a reason is noise there, so
@@ -1995,12 +2131,16 @@ function ApprovalStep({ campaignID, campaign }: { campaignID: string; campaign?:
               <input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="CHG-1234" />
             </Field>
           </FieldGrid>
-          <p>
-            <button onClick={() => approve.mutate()} disabled={approve.isPending || !reasonValid(reason)}>
+          <Actions>
+            <button onClick={() => approve.mutate()} disabled={approve.isPending || !reasonValid(reason)}
+              title={reasonValid(reason) ? undefined : t("Give a reason of at least {n} characters first.", { n: MIN_REASON })}>
               {approve.isPending ? t("Approving…") : t("Approve and start")}
             </button>
-          </p>
-        </>
+            {!reasonValid(reason) && (
+              <span className="source">{t("The button waits for a reason of at least {n} characters.", { n: MIN_REASON })}</span>
+            )}
+          </Actions>
+        </div>
       ) : (
         <p>
           {t("This campaign is")} <JobState state={campaign.state} />.{" "}

@@ -10,6 +10,11 @@ import { Breakdown } from "../components/widgets";
 import { CertificateAuthority } from "./CertificateAuthority";
 import { useT } from "../i18n";
 
+/** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
+function anyScope(value: string | undefined): boolean {
+  return !value || value === "*";
+}
+
 const ROLES = [
   "viewer", "auditor", "operator", "approver", "identity_admin", "platform_admin",
 ];
@@ -179,7 +184,9 @@ function Mappings() {
   // how many of them reach the whole fleet rather than one site or
   // environment. A fleet-wide operator mapping is the one to look at.
   const byRole = ROLES.map((role) => ({ role, count: mappings.filter((mapping) => mapping.role === role).length }));
-  const fleetWide = mappings.filter((mapping) => !mapping.site && !mapping.environment).length;
+  // The server keeps "any" as an asterisk and older records as an empty
+  // string; both reach the whole fleet.
+  const fleetWide = mappings.filter((mapping) => anyScope(mapping.site) && anyScope(mapping.environment)).length;
   const aside = form || removing !== null;
 
   return (
@@ -206,7 +213,9 @@ function Mappings() {
                     <td className="mono">{mapping.group_name}</td>
                     <td>{mapping.role}</td>
                     <td className="source">
-                      {mapping.site || "*"} / {mapping.environment || "*"}
+                      {anyScope(mapping.site) && anyScope(mapping.environment)
+                        ? <span className="badge warn">{t("whole fleet")}</span>
+                        : `${mapping.site || "*"} / ${mapping.environment || "*"}`}
                     </td>
                     <td className="source">{mapping.created_by}</td>
                     <td><Time value={mapping.created_at} /></td>

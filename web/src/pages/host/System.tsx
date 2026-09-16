@@ -1,12 +1,15 @@
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { SystemHistoryEntry, SystemSnapshot } from "../../lib/types";
 import { Time as Timestamp, Empty } from "../../components/ui";
-import { bytes } from "../../lib/format";
+import { Meter } from "../../components/widgets";
+import { absoluteTime, bytes } from "../../lib/format";
 import {
   Fact, Facts, Foot, ModuleFreshness, ModuleHeader, ModulePage, Section, Table, Unknown, Widgets,
-  useHost, useModule,
+  usageTone, useHost, useModule,
 } from "./shared";
+import { adapterSegment } from "./Overview";
 import { useT } from "../../i18n";
 
 /**
@@ -118,9 +121,12 @@ export function System() {
           <Fact label={t("Release")}>
             {snapshot.distribution?.pretty_name || snapshot.os?.pretty_name || <Unknown />}
           </Fact>
+          {/* The uptime is as old as the read; beside it the boot instant
+              itself, absolute, so the two never disagree by the age of
+              the snapshot. */}
           <Fact label={t("Uptime")}>
-            {uptime === undefined ? <Unknown /> : uptimeText(uptime)}
-            {snapshot.boot?.booted_at && <span className="source"> · {t("since")} <Timestamp value={snapshot.boot.booted_at} /></span>}
+            {uptime === undefined ? <Unknown /> : <span title={t("as of the last read")}>{uptimeText(uptime)}</span>}
+            {snapshot.boot?.booted_at && <span className="source"> · {t("since")} {absoluteTime(snapshot.boot.booted_at)}</span>}
           </Fact>
           <Fact label={t("Runs on")}>
             {virtualization ? (virtualization === "none" ? t("bare metal") : virtualization) : <Unknown />}
@@ -188,8 +194,16 @@ export function System() {
               ? fact("memory", undefined)
               : snapshot.memory?.swap_total_bytes === undefined ? "—" : snapshot.memory.swap_total_bytes === 0 ? t("none") : bytes(snapshot.memory.swap_total_bytes)}
           </Fact>
-          <Fact label={t("Root filesystem")}>{snapshot.hardware?.root_fs_bytes ? bytes(snapshot.hardware.root_fs_bytes) : "—"}</Fact>
-          <Fact label={t("Root filesystem free")}>{snapshot.hardware?.root_fs_bytes ? bytes(snapshot.hardware.root_fs_free_bytes) : "—"}</Fact>
+          <Fact label={t("Root filesystem")} wide>
+            {snapshot.hardware?.root_fs_bytes && snapshot.hardware.root_fs_free_bytes !== undefined ? (
+              <Meter
+                value={snapshot.hardware.root_fs_bytes - snapshot.hardware.root_fs_free_bytes}
+                max={snapshot.hardware.root_fs_bytes}
+                tone={usageTone(snapshot.hardware.root_fs_bytes - snapshot.hardware.root_fs_free_bytes, snapshot.hardware.root_fs_bytes)}
+                text={t("{free} free of {total}", { free: bytes(snapshot.hardware.root_fs_free_bytes), total: bytes(snapshot.hardware.root_fs_bytes) })}
+              />
+            ) : snapshot.hardware?.root_fs_bytes ? bytes(snapshot.hardware.root_fs_bytes) : "—"}
+          </Fact>
         </Facts>
       </Section>
 
@@ -237,14 +251,27 @@ export function System() {
           stand on, with the reason where one is missing. */}
       <Section title={t("Detected capabilities")} count={(host.capabilities ?? []).length} span={6} flush>
         <Table>
-          <thead><tr><th>{t("Adapter")}</th><th>{t("Available")}</th><th>{t("Reason")}</th></tr></thead>
+          <thead><tr><th>{t("Adapter")}</th><th>{t("State")}</th><th>{t("Reason")}</th></tr></thead>
           <tbody>
             {(host.capabilities ?? []).length === 0 ? (
               <tr><td colSpan={3} className="empty">{t("The host has not reported its adapters.")}</td></tr>
             ) : (host.capabilities ?? []).map((capability) => (
               <tr key={capability.name}>
-                <td className="hm-mono hm-primary">{capability.name}</td>
-                <td>{capability.available ? <span className="badge ok">{t("yes")}</span> : <span className="badge">{t("no")}</span>}</td>
+                <td className="hm-mono hm-primary">
+                  {adapterSegment(capability.name)
+                    ? <Link to={`/hosts/${host.id}/${adapterSegment(capability.name)}`}>{capability.name}</Link>
+                    : capability.name}
+                </td>
+                {/* The same three states as the overview: a read-only
+                    adapter is available, and the reason says what it
+                    would take to write. */}
+                <td>
+                  {!capability.available
+                    ? <span className="badge">{t("unavailable")}</span>
+                    : capability.read_only
+                      ? <span className="badge warn">{t("read only")}</span>
+                      : <span className="badge ok">{t("available")}</span>}
+                </td>
                 <td>{capability.reason || "—"}</td>
               </tr>
             ))}

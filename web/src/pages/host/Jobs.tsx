@@ -18,8 +18,30 @@ const BEFORE_START = ["planned", "awaiting_approval", "queued", "leased", "dispa
 /** The states in which the host is working on the job. */
 const STARTED = ["running"];
 
-/** The states the filter offers; the same list the fleet page offers. */
-const JOB_STATES = ["awaiting_approval", "queued", "dispatched", "running", "succeeded", "failed", "timed_out", "canceled", "expired"];
+/** The states the filter offers, with the words the state badge uses for them; the same list the fleet page offers. */
+const JOB_STATES: { value: string; label: string }[] = [
+  { value: "awaiting_approval", label: "awaiting approval" },
+  { value: "queued", label: "queued" },
+  { value: "dispatched", label: "dispatched" },
+  { value: "running", label: "running" },
+  { value: "succeeded", label: "succeeded" },
+  { value: "failed", label: "failed" },
+  { value: "timed_out", label: "timed out" },
+  { value: "canceled", label: "canceled" },
+  { value: "expired", label: "expired" },
+];
+
+/**
+ * The campaign a job belongs to, as the chip names it: the campaign's
+ * name where the job's author carries it ("campaign:<name>"), else the
+ * first letters of its identifier. The name is what the operator knows
+ * the campaign by; the identifier is what the link needs.
+ */
+export function campaignLabel(job: Pick<Job, "campaign_id" | "created_by">): string {
+  const author = job.created_by;
+  if (author.startsWith("campaign:") && author.length > "campaign:".length) return author.slice("campaign:".length);
+  return (job.campaign_id ?? "").slice(0, 8);
+}
 
 /** How many jobs one page of the list carries. */
 const JOBS_PAGE = 50;
@@ -166,7 +188,7 @@ export function HostJobs() {
           <>
             <select value={state} onChange={(e) => setState(e.target.value)}>
               <option value="">{t("state: any")}</option>
-              {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
+              {JOB_STATES.map((item) => <option key={item.value} value={item.value}>{t(item.label)}</option>)}
             </select>
             <input
               placeholder={t("operation prefix, e.g. packages.")}
@@ -227,8 +249,8 @@ export function HostJobs() {
                     {job.campaign_id && (
                       <>
                         {" "}
-                        <Link to={`/campaigns/${job.campaign_id}`} className="chip" title={t("Part of a campaign")}>
-                          {t("campaign {id}", { id: job.campaign_id.slice(0, 8) })}
+                        <Link to={`/campaigns/${job.campaign_id}`} className="chip" title={`${t("Part of a campaign")} · ${job.campaign_id}`}>
+                          {t("campaign {id}", { id: campaignLabel(job) })}
                         </Link>
                       </>
                     )}
@@ -244,7 +266,11 @@ export function HostJobs() {
                       />
                     )}
                   </td>
-                  <td>{job.created_by}</td>
+                  <td>
+                    {/* A campaign's job is requested by the campaign; the
+                        chip beside the operation already names it. */}
+                    {job.created_by.startsWith("campaign:") ? <span className="source">{t("the campaign")}</span> : job.created_by}
+                  </td>
                   <td>
                     {job.required_approvals > 1 ? (
                       <>
@@ -255,7 +281,16 @@ export function HostJobs() {
                       job.approved_by || "—"
                     )}
                   </td>
-                  <td>{job.result_error_code ? <ErrorCode code={job.result_error_code} /> : (job.result_status || "—")}</td>
+                  {/* The result is the typed answer of the host: an error
+                      code with its guide, or a status other than the one
+                      the state badge already shows. */}
+                  <td>
+                    {job.result_error_code
+                      ? <ErrorCode code={job.result_error_code} />
+                      : job.result_status && job.result_status !== job.state
+                        ? <JobState state={job.result_status} />
+                        : <span className="source">—</span>}
+                  </td>
                   <td><Time value={job.created_at} /></td>
                   <td>
                     <div className="operations">

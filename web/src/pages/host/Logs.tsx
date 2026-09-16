@@ -388,8 +388,8 @@ export function Logs() {
         <Form>
           {source === "journal" ? (
             <Fields>
-              <Field label={t("Unit")}>
-                <input placeholder={t("unit (optional)")} value={unit} onChange={(e) => setUnit(e.target.value)} />
+              <Field label={t("Unit")} help={t("Empty reads the whole journal.")}>
+                <input placeholder="sshd.service" value={unit} onChange={(e) => setUnit(e.target.value)} />
               </Field>
               <Field label={t("Severity")}>
                 <select value={priority} onChange={(e) => setPriority(e.target.value)}>
@@ -399,9 +399,9 @@ export function Logs() {
                   <option value="6">{t("info and above")}</option>
                 </select>
               </Field>
-              <Field label={t("Since")}>
+              <Field label={t("Since")} help={t("As journalctl takes it: -1h, yesterday, 2026-09-15 10:00 — in the host's clock.")}>
                 <input
-                  placeholder={t("since, e.g. -1h")}
+                  placeholder="-1h"
                   value={bounds ? bounds.since : since}
                   disabled={!!bounds}
                   onChange={(e) => setSince(e.target.value)}
@@ -448,7 +448,7 @@ export function Logs() {
                   </div>
                 </Field>
               )}
-              <Field label={t("lines")} narrow>
+              <Field label={t("Lines")} narrow help={t("The newest ones; at most 2000.")}>
                 <input
                   type="number"
                   min={1}
@@ -460,14 +460,14 @@ export function Logs() {
             </Fields>
           ) : (
             <Fields>
-              <Field label={t("log file")} wide help={t("Only paths on the host's allowlist can be read, and symlinks are not followed.")}>
+              <Field label={t("Log file")} wide help={t("Only paths on the host's allowlist can be read, and symlinks are not followed.")}>
                 <input
                   placeholder="/var/log/syslog"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
                 />
               </Field>
-              <Field label={t("lines")} narrow>
+              <Field label={t("Lines")} narrow help={t("The last ones of the file; at most 2000.")}>
                 <input
                   type="number"
                   min={1}
@@ -489,6 +489,7 @@ export function Logs() {
             {source === "journal" && !preview && (
               <button
                 className="secondary"
+                title={t("A live stream of the journal with these filters, for a bounded time; lines the host cannot send in time are dropped and counted.")}
                 onClick={() => follow.mutate()}
                 disabled={follow.isPending || host.connection_state !== "online"}
               >

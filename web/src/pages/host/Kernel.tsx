@@ -160,19 +160,28 @@ export function Kernel() {
                     <span className="badge unknown"> {t("not applied yet")}</span>
                   )}
                 </td>
-                <td>{setting.managed ? "Flotestro" : t("kernel default or host admin")}</td>
+                <td>
+                  {setting.managed
+                    ? <span className="badge ok">{t("panel")}</span>
+                    : <span className="source">{t("kernel default or host admin")}</span>}
+                </td>
               </tr>
             ))}
           </tbody>
         </Table>
         <div className="hm-section-body">
+          {/* What the form does is said before the first keystroke: the
+              key goes to the panel's own file and is applied at once. */}
           <Form>
             <Fields>
-              <Field label={t("Key")}>
-                <input value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("Key, e.g. vm.swappiness")} />
+              <Field
+                label={t("Key")}
+                help={t("A sysctl key. It is written to {path} and applied now; a key that is not in the profile above joins it.", { path: snapshot?.managed_path || "/etc/sysctl.d" })}
+              >
+                <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="vm.swappiness" />
               </Field>
-              <Field label={t("Value")} narrow>
-                <input value={value} onChange={(e) => setValue(e.target.value)} placeholder={t("Value")} />
+              <Field label={t("Value")} narrow help={t("As sysctl takes it.")}>
+                <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="10" />
               </Field>
             </Fields>
             <FormActions>

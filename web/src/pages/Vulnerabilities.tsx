@@ -233,6 +233,10 @@ export function FleetVulnerabilities() {
   const reason = (code: string) => (COVERAGE_REASONS[code] ? t(COVERAGE_REASONS[code]) : code);
 
   const fullyAssessed = data.hosts_assessed >= data.hosts_total;
+  // A host the feed covers only in part - a package from outside the
+  // distribution, a family without a feed - is neither fully assessed nor
+  // unassessed; it is the rest of the fleet.
+  const partlyAssessed = Math.max(0, data.hosts_total - data.hosts_assessed - data.hosts_without_assessment);
   // The hosts with the most open findings, the gravest first, as the
   // server sorted them: a host with a vendor fix waiting outranks one with
   // more findings and nothing to apply. A host that could not be assessed
@@ -285,11 +289,20 @@ export function FleetVulnerabilities() {
           </p>
         </Card>
 
-        <Card className="span-4" title={t("Assessed")} description={t("{n} of {total}", { n: data.hosts_assessed, total: data.hosts_total })}>
+        {/* The three segments are the whole fleet, host by host: fully
+            assessed, assessed with packages the feed does not cover, and
+            never assessed. The affected hosts are named under the findings;
+            an affected host is also an assessed one, so it is not a fourth
+            segment of the same bar. */}
+        <Card
+          className="span-4"
+          title={t("Assessed")}
+          description={t("{n} of {total} hosts fully assessed", { n: data.hosts_assessed, total: data.hosts_total })}
+        >
           <StatusBar segments={[
-            { label: t("Assessed"), value: data.hosts_assessed, tone: fullyAssessed ? "ok" : "warn" },
-            { label: t("Not assessed"), value: data.hosts_without_assessment, tone: "unknown" },
-            { label: t("Affected"), value: data.hosts_affected, tone: "error" },
+            { label: t("Fully assessed"), value: data.hosts_assessed, tone: fullyAssessed ? "ok" : "warn" },
+            { label: t("Not fully assessed"), value: partlyAssessed, tone: "warn" },
+            { label: t("Never assessed"), value: data.hosts_without_assessment, tone: "unknown" },
           ]} />
         </Card>
 

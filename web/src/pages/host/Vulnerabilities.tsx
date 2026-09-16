@@ -252,7 +252,11 @@ export function Vulnerabilities() {
   // The affected findings by the vendor's severity and by package. Both are
   // unknown until the report arrives - and even then they stand next to the
   // coverage, because a host the feed does not cover shows zero too.
-  const affected = data ? findings.filter((finding) => finding.state === "affected") : undefined;
+  // Without a feed nothing was assessed: the counts are then not known
+  // rather than zero, and the bar shows dashes. A host the feed covers in
+  // part has counts, read next to the coverage.
+  const assessed = !!data && !!state && (state.packages_covered > 0 || !state.coverage_reason);
+  const affected = assessed ? findings.filter((finding) => finding.state === "affected") : undefined;
   const severities = ["critical", "high", "medium", "low"];
   const packages = Object.entries((affected ?? []).reduce<Record<string, number>>((acc, finding) => {
     const name = finding.binary_package || finding.source_package || "?";
@@ -300,9 +304,13 @@ export function Vulnerabilities() {
       />
       <p className="hm-freshness">
         <span>
-          {t("{cves} distinct CVEs · {advisories} vendor advisories · {packages} installed packages to move. One advisory carries several CVEs and touches several packages, so these never add up — and each answers a different question.", {
-            cves: state?.unique_cves ?? 0, advisories: state?.unique_advisories ?? 0, packages: state?.affected_packages ?? 0,
-          })}
+          {!data
+            ? t("Loading…")
+            : !assessed
+              ? t("Not assessed: no count here is known until a feed covers this host.")
+              : t("{cves} distinct CVEs · {advisories} vendor advisories · {packages} installed packages to move. One advisory carries several CVEs and touches several packages, so these never add up — and each answers a different question.", {
+                  cves: state?.unique_cves ?? 0, advisories: state?.unique_advisories ?? 0, packages: state?.affected_packages ?? 0,
+                })}
         </span>
       </p>
       <Message text={message} />
@@ -337,7 +345,7 @@ export function Vulnerabilities() {
             tone: severity === "critical" || severity === "high" ? "error" as const : severity === "medium" ? "warn" as const : "neutral" as const,
           })),
           { label: t("unrated"), value: countWhere(affected, (f) => !severities.includes(f.vendor_severity ?? "")), tone: "unknown" },
-          { label: t("not established"), value: state?.unknown, tone: "unknown" },
+          { label: t("not established"), value: assessed ? state?.unknown : undefined, tone: "unknown" },
         ]}
       />
       <Section title={t("Coverage")} span={4} flush>
@@ -357,7 +365,9 @@ export function Vulnerabilities() {
             )}
           </Fact>
           <Fact label={t("By vendor fix")} wide>
-            {state ? (
+            {!state ? "—" : !assessed ? (
+              <span className="source">{t("nothing assessed")}</span>
+            ) : (
               <Breakdown
                 items={[
                   { label: t("With a vendor fix"), value: state.affected_with_vendor_fix, tone: "error" },
@@ -365,7 +375,7 @@ export function Vulnerabilities() {
                   { label: t("Not established"), value: state.unknown, tone: "unknown" },
                 ]}
               />
-            ) : "—"}
+            )}
           </Fact>
         </Facts>
       </Section>
@@ -398,7 +408,9 @@ export function Vulnerabilities() {
       >
         {!visible.length ? (
           <Empty>
-            {search.trim() || severity
+            {data && !assessed
+              ? t("Nothing was assessed: {reason}. The list is empty because nothing was checked, not because nothing was found.", { reason: reason(state?.coverage_reason) })
+              : search.trim() || severity
               ? t("No finding matches these filters.")
               : filter === "fixable"
               ? t("Nothing here can be closed by installing an update.")
@@ -504,8 +516,10 @@ export function Vulnerabilities() {
       </Section>
 
       <Section title={t("Most affected packages")} span={4} description={t("Findings per package; one advisory can touch several.")}>
-        {affected === undefined ? (
+        {!data ? (
           <p className="source" style={{ margin: 0 }}>{t("Loading…")}</p>
+        ) : affected === undefined ? (
+          <p className="source" style={{ margin: 0 }}>{t("Not assessed: no package on this host was checked against a feed.")}</p>
         ) : !packages.length ? (
           <p className="source" style={{ margin: 0 }}>{t("No package on this host is known to be affected.")}</p>
         ) : (

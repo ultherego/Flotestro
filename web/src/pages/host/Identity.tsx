@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import type { Host, HostAccess, Job, LocalSudoRule, OfflineVerdict } from "../../lib/types";
 import { Time, OptionalFlag } from "../../components/ui";
 import { absoluteTime } from "../../lib/format";
+import { duration } from "../Monitoring";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, FormNote, JobNotice, Message, ModuleFreshness, ModuleHeader,
   ModulePage, Section, Table, Unknown, useHost, useModule, useReadOperation,
@@ -41,6 +42,10 @@ export function Identity() {
   const host = useHost();
   const module = useModule<IdentityState>(host.id, "identity");
   const identity = module.data?.payload ?? {};
+  // A host outside any domain has no principal, no keytab and no cache to
+  // speak of: those facts do not apply, which is not the same as unknown.
+  const notInDomain = <span className="source">{t("not in a domain")}</span>;
+  const enrolled = host.identity.enrolled;
 
   return (
     <ModulePage>
@@ -59,22 +64,30 @@ export function Identity() {
           <Fact label={t("Realm")}>{host.identity.realm || "—"}</Fact>
           <Fact label={t("Servers")}><span className="hm-mono">{(identity.servers ?? []).join(", ") || "—"}</span></Fact>
           <Fact label={t("Host principal")}>
-            {identity.host_principal ? <span className="hm-mono">{identity.host_principal}</span> : <Unknown />}
+            {identity.host_principal ? <span className="hm-mono">{identity.host_principal}</span> : enrolled ? <Unknown /> : notInDomain}
           </Fact>
-          <Fact label={t("Keytab KVNO")}>{identity.keytab_kvno ?? <Unknown />}</Fact>
+          <Fact label={t("Keytab KVNO")}>
+            {identity.keytab_kvno ?? (enrolled ? <Unknown /> : notInDomain)}
+          </Fact>
         </Facts>
       </Section>
 
       <Section title={t("Directory client")} flush>
         <Facts>
           <Fact label={t("SSSD running")}>{identity.sssd_running ? t("yes") : t("no")}</Fact>
-          <Fact label={t("SSSD online")}><OptionalFlag value={host.identity.sssd_online} /></Fact>
+          <Fact label={t("SSSD online")}>
+            {enrolled || (host.identity.sssd_online !== undefined && host.identity.sssd_online !== null)
+              ? <OptionalFlag value={host.identity.sssd_online} />
+              : notInDomain}
+          </Fact>
           <Fact label={t("Cache age")}>
             {identity.cache_age_seconds !== undefined
-              ? `${identity.cache_age_seconds} s`
-              : <Unknown />}
+              ? <span title={t("{n} seconds", { n: identity.cache_age_seconds })}>{duration(identity.cache_age_seconds)}</span>
+              : enrolled ? <Unknown /> : notInDomain}
           </Fact>
-          <Fact label={t("Clock synchronized")}>{identity.time_synchronized ? t("yes") : t("no")}</Fact>
+          <Fact label={t("Clock synchronized")}>
+            {identity.time_synchronized === true ? t("yes") : identity.time_synchronized === false ? t("no") : <Unknown />}
+          </Fact>
           <Fact label={t("Checked")}><Time value={host.identity.checked_at} /></Fact>
         </Facts>
       </Section>
@@ -735,8 +748,10 @@ function LocalSudoRules({ access }: { access: HostAccess }) {
             </Foot>
           )}
           <Foot>
-            {t("Read from {files} files", { files: (state.files ?? []).length })}
-            {state.observed_at && <>, <Time value={state.observed_at} /></>}
+            <span>
+              {t("Read from {files} files", { files: (state.files ?? []).length })}
+              {state.observed_at && <>{" · "}<Time value={state.observed_at} /></>}
+            </span>
           </Foot>
         </>
       )}

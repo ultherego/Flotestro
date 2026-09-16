@@ -5,6 +5,7 @@ import type { PolicyResult, PolicyVerdict } from "../../lib/types";
 import { POLICY_VERDICTS } from "../../lib/types";
 import { ErrorBox, Empty, Time } from "../../components/ui";
 import { EmptyState } from "../../components/layout";
+import { absoluteTime } from "../../lib/format";
 import { ModuleHeader, ModulePage, Section, Summary, Table, Widgets, useHost } from "./shared";
 import { VerdictChip, ruleSummary, verdictLabel, verdictTone } from "../Policies";
 import { useT } from "../../i18n";
@@ -47,7 +48,11 @@ export function HostPolicies() {
           />
           {byPolicy.length === 0 ? (
             <Section title={t("Policies")} span={12}>
-              <EmptyState>{t("No policy selects this host, or none has been evaluated yet.")}</EmptyState>
+              {/* The way to a first policy stands where the list would: an
+                  empty card does not say what fills it. */}
+              <EmptyState action={<Link className="button" to="/policies">{t("Open the policies")}</Link>}>
+                {t("No policy selects this host, or none has been evaluated yet. A policy selects hosts by tag, site or environment and is evaluated on the next inventory.")}
+              </EmptyState>
             </Section>
           ) : byPolicy.map((group) => (
             <Section
@@ -56,11 +61,11 @@ export function HostPolicies() {
               flush
               title={<Link to={`/policies/${group.policyID}`}>{group.name}</Link>}
               count={group.results.length}
-              description={t("version {v}, evaluated {when}", { v: group.results[0].version, when: new Date(group.results[0].evaluated_at).toLocaleString() })}
+              description={t("version {v}, evaluated {when}", { v: group.results[0].version, when: absoluteTime(group.results[0].evaluated_at) })}
             >
               <Table>
                 <thead>
-                  <tr><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th>{t("Read")}</th><th>{t("Evaluated")}</th></tr>
+                  <tr><th>{t("Rule")}</th><th>{t("Verdict")}</th><th>{t("Reason")}</th><th>{t("Inventory revision")}</th><th>{t("Evaluated")}</th></tr>
                 </thead>
                 <tbody>
                   {group.results.map((result) => (

@@ -1,4 +1,5 @@
 import { Fragment, useState } from "react";
+import { Link } from "react-router-dom";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { api, ApiError, loadedItems, type Page } from "../../lib/api";
 import { useDebounced } from "../../lib/debounce";
@@ -12,6 +13,40 @@ import { useT } from "../../i18n";
 
 /** How many events one page of the trail carries. */
 const AUDIT_PAGE = 50;
+
+/**
+ * Who an actor is, in the operator's words: a person by name, a campaign
+ * by a link to it, the agent of this host by the host's name, the panel
+ * as itself. The identifier stays on hover - it is what the trail keeps.
+ */
+export function actorLabel(
+  event: Pick<AuditEvent, "actor_type" | "actor_id">,
+  host: { id: string; hostname: string },
+  t: (text: string, params?: Record<string, string | number>) => string,
+): { text: string; to?: string; title?: string } {
+  const id = event.actor_id;
+  if (id.startsWith("campaign:")) {
+    const campaign = id.slice("campaign:".length);
+    return { text: t("campaign {id}", { id: campaign.slice(0, 8) }), to: `/campaigns/${encodeURIComponent(campaign)}`, title: id };
+  }
+  if (event.actor_type === "agent" || id === host.id) {
+    return { text: t("agent of {host}", { host: host.hostname }), title: id };
+  }
+  return { text: id };
+}
+
+/**
+ * The few keys of the detail an incident review reads first, as one
+ * line; the whole record opens under the row.
+ */
+export function digest(detail: Record<string, unknown> | undefined): string {
+  const interesting = ["reason", "action_type", "state", "permission", "scope", "error_code"];
+  return interesting
+    .filter((key) => detail?.[key] !== undefined && detail[key] !== "")
+    .map((key) => `${key}=${String(detail?.[key])}`)
+    .join(" · ")
+    .slice(0, 120);
+}
 
 /**
  * The audit trail of one host.
@@ -91,7 +126,10 @@ export function HostAudit() {
         ) : !actors.length ? (
           <p className="source" style={{ margin: 0 }}>{t("No events.")}</p>
         ) : (
-          <Breakdown items={actors.map(([actor, count]) => ({ label: actor, value: count }))} />
+          <Breakdown items={actors.map(([actor, count]) => {
+            const who = actorLabel({ actor_type: "", actor_id: actor }, host, t);
+            return { label: <span title={who.title}>{who.text}</span>, value: count };
+          })} />
         )}
       </Section>
       <Section
@@ -132,7 +170,7 @@ export function HostAudit() {
           <Empty>{filtered ? t("No event matches the filter.") : t("No events.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th></th></tr></thead>
+            <thead><tr><th>{t("Time")}</th><th>{t("Actor")}</th><th>{t("Operation")}</th><th>{t("Result")}</th><th>{t("Details")}</th></tr></thead>
             <tbody>
               {events.map((event) => {
                 const open = expanded === event.id;
@@ -141,7 +179,12 @@ export function HostAudit() {
                     <tr>
                       <td><Time value={event.occurred_at} /></td>
                       <td>
-                        {event.actor_id}
+                        {(() => {
+                          const who = actorLabel(event, host, t);
+                          return who.to
+                            ? <Link to={who.to} title={who.title}>{who.text}</Link>
+                            : <span title={who.title}>{who.text}</span>;
+                        })()}
                         {/* The session and how it was authenticated stand
                             under the actor: they say which sign-in acted,
                             which the name alone does not. */}
@@ -156,16 +199,17 @@ export function HostAudit() {
                       <td className="hm-mono">{event.action}</td>
                       <td><JobState state={event.outcome} /></td>
                       <td>
-                        {/* The whole event, as the trail keeps it: the row
-                            shows four columns, and an incident wants every
-                            key of the record. */}
+                        {/* A line of the detail, then the whole event as
+                            the trail keeps it: the row shows four columns,
+                            and an incident wants every key of the record. */}
+                        {digest(event.detail) && <div className="source">{digest(event.detail)}</div>}
                         <button
                           type="button"
-                          className="expander"
+                          className="hm-link"
                           aria-expanded={open}
                           onClick={() => setExpanded(open ? null : event.id)}
                         >
-                          {open ? t("Hide JSON") : t("Show JSON")}
+                          {open ? t("Hide the record") : t("Show the record")}
                         </button>
                       </td>
                     </tr>

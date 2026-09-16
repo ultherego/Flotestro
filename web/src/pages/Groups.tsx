@@ -386,7 +386,13 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
  * hosts are kept by identifier, so a host chosen on one page stays chosen
  * when the search changes.
  */
-export function HostChooser({ selected, onChange }: { selected: Set<string>; onChange: (next: Set<string>) => void }) {
+export function HostChooser({ selected, onChange, title }: {
+  selected: Set<string>;
+  onChange: (next: Set<string>) => void;
+  // The heading over the list; a group calls its hosts members, an
+  // order calls them targets.
+  title?: string;
+}) {
   const t = useT();
   const [search, setSearch] = useState("");
   const settled = useDebounced(search.trim());
@@ -412,7 +418,7 @@ export function HostChooser({ selected, onChange }: { selected: Set<string>; onC
 
   return (
     <>
-      <h4 className="widget-subhead">{t("Members")}</h4>
+      <h4 className="widget-subhead">{title ?? t("Members")}</h4>
       <Toolbar end={<span>{t("{n} chosen", { n: selected.size })}</span>}>
         <input placeholder={t("Search hostname, address, machine ID or owner")} aria-label={t("Search hostname, address, machine ID or owner")} value={search} onChange={(e) => setSearch(e.target.value)} />
         <button type="button" className="secondary" onClick={() => onChange(new Set([...selected, ...rows.map((host) => host.id)]))}>

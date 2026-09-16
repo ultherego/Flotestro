@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Job } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
+import { absoluteTime } from "../../lib/format";
 import { Breakdown } from "../../components/widgets";
 import {
   Fact, Facts, Field, Fields, Form, FormActions, Message, ModuleFreshness, ModuleHeader, ModulePage, Section,
@@ -260,9 +261,9 @@ export function Certificates() {
         span={8}
         segments={[
           { label: t("valid"), value: byStatus("valid"), tone: "ok" },
-          { label: t("Expiring soon"), value: byStatus("warning"), tone: "warn" },
-          { label: t("critical"), value: byStatus("critical"), tone: "error" },
-          { label: t("Expired"), value: byStatus("expired"), tone: "error" },
+          { label: t("under 30 days"), value: byStatus("warning"), tone: "warn" },
+          { label: t("under 7 days"), value: byStatus("critical"), tone: "error" },
+          { label: t("expired"), value: byStatus("expired"), tone: "error" },
           { label: t("unknown"), value: countWhere(known, (c) => !["valid", "warning", "critical", "expired"].includes(c.status)), tone: "unknown" },
         ]}
       />
@@ -299,7 +300,7 @@ export function Certificates() {
             <thead>
               <tr>
                 <th>{t("Path")}</th><th>{t("Subject")}</th><th>{t("Expires")}</th><th>{t("Renewal")}</th>
-                <th>{t("Source")}</th><th>{t("Key")}</th><th>{t("Actions")}</th>
+                <th>{t("Source")}</th><th title={t("The private key file: its mode and owner. The key itself is never read.")}>{t("Key file")}</th><th>{t("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -331,8 +332,10 @@ export function Certificates() {
                   </td>
                   <td>
                     <StatusBadge status={certificate.status} days={certificate.days_to_expiry} />
+                    {/* The date itself under the countdown: "37 d left"
+                        says how urgent, the date says when. */}
                     {certificate.not_after && (
-                      <div className="source"><Time value={certificate.not_after} /></div>
+                      <div className="source">{absoluteTime(certificate.not_after).slice(0, 10)}</div>
                     )}
                   </td>
                   <td>
@@ -387,9 +390,11 @@ export function Certificates() {
                   </td>
                   <td>
                     <div className="operations">
+                      {/* Only certmonger renews from the panel; a manual
+                          certificate has no button, not a dead one. */}
+                      {certificate.renewal === "tracked" && certificate.tracking?.request && (
                       <button
                         className="secondary"
-                        disabled={certificate.renewal !== "tracked" || !certificate.tracking?.request}
                         onClick={() =>
                           setIntent({
                             action: "certificate.renew",
@@ -413,10 +418,16 @@ export function Certificates() {
                       >
                         {t("Renew")}
                       </button>
+                      )}
                       {certificate.watched && (
                         <button className="secondary" onClick={() => forget.mutate(certificate.path)}>
                           {t("Stop watching")}
                         </button>
+                      )}
+                      {!certificate.watched && !(certificate.renewal === "tracked" && certificate.tracking?.request) && (
+                        <span className="source" title={t("Renewed outside the panel; certmonger does not track this file and the panel does not watch it.")}>
+                          {t("renewed by hand")}
+                        </span>
                       )}
                     </div>
                   </td>
@@ -577,17 +588,17 @@ function WatchForm({ onSave }: { onSave: (body: Record<string, unknown>) => void
             <input value={keyPath} onChange={(e) => setKeyPath(e.target.value)}
               placeholder="/etc/pki/tls/private/service.key" />
           </Field>
-          <Field label={t("Key secret (name only)")}>
-            <input value={secret} onChange={(e) => setSecret(e.target.value)} />
+          <Field label={t("Key secret")} help={t("The name of the secret the private key comes from at deployment; the value never travels in a job.")}>
+            <input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="web.tls.key" />
           </Field>
-          <Field label={t("Reload unit (httpd.service)")}>
-            <input value={unit} onChange={(e) => setUnit(e.target.value)} />
+          <Field label={t("Reload unit")} help={t("The service reloaded after a deployment, so it picks the new certificate up.")}>
+            <input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="httpd.service" />
           </Field>
-          <Field label={t("Probe target (host:443)")}>
-            <input value={probe} onChange={(e) => setProbe(e.target.value)} />
+          <Field label={t("Probe target")} help={t("Where the host checks the certificate after the swap; a failed probe rolls the deployment back.")}>
+            <input value={probe} onChange={(e) => setProbe(e.target.value)} placeholder="www.example.internal:443" />
           </Field>
-          <Field label={t("Owner service")}>
-            <input value={service} onChange={(e) => setService(e.target.value)} />
+          <Field label={t("Owner service")} help={t("The service this certificate belongs to, for the list.")}>
+            <input value={service} onChange={(e) => setService(e.target.value)} placeholder="httpd" />
           </Field>
         </Fields>
         <FormActions>

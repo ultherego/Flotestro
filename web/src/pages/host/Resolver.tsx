@@ -31,6 +31,32 @@ type Query = {
 type DNSResult = { kind?: string; queries?: { queries?: Query[] } };
 
 
+/**
+ * What each owner of resolv.conf means for the operator: who rewrites the
+ * file, and so whether a change written by the panel would last.
+ */
+export function ownerMeaning(owner: string): string {
+  switch (owner) {
+    case "systemd-resolved": return "systemd-resolved writes resolv.conf; the servers come from its per-link configuration.";
+    case "networkmanager": return "NetworkManager writes resolv.conf from the connection profiles; the panel changes it through those.";
+    case "dhcp-client": return "A DHCP client writes resolv.conf on every lease; a change by hand is overwritten at the next renewal.";
+    case "manual": return "resolv.conf was written by hand; no service rewrites it.";
+    default: return "";
+  }
+}
+
+/** What the resolver mode means: how resolv.conf relates to the daemon. */
+export function modeMeaning(mode: string): string {
+  switch (mode) {
+    case "stub": return "resolv.conf points at the local stub of systemd-resolved; the real servers are per link.";
+    case "static": return "resolv.conf lists the upstream servers as systemd-resolved knows them, without the stub.";
+    case "uplink": return "resolv.conf lists the upstream servers of systemd-resolved directly.";
+    case "foreign": return "resolv.conf is not managed by systemd-resolved; something else wrote it.";
+    case "file": return "A plain file read by the libc resolver directly; there is no daemon in between.";
+    default: return "";
+  }
+}
+
 type Snapshot = {
   owner?: string;
   mode?: string;
@@ -150,20 +176,22 @@ export function Resolver() {
           is protected, which decide whether the panel may touch it. */}
       <Summary
         title={t("Resolution")}
-        description={t("The servers, the search domains and the links with resolvers of their own.")}
+        description={t("The servers, the search domains, and the links that carry servers or encrypt their queries.")}
         span={8}
         segments={[
           { label: t("Servers"), value: known ? (known.servers ?? []).length : undefined, tone: "info" },
           { label: t("Search domains"), value: known ? (known.search_domains ?? []).length : undefined, tone: "info" },
-          { label: t("Per-link resolvers"), value: countWhere(links, (link) => (link.servers ?? []).length > 0), tone: "neutral" },
-          { label: t("links with DNS over TLS"), value: countWhere(links, (link) => link.dns_over_tls === "yes"), tone: "ok" },
+          { label: t("Links with servers"), value: countWhere(links, (link) => (link.servers ?? []).length > 0), tone: "neutral" },
+          { label: t("Links with DoT"), value: countWhere(links, (link) => link.dns_over_tls === "yes"), tone: "ok" },
         ]}
       />
       <Section title={t("Ownership")} span={4} flush>
         <Facts>
+          {/* The owner and the mode are the daemon's words; the hover
+              says what each means for a change written here. */}
           <Fact label={t("Owner")}>
-            {snapshot?.owner || unknown}
-            {snapshot?.mode && <span className="source"> · {snapshot.mode}</span>}
+            {snapshot?.owner ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span> : unknown}
+            {snapshot?.mode && <span className="source" title={t(modeMeaning(snapshot.mode)) || undefined}> · {snapshot.mode}</span>}
           </Fact>
           <Fact label={t("Write adapter")}>
             {snapshot?.writable
@@ -182,8 +210,12 @@ export function Resolver() {
           width. */}
       <Section title={t("DNS")} span={6} flush>
         <Facts>
-          <Fact label={t("Owner")}>{snapshot?.owner || unknown}</Fact>
-          <Fact label={t("Mode")}>{snapshot?.mode || "—"}</Fact>
+          <Fact label={t("Owner")}>
+            {snapshot?.owner ? <span title={t(ownerMeaning(snapshot.owner)) || undefined}>{snapshot.owner}</span> : unknown}
+          </Fact>
+          <Fact label={t("Mode")}>
+            {snapshot?.mode ? <span title={t(modeMeaning(snapshot.mode)) || undefined}>{snapshot.mode}</span> : "—"}
+          </Fact>
           <Fact label="resolv.conf">
             <span className="hm-mono">
               {snapshot?.resolv_conf}
@@ -268,7 +300,7 @@ export function Resolver() {
         ) : (
           <Table>
             <thead>
-              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th>DoT</th></tr>
+              <tr><th>{t("Link")}</th><th>{t("Servers")}</th><th>{t("Domains")}</th><th>{t("Answers other names")}</th><th>DNSSEC</th><th title="DNS over TLS">DoT</th></tr>
             </thead>
             <tbody>
               {snapshot.links.map((link) => (

@@ -313,7 +313,17 @@ export function Packages() {
             { label: t("security"), value: security, tone: "error" },
             { label: t("held"), value: heldCount(packages), tone: "neutral" },
           ]}
-        />
+        >
+          {/* A dash is not a zero: the operator is told why the host has
+              no count, and what produces one. */}
+          {pending === undefined && (
+            <p className="source" style={{ margin: "8px 0 0" }}>
+              {packages?.unavailable_reason
+                ? t("The update counts could not be read: {reason}", { reason: packages.unavailable_reason })
+                : t("The host has not counted its updates yet; plan updates below to count them.")}
+            </p>
+          )}
+        </Summary>
         <Section title={t("Sources")} span={4} flush>
           <Facts>
             <Fact label={t("Installed")}>{packages?.installed ?? <Unknown />}</Fact>
@@ -449,7 +459,7 @@ export function Packages() {
               <input
                 value={agentVersion}
                 onChange={(e) => setAgentVersion(e.target.value)}
-                placeholder="0.2.0"
+                placeholder={t("e.g. {version}", { version: host.agent_version || "0.51.0" })}
               />
             </Field>
           </Fields>
@@ -905,7 +915,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
                 <th>{t("Outcome")}</th>
                 <th>{t("Applied")}</th>
                 <th>{t("By")}</th>
-                <th></th>
+                <th>{t("Job")}</th>
               </tr>
             </thead>
             <tbody>
@@ -924,7 +934,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
                   </td>
                   <td>{job.created_by}</td>
                   <td>
-                    <Link to={`/hosts/${hostId}/jobs`} className="mono" title={job.id}>{job.id.slice(0, 8)}</Link>
+                    <Link to={`/jobs/${job.id}`} className="mono" title={job.id}>{job.id.slice(0, 8)}</Link>
                   </td>
                 </tr>
               ))}
@@ -1066,6 +1076,7 @@ function Repositories({
                       <button
                         className="secondary"
                         disabled={!source.managed}
+                        title={source.managed ? undefined : t("Only a source written by the panel can be changed here; this one belongs to the distribution or the host administrator.")}
                         onClick={() =>
                           onIntent({
                             label: source.enabled ? t("Disable source") : t("Enable source"),
@@ -1085,6 +1096,7 @@ function Repositories({
                       <button
                         className="hm-danger"
                         disabled={!source.managed}
+                        title={source.managed ? undefined : t("Only a source written by the panel can be removed here; this one belongs to the distribution or the host administrator.")}
                         onClick={() =>
                           onIntent({
                             label: t("Remove source"),

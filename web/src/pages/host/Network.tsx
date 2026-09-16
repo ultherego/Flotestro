@@ -159,7 +159,6 @@ export function Network() {
           { label: t("up"), value: countWhere(known, (iface) => iface.oper_state === "up"), tone: "ok" },
           { label: t("down"), value: countWhere(known, (iface) => iface.oper_state === "down"), tone: "neutral" },
           { label: t("other"), value: countWhere(known, (iface) => iface.oper_state !== "up" && iface.oper_state !== "down"), tone: "unknown" },
-          { label: t("Routes"), value: snapshot?.unavailable_reason ? undefined : routes.length, tone: "info" },
         ]}
       />
       <Section title={t("Management channel")} span={4} flush>
@@ -177,6 +176,9 @@ export function Network() {
               ? <span className="badge ok">{adapterLabel(snapshot.write_adapter)}</span>
               : <span className="badge unknown">{t("none")}</span>}
           </Fact>
+          {/* The routes are a count of their own, not a state of an
+              interface: they stand here, not in the bar of link states. */}
+          <Fact label={t("Routes")}>{snapshot?.unavailable_reason ? <span className="badge unknown">{t("unknown")}</span> : routes.length}</Fact>
           <Fact label={t("By kind")} wide>
             {kinds.length ? <Breakdown items={kinds.map(([kind, count]) => ({ label: kind, value: count }))} /> : "—"}
           </Fact>
@@ -217,8 +219,16 @@ export function Network() {
                   {iface.management && <span className="badge"> {t("management")}</span>}
                 </td>
                 <td>{iface.kind || "—"}</td>
+                {/* The state is the kernel's word. A loopback has no
+                    carrier to report, so "unknown" is its normal state
+                    and not a fault; the hover says so. */}
                 <td>
-                  <span className={iface.oper_state === "up" ? "badge ok" : iface.oper_state === "down" ? "badge" : "badge unknown"}>
+                  <span
+                    className={iface.oper_state === "up" ? "badge ok" : iface.oper_state === "down" ? "badge" : "badge unknown"}
+                    title={iface.oper_state === "unknown" && iface.kind === "loopback"
+                      ? t("The kernel reports no operational state for a loopback; this is its normal state.")
+                      : t("The operational state as the kernel reports it.")}
+                  >
                     {iface.oper_state}
                   </span>
                 </td>

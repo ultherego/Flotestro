@@ -102,8 +102,10 @@ export function Campaigns() {
     { key: "name", label: t("Name"), sort: "name", fixed: true },
     { key: "state", label: t("State"), sort: "state" },
     { key: "operation", label: t("Operation"), sort: "operation" },
-    { key: "progress", label: t("Progress") },
-    { key: "canary", label: t("Canary/wave"), sort: "canary", className: "num", secondary: true },
+    // The heading spells the three numbers of the cell out; a bare
+    // "progress" over "2 / 0 / 4" leaves the reader to guess the order.
+    { key: "progress", label: t("Done / failed / pending") },
+    { key: "canary", label: t("Canary / wave size"), sort: "canary", className: "num", secondary: true },
     { key: "requested_by", label: t("Requested by"), sort: "requested_by", secondary: true },
     { key: "approved_by", label: t("Approved by"), sort: "approved_by", secondary: true },
     { key: "created", label: t("Created"), sort: "created" },

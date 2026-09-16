@@ -401,7 +401,7 @@ export function Jobs() {
               <option value="">{t("state: any")}</option>
               {JOB_STATES.map((value) => <option key={value} value={value}>{value}</option>)}
             </select>
-            <input placeholder={t("operation, e.g. unit.restart")} value={filters.action} onChange={(e) => setFilter("action", e.target.value)} />
+            <input placeholder={t("operation")} title={t("the operation, e.g. unit.restart")} value={filters.action} onChange={(e) => setFilter("action", e.target.value)} />
             <input placeholder={t("host name")} value={filters.hostname} onChange={(e) => setFilter("hostname", e.target.value)} />
             <input placeholder={t("requested by")} value={filters.actor} onChange={(e) => setFilter("actor", e.target.value)} />
             <input placeholder={t("campaign ID")} value={filters.campaign_id} onChange={(e) => setFilter("campaign_id", e.target.value)} />
@@ -447,13 +447,15 @@ export function Jobs() {
             <Toolbar>
               <span>{t("{n} of {total} awaiting jobs selected", { n: selectedJobs.length, total: awaitingJobs.length })}</span>
               <input
-                placeholder={t("reason for the batch, at least 8 characters")}
+                placeholder={t("reason for the batch")}
+                title={t("The one reason recorded next to every job of the batch; at least 8 characters.")}
                 value={batchReason}
                 onChange={(e) => setBatchReason(e.target.value)}
               />
               <button
                 type="button"
                 disabled={selectedJobs.length === 0 || batch.isPending}
+                title={selectedJobs.length === 0 ? t("Tick the awaiting jobs to approve first.") : undefined}
                 onClick={() => batch.mutate({ operation: "approve", jobs: selectedJobs, reason: batchReason })}
               >
                 {t("Approve selected")}
@@ -523,7 +525,9 @@ export function Jobs() {
                           </>
                         )}
                       </Td>
-                      <Td columns={columns} name="host">
+                      {/* A hostname broken over two lines reads as two hosts;
+                          the column is narrow and the name stays on one. */}
+                      <Td columns={columns} name="host" style={{ whiteSpace: "nowrap" }}>
                         <Link to={`/hosts/${job.host_id}/overview`}>{job.hostname || job.host_id.slice(0, 8)}</Link>
                       </Td>
                       <Td columns={columns} name="state">
