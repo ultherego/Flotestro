@@ -556,7 +556,7 @@ test.describe("host workspace", () => {
     test.skip(packages.items.length === 0, "the panel has not read the package list of this host yet");
 
     // The tools stand in the heading: the search, the filter, the order.
-    const search = installed.getByPlaceholder("Search by name or source package");
+    const search = installed.getByPlaceholder("Search packages");
     await expect(search).toBeVisible();
     await expect(installed.locator(".hm-count")).toHaveText(String(packages.items.length));
     const table = installed.locator("table").first();

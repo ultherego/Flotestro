@@ -104,10 +104,18 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   expect(eligibleCount).toBeGreaterThan(0);
   expect(eligibleCount).toBeLessThanOrEqual(count);
   // A host without systemd cannot restart a unit, so the eligible count
-  // is bounded by the adapters the API reports, when it reports them.
+  // is bounded by the adapters the API reports, when it reports them. A
+  // host whose adapters are not known yet - never connected, or offline
+  // since before its report - stays eligible under the offline policy and
+  // is judged when it connects; the preview names those in a bucket of
+  // their own, so they are allowed for on top of the capable ones.
   if (inSite.some((host) => host.capabilities?.length)) {
     const capable = inSite.filter((host) => host.capabilities?.some((item) => item.name === "systemd" && item.available)).length;
-    expect(eligibleCount).toBeLessThanOrEqual(capable);
+    const unknownRow = page.getByRole("row").filter({ has: page.locator(".badge", { hasText: "adapter unknown" }) });
+    const unknown = (await unknownRow.count()) > 0
+      ? Number((await unknownRow.first().getByRole("cell").nth(1).textContent())?.trim())
+      : 0;
+    expect(eligibleCount).toBeLessThanOrEqual(capable + unknown);
   }
   if (eligibleCount < count) {
     // Somebody is left out; the reason stands next to the count.

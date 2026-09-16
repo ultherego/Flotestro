@@ -203,7 +203,10 @@ test.describe("host workspace", () => {
           // module would look like a missing feature.
           const notice = page.getByText(`${module.name} is not available on this host: ${module.unavailable}.`);
           await expect(notice).toBeVisible();
-          await expect(page.locator(".hm-header")).toHaveCount(0);
+          // The unavailable module is still a page with its header and a
+          // way back, not a bare sentence.
+          await expect(page.locator(".hm-header").getByRole("heading", { name: module.name, exact: true })).toBeVisible();
+          await expect(page.getByRole("link", { name: "Back to the overview" })).toBeVisible();
         } else {
           // A module with backing shows its header, or an honest empty
           // state while the host has not reported it yet.

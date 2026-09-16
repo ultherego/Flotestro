@@ -269,11 +269,13 @@ test.describe("monitoring", () => {
     const history = card(page, "Recent alerts");
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
     const filtered = page.waitForResponse((response) => response.url().includes("/api/v1/monitoring/alerts?") && response.url().includes("state=resolved"));
-    await history.locator(".card-actions select").selectOption("resolved");
+    await history.locator(".card-actions select").first().selectOption("resolved");
     expect((await filtered).ok()).toBeTruthy();
     await expect(history.locator("tbody tr").first().or(history.getByText("No alerts recorded in this state."))).toBeVisible();
-    for (const badge of await history.locator("tbody tr td:nth-child(4) .badge").all()) {
-      await expect(badge).toHaveText("resolved");
+    // The state cell carries the state first and, on a taken alert, the
+    // acknowledgement beside it; the state is what the filter promised.
+    for (const cell of await history.locator("tbody tr td:nth-child(4)").all()) {
+      await expect(cell.locator(".badge").first()).toHaveText("resolved");
     }
     await expect(card(page, "Silences in force")).toBeVisible();
     await expectHealthy(page, errors);
