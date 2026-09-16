@@ -81,6 +81,12 @@ func (s *Server) ensureEntry(ctx context.Context, action *helperv1.ScheduleReque
 				"remove the line there by hand before adopting it", collision.Path, collision.Line))
 	}
 
+	// A host without /etc/cron.d reads its timers but has nowhere for a
+	// managed entry: the refusal names the directory rather than failing
+	// on the write.
+	if info, err := os.Stat(schedules.CronDDir); err != nil || !info.IsDir() {
+		return reject(ErrorUnsupported, "this host has no "+schedules.CronDDir+" directory, so a managed entry has nowhere to be written")
+	}
 	entry := schedules.Schedule{
 		ID:         action.GetId(),
 		Expression: action.GetExpression(),

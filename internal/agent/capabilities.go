@@ -225,9 +225,12 @@ func DetectCapabilities() Capabilities {
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
 	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
-	// The managed entries go to /etc/cron.d, so without that directory the
-	// module has nowhere to create them - even when the systemd timers work.
-	schedules := isDir("/etc/cron.d")
+	// The module reads cron and the systemd timers; either makes it worth
+	// having. The managed entries go to /etc/cron.d, so without that
+	// directory a write is refused on the host, with the reason, while the
+	// timers still read.
+	cronD := isDir("/etc/cron.d")
+	schedules := cronD || systemd
 	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
 	networkWrite := network.DetectAdapter(network.Exists)
 	resolver := exists("/etc/resolv.conf")
@@ -467,8 +470,8 @@ func DetectCapabilities() Capabilities {
 			Name:      CapSchedules,
 			Version:   adapterVersion,
 			Available: schedules,
-			Features:  map[string]bool{"cron": schedules, "timers": systemd},
-			Reason:    reason(schedules, "this host has no /etc/cron.d directory"),
+			Features:  map[string]bool{"cron": cronD, "timers": systemd},
+			Reason:    reason(schedules, "this host has neither /etc/cron.d nor systemd timers"),
 		},
 		{
 			Name:      CapJournald,
