@@ -256,7 +256,7 @@ export function Secrets() {
           {!loaded ? (
             <Empty>{t("Loading…")}</Empty>
           ) : byCreator.length === 0 ? (
-            <p className="fp-blank">{t("No secrets are stored in this installation.")}</p>
+            <p className="fp-blank">{t("Nobody has put a secret in yet.")}</p>
           ) : (
             <Breakdown tone="neutral" items={byCreator.map(([creator, n]) => ({ label: <span className="mono">{creator}</span>, value: n }))} />
           )}

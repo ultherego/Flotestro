@@ -4430,4 +4430,5 @@ export const pl: Record<string, string> = {
   "Approval is blocked: {n} hosts have a plan the panel cannot read. Exclude them with a reason or plan the campaign again.": "Zatwierdzenie zablokowane: {n} hostów ma plan, którego panel nie potrafi odczytać. Wyklucz je z podaniem powodu albo zaplanuj kampanię ponownie.",
   "{n} hosts refused the plan as stale; the previous consent does not carry over. Order a retry to plan them again.": "{n} hostów odrzuciło plan jako nieaktualny; poprzednia zgoda nie przechodzi. Zleć retry, aby zaplanować je ponownie.",
   "The host no longer computes this plan; plan again and approve the new one.": "Host nie wylicza już tego planu; zaplanuj ponownie i zatwierdź nowy.",
+  "Nobody has put a secret in yet.": "Nikt jeszcze nie dodał sekretu.",
 };
