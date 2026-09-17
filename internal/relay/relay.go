@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"log/slog"
@@ -23,15 +24,24 @@ import (
 
 // The headers the relay attests a host's session with. The host is named
 // by its identifier, and the certificate it presented to the relay by its
-// SHA-256 fingerprint in hex and its serial: the relay verified the chain
-// in its handshake, and the gateway checks that certificate against its
-// record - revoked, expired, another host's - as it would in a direct
-// handshake. The names have to match the gateway: they are the only place
-// where the panel learns whose traffic goes through the relay.
+// SHA-256 fingerprint in hex, its serial and the certificate itself as DER
+// in base64: the relay verified the chain in its handshake, and the
+// gateway checks that certificate against its record - revoked, expired,
+// another host's - as it would in a direct handshake, and takes the public
+// key of an older certificate from the DER once the fingerprint on record
+// confirms it. The names have to match the gateway: they are the only
+// place where the panel learns whose traffic goes through the relay.
+//
+// The attestation is the relay's part of the identity of a relayed host.
+// The host's own part is the envelope inside every message it sends - its
+// signature over the payload - which the relay carries untouched: it
+// decodes and encodes the message, it does not sign, rewrite or drop the
+// envelope, and a buffered message keeps the envelope it came with.
 const (
 	hostHeader            = "Flotestro-Relay-Host"
 	hostFingerprintHeader = "Flotestro-Relay-Host-Fingerprint"
 	hostSerialHeader      = "Flotestro-Relay-Host-Serial"
+	hostCertificateHeader = "Flotestro-Relay-Host-Certificate"
 )
 
 // attestHost names the host and the certificate it presented on a call
@@ -42,6 +52,7 @@ func attestHost(headers http.Header, hostID string, cert *x509.Certificate) {
 	if cert.SerialNumber != nil {
 		headers.Set(hostSerialHeader, cert.SerialNumber.String())
 	}
+	headers.Set(hostCertificateHeader, base64.StdEncoding.EncodeToString(cert.Raw))
 }
 
 // Options describe the relay of a site.
@@ -184,8 +195,11 @@ func (r *Relay) centre() agentv1connect.AgentServiceClient {
 }
 
 // Handler serves the connections of the agents. The relay exposes the same
-// contract as the centre, so the agent does not know and does not have to know
-// that it speaks through a relay.
+// contract as the centre, so the agent needs no other client for it. What
+// the agent does learn is the identity of the relay - from the relay's own
+// certificate in the handshake - because its envelopes name the relay
+// they go through, and the centre checks that the relay named is the one
+// that forwarded them.
 func (r *Relay) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(agentv1connect.NewAgentServiceHandler(r))
@@ -229,12 +243,41 @@ func (r *Relay) RenewCertificate(ctx context.Context,
 	return connect.NewResponse(response.Msg), nil
 }
 
+// RequestIdentityChallenge forwards the request for a renewal challenge to
+// the centre, the way the renewal itself goes: the centre binds the
+// challenge to the host the relay names and to this relay, and the host
+// signs it into the proof of its renewal. The relay sees the challenge on
+// the way and can do nothing with it - the proof needs the host's key.
+func (r *Relay) RequestIdentityChallenge(ctx context.Context,
+	req *connect.Request[agentv1.IdentityChallengeRequest],
+) (*connect.Response[agentv1.IdentityChallengeResponse], error) {
+	cert, ok := clientCertificate(ctx)
+	if !ok {
+		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
+	}
+	hostID, err := pki.HostIDFromCert(cert)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+	}
+
+	forwarded := connect.NewRequest(req.Msg)
+	attestHost(forwarded.Header(), hostID, cert)
+	response, err := r.centre().RequestIdentityChallenge(ctx, forwarded)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(response.Msg), nil
+}
+
 // FetchSecret forwards the fetch of a secret to the centre.
 //
 // The relay neither stores nor looks at the value: it forwards the call
 // together with the identity of the host, and the centre decides on the
 // release on the basis of the lease. A buffer makes no sense here - the host
-// waits for an answer and the lease is short.
+// waits for an answer and the lease is short. The forward is a plain unary
+// call on the request's own context: nothing of it goes through the
+// buffer, and the answer - which the centre seals to the host's one-time
+// key, so the relay carries cipher text - is handed back and forgotten.
 func (r *Relay) FetchSecret(ctx context.Context,
 	req *connect.Request[agentv1.FetchSecretRequest],
 ) (*connect.Response[agentv1.FetchSecretResponse], error) {

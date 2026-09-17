@@ -17,6 +17,7 @@ type deviceView struct {
 	FSType      string   `json:"fs_type"`
 	UUID        string   `json:"uuid"`
 	Parent      string   `json:"parent"`
+	ByID        string   `json:"by_id"`
 	Mountpoints []string `json:"mountpoints"`
 }
 
@@ -201,7 +202,8 @@ func TestDestructiveOperationRequiresTwoPeople(t *testing.T) {
 		"action": "disk.wipe", "reason": storageReason,
 		"target_confirmation": host.Hostname,
 		"payload": map[string]any{"storage": map[string]any{
-			"device": "/dev/sdz", "expected_serial": "DEVICE-THAT-DOES-NOT-EXIST"}},
+			"device": "/dev/sdz", "expected_serial": "DEVICE-THAT-DOES-NOT-EXIST",
+			"expected_by_id": "/dev/disk/by-id/ata-DOES-NOT-EXIST"}},
 	})
 	if job.RequiredApprovals != 2 {
 		t.Fatalf("required approvals = %d", job.RequiredApprovals)
@@ -260,12 +262,17 @@ func TestDestructiveOperationChecksTheDeviceIdentity(t *testing.T) {
 		t.Skip("the host has no free disk")
 	}
 
-	// A wrong identity: the host is to refuse before doing anything.
+	// A wrong identity: the host is to refuse before doing anything. The
+	// by-id link is the disk's own; the WWN is not, and one wrong mark of
+	// identity is enough.
+	if empty.ByID == "" {
+		t.Skip("the free disk has no stable identity link")
+	}
 	job := h.createOperation(host.ID, map[string]any{
 		"action": "disk.wipe", "reason": storageReason,
 		"target_confirmation": host.Hostname,
 		"payload": map[string]any{"storage": map[string]any{
-			"device": empty.Path, "expected_size_bytes": 1024}},
+			"device": empty.Path, "expected_by_id": empty.ByID, "expected_wwn": "0x5000c500deadbeef"}},
 	})
 	h.approve(job.ID, job.PayloadHash)
 	second := h.withToken(h.createPrincipal("second-person-identity",
@@ -274,11 +281,11 @@ func TestDestructiveOperationChecksTheDeviceIdentity(t *testing.T) {
 
 	final := h.awaitTerminal(job.ID, 2*time.Minute)
 	if final.State == "succeeded" {
-		t.Fatalf("the host wiped %s despite the mismatched size", empty.Path)
+		t.Fatalf("the host wiped %s despite the mismatched identity", empty.Path)
 	}
 	attempts := h.attempts(job.ID)
-	if !strings.Contains(lastMessage(attempts), "bytes") {
-		t.Errorf("the refusal does not explain the mismatch: %q", lastMessage(attempts))
+	if len(attempts) == 0 || attempts[len(attempts)-1].ErrorCode != "disk_changed" {
+		t.Errorf("refusal = %s, want disk_changed", lastMessage(attempts))
 	}
 }
 
@@ -299,7 +306,7 @@ func TestDestructiveOperationRequiresAnIdentity(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations",
 		map[string]any{"action": "disk.wipe", "reason": storageReason,
 			"payload": map[string]any{"storage": map[string]any{
-				"device": "/dev/sdb", "expected_size_bytes": 2147483648}}},
+				"device": "/dev/sdb", "expected_by_id": "/dev/disk/by-id/ata-VBOX_HARDDISK_VB00000000-00000000"}}},
 		nil, http.StatusBadRequest)
 }
 

@@ -106,7 +106,10 @@ func TestTheWaitForARebootIsCountedFromTheReboot(t *testing.T) {
 // task onto the host: a success is a success, a success the host says
 // changed nothing is no_change, a task that ended without a result - the
 // session broke, or the agent came back from a restart - is unknown rather
-// than failed, and the rest fail with the code the host gave.
+// than failed, a task canceled before the host changed anything ends the
+// host canceled rather than failed, a cancel request nobody answered ends
+// it unknown with that code, and the rest fail with the code the host
+// gave.
 func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -121,7 +124,8 @@ func TestTheOutcomeOfATaskNamesTheHostState(t *testing.T) {
 		{"the agent restarted mid-task", jobVerdict{State: jobs.StateFailed, ErrorCode: OutcomeUnknownCode}, TargetUnknown, OutcomeUnknownCode},
 		{"the change failed", jobVerdict{State: jobs.StateFailed, ErrorCode: "exec_failed"}, TargetFailed, "exec_failed"},
 		{"a timeout with the host still answering", jobVerdict{State: jobs.StateTimedOut}, TargetFailed, "timed_out"},
-		{"a cancel of the task", jobVerdict{State: jobs.StateCanceled}, TargetFailed, "canceled"},
+		{"a cancel of the task", jobVerdict{State: jobs.StateCanceled}, TargetCanceled, "canceled"},
+		{"a cancel nobody answered", jobVerdict{State: jobs.StateFailed, ErrorCode: CancelAckTimeoutCode}, TargetUnknown, CancelAckTimeoutCode},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

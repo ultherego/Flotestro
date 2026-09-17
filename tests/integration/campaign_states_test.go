@@ -330,16 +330,16 @@ func TestACancelDrainsTheHostUnderWay(t *testing.T) {
 	}
 	target := awaitTargetState(t, h, campaign.ID, host.ID,
 		map[string]bool{"succeeded": true, "failed": true, "unknown": true, "canceled": true}, 30*time.Second)
-	if target.State != "succeeded" {
-		t.Errorf("the host under way ended %s (%s: %s); a cancel leaves the task to finish",
+	if target.State != "canceled" {
+		t.Errorf("the host under way ended %s (%s: %s); a cancel of a task not yet started ends the host canceled",
 			target.State, target.ErrorCode, target.Message)
 	}
 	report := campaignReport(h, campaign.ID)
 	if report.State != "canceled" {
 		t.Errorf("the report says %s, expected canceled", report.State)
 	}
-	if report.Totals["succeeded"] != 1 {
-		t.Errorf("the report of the canceled campaign does not count the host that finished: %v", report.Totals)
+	if report.Totals["canceled"] != 1 {
+		t.Errorf("the report of the canceled campaign does not count the host taken back: %v", report.Totals)
 	}
 	if run := h.awaitTerminal(holder.ID, 60*time.Second); run.State != "succeeded" {
 		t.Errorf("the run that held the lock ended as %s (%s)", run.State, run.ResultErrorCode)

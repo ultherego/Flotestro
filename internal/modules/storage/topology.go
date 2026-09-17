@@ -19,14 +19,28 @@ const (
 // dozens of columns per device and most of them are driver details the
 // panel never shows.
 var LsblkColumns = []string{
-	"NAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
+	"NAME", "KNAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
 	"MOUNTPOINTS", "MODEL", "SERIAL", "WWN", "ROTA", "RO", "PKNAME",
 	"FSSIZE", "FSUSED", "FSAVAIL",
+}
+
+// IdentityColumns is the list the helper asks for: the same identity and
+// topology as the agent's, without the filesystem usage that changes
+// between two reads and has no place in a plan fingerprint.
+var IdentityColumns = []string{
+	"NAME", "KNAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
+	"MOUNTPOINTS", "MODEL", "SERIAL", "WWN", "ROTA", "RO", "PKNAME",
+}
+
+// Columns joins the column names the way lsblk -o expects them.
+func Columns(names []string) string {
+	return strings.Join(names, ",")
 }
 
 // rawBlock maps one entry of "lsblk -J -b".
 type rawBlock struct {
 	Name        string     `json:"name"`
+	KName       *string    `json:"kname"`
 	Path        string     `json:"path"`
 	Type        string     `json:"type"`
 	Size        *uint64    `json:"size"`
@@ -71,12 +85,31 @@ func ParseDevices(output string) ([]Device, error) {
 	for _, block := range result.Blockdevices {
 		flatten(block, "")
 	}
+	// lsblk repeats a device that sits on several parents - a volume group
+	// spanning two disks lists its volumes under each - and a plan must
+	// point at every device exactly once.
+	devices = dedupe(devices)
+	CompleteTopology(devices)
 	return devices, nil
+}
+
+func dedupe(devices []Device) []Device {
+	seen := map[string]bool{}
+	result := devices[:0]
+	for _, device := range devices {
+		if seen[device.Path] {
+			continue
+		}
+		seen[device.Path] = true
+		result = append(result, device)
+	}
+	return result
 }
 
 func deviceFromBlock(block rawBlock, parent string) Device {
 	device := Device{
 		Name:       block.Name,
+		KernelName: value(block.KName),
 		Path:       block.Path,
 		Type:       block.Type,
 		FSType:     value(block.FSType),

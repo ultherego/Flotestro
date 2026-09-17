@@ -19,3 +19,16 @@ func TestAStaleSessionRefusalIsTyped(t *testing.T) {
 		t.Fatalf("the stale-session error does not carry its code: %q", ErrSessionStale)
 	}
 }
+
+// A closed session row and a superseded owner are two refusals with two
+// codes: the first sends the task back for the host's current session,
+// the second says the instance that wrote no longer owns the host. A
+// screen and the trail must never show one for the other.
+func TestAStaleSessionAndAStaleFenceAreDifferentRefusals(t *testing.T) {
+	if errors.Is(ErrSessionStale, ErrStaleFence) || errors.Is(ErrStaleFence, ErrSessionStale) {
+		t.Fatal("the two refusals read as one")
+	}
+	if strings.HasPrefix(ErrStaleFence.Error(), "session_stale:") {
+		t.Fatalf("the stale-fence error carries the stale-session code: %q", ErrStaleFence)
+	}
+}

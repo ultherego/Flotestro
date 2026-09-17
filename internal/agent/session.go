@@ -2,12 +2,15 @@ package agent
 
 import (
 	"context"
+	"crypto"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math/rand/v2"
 	"net"
@@ -19,6 +22,7 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"golang.org/x/net/http2"
 
 	"github.com/ultherego/flotestro/internal/agentconfig"
@@ -27,6 +31,8 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
 // SessionOptions configures the connection of the agent to the control plane.
@@ -60,6 +66,16 @@ type SessionOptions struct {
 	// from the configuration but from the gateway manager, so it is not a public
 	// field.
 	gatewayURL string
+	// material is the certificate and key this one session connected with,
+	// taken at the moment the client was built. The envelopes of the
+	// session are signed with exactly that key: a renewal that lands during
+	// the session replaces the shared identity, and the relay attested the
+	// certificate of the handshake, not the new one.
+	material tls.Certificate
+	// peer records what the server proved itself to be in the handshake -
+	// a relay, or the gateway itself - so the envelopes can name the relay
+	// they go through.
+	peer *peerIdentity
 }
 
 const (
@@ -105,9 +121,12 @@ func Run(ctx context.Context, opts SessionOptions) error {
 
 		// The client is created at every connection, because the identity may
 		// change in the meantime: a renewed certificate has to come into use
-		// without restarting the agent.
+		// without restarting the agent. The material is read once here, so
+		// the handshake and the envelopes of the session use the same key.
+		material := opts.Identity.Certificate
+		peer := newPeerIdentity()
 		client := agentv1connect.NewAgentServiceClient(
-			newHTTP2Client(opts.Identity),
+			newObservedHTTP2Client(material, opts.Identity.CAPool, peer),
 			gateway.URL,
 			// The Connect protocol does not support full duplex, so the
 			// bidirectional stream travels over gRPC on top of HTTP/2.
@@ -116,6 +135,8 @@ func Run(ctx context.Context, opts SessionOptions) error {
 		start := time.Now()
 		session := opts
 		session.gatewayURL = gateway.URL
+		session.material = material
+		session.peer = peer
 		err = runSession(ctx, client, session)
 		if ctx.Err() != nil {
 			return nil
@@ -248,9 +269,43 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		return err
 	}
 
-	if err := stream.Send(&agentv1.AgentMessage{
+	// The request goes out before Hello, headers alone, so that the
+	// handshake happens now and the session learns whom it reached: a
+	// relay names itself in its certificate, and the envelope of every
+	// message names the relay it goes through. The signer is the session's
+	// own; a session without a usable key sends unsigned, which a relayed
+	// session pays for at the gateway with its strength, not here.
+	if err := stream.Send(nil); err != nil {
+		return err
+	}
+	relayID := ""
+	if opts.peer != nil {
+		relayID = opts.peer.relayID(sessionCtx, handshakeWait)
+	}
+	signer := newEnvelopeSigner(opts.material, opts.Identity.HostID, relayID, opts.Log)
+	sign := func(msg *agentv1.AgentMessage) error {
+		if signer == nil {
+			return nil
+		}
+		return signer.SignMessage(msg)
+	}
+
+	greeting := &agentv1.AgentMessage{
 		Payload: &agentv1.AgentMessage_Hello{Hello: hello(facts, revision, localAddress)},
-	}); err != nil {
+	}
+	if err := sign(greeting); err != nil {
+		return err
+	}
+	if err := stream.Send(greeting); err != nil {
+		// A server that refused the stream before Hello answers the send
+		// with EOF; the refusal itself waits in Receive, and it is the
+		// refusal that Run classifies - a revoked identity must not read
+		// as a broken link.
+		if errors.Is(err, io.EOF) {
+			if _, refusal := stream.Receive(); refusal != nil {
+				return refusal
+			}
+		}
 		return err
 	}
 
@@ -277,11 +332,16 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		"host_id", opts.Identity.HostID, "heartbeat", heartbeatInterval.String())
 	opts.State.Connected(opts.gatewayURL, time.Now())
 
-	// Send is not safe for concurrent calls.
+	// Send is not safe for concurrent calls. The envelope is signed under
+	// the same lock: the sequence has to be the order on the wire, and the
+	// gateway refuses a number below the last one it accepted.
 	var sendMu sync.Mutex
 	send := func(msg *agentv1.AgentMessage) error {
 		sendMu.Lock()
 		defer sendMu.Unlock()
+		if err := sign(msg); err != nil {
+			return err
+		}
 		return stream.Send(msg)
 	}
 
@@ -414,19 +474,11 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			if final.isLeaving() {
 				return nil, errLeasesDropped
 			}
-			response, err := client.FetchSecret(ctx, connect.NewRequest(&agentv1.FetchSecretRequest{
-				TaskId: taskID, SecretName: name, SecretVersion: uint32(version),
-			}))
-			if err != nil {
-				return nil, err
-			}
-			value := response.Msg.GetValue()
-			// The panel gives the digest of what it issued: this checks that
-			// exactly that arrived and not content damaged on the way.
-			if digest := response.Msg.GetSha256(); digest != "" && digest != valueDigest(value) {
-				return nil, errors.New("the digest of the fetched secret does not match the one given by the panel")
-			}
-			return value, nil
+			// Through a relay the value comes back sealed to a one-time key
+			// of this fetch; directly it comes as it is. The same call
+			// serves both: the proof and the key travel with the request,
+			// and the panel answers sealed when the relay is in the path.
+			return fetchSecret(ctx, client, signer, taskID, name, version)
 		}
 		opts.Executor.progress = func(p *agentv1.TaskProgress) {
 			if err := send(&agentv1.AgentMessage{
@@ -600,24 +652,36 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 				}()
 
 			case *agentv1.ServerMessage_CancelTask:
-				// Not every system operation can be interrupted safely - a package
-				// transaction must not be cut in half - so the cancellation works
-				// where it was declared safe, and beyond that it is recorded.
-				interrupted := false
-				if opts.Executor != nil && opts.Executor.cancels != nil {
-					// The panel may name the attempt it holds now, which can be
-					// a redelivery; the interruption goes to the execution
-					// behind it.
-					target := payload.CancelTask.GetTaskId()
-					if origin := opts.Executor.running.origin(target); origin != "" {
-						target = origin
-					}
-					interrupted = opts.Executor.cancels.Cancel(target)
+				// A cancel is answered by what it finds, not carried out
+				// blindly: a task that has not started is refused and never
+				// starts, a read under way is interrupted where its module
+				// allows, a mutation under way runs to its end - a package
+				// transaction must not be cut in half - and a task that ended
+				// is answered with the digest of its result. The answer goes
+				// out first and the interruption follows it, so that the
+				// host's own account of the interrupted work reaches the panel
+				// after the acknowledgement and never overtakes it.
+				cancel := payload.CancelTask
+				outcome, phase, resultHash, interrupt := opts.Executor.CancelTask(cancel.GetTaskId())
+				if err := send(&agentv1.AgentMessage{
+					Payload: &agentv1.AgentMessage_CancelAck{CancelAck: &agentv1.CancelAck{
+						TaskId:             cancel.GetTaskId(),
+						Outcome:            outcome,
+						Phase:              phase,
+						ObservedResultHash: resultHash,
+					}},
+				}); err != nil {
+					opts.Log.Error("the cancel acknowledgement was not sent back",
+						"task_id", cancel.GetTaskId(), "err", err)
+				}
+				if interrupt != nil {
+					interrupt()
 				}
 				opts.Log.Info("a cancellation of the task was requested",
-					"task_id", payload.CancelTask.GetTaskId(),
-					"reason", payload.CancelTask.GetReason(),
-					"interrupted", interrupted)
+					"task_id", cancel.GetTaskId(),
+					"reason", cancel.GetReason(),
+					"request_revision", cancel.GetRequestRevision(),
+					"outcome", outcome.String(), "phase", phase)
 			}
 		}
 	}()
@@ -726,17 +790,106 @@ func panelAddress(gatewayURL string) string {
 }
 
 func newHTTP2Client(identity *Identity) *http.Client {
+	return newObservedHTTP2Client(identity.Certificate, identity.CAPool, nil)
+}
+
+// newObservedHTTP2Client builds the client of a session and lets the
+// observer read the server's identity from the handshake. A nil observer
+// is a client that does not care whom it reached.
+func newObservedHTTP2Client(material tls.Certificate, trust *x509.CertPool, peer *peerIdentity) *http.Client {
+	config := &tls.Config{
+		Certificates: []tls.Certificate{material},
+		RootCAs:      trust,
+		MinVersion:   tls.VersionTLS13,
+	}
+	if peer != nil {
+		config.VerifyConnection = peer.observe
+	}
 	return &http.Client{
 		Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{identity.Certificate},
-				RootCAs:      identity.CAPool,
-				MinVersion:   tls.VersionTLS13,
-			},
+			TLSClientConfig: config,
 			ReadIdleTimeout: 30 * time.Second,
 			PingTimeout:     15 * time.Second,
 		},
 	}
+}
+
+// handshakeWait bounds how long a session waits to learn whom it reached
+// before it sends Hello. A handshake that takes longer has failed for the
+// stream as well, and Hello will say so.
+const handshakeWait = 15 * time.Second
+
+// peerIdentity is what the server proved itself to be in the handshake:
+// a relay, by the flotestro://relay/<id> identity in its certificate, or
+// the gateway of the centre. The chain was verified by the standard path
+// before the hook runs; the hook only reads the identity.
+type peerIdentity struct {
+	mu    sync.Mutex
+	kind  string
+	id    string
+	ready chan struct{}
+	once  sync.Once
+}
+
+func newPeerIdentity() *peerIdentity { return &peerIdentity{ready: make(chan struct{})} }
+
+// observe is the tls.Config hook.
+func (p *peerIdentity) observe(state tls.ConnectionState) error {
+	kind, id := "", ""
+	if len(state.PeerCertificates) > 0 {
+		if k, i, err := pki.IdentityFromCert(state.PeerCertificates[0]); err == nil {
+			kind, id = k, i
+		}
+	}
+	p.mu.Lock()
+	p.kind, p.id = kind, id
+	p.mu.Unlock()
+	p.once.Do(func() { close(p.ready) })
+	return nil
+}
+
+// relayID waits for the handshake and returns the identifier of the relay
+// the connection reached, or empty for a direct connection or a handshake
+// that did not happen in time. An envelope signed for no relay on a
+// relayed session is refused by the gateway, and the next attempt gets
+// the identity: that beats guessing.
+func (p *peerIdentity) relayID(ctx context.Context, wait time.Duration) string {
+	select {
+	case <-p.ready:
+	case <-ctx.Done():
+		return ""
+	case <-time.After(wait):
+		return ""
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.kind != "relay" {
+		return ""
+	}
+	return p.id
+}
+
+// newEnvelopeSigner prepares the signer of a session from the material it
+// connected with. Nil when the material cannot sign - no certificate, a
+// key that is not a signer - which the log names once: a relayed session
+// then rests on the relay's attestation, and the gateway says so on the
+// host. The session is signed on a direct connection as well: the gateway
+// ignores the envelope there, and one code path is one code path.
+func newEnvelopeSigner(material tls.Certificate, hostID, relayID string, log *slog.Logger) *relayproof.Signer {
+	if log == nil {
+		log = slog.Default()
+	}
+	key, ok := material.PrivateKey.(crypto.Signer)
+	if !ok || len(material.Certificate) == 0 {
+		log.Warn("the session cannot sign its envelopes: the identity carries no signing key")
+		return nil
+	}
+	leaf, err := x509.ParseCertificate(material.Certificate[0])
+	if err != nil || leaf.SerialNumber == nil {
+		log.Warn("the session cannot sign its envelopes: the certificate does not parse", "err", err)
+		return nil
+	}
+	return relayproof.NewSigner(key, hostID, leaf.SerialNumber.String(), relayID, uuid.NewString())
 }
 
 // stableOffset spreads the first heartbeat deterministically by machine-id, so

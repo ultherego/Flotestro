@@ -481,6 +481,15 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	if err != nil {
 		return nil, fmt.Errorf("taking back the queued tasks of the campaign: %w", err)
 	}
+	// The tasks the hosts hold are asked to stop, not written off: each
+	// moves to cancel_requested with a request on the trail, and the
+	// agent answers what the request found - a task not yet started ends
+	// canceled, one under way in a phase that must finish runs to its
+	// end, and the campaign drains on the answers. The follow-up tasks
+	// owed to a host whose change landed are not asked.
+	if _, err := jobs.RequestCancelOf(ctx, tx, campaignID, actor, why, owed); err != nil {
+		return nil, fmt.Errorf("asking the hosts of the campaign to stop: %w", err)
+	}
 	if len(takenBack) > 0 {
 		// A host whose task was taken back before it left the panel never
 		// started: it ends canceled, like the hosts that were waiting.
@@ -498,8 +507,8 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	// The hosts still carrying a task keep it, and the row says the cancel
 	// reached them while they worked: the campaign waits for them, and the
-	// acknowledgement of the agent - once the protocol carries one - will
-	// say whether the task was interrupted or ran to its end.
+	// acknowledgement of the agent says whether the task was interrupted,
+	// never started, or runs to its end.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets
 		   set cancel_requested_at = coalesce(cancel_requested_at, now()), revision = revision + 1
@@ -1334,9 +1343,11 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		       coalesce(t.boot_id_before, ''),
 		       coalesce(t.error_code, ''), coalesce(t.message, ''), t.started_at, t.finished_at,
 		       t.state_since, t.blocker,
-		       t.revision, coalesce(t.claimed_by::text, ''), t.claim_token, t.cancel_requested_at
+		       t.revision, coalesce(t.claimed_by::text, ''), t.claim_token, t.cancel_requested_at,
+		       coalesce(j.cancel_outcome, ''), coalesce(j.cancel_phase, '')
 		from campaign_targets t
-		left join hosts h on h.id = t.host_id ` + where + `
+		left join hosts h on h.id = t.host_id
+		left join jobs j on j.id = t.job_id ` + where + `
 		order by t.wave, t.position`
 	if limit > 0 {
 		// One row more than the page says whether there is a next page
@@ -1355,7 +1366,8 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 		if err := rows.Scan(&t.ID, &t.CampaignID, &t.HostID, &t.Hostname, &t.Wave, &t.Position,
 			&t.State, &t.JobID, &t.PlanJobID, &t.RebootJobID, &t.HealthJobID, &t.BootIDBefore,
 			&t.ErrorCode, &t.Message, &t.StartedAt, &t.FinishedAt, &t.StateSince, &t.Blocker,
-			&t.Revision, &t.ClaimedBy, &t.ClaimToken, &t.CancelRequestedAt); err != nil {
+			&t.Revision, &t.ClaimedBy, &t.ClaimToken, &t.CancelRequestedAt,
+			&t.CancelOutcome, &t.CancelPhase); err != nil {
 			return page, err
 		}
 		page.Items = append(page.Items, t)
@@ -1505,12 +1517,10 @@ func (s *Store) FollowTask(ctx context.Context, target *Target, state TargetStat
 	return nil
 }
 
-// AttachJob binds a target to the task that was created.
-func (s *Store) AttachJob(ctx context.Context, target *Target, column, jobID string) error {
-	return s.attachJob(ctx, s.pool, target, column, jobID)
-}
-
-// AttachJobTx binds the task inside the caller's transaction.
+// AttachJobTx binds a target to the task that was created, inside the
+// caller's transaction - the one that creates the task and moves the
+// target, so a target never names a task that does not exist and a task
+// is never created for a target that stayed where it was.
 func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, target *Target, column, jobID string) error {
 	return s.attachJob(ctx, tx, target, column, jobID)
 }
@@ -1543,12 +1553,9 @@ func (s *Store) attachJob(ctx context.Context, q stepQuerier, target *Target, co
 	return nil
 }
 
-// SetBootIDBefore records the boot ID from before the reboot.
-func (s *Store) SetBootIDBefore(ctx context.Context, target *Target, bootID string) error {
-	return s.setBootIDBefore(ctx, s.pool, target, bootID)
-}
-
-// SetBootIDBeforeTx records the boot ID inside the caller's transaction.
+// SetBootIDBeforeTx records the boot ID from before the reboot, inside
+// the transaction that orders the reboot: the proof the host came back is
+// written with the order, never beside it.
 func (s *Store) SetBootIDBeforeTx(ctx context.Context, tx pgx.Tx, target *Target, bootID string) error {
 	return s.setBootIDBefore(ctx, tx, target, bootID)
 }
@@ -1564,6 +1571,75 @@ func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, target *Targ
 		return ErrConcurrentTransition
 	}
 	return nil
+}
+
+// ErrSkipNotAllowed says the host is not one an operator may skip: only a
+// host waiting for its connection is, because only such a host is holding
+// the campaign for nothing - a host under way settles on its own, and a
+// host in the queue starts on the next pass.
+var ErrSkipNotAllowed = errors.New("skip_not_allowed: only a host waiting for its connection can be skipped")
+
+// SkipTarget lets an operator leave a host waiting for its connection out
+// of the campaign, with a reason: the offline canary the document lets
+// the operator skip by name so that the wave barrier opens. The host
+// ends skipped with the reason and the author, its step is recorded as
+// skipped, and its tokens - it holds none while offline - are left as
+// they are. The write is the ordinary compare-and-swap: the row is read
+// first, and a host that moved between the read and the write - it came
+// back and started - is not skipped, because it is no longer waiting.
+func (s *Store) SkipTarget(ctx context.Context, campaignID, hostID, actor, reason string) (*Target, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	campaign, err := s.getTx(ctx, tx, campaignID)
+	if err != nil {
+		return nil, err
+	}
+	if campaign.State.Terminal() {
+		return nil, ErrConflict
+	}
+	var target Target
+	err = tx.QueryRow(ctx, `
+		select id, campaign_id, host_id, wave, position, state, revision, claim_token, job_id, reboot_job_id
+		  from campaign_targets where campaign_id = $1 and host_id = $2::uuid for update`,
+		campaignID, hostID).Scan(&target.ID, &target.CampaignID, &target.HostID, &target.Wave, &target.Position,
+		&target.State, &target.Revision, &target.ClaimToken, &target.JobID, &target.RebootJobID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if target.State != TargetQueuedOffline {
+		return nil, ErrSkipNotAllowed
+	}
+	message := "skipped by " + actor + ": " + reason
+	revision, err := s.updateTarget(ctx, tx, &target, TargetSkipped, SkippedByOperatorCode, message)
+	if err != nil {
+		return nil, err
+	}
+	// The strip of the host says who left it out and why, on the step it
+	// was waiting to run.
+	for _, outcome := range settledOutcomes(*campaign, &target, TargetSkipped, SkippedByOperatorCode, message) {
+		if err := s.RecordStep(ctx, tx, StepRecord{
+			Target: target, Key: outcome.Key,
+			DependsOn: dependencyOf(outcome.Key, campaignPlans(*campaign), target.RebootJobID != nil),
+			State:     outcome.State, Reason: outcome.Reason,
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	target.Revision = revision
+	target.State = TargetSkipped
+	target.ErrorCode = SkippedByOperatorCode
+	target.Message = message
+	return &target, nil
 }
 
 // Counts returns the number of targets in each state.

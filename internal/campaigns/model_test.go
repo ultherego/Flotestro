@@ -200,9 +200,12 @@ func TestTheFingerprintChangesWithEveryDecision(t *testing.T) {
 
 // TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave guards the two things
 // the offline queue exists for: such a host is not working, so it takes no
-// concurrency slot, and it is not a verdict, so it does not keep its wave
-// open - otherwise one unplugged machine would hold the fleet until the
-// deadline.
+// concurrency slot, and in a wave it is not a verdict, so it does not
+// keep the wave open - otherwise one unplugged machine would hold the
+// fleet until the deadline. The canary is the exception the document
+// makes: an offline canary has said nothing about the change, and the
+// barrier stays closed over it until it runs, the deadline passes or an
+// operator skips it by name.
 func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
 	if !TargetQueuedOffline.Waiting() {
 		t.Error("a host queued offline should wait in the queue")
@@ -210,11 +213,17 @@ func TestAHostQueuedOfflineHoldsNeitherASlotNorItsWave(t *testing.T) {
 	if TargetQueuedOffline.Finished() {
 		t.Error("a host queued offline has not finished")
 	}
-	if TargetQueuedOffline.HoldsWave() {
-		t.Error("a host queued offline holds its wave open")
+	if (Target{State: TargetQueuedOffline, Wave: 1}).HoldsWave() {
+		t.Error("a host queued offline in a wave holds the wave open")
+	}
+	if !(Target{State: TargetQueuedOffline, Wave: 0}).HoldsWave() {
+		t.Error("an offline canary does not hold the barrier")
+	}
+	if (Target{State: TargetSkipped, Wave: 0, ErrorCode: SkippedByOperatorCode}).HoldsWave() {
+		t.Error("a canary skipped by the operator still holds the barrier")
 	}
 	for _, state := range []TargetState{TargetPending, TargetRunning, TargetAwaitingBudget, TargetPlanning} {
-		if !state.HoldsWave() {
+		if !(Target{State: state, Wave: 1}).HoldsWave() {
 			t.Errorf("%s does not hold its wave open", state)
 		}
 	}
@@ -240,12 +249,12 @@ func TestTheNewStatesKnowTheirPlace(t *testing.T) {
 		if state.Finished() || state.Waiting() {
 			t.Errorf("%s is neither finished nor waiting in the queue", state)
 		}
-		if !state.HoldsWave() || !state.UnderWay() {
+		if !(Target{State: state, Wave: 1}).HoldsWave() || !state.UnderWay() {
 			t.Errorf("%s holds its wave and carries a task", state)
 		}
 	}
 	for _, state := range []TargetState{TargetNoChange, TargetUnknown} {
-		if !state.Finished() || state.UnderWay() || state.HoldsWave() {
+		if !state.Finished() || state.UnderWay() || (Target{State: state, Wave: 1}).HoldsWave() {
 			t.Errorf("%s ends the host's participation", state)
 		}
 	}
@@ -464,5 +473,92 @@ func TestACanaryHealthFailureCountsTowardsTheThreshold(t *testing.T) {
 	}
 	if (Target{State: TargetSucceeded, ErrorCode: RebootWindowClosedCode}).RebootWindowClosed() {
 		t.Error("a succeeded host counts as closed by the window")
+	}
+}
+
+// TestTheBarrierWaitsForAnOfflineCanaryUntilItIsSkipped reads the wave
+// barrier the orchestrator reads: with the canary offline the current
+// wave is still the canary and the canary is not finished, so wave one
+// does not open; once the host is skipped with a reason the canary is
+// finished and the next wave is the current one. An offline host of a
+// later wave holds nothing, as before.
+func TestTheBarrierWaitsForAnOfflineCanaryUntilItIsSkipped(t *testing.T) {
+	targets := []Target{
+		{HostID: "a", Wave: 0, State: TargetSucceeded},
+		{HostID: "b", Wave: 0, State: TargetQueuedOffline},
+		{HostID: "c", Wave: 1, State: TargetPending},
+		{HostID: "d", Wave: 1, State: TargetQueuedOffline},
+	}
+	if wave := currentWave(targets); wave != 0 {
+		t.Fatalf("the current wave is %d with the canary offline, expected 0", wave)
+	}
+	if waveFinished(targets, 0) {
+		t.Fatal("the canary reads as finished with a host of it offline")
+	}
+	targets[1].State = TargetSkipped
+	targets[1].ErrorCode = SkippedByOperatorCode
+	if !waveFinished(targets, 0) {
+		t.Fatal("the canary does not read as finished after the offline host was skipped")
+	}
+	if wave := currentWave(targets); wave != 1 {
+		t.Fatalf("the current wave is %d after the skip, expected 1", wave)
+	}
+	// The offline host of wave one holds nothing: with c settled the
+	// wave is finished over it.
+	targets[2].State = TargetSucceeded
+	if !waveFinished(targets, 1) {
+		t.Fatal("an offline host of a wave holds the wave open")
+	}
+}
+
+// TestTheConcurrencyLimitCountsEveryWave guards max_concurrent as the
+// document reads it: the hosts in flight across the whole campaign, not
+// the hosts of the wave the scheduler is looking at. A canary that came
+// back and runs under the waves takes a slot of the campaign; a host
+// waiting - for its turn, a budget or its connection - takes none.
+func TestTheConcurrencyLimitCountsEveryWave(t *testing.T) {
+	targets := []Target{
+		{Wave: 0, State: TargetRunning},
+		{Wave: 0, State: TargetSucceeded},
+		{Wave: 1, State: TargetDispatched},
+		{Wave: 1, State: TargetAwaitingLock},
+		{Wave: 1, State: TargetAwaitingBudget},
+		{Wave: 2, State: TargetRebooting},
+		{Wave: 2, State: TargetPending},
+		{Wave: 2, State: TargetQueuedOffline},
+	}
+	if active := activeTargets(targets); active != 4 {
+		t.Fatalf("%d hosts hold a slot, expected 4: the running canary, the dispatched and the locked host of wave one, the rebooting host of wave two", active)
+	}
+}
+
+// TestALateSuccessDoesNotResurrectACanceledCampaign guards the settle
+// path after a cancel: a host settled canceled stays canceled when its
+// task's result arrives late - a settled host never moves - and a
+// canceled or canceling campaign never becomes running again on it.
+func TestALateSuccessDoesNotResurrectACanceledCampaign(t *testing.T) {
+	for _, to := range []TargetState{TargetSucceeded, TargetNoChange, TargetRunning, TargetVerifying} {
+		if TargetCanceled.mayBecome(to) {
+			t.Errorf("a canceled host may become %s on a late result", to)
+		}
+	}
+	for _, from := range []State{StateCanceled, StateCanceling} {
+		for _, to := range []State{StateRunning, StateCanary, StateCompleted, StateCompletedWithIssues} {
+			if from.mayBecome(to) {
+				t.Errorf("a %s campaign may become %s", from, to)
+			}
+		}
+	}
+	// The campaign's own drain reads the hosts: a host whose cancel
+	// request is answered as not interruptible is still under way and
+	// holds the campaign in canceling; one answered as not started is
+	// canceled and holds nothing.
+	targets := []Target{{State: TargetRunning, CancelRequestedAt: new(time.Time)}}
+	if cancelSettled(targets) {
+		t.Fatal("a host running to its end after a cancel request reads as settled")
+	}
+	targets[0].State = TargetCanceled
+	if !cancelSettled(targets) {
+		t.Fatal("a host canceled on the agent's word holds the campaign in canceling")
 	}
 }

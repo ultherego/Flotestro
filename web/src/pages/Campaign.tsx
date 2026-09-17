@@ -8,7 +8,7 @@ import type {
 import { ErrorBox, ErrorCode, Time, Pair, Pairs, ProgressBar, Empty, JobState } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { StatusBar } from "../components/widgets";
-import { JobPlan, PlanGroupView } from "../components/plan";
+import { JobPlan, PlanGroupView, STALE_PLAN_CODES, unknownPlanHosts } from "../components/plan";
 import { VirtualRows } from "../components/virtual";
 import { OPERATIONS_INTERVAL, useProgress, useProgressStream } from "../lib/stream";
 import {
@@ -17,10 +17,12 @@ import {
 } from "../lib/targets";
 import { moduleForAction } from "./host/modules";
 import {
-  approvalForced, bulkPrefill, ContractChips, contractWords, MIN_REASON, type PlanGroups, reasonValid,
+  bulkPrefill, ContractChips, contractWords, MIN_REASON, type PlanGroups, reasonValid,
   REVERSE_OPERATION, reversePayload, useOperation,
 } from "./Bulk";
 import { describeExpression } from "./Groups";
+import { useConfirm } from "../components/Modal";
+import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
@@ -58,11 +60,58 @@ type CampaignRecord = CampaignType & CompensationLinks & {
   retried_by?: { id: string; name: string; state: string }[];
 };
 
+/**
+ * The cancel protocol as a target row carries it: when the cancel was
+ * asked of the host, and what the host answered - the outcome and the
+ * phase it was in. Read off the host's task by the server; absent for a
+ * host nobody asked.
+ */
+export type CancelState = {
+  cancel_requested_at?: string;
+  cancel_outcome?: string;
+  cancel_phase?: string;
+};
+
+/**
+ * One line about the cancel of a host's task, for the row: what the
+ * host answered, or that the answer is still awaited. Empty for a host
+ * nobody asked. The outcome is the protocol's word; the sentence says
+ * what it means for the host, because "not_interruptible" on its own
+ * reads as an error to somebody who did not write the protocol.
+ */
+export function cancelOutcomeLine(target: CancelState, t: (key: string, params?: Record<string, string | number>) => string): string {
+  if (!target.cancel_requested_at && !target.cancel_outcome) return "";
+  switch (target.cancel_outcome) {
+    case "not_started":
+      return t("Cancel: the host had not started the task; it will not start.");
+    case "interrupted":
+      return t("Cancel: the host interrupted the task while it was {phase}.", { phase: target.cancel_phase || "under way" });
+    case "not_interruptible":
+      return t("Cancel: the host runs the task to its end ({phase}); the result settles it.", { phase: target.cancel_phase || "under way" });
+    case "already_done":
+      return t("Cancel: the host had already finished the task; its result settles it.");
+    default:
+      return t("Cancel requested; waiting for the host to answer.");
+  }
+}
+
+/**
+ * Whether the operator may skip the host by name: only a host waiting
+ * for its connection in a campaign that has not settled - the offline
+ * canary the barrier waits for. The server refuses everything else with
+ * skip_not_allowed; the button is not drawn where the answer is known.
+ */
+export function canSkipTarget(target: { state: string }, campaignState: string): boolean {
+  return target.state === "queued_offline" && !SETTLED_CAMPAIGN_STATES.includes(campaignState);
+}
+
 export function Campaign() {
   const t = useT();
   const { id = "" } = useParams();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [stateFilter, setStateFilter] = useState("");
   const [search, setSearch] = useState("");
   // The timeline is read through a filter of its own: one kind of event,
@@ -185,6 +234,37 @@ export function Campaign() {
       navigate(`/campaigns/${created.id}`);
     },
   });
+  // The skip of a host waiting for its connection: the offline canary
+  // the barrier waits for, let go by name with a reason the dialog asks
+  // for. The row and the totals are read again once the server answered.
+  const skip = useMutation({
+    mutationFn: ({ hostId, reason }: { hostId: string; reason: string }) =>
+      api.post(`/api/v1/campaigns/${id}/targets/${hostId}/skip`, { reason }),
+    onSuccess: (_, { hostId }) => {
+      toast.success(t("Host {host} skipped; the campaign goes on without it.", { host: hostId.slice(0, 8) }));
+      queryClient.invalidateQueries({ queryKey: ["campaign", id] });
+      queryClient.invalidateQueries({ queryKey: ["campaign-targets", id] });
+    },
+    onError: (error) => {
+      toast.error(error instanceof Error ? error.message : String(error));
+    },
+  });
+  const askToSkip = async (target: { host_id: string; hostname?: string; wave: number }) => {
+    const host = target.hostname || target.host_id.slice(0, 8);
+    const { ok, reason } = await confirm({
+      title: t("Skip {host}?", { host }),
+      body: (
+        <p>
+          {target.wave === 0
+            ? t("The host is a canary waiting for its connection, and the waves do not start until the canary is settled. Skipping it opens the barrier on the word of the canary hosts that ran; the host takes no part and is not a failure.")
+            : t("The host waits for its connection. Skipping it leaves it out of the campaign with your reason; it takes no part and is not a failure.")}
+        </p>
+      ),
+      confirmLabel: t("Skip this host"),
+      reason: { required: true, label: t("Reason (kept in the audit trail)") },
+    });
+    if (ok && reason) skip.mutate({ hostId: target.host_id, reason });
+  };
   const control = useMutation({
     mutationFn: (operation: string) =>
       api.post(`/api/v1/campaigns/${id}/${operation}`, controlBody(operation)),
@@ -237,8 +317,14 @@ export function Campaign() {
   // The approval of a critical or destructive operation needs a reason
   // the server accepts: the same rule as the fresh authentication it asks
   // for, checked here so the button says so instead of the refusal.
-  const reasonForced = approvalForced(operation?.risk);
+  const reasonForced = approvalReasonRequired(operation?.risk);
   const approvalReady = !reasonForced || reasonValid(approvalReason);
+  // A plan the panel cannot read on any host blocks the consent: nobody can
+  // approve what nobody has seen. The host is excluded with a reason, or
+  // the campaign is planned again.
+  const unknownPlans = unknownPlanHosts(plans.data?.items ?? []);
+  const staleHosts = loaded.filter((target) => STALE_PLAN_CODES.has(target.error_code ?? "")).map((target) => target.hostname ?? target.host_id);
+  const approvalBlocked = unknownPlans.length > 0;
 
   // What the hosts under way do when the campaign stops, from the cancel
   // mode of the operation. The campaign stop itself never interrupts a
@@ -387,13 +473,16 @@ export function Campaign() {
           description={t("The consent covers exactly what is on screen: this operation, this payload, these {count} hosts and this rollout. It is recorded with the fingerprint {fingerprint}, your authentication and the reason.", { count: total, fingerprint: data.approval_fingerprint.slice(0, 12) })}
           footer={
             <Actions>
-              <button onClick={() => control.mutate("approve")} disabled={control.isPending || !approvalReady}>
+              <button onClick={() => control.mutate("approve")} disabled={control.isPending || !approvalReady || approvalBlocked}>
                 {t("Approve")}
               </button>
               <button className="secondary" onClick={() => setApproving(false)}>{t("Back")}</button>
             </Actions>
           }
         >
+          {approvalBlocked && (
+            <p className="warning"><span>{t("Approval is blocked: {n} hosts have a plan the panel cannot read. Exclude them with a reason or plan the campaign again.", { n: unknownPlans.length })} {unknownPlans.slice(0, 12).join(", ")}</span></p>
+          )}
           <FieldGrid>
             <Field
               label={t("Reason (kept in the audit trail)")}
@@ -409,6 +498,12 @@ export function Campaign() {
             </Field>
           </FieldGrid>
           {control.error && <p className="warning"><span>{control.error instanceof Error ? control.error.message : String(control.error)}</span></p>}
+          {control.error instanceof ApiError && STALE_PLAN_CODES.has(control.error.code) && (
+            <Actions>
+              <span className="source">{t("The host no longer computes this plan; plan again and approve the new one.")}</span>
+              <Link className="button" to={bulkPrefill(data.action_type, data.name, data.payload ?? {})}>{t("Replan")}</Link>
+            </Actions>
+          )}
         </Card>
       )}
 
@@ -668,8 +763,14 @@ export function Campaign() {
         ) : (
           <div className="plan-groups">
             {plans.data.items.map((group) => (
-              <PlanGroupView key={group.plan_hash} group={group} action={actionType} />
+              <PlanGroupView key={group.plan_hash} group={group} action={actionType} stale={staleHosts} />
             ))}
+            {staleHosts.length > 0 && canRetry && (
+              <p className="warning">
+                <span>{t("{n} hosts refused the plan as stale; the previous consent does not carry over. Order a retry to plan them again.", { n: staleHosts.length })}</span>
+                <button className="secondary" onClick={() => setRetrying(true)}>{t("Replan")}</button>
+              </p>
+            )}
           </div>
         )}
       </Card>
@@ -813,6 +914,31 @@ export function Campaign() {
                       >
                         {t("Blocker")}: {target.blocker}
                       </div>
+                    )}
+                    {/* The cancel protocol on the host: asked, and what the
+                        host answered. A cancel written on the panel alone
+                        would say "stopped" about a transaction the host ran
+                        to its end. */}
+                    {cancelOutcomeLine(target as CancelState, t) && (
+                      <div
+                        className="source"
+                        title={cancelOutcomeLine(target as CancelState, t)}
+                        style={{ maxWidth: "28ch", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", lineHeight: 1.2 }}
+                      >
+                        {cancelOutcomeLine(target as CancelState, t)}
+                      </div>
+                    )}
+                    {/* An offline canary holds the barrier; the operator may
+                        let it go by name, with a reason. */}
+                    {canSkipTarget(target, data.state) && (
+                      <button
+                        className="inline"
+                        onClick={() => askToSkip(target)}
+                        disabled={skip.isPending}
+                        title={t("Leave this host out with a reason; a skipped canary opens the waves.")}
+                      >
+                        {t("Skip")}
+                      </button>
                     )}
                   </td>
                   {/* The progress belongs to the operation currently running
@@ -1211,4 +1337,13 @@ function targetProgress(
     if (jobID && progress.has(jobID)) return progress.get(jobID);
   }
   return undefined;
+}
+
+/**
+ * The risk classes whose approval needs a reason the server accepts: an
+ * operation that can cut a host off or destroy what it holds is approved
+ * with a sentence, not a click.
+ */
+function approvalReasonRequired(risk: string | undefined): boolean {
+  return risk === "critical" || risk === "destructive";
 }

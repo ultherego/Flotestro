@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { findMatches, jobWindow, logFileName, splitMatches, utcStamp } from "./Logs";
-import type { Attempt, Job } from "../../lib/types";
+import { bootFilterSupport, bootParam, findMatches, jobWindow, logFileName, splitMatches, utcStamp } from "./Logs";
+import type { Attempt, Capabilities, Job } from "../../lib/types";
 
 /* The window of a job is what the journal read is bounded to; it is
    computed from the record and the attempts, so it is tested on its own. */
@@ -100,5 +100,40 @@ describe("logFileName", () => {
   it("turns a path into one file name and names an unbounded journal read", () => {
     expect(logFileName("web01", "/var/log/syslog", at)).toBe("web01-var-log-syslog-20260915100100.log");
     expect(logFileName("web01", "", at)).toBe("web01-all-20260915100100.log");
+  });
+});
+
+/* A read by boot is offered only where the agent applies the filter: an
+   older agent is silent about the feature and would answer with every
+   boot, so silence reads as "cannot", with the reason spelled out. */
+
+const t = (text: string) => text;
+const journald = (features?: Record<string, boolean>, available = true): Capabilities => [
+  { name: "journald", version: 1, available, read_only: false, features },
+];
+
+describe("bootFilterSupport", () => {
+  it("is supported only when the journald adapter names the feature", () => {
+    expect(bootFilterSupport(journald({ boot_filter: true }), t)).toEqual({ supported: true });
+  });
+
+  it("names the reason for an old agent, an adapter without the feature and a host without journald", () => {
+    const silent = bootFilterSupport(journald(), t);
+    expect(silent.supported).toBe(false);
+    expect(silent.reason).toContain("cannot filter the journal by boot");
+    expect(bootFilterSupport(journald({ boot_filter: false }), t).supported).toBe(false);
+    expect(bootFilterSupport(journald({ boot_filter: true }, false), t).reason).toContain("no journald adapter");
+    expect(bootFilterSupport([], t).supported).toBe(false);
+    expect(bootFilterSupport(undefined, t).supported).toBe(false);
+  });
+});
+
+describe("bootParam", () => {
+  it("takes the kernel's dashed form and the journal's bare one, and nothing else", () => {
+    expect(bootParam("2cd11312-4365-4fe6-b49e-e4d704ea2c5a")).toBe("2cd1131243654fe6b49ee4d704ea2c5a");
+    expect(bootParam("2CD1131243654FE6B49EE4D704EA2C5A")).toBe("2cd1131243654fe6b49ee4d704ea2c5a");
+    expect(bootParam("yesterday")).toBe("");
+    expect(bootParam("")).toBe("");
+    expect(bootParam(null)).toBe("");
   });
 });

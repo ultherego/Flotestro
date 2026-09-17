@@ -12,8 +12,9 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { useT } from "../../i18n";
 
-type Device = {
+export type Device = {
   name: string;
+  kernel_name?: string;
   path: string;
   type: string;
   size_bytes: number;
@@ -22,7 +23,17 @@ type Device = {
   uuid?: string;
   model?: string;
   serial?: string;
+  wwn?: string;
+  /** The /dev/disk/by-id link: the identity a destructive operation binds to. */
+  by_id?: string;
+  identity_unavailable_reason?: string;
   parent?: string;
+  children?: string[];
+  /** Devices stacked on this one: a volume group, an array, an encrypted container. */
+  holders?: string[];
+  root_device?: boolean;
+  has_mounted_children?: boolean;
+  has_open_holders?: boolean;
   rotational?: boolean;
   read_only: boolean;
   mountpoints?: string[];
@@ -134,6 +145,49 @@ export function deviceInUse(device: Device, devices: Device[]): boolean {
 /** A mount point as lsblk prints it, in the operator's words: "[SWAP]" is swap, the rest a path. */
 export function mountpointWords(mountpoint: string): string {
   return mountpoint === "[SWAP]" ? "swap" : mountpoint;
+}
+
+/** The by-id link without its directory: what the operator recognises the disk by. */
+export function byIdName(device: Device): string {
+  return device.by_id ? device.by_id.replace(/^\/dev\/disk\/by-id\//, "") : "";
+}
+
+/**
+ * Whether the device has an identity a destructive operation can bind to.
+ * The host applies the same rule: a by-id link, and behind it a WWN or a
+ * serial - or the UUID of a device-mapper or RAID volume, which is the
+ * identity such a device has. A dm-name link is a name, not an identity.
+ */
+export function hasStableIdentity(device: Device): boolean {
+  const link = byIdName(device);
+  if (!link) return false;
+  if (device.wwn || device.serial) return true;
+  return /^(dm-uuid-|md-uuid-|lvm-pv-uuid-)/.test(link);
+}
+
+/**
+ * Why the host would refuse to format or wipe the device, in the host's
+ * own codes, or nothing when the operation may be ordered. The host checks
+ * again right before the change; this is the same answer given before the
+ * operator clicks, so a refused plan is shown as refused and not offered.
+ */
+export function destructiveRefusal(device: Device, devices: Device[]): { code: string; reason: string } | null {
+  if (!hasStableIdentity(device)) {
+    return {
+      code: "stable_identity_required",
+      reason: device.identity_unavailable_reason
+        || (byIdName(device) ? "the by-id link carries neither a WWN nor a serial" : "no /dev/disk/by-id link names this device"),
+    };
+  }
+  if (device.root_device) return { code: "disk_in_use", reason: "carries the root filesystem" };
+  if ((device.mountpoints ?? []).length > 0) return { code: "disk_in_use", reason: `mounted at ${device.mountpoints![0]}` };
+  if (device.has_mounted_children || deviceInUse(device, devices)) {
+    return { code: "disk_in_use", reason: "a partition or volume on it is mounted or used as swap" };
+  }
+  if (device.has_open_holders || (device.holders ?? []).length > 0) {
+    return { code: "disk_in_use", reason: `held by ${(device.holders ?? []).join(", ") || "another device"}` };
+  }
+  return null;
 }
 
 /**
@@ -363,21 +417,36 @@ export function Storage() {
                   )}
                 </td>
                 <td className="hm-mono">{(device.mountpoints ?? []).map((point) => t(mountpointWords(point))).join(", ") || "—"}</td>
-                {/* Identification goes by UUID and serial: /dev/sdX depends on
-                    the detection order and points at another disk after a
-                    reboot. */}
+                {/* Identification goes by the by-id link, the WWN and the
+                    serial: /dev/sdX depends on the detection order and points
+                    at another disk after a reboot. A device without a link
+                    has no identity to bind a destructive operation to, and
+                    the row says so instead of showing an empty cell. */}
                 <td
                   className="source hm-mono"
                   title={[
+                    device.by_id ?? "",
+                    device.wwn ? `WWN ${device.wwn}` : "",
+                    device.serial ? `${t("serial")} ${device.serial}` : "",
                     device.uuid ? `UUID=${device.uuid}` : "",
                     device.label ? `LABEL=${device.label}` : "",
                     device.model ?? "",
-                    device.serial ? `${t("serial")} ${device.serial}` : "",
+                    (device.holders ?? []).length ? `${t("held by")} ${device.holders!.join(", ")}` : "",
+                    device.identity_unavailable_reason ?? "",
                   ].filter(Boolean).join(" · ") || undefined}
                 >
-                  {device.uuid ? `UUID=${device.uuid.slice(0, 13)}…` : ""}
-                  {device.serial ? ` ${device.model ?? ""} ${device.serial}` : ""}
-                  {!device.uuid && !device.serial && "—"}
+                  {byIdName(device) ? <div>{byIdName(device)}</div> : null}
+                  {device.wwn ? <div>WWN {device.wwn}</div> : null}
+                  {device.serial ? <div>{t("serial")} {device.serial}</div> : null}
+                  {device.uuid ? <div>UUID={device.uuid.slice(0, 13)}…</div> : null}
+                  {(device.holders ?? []).length > 0 && (
+                    <div><span className="badge warn">{t("held by {holders}", { holders: device.holders!.join(", ") })}</span></div>
+                  )}
+                  {!device.by_id && (
+                    <div>
+                      <span className="badge unknown" title={device.identity_unavailable_reason}>{t("no stable identity")}</span>
+                    </div>
+                  )}
                 </td>
                 <td>
                   {/* The health log belongs to a whole disk, not to a
@@ -427,38 +496,53 @@ export function Storage() {
                         </button>
                       )}
                       {/* Formatting and wiping carry the device identity from
-                          this row: the host refuses if it hits something else. */}
-                      <button
-                        className="hm-danger"
-                        onClick={() =>
-                          setIntent({
-                            action: "filesystem.create",
-                            label: t("Format device"),
-                            description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
-                              device: device.path,
-                              details: `${bytes(device.size_bytes)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
-                            }),
-                            payload: {
-                              storage: { ...identity(device), fs_type: "ext4" },
-                            },
-                          })
-                        }
-                      >
-                        {t("Format")}
-                      </button>
-                      <button
-                        className="hm-danger"
-                        onClick={() =>
-                          setIntent({
-                            action: "disk.wipe",
-                            label: t("Wipe signatures"),
-                            description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
-                            payload: { storage: identity(device) },
-                          })
-                        }
-                      >
-                        {t("Wipe")}
-                      </button>
+                          this row - the by-id link, the WWN, the serial - and
+                          the host refuses if it hits something else. The size
+                          is in the description for the operator, never an
+                          identity. A device without a stable identity is not
+                          offered: the host would refuse, and the row says why. */}
+                      {destructiveRefusal(device, devices) ? (
+                        <span
+                          className="badge error"
+                          title={destructiveRefusal(device, devices)!.reason}
+                        >
+                          {t("format refused: {code}", { code: destructiveRefusal(device, devices)!.code })}
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            className="hm-danger"
+                            onClick={() =>
+                              setIntent({
+                                action: "filesystem.create",
+                                label: t("Format device"),
+                                description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
+                                  device: device.path,
+                                  details: `${bytes(device.size_bytes)}, ${byIdName(device)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
+                                }),
+                                payload: {
+                                  storage: { ...identity(device), fs_type: "ext4" },
+                                },
+                              })
+                            }
+                          >
+                            {t("Format")}
+                          </button>
+                          <button
+                            className="hm-danger"
+                            onClick={() =>
+                              setIntent({
+                                action: "disk.wipe",
+                                label: t("Wipe signatures"),
+                                description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
+                                payload: { storage: identity(device) },
+                              })
+                            }
+                          >
+                            {t("Wipe")}
+                          </button>
+                        </>
+                      )}
                     </div>
                   )}
                 </td>
@@ -690,13 +774,15 @@ function SectorCount({ count }: { count: number }) {
  * The device identity sent together with the operation. The host compares
  * it with its state and refuses at the first mismatch: /dev/sdX after a
  * reboot may point at a different disk than the one the operator is looking
- * at.
+ * at. The size is not sent as an identity: two disks of the same size prove
+ * nothing about each other.
  */
-function identity(device: Device): Record<string, unknown> {
+export function identity(device: Device): Record<string, unknown> {
   return {
     device: device.path,
+    expected_by_id: device.by_id ?? "",
+    expected_wwn: device.wwn ?? "",
     expected_serial: device.serial ?? "",
-    expected_size_bytes: device.size_bytes,
     expected_uuid: device.uuid ?? "",
   };
 }

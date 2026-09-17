@@ -110,8 +110,8 @@ func TestTransactionWithAStalePlanIsRejected(t *testing.T) {
 		t.Fatal("a transaction with a stale plan was carried out")
 	}
 	last := attempts[len(attempts)-1]
-	if last.ErrorCode != "plan_changed" {
-		t.Fatalf("error code = %q, expected plan_changed", last.ErrorCode)
+	if last.ErrorCode != "stale_plan" {
+		t.Fatalf("error code = %q, expected stale_plan", last.ErrorCode)
 	}
 	// Nothing could have been changed.
 	if last.Detail != nil && len(last.Detail.Applied) > 0 {

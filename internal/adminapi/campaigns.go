@@ -1,6 +1,7 @@
 package adminapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1318,13 +1319,25 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 		// The group expires with its oldest plan: past that moment the
 		// hosts are not started on it, digest or no digest.
 		ExpiresAt time.Time `json:"expires_at"`
+		// The header of the plan envelope: the planner that made the plan
+		// and whether the plan is an envelope at all. A plan that is not
+		// one is a plan the panel cannot read as a declaration of its
+		// effects, and the screen says so rather than merging it in.
+		PlannerVersion string `json:"planner_version,omitempty"`
+		SchemaVersion  uint32 `json:"schema_version,omitempty"`
+		Envelope       bool   `json:"envelope"`
 	}
 	order := []string{}
 	by := map[string]*planGroup{}
 	for _, entry := range entries {
 		group, present := by[entry.PlanHash]
 		if !present {
-			group = &planGroup{PlanHash: entry.PlanHash, Plan: entry.Plan, ExpiresAt: entry.ExpiresAt}
+			header := campaigns.EnvelopeHeader(entry.Plan)
+			group = &planGroup{PlanHash: entry.PlanHash, Plan: entry.Plan, ExpiresAt: entry.ExpiresAt,
+				PlannerVersion: header.PlannerVersion, SchemaVersion: header.SchemaVersion, Envelope: header.Envelope}
+			if expiry, err := time.Parse(time.RFC3339, header.ExpiresAt); err == nil && expiry.Before(group.ExpiresAt) {
+				group.ExpiresAt = expiry
+			}
 			by[entry.PlanHash] = group
 			order = append(order, entry.PlanHash)
 		}
@@ -1523,6 +1536,14 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		stepUpEvidence = evidence
 	}
 
+	// A consent covers plans the hosts still compute. A plan envelope past
+	// its expiry is one they do not: the approval is refused with the code
+	// the host would answer with, and the operator plans again.
+	if code, detail := campaignPlansConflict(r.Context(), s.campaigns, campaign.ID); code != "" {
+		problem(w, http.StatusConflict, code, detail)
+		return
+	}
+
 	tx, err := s.campaigns.Pool().Begin(r.Context())
 	if err != nil {
 		s.fail(w, err)
@@ -1530,7 +1551,9 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback(r.Context()) }()
 
-	approved, err := s.campaigns.Approve(r.Context(), tx, campaign.ID, approval)
+	// The plans are recorded with the approval: what the consent covered,
+	// host by host, as it stood when it was given.
+	approved, err := s.campaigns.ApproveWithPlans(r.Context(), tx, *campaign, approval)
 	if errors.Is(err, campaigns.ErrConflict) {
 		problem(w, http.StatusConflict, "invalid_state",
 			"the campaign is not awaiting approval (state "+string(campaign.State)+")")
@@ -1571,6 +1594,33 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, approved)
+}
+
+// campaignPlansConflict says whether the campaign's plans can still be
+// consented to: plan_expired when a plan envelope is past its expiry. A
+// plan of the older shape carries no expiry of its own and is bound in
+// time by the campaign's plan TTL alone.
+func campaignPlansConflict(ctx context.Context, store *campaigns.Store, campaignID string) (string, string) {
+	entries, err := store.PlansWithContent(ctx, campaignID)
+	if err != nil {
+		return "", ""
+	}
+	now := time.Now()
+	for _, entry := range entries {
+		header := campaigns.EnvelopeHeader(entry.Plan)
+		if !header.Envelope || header.ExpiresAt == "" {
+			continue
+		}
+		expiry, err := time.Parse(time.RFC3339, header.ExpiresAt)
+		if err != nil {
+			continue
+		}
+		if now.After(expiry) {
+			return "plan_expired", "the plan of " + orDefault(entry.Hostname, entry.HostID) +
+				" expired at " + expiry.UTC().Format(time.RFC3339) + "; plan the campaign again"
+		}
+	}
+	return "", ""
 }
 
 // handleCampaignApprovals returns the approval records: the evidence of
@@ -1665,6 +1715,73 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 		Detail: map[string]any{"reason": request.Reason, "state": string(updated.State)},
 	})
 	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleSkipCampaignTarget lets an operator leave a host waiting for its
+// connection out of the campaign, by name and with a reason: the offline
+// canary the document lets the operator skip so that the wave barrier
+// opens. The right is the approver's - opening the waves over a canary
+// that never ran is a decision of the same weight as advancing the gate -
+// and the reason goes on the host's row, its step and the trail.
+func (s *Server) handleSkipCampaignTarget(w http.ResponseWriter, r *http.Request) {
+	campaign, ok := s.campaignFor(w, r, authz.PermCampaignApprove)
+	if !ok {
+		return
+	}
+	principal := authz.FromContext(r.Context())
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+			return
+		}
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	if len([]rune(request.Reason)) < minimalStepUpReason {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"a skip must state its reason (field reason, min. 8 characters)")
+		return
+	}
+	hostID := r.PathValue("host")
+	if _, err := uuid.Parse(hostID); err != nil {
+		problem(w, http.StatusNotFound, "target_not_found", "no such host in the campaign")
+		return
+	}
+	target, err := s.campaigns.SkipTarget(r.Context(), campaign.ID, hostID, principal.Subject, request.Reason)
+	switch {
+	case errors.Is(err, campaigns.ErrNotFound):
+		problem(w, http.StatusNotFound, "target_not_found", "no such host in the campaign")
+		return
+	case errors.Is(err, campaigns.ErrSkipNotAllowed):
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "campaign.target.skip", TargetType: "host", TargetID: hostID,
+			RequestID: campaign.RequestID, Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{"campaign_id": campaign.ID, "reason": "skip_not_allowed"},
+		})
+		problem(w, http.StatusConflict, "skip_not_allowed",
+			"only a host waiting for its connection can be skipped; a host under way settles on its own")
+		return
+	case errors.Is(err, campaigns.ErrConflict), errors.Is(err, campaigns.ErrConcurrentTransition):
+		problem(w, http.StatusConflict, "invalid_state",
+			"the host or the campaign moved; read it again")
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "campaign.target.skip", TargetType: "host", TargetID: hostID,
+		RequestID: campaign.RequestID, Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"campaign_id": campaign.ID, "wave": target.Wave,
+			"error_code": target.ErrorCode, "reason": request.Reason,
+		},
+	})
+	writeJSON(w, http.StatusOK, target)
 }
 
 // campaignFor loads the campaign and checks the permission in the scope of

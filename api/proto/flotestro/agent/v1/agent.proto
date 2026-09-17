@@ -37,6 +37,12 @@ service AgentService {
   // audit log, nor in the inventory - it is only in the store and briefly in
   // the host's memory.
   rpc FetchSecret(FetchSecretRequest) returns (FetchSecretResponse);
+  // RequestIdentityChallenge hands out a one-time challenge a host signs
+  // with its current key when it renews through a relay. The relay's
+  // handshake proves the relay; the challenge, bound to the host, the relay
+  // and a short expiry, is what proves the host still holds the key the
+  // certificate on record belongs to.
+  rpc RequestIdentityChallenge(IdentityChallengeRequest) returns (IdentityChallengeResponse);
 }
 
 // RelayService serves the site relays. It is a separate service, because a
@@ -125,13 +131,48 @@ message FetchSecretRequest {
   string task_id = 1;
   string secret_name = 2;
   uint32 secret_version = 3;
+  // The host's own proof when the fetch goes through a relay: the envelope
+  // signs the request with the identity field cleared, and the ephemeral
+  // X25519 public key - signed by the host key over the task and the
+  // secret - is what the panel seals the value to. A relay carries these
+  // untouched and never sees the plaintext.
+  RelayedEnvelope identity = 4;
+  bytes ephemeral_public_key = 5;
+  bytes ephemeral_key_signature = 6;
 }
 
 message FetchSecretResponse {
   bytes value = 1;
   uint32 version = 2;
-  // Sha256 lets the host check that it got what the panel issued.
+  // Sha256 lets the host check that it got what the panel issued. Empty on
+  // a sealed answer: the authenticated cipher already guarantees the
+  // content, and a digest of a short secret in a relay's log would be a
+  // hint nobody asked for.
   string sha256 = 3;
+  // The sealed answer of a relayed fetch: value stays empty, and the host
+  // opens sealed_value with its ephemeral private key and the panel's
+  // ephemeral public key. sealing names the scheme
+  // (x25519-hkdf-sha256-aes256gcm); a host that does not know it must not
+  // guess.
+  bytes sealed_value = 4;
+  bytes sealed_nonce = 5;
+  bytes server_public_key = 6;
+  string sealing = 7;
+}
+
+// IdentityChallengeRequest carries nothing: the identity comes from the
+// handshake, or from the relay's attestation, never from the body.
+message IdentityChallengeRequest {}
+
+message IdentityChallengeResponse {
+  // Challenge is 32 random bytes the host signs into its renewal proof. The
+  // panel keeps only its digest, for one use and for two minutes.
+  bytes challenge = 1;
+  int64 expires_at_unix = 2;
+  // RelayId is the relay the challenge was issued through, empty for a
+  // direct call: the proof binds the same relay, so the host can check it
+  // signs what the panel will look for.
+  string relay_id = 3;
 }
 
 message PingRequest {}
@@ -146,6 +187,14 @@ message RenewCertificateRequest {
   // the agent may generate a new key pair.
   bytes csr_pem = 1;
   AgentBuild build = 2;
+  // A renewal through a relay binds the request to the old host key: the
+  // envelope signs the request with the identity field cleared, and proof
+  // is Sign(old host key, SHA256(csr_der || server_challenge || relay_id))
+  // over a challenge the panel issued for this host, this relay and two
+  // minutes. Absent on a direct renewal, where the handshake is the proof.
+  RelayedEnvelope identity = 3;
+  bytes server_challenge = 4;
+  bytes proof = 5;
 }
 
 message RenewCertificateResponse {
@@ -204,7 +253,39 @@ message AgentMessage {
     MetricsSample metrics_sample = 7;
     // The answer to a FinalTask: the host has stopped taking work.
     FinalReady final_ready = 8;
+    // The answer to a CancelTask: what the cancel found on the host.
+    CancelAck cancel_ack = 9;
   }
+  // The host's own signature over the payload, for a session that goes
+  // through a relay. Outside the oneof: every kind of message carries it,
+  // and a relay forwards it untouched - it neither signs nor rewrites.
+  RelayedEnvelope envelope = 20;
+}
+
+// RelayedEnvelope is the inner identity envelope of a message that travels
+// through a relay. The relay proves itself in its own handshake; the host
+// proves itself here, with a signature its key alone can make, so the relay
+// can carry the host's word but not speak for it.
+//
+// The agent signs fields 1-10 with its current host key. body_sha256 is the
+// SHA-256 of the payload message in its deterministic protobuf encoding;
+// the gateway decodes the payload and encodes it again the same way, so
+// what is checked is the content rather than the bytes a relay happened to
+// forward. sequence is monotonic within session_id, starting at 1 with
+// Hello; a message the relay buffered keeps its original issued_at_unix and
+// signature. nonce is 16 random bytes.
+message RelayedEnvelope {
+  uint32 schema_version = 1;
+  string relay_id = 2;
+  string host_id = 3;
+  string certificate_serial = 4;
+  string session_id = 5;
+  uint64 sequence = 6;
+  int64 issued_at_unix = 7;
+  bytes nonce = 8;
+  string message_kind = 9;
+  bytes body_sha256 = 10;
+  bytes host_signature = 11;
 }
 
 message ServerMessage {
@@ -760,6 +841,11 @@ message ReadJournal {
   // Until ends the read, in the same forms as since; the Logs page bounds
   // a read to the window of a job with both.
   string until = 6;
+  // BootID narrows the read to one boot of the host: thirty-two hex digits
+  // as journalctl --boot takes them. An agent that applies it announces the
+  // boot_filter feature of its journald adapter; the panel sends the field
+  // only to such an agent.
+  string boot_id = 7;
 }
 
 // SystemReboot restarts the host. A reboot is a separate campaign phase, not
@@ -924,6 +1010,39 @@ message PackageRepairResult {
 message CancelTask {
   string task_id = 1;
   string reason = 2;
+  // request_revision names the delivery the cancel is about - the number
+  // of the attempt the panel holds - so that an acknowledgement is read
+  // against the request that asked for it.
+  uint64 request_revision = 3;
+  // deadline_unix is when the panel stops waiting for the acknowledgement
+  // and settles the task as unknown; the agent answers before it or the
+  // answer is only a note on the trail.
+  int64 deadline_unix = 4;
+}
+
+// CancelAck is the agent's answer to a CancelTask. A cancel is not a
+// state the panel writes on its own: the host says what the request
+// found - a task that never started, one it interrupted, one in a phase
+// that has to finish, or one whose result is already in its journal.
+message CancelAck {
+  string task_id = 1;
+  enum Outcome {
+    // The task had not begun on the host; it will not begin.
+    NOT_STARTED = 0;
+    // The task was under way in a phase the agent may interrupt, and was.
+    INTERRUPTED = 1;
+    // The task is in a phase that must run to its end - a transaction
+    // inside the helper; the request was noted and the result follows.
+    NOT_INTERRUPTIBLE = 2;
+    // The result is already in the journal of the host.
+    ALREADY_DONE = 3;
+  }
+  Outcome outcome = 2;
+  // phase says what the host was doing when the request arrived.
+  string phase = 3;
+  // observed_result_hash is the SHA-256 of the deterministic encoding of
+  // the TaskResult the journal holds, with ALREADY_DONE; empty otherwise.
+  bytes observed_result_hash = 4;
 }
 
 // FinalTask tells the agent the host is leaving the fleet. From this message
@@ -1161,15 +1280,61 @@ message PackageUpgrade {
   // An empty list means all the packages from the plan.
   repeated string packages = 2;
   bool security_only = 3;
+  // The approved plan envelope the execution is bound to: its header,
+  // so the host rebuilds the same envelope, and its elements, so a
+  // refusal names the element that moved. The hash above is the digest
+  // of that envelope.
+  PackagePlanReference plan_reference = 4;
 }
 
-// PackageChange describes one version change.
+// PackagePlanReference is what an execution carries of the approved plan
+// envelope. The content is not carried in full - the host computes it
+// again right before the change, that is the point - only the header the
+// planner does not compute from the host and the elements the operator
+// approved. The agent cannot change the expected digest: the reference
+// travels in the payload the panel's capability signs.
+message PackagePlanReference {
+  uint32 schema_version = 1;
+  string planner_version = 2;
+  string inventory_revision = 3;
+  string resource_revision = 4;
+  // The expiry as the payload spells it (RFC 3339), carried verbatim: the
+  // agent rebuilds the payload from this envelope and hashes it against
+  // the panel's digest, so every field has to come back byte for byte.
+  string expires_at = 5;
+  repeated PackageChange changes = 6;
+}
+
+// PackageChange describes one element of a plan or of a result: what
+// happens to one package, at which version, from where, in which
+// architecture and in which direction.
 message PackageChange {
   string name = 1;
   string current_version = 2;
   string candidate_version = 3;
   string origin = 4;
   bool security = 5;
+  // The architecture of the candidate; empty when the manager did not
+  // say, never "any".
+  string architecture = 6;
+  // install, upgrade, downgrade or remove.
+  string action = 7;
+  // requested, dependency or orphan: why the element is in the plan.
+  string reason = 8;
+  bool blocked = 9;
+  bool protected = 10;
+  // How the installed files of the package grow or shrink; meaningful
+  // only when known.
+  int64 installed_delta_bytes = 11;
+  bool installed_delta_known = 12;
+  // The checksum of the archive as the index publishes it
+  // ("sha256:..."); empty when the index carries none.
+  string digest = 13;
+  // In a result: achieved or missed for an expected effect of the plan,
+  // unplanned for a change the plan did not name. Empty in a plan.
+  string effect = 14;
+  // In a result: the version found after the transaction, or "absent".
+  string observed_version = 15;
 }
 
 message PackagePlanResult {
@@ -1200,6 +1365,27 @@ message PackagePlanResult {
   // kernel is among the changes. The helper refuses a change whose need
   // exceeds what is free, before the transaction starts.
   repeated SpaceFact space = 12;
+  // The header of the plan envelope: who made the plan, for which host and
+  // picture of it, against which repository metadata, and until when it
+  // holds. plan_hash above is the digest of the envelope over all of it.
+  uint32 schema_version = 13;
+  string planner_version = 14;
+  string host_id = 15;
+  string inventory_revision = 16;
+  string resource_revision = 17;
+  int64 expires_at_unix = 18;
+  // How the change could be taken back: the mechanism and its identifier,
+  // or unavailable with the reason.
+  string rollback_mechanism = 19;
+  string rollback_id = 20;
+  bool rollback_available = 21;
+  string rollback_reason = 22;
+  // The whole envelope in its canonical JSON (RFC 8785): what the digest
+  // was computed over, kept by the panel as the plan body next to the
+  // approval.
+  bytes envelope = 23;
+  // The plan in words for the screen; outside the digest.
+  string description = 24;
 }
 
 // SpaceFact is what a package change needs on one filesystem against what
@@ -1535,6 +1721,12 @@ message StorageAction {
   // The fingerprint of the plan approved by the operator; the host computes
   // it once more.
   string plan_hash = 15;
+  // The stable identity of the device a destructive operation binds to: the
+  // /dev/disk/by-id link and the WWN from the plan. The host compares them
+  // with the device under the path right before the change; the size is a
+  // description, never an identity.
+  string expected_by_id = 16;
+  string expected_wwn = 17;
 }
 
 message StorageResult {
@@ -1962,6 +2154,8 @@ message PackageLifecycle {
   // host computes the plan once more and refuses when the repository
   // metadata changed.
   string plan_hash = 5;
+  // The approved plan envelope the change is bound to, as for an upgrade.
+  PackagePlanReference plan_reference = 6;
 }
 
 // ListProcesses orders a snapshot of the host processes.
@@ -2030,6 +2224,9 @@ message ComposeAction {
   string project = 2;
   string manifest = 3;
   string plan_digest = 4;
+  // The image digests the plan resolved, by service name: what the
+  // deployment binds the containers to.
+  map<string, string> image_digests = 5;
 }
 
 message ComposeResult {

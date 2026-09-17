@@ -7,6 +7,7 @@ import type { Job } from "../../lib/types";
 import { absoluteTime } from "../../lib/format";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
+import { ColumnChooser, Td, Th, useColumns, type ColumnDef, type Columns } from "../../components/SortableTable";
 import {
   Fact, Facts, Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
   useHost, useModule, useModuleRefresh,
@@ -74,6 +75,17 @@ function detailDocumentOf(attempt: Attempt): DetailDocument {
   return JSON.parse(attempt.stdout ?? "{}") as DetailDocument;
 }
 
+/** The columns of the unit list; the unit name cannot be taken off the screen. */
+export function unitColumns(t: (text: string) => string): ColumnDef[] {
+  return [
+    { key: "unit", label: t("Unit"), fixed: true },
+    { key: "active", label: t("Active") },
+    { key: "sub_state", label: t("Sub-state"), secondary: true },
+    { key: "on_boot", label: t("On boot") },
+    { key: "actions", label: t("Actions") },
+  ];
+}
+
 export function Services() {
   const t = useT();
   const host = useHost();
@@ -94,6 +106,9 @@ export function Services() {
   const [limit, setLimit] = useState(UNIT_PAGE);
   const [details, setDetails] = useState<Record<string, UnitDetail>>({});
   const [detailError, setDetailError] = useState("");
+  // The columns of the unit list, remembered per table in the browser.
+  // The unit name is the identity of a row and stays on the screen.
+  const columns = useColumns("host-services", unitColumns(t));
 
   const failed = module.data?.payload?.failed_units ?? [];
   const known = module.data?.payload?.failed_units_known ?? false;
@@ -294,6 +309,7 @@ export function Services() {
               />
               {t("active only")}
             </label>
+            <ColumnChooser columns={columns} />
           </>
         )}
         flush
@@ -329,13 +345,14 @@ export function Services() {
             <Table>
               <thead>
                 <tr>
-                  <th>{t("Unit")}</th><th>{t("Active")}</th><th>{t("Sub-state")}</th><th>{t("On boot")}</th><th>{t("Actions")}</th>
+                  {columns.all.map((column) => <Th key={column.key} columns={columns} name={column.key} />)}
                 </tr>
               </thead>
               <tbody>
                 {page.map((unit) => (
                   <UnitRow
                     key={unit.name}
+                    columns={columns}
                     unit={unit}
                     expanded={expanded === unit.name}
                     detail={details[unit.name]}
@@ -389,8 +406,9 @@ export function Services() {
 
 /** One unit of the list, with its detail panel under it when opened. */
 function UnitRow({
-  unit, expanded, detail, loading, error, onToggle, onRefresh, onOperation, onEnable, onUnmask, onMask,
+  columns, unit, expanded, detail, loading, error, onToggle, onRefresh, onOperation, onEnable, onUnmask, onMask,
 }: {
+  columns: Columns;
   unit: Unit;
   expanded: boolean;
   detail?: UnitDetail;
@@ -407,7 +425,7 @@ function UnitRow({
   return (
     <>
       <tr>
-        <td className="hm-mono">
+        <Td columns={columns} name="unit" className="hm-mono">
           <button
             type="button"
             className="secondary"
@@ -418,15 +436,15 @@ function UnitRow({
             {expanded ? "▾" : "▸"}
           </button>{" "}
           {unit.name}
-        </td>
-        <td>
+        </Td>
+        <Td columns={columns} name="active">
           <span className={unit.active_state === "active" ? "badge ok" : unit.active_state === "failed" ? "badge error" : "badge"}>
             {unit.active_state}
           </span>
-        </td>
-        <td>{unit.sub_state}</td>
-        <td>{unit.unit_file_state || "—"}</td>
-        <td>
+        </Td>
+        <Td columns={columns} name="sub_state">{unit.sub_state}</Td>
+        <Td columns={columns} name="on_boot">{unit.unit_file_state || "—"}</Td>
+        <Td columns={columns} name="actions">
           <div className="operations">
             {unit.active_state === "active" ? (
               <>
@@ -452,11 +470,11 @@ function UnitRow({
               <button className="hm-danger" onClick={onMask}>{t("Mask")}</button>
             )}
           </div>
-        </td>
+        </Td>
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={5}>
+          <td colSpan={columns.visible.length}>
             <UnitDetailPanel unit={unit} detail={detail} loading={loading} error={error} onRefresh={onRefresh} />
           </td>
         </tr>

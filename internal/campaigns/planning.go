@@ -452,6 +452,66 @@ func hostFingerprint(detail json.RawMessage) string {
 	return ""
 }
 
+// planReference reads off a package plan the header of its envelope and
+// the elements the operator approved, so the change carries them back to
+// the host: the host rebuilds the envelope with the same header, and a
+// refusal names the element that moved. A plan without a planner version
+// comes from an agent before the envelope; it binds by its digest alone,
+// as before.
+func planReference(plan json.RawMessage) *opspec.PlanReference {
+	if len(plan) == 0 {
+		return nil
+	}
+	var parsed struct {
+		Kind              string                   `json:"kind"`
+		SchemaVersion     uint32                   `json:"schema_version"`
+		PlannerVersion    string                   `json:"planner_version"`
+		InventoryRevision string                   `json:"inventory_revision"`
+		ResourceRevision  string                   `json:"resource_revision"`
+		ExpiresAt         string                   `json:"expires_at"`
+		Changes           []opspec.PlanChangeEntry `json:"changes"`
+	}
+	if err := json.Unmarshal(plan, &parsed); err != nil || parsed.Kind != "package_plan" || parsed.PlannerVersion == "" {
+		return nil
+	}
+	return &opspec.PlanReference{
+		SchemaVersion:     parsed.SchemaVersion,
+		PlannerVersion:    parsed.PlannerVersion,
+		InventoryRevision: parsed.InventoryRevision,
+		ResourceRevision:  parsed.ResourceRevision,
+		ExpiresAt:         parsed.ExpiresAt,
+		Changes:           parsed.Changes,
+	}
+}
+
+// PlanEnvelopeHeader is what the screen of plans and the approval record
+// read off a plan beyond its digest: who made it and until when it holds.
+// A plan without a planner version is a plan of the older shape - known,
+// but not an envelope.
+type PlanEnvelopeHeader struct {
+	PlannerVersion string `json:"planner_version,omitempty"`
+	SchemaVersion  uint32 `json:"schema_version,omitempty"`
+	ExpiresAt      string `json:"expires_at,omitempty"`
+	// Envelope says whether the plan is a plan envelope at all.
+	Envelope bool `json:"envelope"`
+}
+
+// EnvelopeHeader reads the header off a stored plan.
+func EnvelopeHeader(plan json.RawMessage) PlanEnvelopeHeader {
+	var parsed struct {
+		PlannerVersion string `json:"planner_version"`
+		SchemaVersion  uint32 `json:"schema_version"`
+		ExpiresAt      string `json:"expires_at"`
+	}
+	if len(plan) == 0 || json.Unmarshal(plan, &parsed) != nil {
+		return PlanEnvelopeHeader{}
+	}
+	return PlanEnvelopeHeader{
+		PlannerVersion: parsed.PlannerVersion, SchemaVersion: parsed.SchemaVersion,
+		ExpiresAt: parsed.ExpiresAt, Envelope: parsed.PlannerVersion != "",
+	}
+}
+
 // ContentFingerprint computes the digest of a plan from its description.
 func ContentFingerprint(detail json.RawMessage) string {
 	if len(detail) == 0 {
@@ -592,14 +652,26 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 	plan json.RawMessage) opspec.Payload {
 	switch action {
 	case opspec.ActionPackageInstall:
-		install := &opspec.PackageChangePayload{PlanHash: hash}
+		install := &opspec.PackageChangePayload{PlanHash: hash, Plan: planReference(plan)}
 		if payload.PackageChange != nil {
 			install.Packages = payload.PackageChange.Packages
 		}
 		payload.PackageChange = install
 
+	case opspec.ActionPackageRemove:
+		// A removal binds to its plan like an installation: the set the
+		// host computes again right before the transaction has to hash to
+		// the approved one. The approved set of the order stays as the
+		// second, older guard.
+		removal := &opspec.PackageChangePayload{PlanHash: hash, Plan: planReference(plan)}
+		if payload.PackageChange != nil {
+			removal.Packages = payload.PackageChange.Packages
+			removal.ExpectedRemovals = payload.PackageChange.ExpectedRemovals
+		}
+		payload.PackageChange = removal
+
 	case opspec.ActionPackageUpgrade:
-		upgrade := &opspec.PackageUpgradePayload{PlanHash: hash}
+		upgrade := &opspec.PackageUpgradePayload{PlanHash: hash, Plan: planReference(plan)}
 		if payload.PackageUpgrade != nil {
 			upgrade.Packages = payload.PackageUpgrade.Packages
 			upgrade.SecurityOnly = payload.PackageUpgrade.SecurityOnly
@@ -714,7 +786,8 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 			payload.DNS = &resolver
 		}
 
-	case opspec.ActionFilesystemCheck, opspec.ActionFilesystemResize, opspec.ActionLVMExtend:
+	case opspec.ActionFilesystemCheck, opspec.ActionFilesystemResize, opspec.ActionLVMExtend,
+		opspec.ActionMountRemove:
 		// A device binds by the plan digest: the disk, the group or the mount
 		// changed since planning stops the operation.
 		if payload.Storage != nil {
@@ -726,20 +799,28 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 	case opspec.ActionMountEnsure:
 		// A mount binds by the source resolved to a UUID on this host: mount
 		// by UUID finds the same filesystem or none, and never somebody
-		// else's disk that got the same path after a reboot.
-		if source := resolvedSource(plan); source != "" && payload.Storage != nil {
+		// else's disk that got the same path after a reboot. The plan
+		// digest goes with it: the fstab or the mount point moving since
+		// planning stops the operation.
+		if payload.Storage != nil {
 			mount := *payload.Storage
-			mount.Source = source
+			if source := resolvedSource(plan); source != "" {
+				mount.Source = source
+			}
+			mount.PlanHash = hash
 			payload.Storage = &mount
 		}
 
 	case opspec.ActionComposeDeploy:
 		// The digest of a Compose plan comes from the manifest and from the
 		// image digests. A deployment without it has no basis, and one with
-		// somebody else's would reach a host that never saw that plan.
+		// somebody else's would reach a host that never saw that plan. The
+		// digests themselves travel too: the host binds the images it runs
+		// to what was approved, tag or no tag.
 		if payload.Compose != nil {
 			manifest := *payload.Compose
 			manifest.PlanDigest = hash
+			manifest.ImageDigests = composeDigests(plan)
 			payload.Compose = &manifest
 		}
 
@@ -756,6 +837,35 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		payload.Hostname = &own
 	}
 	return payload
+}
+
+// composeDigests reads the image digest of every service out of a Compose
+// plan, by service name; nil when the plan names none.
+func composeDigests(plan json.RawMessage) map[string]string {
+	if len(plan) == 0 {
+		return nil
+	}
+	var parsed struct {
+		Payload struct {
+			Services []struct {
+				Name        string `json:"name"`
+				ImageDigest string `json:"image_digest"`
+			} `json:"services"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(plan, &parsed); err != nil {
+		return nil
+	}
+	digests := map[string]string{}
+	for _, service := range parsed.Payload.Services {
+		if service.Name != "" && service.ImageDigest != "" {
+			digests[service.Name] = service.ImageDigest
+		}
+	}
+	if len(digests) == 0 {
+		return nil
+	}
+	return digests
 }
 
 // orderedHostname takes the name the order gave this host out of its plan.

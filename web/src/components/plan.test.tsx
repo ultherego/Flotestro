@@ -3,7 +3,10 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@testing-library/jest-dom/vitest";
 import type { ReactElement } from "react";
-import { changesSummary, isHostPlan, JobPlan, PlanChanges, PlanFacts, PlanGroupView, PlanSummary, type HostPlan } from "./plan";
+import {
+  changeAction, changesSummary, isHostPlan, JobPlan, PlanChanges, PlanFacts, PlanGroupView, PlanSummary, planStatus,
+  STALE_PLAN_CODES, unknownPlanHosts, type HostPlan, type PlanGroup,
+} from "./plan";
 
 /* The attempts of a job come from the API; the client is replaced by a
    function each test programs. The mock is hoisted with the module,
@@ -181,9 +184,11 @@ describe("PlanChanges", () => {
     const rows = [...container.querySelectorAll("tbody tr")];
     expect(rows.map((row) => row.querySelector("td")?.textContent)).toEqual(["base-files", "libc6", "openssl", "zsh"]);
     const cells = (row: Element) => [...row.querySelectorAll("td")].map((cell) => cell.textContent);
-    expect(cells(rows[2])).toEqual(["openssl", "3.0.1", "3.0.2", "securitybookworm-security"]);
-    // A package new on the host has no version now; a dash says so.
-    expect(cells(rows[3])).toEqual(["zsh", "—", "5.9", ""]);
+    // A host that named no direction gets a dash, not an upgrade by default.
+    expect(cells(rows[2])).toEqual(["openssl", "—", "3.0.1", "3.0.2", "securitybookworm-security"]);
+    // A package new on the host has no version now; a dash says so, and
+    // the direction follows from it.
+    expect(cells(rows[3])).toEqual(["zsh", "install", "—", "5.9", ""]);
     expect(container.querySelectorAll(".badge.warn")).toHaveLength(2);
     expect(container.querySelector(".plan-changes-foot")).toHaveTextContent("4 packages · 2 security");
     expect(container.querySelector("button")).toBeNull();
@@ -202,6 +207,22 @@ describe("PlanChanges", () => {
     fireEvent.click(button);
     expect(container.querySelectorAll("tbody tr")).toHaveLength(8);
     expect(container.querySelector(".plan-changes-foot .source")).toHaveTextContent(/^20 packages$/);
+  });
+
+  it("names the direction, the origin and the architecture of every element the host filled", () => {
+    const { container } = render(<PlanChanges changes={[
+      { name: "openssl", current_version: "3.0.15-1", candidate_version: "3.0.16-1", action: "upgrade", origin: "Debian-Security:12/stable-security", architecture: "amd64", installed_delta_bytes: 2048, installed_delta_known: true },
+      { name: "curl", current_version: "8.11.0-1", candidate_version: "8.10.0-1", action: "downgrade", origin: "fedora", architecture: "x86_64" },
+      { name: "old-tool", current_version: "1.0", action: "remove", reason: "dependency", protected: true },
+    ]} />);
+    const rows = [...container.querySelectorAll("tbody tr")];
+    const cells = (row: Element) => [...row.querySelectorAll("td")].map((cell) => cell.textContent);
+    expect(cells(rows[0])).toEqual(["curl", "downgrade", "8.11.0-1", "8.10.0-1", "fedorax86_64"]);
+    expect(cells(rows[1])).toEqual(["old-tool", "remove", "1.0", "—", "protecteddependency"]);
+    expect(cells(rows[2])).toEqual(["openssl", "upgrade", "3.0.15-1", "3.0.16-1", "Debian-Security:12/stable-securityamd64+2.0 KiB"]);
+    // A removal and a downgrade are what the operator must not miss.
+    expect(container.querySelectorAll("tr.plan-change-attention")).toHaveLength(2);
+    expect(container.querySelector(".plan-changes-foot")).toHaveTextContent("3 packages · 1 removed · 1 downgraded");
   });
 
   it("lists the changes of a file plan as sentences, and nothing for an empty plan", () => {
@@ -232,7 +253,71 @@ describe("PlanFacts", () => {
   });
 });
 
+describe("changeAction", () => {
+  it("takes the direction the host named, settles the two cases the versions decide, and guesses nothing else", () => {
+    expect(changeAction({ name: "a", action: "downgrade", current_version: "1", candidate_version: "2" })).toBe("downgrade");
+    expect(changeAction({ name: "a", candidate_version: "2" })).toBe("install");
+    expect(changeAction({ name: "a", current_version: "1" })).toBe("remove");
+    expect(changeAction({ name: "a", current_version: "1", candidate_version: "2" })).toBe("");
+  });
+});
+
+describe("planStatus", () => {
+  const future = new Date(Date.now() + 3600_000).toISOString();
+  it("knows an envelope, a shaped plan of an older agent, and nothing else", () => {
+    const envelope: PlanGroup = { plan_hash: "a", count: 1, hosts: ["h1"], expires_at: future, envelope: true, planner_version: "packages/1", plan: { kind: "package_plan", changes: [] } };
+    expect(planStatus(envelope)).toBe("known");
+    const older: PlanGroup = { plan_hash: "b", count: 1, hosts: ["h2"], expires_at: future, plan: { kind: "package_plan", manager: "apt", changes: [{ name: "x" }] } };
+    expect(planStatus(older)).toBe("known");
+    const file: PlanGroup = { plan_hash: "c", count: 1, hosts: ["h3"], expires_at: future, plan: { kind: "file_plan", plan: { action: "update" } } };
+    expect(planStatus(file)).toBe("known");
+    const empty: PlanGroup = { plan_hash: "d", count: 2, hosts: ["h4", "h5"], expires_at: future, plan: {} };
+    expect(planStatus(empty)).toBe("unknown");
+    const past: PlanGroup = { ...envelope, expires_at: "2020-01-01T00:00:00Z" };
+    expect(planStatus(past)).toBe("expired");
+    expect(unknownPlanHosts([envelope, older, empty])).toEqual(["h4", "h5"]);
+  });
+
+  it("names every code a host refuses a moved plan with", () => {
+    for (const code of ["stale_plan", "replan_required", "plan_expired"]) expect(STALE_PLAN_CODES.has(code), code).toBe(true);
+    expect(STALE_PLAN_CODES.has("transaction_failed")).toBe(false);
+  });
+});
+
 describe("PlanGroupView", () => {
+  it("shows the planner, marks an unknown plan and the hosts that refused the plan as stale", () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    const group: PlanGroup = {
+      plan_hash: "abcdef0123456789", count: 2, hosts: ["web-1", "web-2"], expires_at: future,
+      envelope: true, planner_version: "packages/1",
+      plan: { kind: "package_plan", mode: "upgrade", manager: "apt", planner_version: "packages/1", changes: [{ name: "libc6", candidate_version: "2.41-13", action: "install" }] },
+    };
+    const { container } = render(<PlanGroupView group={group} stale={["web-2", "db-9"]} />);
+    expect(container.querySelector(".plan-group-head")).toHaveTextContent("Planner packages/1");
+    expect(container.querySelector(".plan-group-head .badge.error")).toHaveTextContent("stale on 1 hosts");
+    expect(container.querySelector("[data-testid=plan-group]")?.getAttribute("data-status")).toBe("known");
+
+    const { container: unknown } = render(<PlanGroupView group={{ plan_hash: "0000", count: 1, hosts: ["old-1"], expires_at: future, plan: {} }} />);
+    expect(unknown.querySelector("[data-testid=plan-group]")?.getAttribute("data-status")).toBe("unknown");
+    expect(unknown.querySelector(".plan-group-head")).toHaveTextContent("unknown plan");
+    expect(unknown.querySelector("table")).toBeNull();
+    expect(unknown.querySelector(".warning")).toHaveTextContent("exclude the hosts with a reason");
+  });
+
+  it("keeps two plans of different fingerprints apart even over the same packages", () => {
+    const future = new Date(Date.now() + 3600_000).toISOString();
+    const changes = [{ name: "libc6", current_version: "2.41-12", candidate_version: "2.41-13", action: "upgrade" }];
+    const groups: PlanGroup[] = [
+      { plan_hash: "aaaa", count: 1, hosts: ["web-1"], expires_at: future, envelope: true, plan: { kind: "package_plan", manager: "apt", changes: changes.map((c) => ({ ...c, origin: "Debian:12/stable" })) } },
+      { plan_hash: "bbbb", count: 1, hosts: ["web-2"], expires_at: future, envelope: true, plan: { kind: "package_plan", manager: "apt", changes: changes.map((c) => ({ ...c, origin: "Debian-Security:12/stable-security" })) } },
+    ];
+    const { container } = render(<>{groups.map((group) => <PlanGroupView key={group.plan_hash} group={group} />)}</>);
+    const sections = [...container.querySelectorAll("[data-testid=plan-group]")];
+    expect(sections).toHaveLength(2);
+    expect(sections[0]).toHaveTextContent("Debian:12/stable");
+    expect(sections[1]).toHaveTextContent("Debian-Security:12/stable-security");
+  });
+
   it("puts the hosts, the fingerprint and the expiry in a header and the packages in a table", () => {
     const group = {
       plan_hash: "abcdef0123456789abcdef0123456789",
@@ -255,7 +340,7 @@ describe("PlanGroupView", () => {
   });
 
   it("shows a host plan with its words and a refusal as the badge alone", () => {
-    const base = { plan_hash: "0123456789abcdef", count: 1, hosts: ["db-1"], expires_at: "2026-01-01T00:00:00Z" };
+    const base = { plan_hash: "0123456789abcdef", count: 1, hosts: ["db-1"], expires_at: "2099-01-01T00:00:00Z" };
     const { container } = render(<PlanGroupView group={{ ...base, plan: { kind: "file_plan", plan: { action: "update", changes: ["content"], document: "x=1" } } }} />);
     expect(container.querySelector(".plan-group-words")).toHaveTextContent("will change");
     expect(container.querySelector("li")).toHaveTextContent("content");

@@ -1112,6 +1112,26 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 			ineligible, len(targets)-withDocker)
 	}
 
+	// The manifest names the image by a mutable tag. The plan is computed
+	// only once the tag resolves to a digest, and that digest is what the
+	// deployment binds: the plan says which one, and where it came from.
+	for _, target := range h.campaignTargets(campaign.ID) {
+		if target.State != "pending" {
+			continue
+		}
+		plan := composePlan(t, h, target.PlanJobID)
+		if len(plan.Services) == 0 {
+			t.Errorf("host %s: the Compose plan names no service", target.Hostname)
+		}
+		for _, service := range plan.Services {
+			if !strings.HasPrefix(service.ImageDigest, "sha256:") || service.DigestSource == "" ||
+				!strings.Contains(service.PinnedImage, "@sha256:") {
+				t.Errorf("host %s: the service %s is not bound to a digest: %+v",
+					target.Hostname, service.Name, service)
+			}
+		}
+	}
+
 	// The cleanup goes by containers, because the panel has no "take the
 	// project down" operation: a deployment is a declaration of state, not
 	// a command that can be undone with one order.
@@ -1135,6 +1155,41 @@ func TestComposeCampaignCarriesThePlanDigestToTheHost(t *testing.T) {
 	if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
+}
+
+// composePlan reads the Compose plan out of the planning job: the services
+// with the digests the deployment binds.
+func composePlan(t *testing.T, h *harness, jobID string) (plan struct {
+	Digest   string `json:"digest"`
+	Services []struct {
+		Name         string `json:"name"`
+		Image        string `json:"image"`
+		ImageDigest  string `json:"image_digest"`
+		DigestSource string `json:"digest_source"`
+		PinnedImage  string `json:"pinned_image"`
+	} `json:"services"`
+}) {
+	t.Helper()
+	var response struct {
+		Items []struct {
+			Detail struct {
+				Kind    string          `json:"kind"`
+				Payload json.RawMessage `json:"payload"`
+			} `json:"detail"`
+		} `json:"items"`
+	}
+	h.get("/api/v1/jobs/"+jobID+"/attempts", &response)
+	for i := len(response.Items) - 1; i >= 0; i-- {
+		if response.Items[i].Detail.Kind != "compose" {
+			continue
+		}
+		if err := json.Unmarshal(response.Items[i].Detail.Payload, &plan); err != nil {
+			t.Fatalf("compose plan: %v", err)
+		}
+		return plan
+	}
+	t.Fatalf("the job %s carries no Compose plan", jobID)
+	return plan
 }
 
 // projectContainers returns the container identifiers of one Compose

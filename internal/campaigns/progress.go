@@ -172,6 +172,12 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 // few seconds, and a host waiting a minute must not be rewritten every
 // pass to say the same thing.
 func (o *Orchestrator) followJob(ctx context.Context, target *Target, job *jobs.Job) error {
+	// A task whose cancel was asked of the host stands where it stood:
+	// the host has not said yet whether it started, and the answer or the
+	// result moves the host - not a guess made from the request.
+	if job.State == jobs.StateCancelRequested {
+		return nil
+	}
 	state, blocker := taskStanding(job.State, job.WaitReason)
 	if state == target.State && blocker == target.Blocker {
 		return nil
@@ -216,9 +222,14 @@ type jobVerdict struct {
 // back from a restart with the operation half done. The document keeps
 // unknown apart from failure because the next step differs - read the
 // host, do not run the change again - and from success because nobody
-// saw the desired state on the host. Everything else is a failure of the
-// change with the code the host gave, or the task's state when it gave
-// none.
+// saw the desired state on the host. A task canceled - by the campaign's
+// own cancel reaching the host before it started, or by an operator on
+// the job - is a host that was stopped, not one that failed: it changed
+// nothing, and the threshold has no failure to count. A task whose
+// cancel request got no answer within the operation's timeout is unknown
+// with that code: the host may have done anything. Everything else is a
+// failure of the change with the code the host gave, or the task's state
+// when it gave none.
 func targetOutcome(verdict jobVerdict) (TargetState, string) {
 	switch {
 	case verdict.State == jobs.StateSucceeded && verdict.NoChange:
@@ -229,6 +240,10 @@ func targetOutcome(verdict jobVerdict) (TargetState, string) {
 		return TargetUnknown, ConnectivityLostCode
 	case verdict.ErrorCode == OutcomeUnknownCode:
 		return TargetUnknown, OutcomeUnknownCode
+	case verdict.ErrorCode == CancelAckTimeoutCode:
+		return TargetUnknown, CancelAckTimeoutCode
+	case verdict.State == jobs.StateCanceled:
+		return TargetCanceled, string(jobs.StateCanceled)
 	default:
 		return TargetFailed, orDefault(verdict.ErrorCode, string(verdict.State))
 	}

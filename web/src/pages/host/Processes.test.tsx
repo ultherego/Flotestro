@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { kernelThread, stateWords } from "./Processes";
+import { kernelThread, processColumns, stateWords } from "./Processes";
 
 /* procfs prints the scheduler state as one letter; the table says it in
    words and keeps the letter on hover. */
@@ -31,5 +31,19 @@ describe("kernelThread", () => {
   it("leaves ordinary processes alone, including init", () => {
     expect(kernelThread({ pid: 1, ppid: 0 })).toBe(false);
     expect(kernelThread({ pid: 1160, ppid: 1 })).toBe(false);
+  });
+});
+
+/* The PID and the command identify a process; a preference that hides
+   every other column still leaves both on the screen. */
+
+describe("processColumns", () => {
+  it("fixes the PID and the command, and names the rest for the chooser", () => {
+    const columns = processColumns((text) => text);
+    const fixed = columns.filter((column) => column.fixed).map((column) => column.key);
+    expect(fixed).toEqual(["pid", "command"]);
+    expect(columns.map((column) => column.key)).toEqual([
+      "pid", "user", "memory", "cpu", "threads", "state", "managed_by", "command", "actions",
+    ]);
   });
 });

@@ -9,30 +9,49 @@ import { ErrorBox, Time, Empty, JobState } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { Foot, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere, useHost } from "./shared";
 import { hoursAgo } from "../Jobs";
+import { actorKey, actorOf, actorView } from "../Audit";
 import { useT } from "../../i18n";
 
 /** How many events one page of the trail carries. */
 const AUDIT_PAGE = 50;
 
 /**
- * Who an actor is, in the operator's words: a person by name, a campaign
- * by a link to it, the agent of this host by the host's name, the panel
- * as itself. The identifier stays on hover - it is what the trail keeps.
+ * Who an actor is, in the operator's words: a person by the name it had,
+ * a campaign by a link to it, the agent of this host by the host's name,
+ * the panel as itself. The immutable identifier stays on hover - it is
+ * what the trail keeps. The snapshot decides the words and the link; the
+ * text of actor_id only stands in for an event written before it.
  */
 export function actorLabel(
   event: Pick<AuditEvent, "actor_type" | "actor_id">,
   host: { id: string; hostname: string },
   t: (text: string, params?: Record<string, string | number>) => string,
 ): { text: string; to?: string; title?: string } {
+  const actor = actorOf(event);
   const id = event.actor_id;
-  if (id.startsWith("campaign:")) {
-    const campaign = id.slice("campaign:".length);
-    return { text: t("campaign {id}", { id: campaign.slice(0, 8) }), to: `/campaigns/${encodeURIComponent(campaign)}`, title: id };
+  if (!actor) {
+    if (id.startsWith("campaign:")) {
+      const campaign = id.slice("campaign:".length);
+      return { text: t("campaign {id}", { id: campaign.slice(0, 8) }), to: `/campaigns/${encodeURIComponent(campaign)}`, title: id };
+    }
+    if (event.actor_type === "agent" || id === host.id) {
+      return { text: t("agent of {host}", { host: host.hostname }), title: id };
+    }
+    return { text: id };
   }
-  if (event.actor_type === "agent" || id === host.id) {
-    return { text: t("agent of {host}", { host: host.hostname }), title: id };
+  // The agent of this very host: its own trail names it as such, and a
+  // link to the host would lead where the reader already is.
+  if (actor.resource_type === "host" && actor.resource_id === host.id) {
+    return { text: t("agent of {host}", { host: host.hostname }), title: actor.resource_id };
   }
-  return { text: id };
+  const who = actorView(event, t);
+  if (actor.resource_type === "campaign" && actor.resource_id) {
+    return {
+      text: actor.resource_name ? `${t("campaign")} ${actor.resource_name}` : t("campaign {id}", { id: actor.resource_id.slice(0, 8) }),
+      to: who.to, title: actor.resource_id,
+    };
+  }
+  return { text: who.text, to: who.to, title: who.id };
 }
 
 /**
@@ -96,10 +115,15 @@ export function HostAudit() {
   // The listed events by outcome, and by who caused them; unknown until
   // the trail loads.
   const events = trail.data ? loadedItems(trail.data) : undefined;
-  const actors = Object.entries((events ?? []).reduce<Record<string, number>>((acc, event) => {
-    acc[event.actor_id] = (acc[event.actor_id] ?? 0) + 1;
+  // Grouped by the immutable identifier and the kind, not by the text of
+  // the name: a renamed person is one actor across both names.
+  const actors = Object.values((events ?? []).reduce<Record<string, { event: AuditEvent; count: number }>>((acc, event) => {
+    const key = actorKey(event);
+    const entry = acc[key] ?? { event, count: 0 };
+    entry.count += 1;
+    acc[key] = entry;
     return acc;
-  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  }, {})).sort((a, b) => b.count - a.count).slice(0, 8);
 
   return (
     <ModulePage>
@@ -126,8 +150,8 @@ export function HostAudit() {
         ) : !actors.length ? (
           <p className="source" style={{ margin: 0 }}>{t("No events.")}</p>
         ) : (
-          <Breakdown items={actors.map(([actor, count]) => {
-            const who = actorLabel({ actor_type: "", actor_id: actor }, host, t);
+          <Breakdown items={actors.map(({ event, count }) => {
+            const who = actorLabel(event, host, t);
             return { label: <span title={who.title}>{who.text}</span>, value: count };
           })} />
         )}
@@ -196,9 +220,19 @@ export function HostAudit() {
                       <td>
                         {(() => {
                           const who = actorLabel(event, host, t);
-                          return who.to
-                            ? <Link to={who.to} title={who.title}>{who.text}</Link>
-                            : <span title={who.title}>{who.text}</span>;
+                          return (
+                            <>
+                              {who.to
+                                ? <Link to={who.to} title={who.title}>{who.text}</Link>
+                                : <span title={who.title}>{who.text}</span>}
+                              {/* The immutable identifier beside the name
+                                  it had, so a rename later still reads as
+                                  one actor. */}
+                              {who.title && who.title !== who.text && (
+                                <> <span className="source hm-mono" title={who.title}>{who.title.slice(0, 8)}</span></>
+                              )}
+                            </>
+                          );
                         })()}
                         {/* The session and how it was authenticated stand
                             under the actor: they say which sign-in acted,

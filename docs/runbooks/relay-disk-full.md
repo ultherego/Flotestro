@@ -92,6 +92,13 @@ recovered. A job whose time to live passes first ends `expired`; a campaign targ
    panel side, and a lost state directory passes the local check by itself. The relay `name`
    in `relay.yaml` is the natural key: the same name refreshes the existing record and clears
    its revocation instead of creating a second relay.
+4. Upgrade order for the host identity envelope (`relay.identity` v2): the panel first, the relay
+   second, the agents last - a panel that does not know the envelope refuses a signing agent
+   as `relay_body_hash_mismatch`, and a relay from before v2 forwards neither the challenge nor the
+   certificate the gateway takes an older host key from. Set `FLOTESTRO_RELAY_IDENTITY=enforce`
+   only once `flotestro_relay_session_identity_total{strength="weak"}` stops growing and no open
+   session on `agent_sessions` carries `auth_strength = 'relay_only'`; after that a relayed host
+   that still does not sign shows `blocked_upgrade_required` and needs its agent upgraded.
 
 ## Verification
 

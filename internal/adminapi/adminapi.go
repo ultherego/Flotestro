@@ -257,6 +257,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/enrollment-requests", s.handleCreateEnrollmentRequest)
 	s.route(mux, "GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
 	s.route(mux, "POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
+	s.route(mux, "POST /api/v1/enrollment-requests/{id}/replace", s.handleReplaceEnrollmentRequest)
 	// The ready configuration of an order: the same file the installation
 	// profile composes, without the token, fetchable as often as needed.
 	s.route(mux, "GET /api/v1/enrollment-requests/{id}/config", s.handleEnrollmentConfig)
@@ -406,6 +407,7 @@ func (s *Server) Routes() http.Handler {
 	// A retry is a new order for the hosts the campaign lost, under a new
 	// approval; the settled campaign itself never changes.
 	s.route(mux, "POST /api/v1/campaigns/{id}/retry", s.handleRetryCampaign)
+	s.route(mux, "POST /api/v1/campaigns/{id}/targets/{host}/skip", s.handleSkipCampaignTarget)
 	// Scheduled campaigns: an order kept for a moment or a rule of moments,
 	// placed through the door above under its author's rights; each
 	// campaign it places waits for its approval. The calendar lines up the

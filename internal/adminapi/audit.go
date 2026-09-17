@@ -22,7 +22,9 @@ func (s *Server) recordAuditRead(r *http.Request, actor authz.Principal, action 
 	detail := map[string]any{}
 	for key, value := range map[string]string{
 		"target_id": filter.TargetID, "target_type": filter.TargetType,
-		"actor": filter.Actor, "action": filter.Action, "action_prefix": filter.ActionPrefix,
+		"actor": filter.Actor, "actor_kind": filter.ActorKind,
+		"actor_principal_id": filter.ActorPrincipalID, "actor_resource_id": filter.ActorResourceID,
+		"action": filter.Action, "action_prefix": filter.ActionPrefix,
 		"outcome": filter.Outcome,
 	} {
 		if value != "" {
@@ -95,12 +97,18 @@ func (s *Server) handleHostAudit(w http.ResponseWriter, r *http.Request) {
 func auditFilter(w http.ResponseWriter, r *http.Request) (audit.ListFilter, bool) {
 	query := r.URL.Query()
 	filter := audit.ListFilter{
-		TargetID:     query.Get("target_id"),
-		TargetType:   query.Get("target_type"),
-		Actor:        query.Get("actor"),
-		Action:       query.Get("action"),
-		ActionPrefix: query.Get("action_prefix"),
-		Outcome:      query.Get("outcome"),
+		TargetID:   query.Get("target_id"),
+		TargetType: query.Get("target_type"),
+		Actor:      query.Get("actor"),
+		// The snapshot filters: who acted by the immutable identifier and
+		// the kind, which is how the interface groups the trail. The text
+		// filter above stays for the readers that know it.
+		ActorKind:        query.Get("actor_kind"),
+		ActorPrincipalID: query.Get("actor_principal_id"),
+		ActorResourceID:  query.Get("actor_resource_id"),
+		Action:           query.Get("action"),
+		ActionPrefix:     query.Get("action_prefix"),
+		Outcome:          query.Get("outcome"),
 	}
 	var err error
 	if filter.Since, err = parseTimeParam(query.Get("since")); err != nil {

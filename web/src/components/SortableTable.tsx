@@ -107,13 +107,28 @@ export type Columns = {
 const columnsKey = (table: string) => `flotestro.columns.${table}`;
 
 /**
+ * The columns with at least one that cannot be taken off the screen. A
+ * row has to stay recognisable whatever the preference says: a table of
+ * units without the unit name, or of processes without the PID and the
+ * command, is a table of nothing. A screen names its identity columns
+ * with `fixed`; one that names none gets its first column fixed, so no
+ * stored preference - from this release or an older one - can hide every
+ * field that identifies a record.
+ */
+export function withIdentityColumn(columns: ColumnDef[]): ColumnDef[] {
+  if (columns.length === 0 || columns.some((column) => column.fixed)) return columns;
+  return columns.map((column, index) => (index === 0 ? { ...column, fixed: true, hidden: false } : column));
+}
+
+/**
  * The visible columns of a table, remembered per table in the browser.
  * What is stored is the list of the columns switched off their default -
  * a shown one hidden, a hidden one shown - so a column added to a screen
  * later takes its own default instead of the fate an old preference that
  * never named it would give it.
  */
-export function useColumns(table: string, columns: ColumnDef[]): Columns {
+export function useColumns(table: string, definitions: ColumnDef[]): Columns {
+  const columns = withIdentityColumn(definitions);
   const [switched, setSwitched] = useState<string[]>(() => readStored(columnsKey(table), [], isStringList));
   const isHidden = (key: string) => {
     const column = columns.find((entry) => entry.key === key);

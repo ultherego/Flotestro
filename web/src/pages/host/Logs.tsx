@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../../lib/api";
 import { awaitJob } from "../../lib/jobs";
-import type { Attempt, Job } from "../../lib/types";
+import type { Attempt, Capabilities, Job } from "../../lib/types";
 import { Empty } from "../../components/ui";
 import {
   Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleHeader, ModulePage, Section, Summary, Widgets,
@@ -106,6 +106,39 @@ export function logFileName(hostname: string, source: string, millis: number): s
   return `${hostname}-${part}-${stamp}.log`;
 }
 
+/**
+ * Whether the agent of the host applies a boot identifier to a journal
+ * read, and the reason when it does not. The journald adapter has to
+ * name the boot_filter feature as present: an agent from before the
+ * feature is silent about it, and silence is what an old agent says - it
+ * would ignore the field and answer with every boot under the name of
+ * one. The panel refuses such a read before dispatch; the screen says so
+ * before the operator asks.
+ */
+export function bootFilterSupport(
+  capabilities: Capabilities | undefined,
+  t: (text: string) => string,
+): { supported: boolean; reason?: string } {
+  const journald = (capabilities ?? []).find((capability) => capability.name === "journald");
+  if (!journald || !journald.available) {
+    return { supported: false, reason: t("This host has no journald adapter; the journal cannot be filtered by boot.") };
+  }
+  if (journald.features?.boot_filter !== true) {
+    return { supported: false, reason: t("The agent of this host cannot filter the journal by boot; it would answer with every boot. Read by time instead, or upgrade the agent.") };
+  }
+  return { supported: true };
+}
+
+/**
+ * A boot identifier as the address carries it: the bare lowercase form
+ * the journal uses, or empty for a value that is not one. The Power tab
+ * links here with the kernel's dashed form; both spell one boot.
+ */
+export function bootParam(value: string | null): string {
+  const bare = (value ?? "").trim().toLowerCase().replace(/-/g, "");
+  return /^[0-9a-f]{32}$/.test(bare) ? bare : "";
+}
+
 type FileResult = {
   path?: string;
   lines?: string[];
@@ -135,9 +168,18 @@ export function Logs() {
   const [paused, setPaused] = useState(false);
   // The unit detail on the Services tab hands over the unit and the cursor
   // of its last journal line, so the read here starts where that ended.
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const [unit, setUnit] = useState(params.get("unit") ?? "");
   const [cursor, setCursor] = useState(params.get("cursor") ?? "");
+  // The Power tab links here with one boot of the host; the filter stays
+  // in the address, so the view of one boot is a thing to hand over.
+  const boot = bootParam(params.get("boot"));
+  const bootFilter = bootFilterSupport(host.capabilities, t);
+  const clearBoot = () => {
+    const next = new URLSearchParams(params);
+    next.delete("boot");
+    setParams(next, { replace: true });
+  };
   const [priority, setPriority] = useState("");
   const [since, setSince] = useState("");
   // A job bounds the read to its window on the host: the operations
@@ -233,6 +275,10 @@ export function Logs() {
                   since: bounds?.since ?? (since || undefined),
                   until: bounds?.until,
                   after_cursor: cursor || undefined,
+                  // The boot goes to the host only where the agent applies
+                  // it; the button is off otherwise, and the server refuses
+                  // the read anyway.
+                  boot_id: boot && bootFilter.supported ? boot : undefined,
                 },
               },
             }
@@ -346,6 +392,11 @@ export function Logs() {
             <span className="hm-mono">{source === "journal" ? unit || t("all units") : path}</span>
           </Fact>
           <Fact label={t("Limit")}>{preview ? t("5 minutes, 32 KiB/s") : t("{n} lines", { n: lineCount })}</Fact>
+          {source === "journal" && boot && (
+            <Fact label={t("Boot")}>
+              <span className="hm-mono" title={boot}>{boot.slice(0, 8)}…</span>
+            </Fact>
+          )}
           {bounds && (
             <Fact label={t("Window")}>
               <span className="hm-mono">{bounds.since} – {bounds.until}</span>
@@ -438,6 +489,26 @@ export function Logs() {
                   )}
                 </div>
               </Field>
+              {/* One boot of the host, from the Power tab. The filter is
+                  shown as such, and where the agent cannot apply it the
+                  reason stands in its place - the read is not sent as if
+                  the filter held. */}
+              {boot && (
+                <Field
+                  label={t("Boot")}
+                  wide
+                  help={bootFilter.supported
+                    ? t("Only the lines of this boot of the host; clear the filter to read across boots.")
+                    : bootFilter.reason}
+                >
+                  <div className="operations">
+                    <span className="hm-mono" title={boot} data-testid="boot-filter">{boot}</span>
+                    {!bootFilter.supported && <span className="badge warn">{t("not applied")}</span>}
+                    <button className="secondary" onClick={clearBoot}>{t("Clear")}</button>
+                    <Link to={`/hosts/${host.id}/power`}>{t("boots on the Power tab")}</Link>
+                  </div>
+                </Field>
+              )}
               {/* A cursor is the position the unit detail ended at; the
                   read continues from there until the operator clears it. */}
               {cursor && (
@@ -480,7 +551,11 @@ export function Logs() {
           )}
 
           <FormActions>
-            <button onClick={() => read.mutate()} disabled={read.isPending || host.connection_state !== "online"}>
+            <button
+              onClick={() => read.mutate()}
+              disabled={read.isPending || host.connection_state !== "online" || (source === "journal" && !!boot && !bootFilter.supported)}
+              title={source === "journal" && boot && !bootFilter.supported ? bootFilter.reason : undefined}
+            >
               {read.isPending ? t("Reading…") : t("Read")}
             </button>
             {/* The live preview applies to the journal only: a file has no

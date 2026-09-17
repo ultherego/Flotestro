@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
+
+	"google.golang.org/protobuf/proto"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
@@ -253,6 +256,9 @@ func (e *TaskExecutor) outcomeUnknown(ctx context.Context, marker InFlight) *age
 func (e *TaskExecutor) reportInFlight() {
 	now := time.Now().UTC()
 	for _, marker := range e.journal.InFlightMarkers() {
+		// A cancel of such a task is answered from the marker: nothing
+		// runs that could be interrupted, and nothing is promised.
+		e.phases.seed(marker.TaskID, marker.IdempotencyKey)
 		e.log.Warn("an operation was in flight when the previous process of the agent stopped; "+
 			"its outcome is unknown until the host state is read",
 			"task_id", marker.TaskID, "action", marker.Action,
@@ -285,5 +291,229 @@ func packageStateNow(ctx context.Context) *agentv1.PackageApplyResult {
 		Manager:                  manager.Name(),
 		PackageDatabaseBroken:    len(attention) > 0,
 		PackagesNeedingAttention: attention,
+	}
+}
+
+// The phases of a task on the host, as the cancel protocol names them in
+// the acknowledgement (CancelAck.phase in agent.proto). A cancel that
+// arrives is answered by the phase the task is in: before the start the
+// task is refused and never starts; a read under way that registered an
+// interruption is interrupted; a mutation under way runs to its end; a
+// task that ended is answered with the hash of its result.
+const (
+	// PhaseAccepted: the task was delivered and is going through the
+	// checks and the wait for the host's resources; nothing ran.
+	PhaseAccepted = "accepted"
+	// PhaseAwaitingLock: the task waits for a resource of the host that
+	// another task holds; nothing ran.
+	PhaseAwaitingLock = "awaiting_lock"
+	// PhaseStarted: a read is under way. Interruptible when the module
+	// registered an interruption for it (a journal preview); otherwise it
+	// runs to its end, which for a read is soon.
+	PhaseStarted = "started"
+	// PhaseMutating: the in-flight marker is down and the helper may be
+	// changing the host. Never interrupted: a transaction cut in half is
+	// worse than one that ran.
+	PhaseMutating = "mutating"
+	// PhaseDone: the task ended and its result is in the journal.
+	PhaseDone = "done"
+	// PhaseNotDelivered: the cancel named a task this process was never
+	// handed. It will not start: a delivery that follows is refused.
+	PhaseNotDelivered = "not_delivered"
+	// PhaseInFlightBeforeRestart: the previous process of the agent left
+	// the task in flight; the helper may have finished it, and the answer
+	// to its redelivery is outcome_unknown. Not interruptible - there is
+	// nothing to interrupt and nothing to promise.
+	PhaseInFlightBeforeRestart = "in_flight_before_restart"
+)
+
+// taskPhase is where one attempt stands on the host.
+type taskPhase struct {
+	idempotencyKey string
+	phase          string
+	// stop cancels the context the checks and the wait for the host's
+	// resources run under. It is called for a cancel that arrives before
+	// the start, and never after: the operation itself runs under the
+	// same context, and a mutation must not be cut.
+	stop context.CancelFunc
+	// canceled says a cancel reached the task before it started; the
+	// executor refuses to start it and answers with STATUS_CANCELED.
+	canceled bool
+	// resultHash is the digest of the result the journal holds, once the
+	// task ended.
+	resultHash []byte
+}
+
+// taskPhases is the record, per attempt this process was handed, of the
+// phase the attempt is in - the record the cancel protocol answers from.
+//
+// The entries of finished tasks are kept, bounded, so that a cancel of a
+// task that ended a moment ago is answered as already done with the hash
+// of its result rather than as never delivered. The attempts a cancel
+// reached before their delivery are kept apart: such a delivery, should
+// it still arrive, is refused without running.
+type taskPhases struct {
+	mu      sync.Mutex
+	entries map[string]*taskPhase
+	// order is the sequence the entries were made in, for the bound.
+	order   []string
+	refused map[string]bool
+}
+
+// maxRememberedPhases bounds the record. A host carries a handful of
+// tasks at a time; the bound is for the finished ones kept behind them.
+const maxRememberedPhases = 512
+
+func newTaskPhases() *taskPhases {
+	return &taskPhases{entries: map[string]*taskPhase{}, refused: map[string]bool{}}
+}
+
+// enter records a task handed to this process, in the accepted phase,
+// with the function that stops it before the start. It says whether a
+// cancel reached the task before its delivery, in which case the task is
+// not to start.
+func (p *taskPhases) enter(taskID, idempotencyKey string, stop context.CancelFunc) (refused bool) {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	refused = p.refused[taskID]
+	delete(p.refused, taskID)
+	p.entries[taskID] = &taskPhase{idempotencyKey: idempotencyKey, phase: PhaseAccepted, stop: stop, canceled: refused}
+	p.order = append(p.order, taskID)
+	p.trim()
+	return refused
+}
+
+// seed records a task the previous process left in flight: the marker
+// names the attempt, and a cancel of it is answered as not interruptible.
+func (p *taskPhases) seed(taskID, idempotencyKey string) {
+	if p == nil || taskID == "" {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, known := p.entries[taskID]; known {
+		return
+	}
+	p.entries[taskID] = &taskPhase{idempotencyKey: idempotencyKey, phase: PhaseInFlightBeforeRestart}
+	p.order = append(p.order, taskID)
+	p.trim()
+}
+
+// move records the phase the task entered.
+func (p *taskPhases) move(taskID, phase string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if entry, known := p.entries[taskID]; known {
+		entry.phase = phase
+	}
+}
+
+// finish records the end of the task with the digest of its result: the
+// SHA-256 of the deterministic encoding, the same bytes on every
+// computation of the same result.
+func (p *taskPhases) finish(taskID string, result *agentv1.TaskResult) {
+	if p == nil {
+		return
+	}
+	var hash []byte
+	if result != nil {
+		options := proto.MarshalOptions{Deterministic: true}
+		if encoded, err := options.Marshal(result); err == nil {
+			sum := sha256.Sum256(encoded)
+			hash = sum[:]
+		}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, known := p.entries[taskID]
+	if !known {
+		entry = &taskPhase{}
+		p.entries[taskID] = entry
+		p.order = append(p.order, taskID)
+		p.trim()
+	}
+	entry.phase = PhaseDone
+	entry.stop = nil
+	entry.resultHash = hash
+}
+
+// canceledBeforeStart says whether a cancel reached the task before it
+// started. The executor asks before every step that would touch the host.
+func (p *taskPhases) canceledBeforeStart(taskID string) bool {
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, known := p.entries[taskID]
+	return known && entry.canceled
+}
+
+// answer decides what a cancel of the task finds and what it does. The
+// outcome and the phase go into the acknowledgement; stop, when not nil,
+// is the interruption to carry out - after the acknowledgement went out,
+// so that the host's own account of the interrupted work follows it on
+// the stream rather than overtaking it.
+//
+// A task never handed to this process is answered as not started and
+// remembered: its delivery, should it arrive, is refused without running.
+func (p *taskPhases) answer(taskID string, interruptible func(string) (context.CancelFunc, bool)) (
+	outcome agentv1.CancelAck_Outcome, phase string, hash []byte, stop context.CancelFunc) {
+	if p == nil {
+		return agentv1.CancelAck_NOT_STARTED, PhaseNotDelivered, nil, nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, known := p.entries[taskID]
+	if !known {
+		p.refused[taskID] = true
+		if len(p.refused) > maxRememberedPhases {
+			p.refused = map[string]bool{taskID: true}
+		}
+		return agentv1.CancelAck_NOT_STARTED, PhaseNotDelivered, nil, nil
+	}
+	switch entry.phase {
+	case PhaseDone:
+		return agentv1.CancelAck_ALREADY_DONE, PhaseDone, entry.resultHash, nil
+	case PhaseAccepted, PhaseAwaitingLock:
+		// Nothing ran: the task is refused at its next step, and the wait
+		// it may be in is cut so that the refusal is answered now.
+		entry.canceled = true
+		return agentv1.CancelAck_NOT_STARTED, entry.phase, nil, entry.stop
+	case PhaseStarted:
+		if interruptible != nil {
+			if cancel, registered := interruptible(taskID); registered {
+				return agentv1.CancelAck_INTERRUPTED, entry.phase, nil, cancel
+			}
+		}
+		return agentv1.CancelAck_NOT_INTERRUPTIBLE, entry.phase, nil, nil
+	default:
+		return agentv1.CancelAck_NOT_INTERRUPTIBLE, entry.phase, nil, nil
+	}
+}
+
+// trim drops the oldest finished entries beyond the bound. An entry of
+// a task still under way is never dropped: a cancel of it has to find it.
+func (p *taskPhases) trim() {
+	for len(p.order) > maxRememberedPhases {
+		dropped := false
+		for i, id := range p.order {
+			entry, known := p.entries[id]
+			if !known || entry.phase == PhaseDone || entry.phase == PhaseInFlightBeforeRestart {
+				delete(p.entries, id)
+				p.order = append(p.order[:i], p.order[i+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			return
+		}
 	}
 }

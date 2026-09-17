@@ -21,24 +21,36 @@ var (
 	fsLabel = regexp.MustCompile(`^[A-Za-z0-9_.-]{0,16}$`)
 )
 
-// DeviceIdentity describes what the operation expects on the host.
+// DeviceIdentity describes what a non-destructive operation expects on the
+// host.
 //
 // The path alone is not enough: /dev/sdb after a reboot can be a different
-// disk than the one the operator viewed. In formatting and wiping that is
-// the difference between an empty disk and somebody else's data, so the
-// host checks everything the panel gave - and refuses at the first
-// mismatch.
+// disk than the one the operator viewed. Every identifier the panel gave
+// is compared and the first mismatch refuses. The size is not among them:
+// two disks of the same size prove nothing about each other, so a size in
+// the order is a description, never a match. Destructive operations go
+// through ValidateDestructiveTarget, which requires the identity instead of
+// checking whatever was given.
 type DeviceIdentity struct {
-	Path      string
-	Serial    string
-	UUID      string
-	SizeBytes uint64
+	Path   string
+	ByID   string
+	WWN    string
+	Serial string
+	UUID   string
 }
 
 // Matches compares the expected identity with the host state.
 func (d DeviceIdentity) Matches(device *Device) error {
 	if device == nil {
 		return fmt.Errorf("the device %s does not exist on this host", d.Path)
+	}
+	if d.ByID != "" && device.ByID != d.ByID {
+		return fmt.Errorf("the device %s is %q, and the plan assumes %q",
+			d.Path, device.ByID, d.ByID)
+	}
+	if d.WWN != "" && device.WWN != d.WWN {
+		return fmt.Errorf("the device %s has the WWN %q, and the plan assumes %q",
+			d.Path, device.WWN, d.WWN)
 	}
 	if d.Serial != "" && device.Serial != d.Serial {
 		return fmt.Errorf("the device %s has the serial %q, and the plan assumes %q",
@@ -47,11 +59,6 @@ func (d DeviceIdentity) Matches(device *Device) error {
 	if d.UUID != "" && device.UUID != d.UUID {
 		return fmt.Errorf("the device %s has the UUID %q, and the plan assumes %q",
 			d.Path, device.UUID, d.UUID)
-	}
-	// The size decides where the disk has neither a serial nor a UUID.
-	if d.SizeBytes != 0 && device.SizeBytes != d.SizeBytes {
-		return fmt.Errorf("the device %s has %d bytes, and the plan assumes %d",
-			d.Path, device.SizeBytes, d.SizeBytes)
 	}
 	return nil
 }

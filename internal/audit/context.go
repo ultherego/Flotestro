@@ -30,15 +30,31 @@ type Actor struct {
 	// RequestID is the identifier the caller attached to the request, so an
 	// event can be matched with the client's own log.
 	RequestID string
+	// The identity behind the request as the trail is to remember it: the
+	// immutable identifier, the subject, the display name and the kind at
+	// the moment of the request. The authentication layer fills them in
+	// where it has the principal at hand; an event whose context carries
+	// none is resolved by its subject when it is written.
+	PrincipalID string
+	Subject     string
+	DisplayName string
+	Kind        string
+	// CredentialID is the row of the credential the request came with -
+	// the browser session or the API token - not the credential itself.
+	// The digest in SessionID ties the events of one sign-in together;
+	// this identifier names the row an administrator revokes.
+	CredentialID string
 }
 
 // requestContext is what the context carries for the recorder: the actor and
-// the host lookups already made under this request, so ten events about one
-// host under one request cost one query.
+// the lookups already made under this request - the hosts and the
+// identities - so ten events about one host under one request cost one
+// query.
 type requestContext struct {
-	actor Actor
-	mu    sync.Mutex
-	hosts map[string]hostSnapshot
+	actor      Actor
+	mu         sync.Mutex
+	hosts      map[string]hostSnapshot
+	principals map[string]principalSnapshot
 }
 
 type hostSnapshot struct {
@@ -100,4 +116,27 @@ func (rc *requestContext) rememberHost(hostID string, snapshot hostSnapshot) {
 		rc.hosts = map[string]hostSnapshot{}
 	}
 	rc.hosts[hostID] = snapshot
+}
+
+// cachedPrincipal returns the identity read earlier under the same request.
+func (rc *requestContext) cachedPrincipal(subject string) (principalSnapshot, bool) {
+	if rc == nil {
+		return principalSnapshot{}, false
+	}
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	snapshot, ok := rc.principals[subject]
+	return snapshot, ok
+}
+
+func (rc *requestContext) rememberPrincipal(subject string, snapshot principalSnapshot) {
+	if rc == nil {
+		return
+	}
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	if rc.principals == nil {
+		rc.principals = map[string]principalSnapshot{}
+	}
+	rc.principals[subject] = snapshot
 }

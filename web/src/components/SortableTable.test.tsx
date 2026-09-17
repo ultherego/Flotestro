@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-li
 import "@testing-library/jest-dom/vitest";
 import {
   ColumnChooser, formatSort, parseSort, sortRows, Td, Th, toggleSort, useColumns, usePageSize, useSort,
-  type ColumnDef,
+  withIdentityColumn, type ColumnDef,
 } from "./SortableTable";
 
 /* A storage of the test's own in place of the browser's: what the hooks
@@ -155,6 +155,30 @@ describe("useColumns", () => {
     storage.setItem("flotestro.columns.hosts", "{not json");
     const { result } = renderHook(() => useColumns("hosts", columns));
     expect(result.current.visible).toHaveLength(3);
+  });
+
+  it("keeps one identity column on the screen whatever the preference says", () => {
+    // A screen that names no fixed column gets its first one fixed; a
+    // stored preference naming every column cannot empty the table.
+    const unnamed: ColumnDef[] = [
+      { key: "pid", label: "PID" }, { key: "user", label: "User" }, { key: "command", label: "Command" },
+    ];
+    storage.setItem("flotestro.columns.processes", JSON.stringify(["pid", "user", "command"]));
+    const { result } = renderHook(() => useColumns("processes", unnamed));
+    expect(result.current.visible.map((column) => column.key)).toEqual(["pid"]);
+    expect(result.current.all.find((column) => column.key === "pid")?.fixed).toBe(true);
+    act(() => result.current.toggle("pid"));
+    expect(result.current.shown("pid")).toBe(true);
+
+    // A screen that names its identity columns keeps them all, and the
+    // first column is not made fixed on top of them.
+    const named: ColumnDef[] = [
+      { key: "age", label: "Age" }, { key: "unit", label: "Unit", fixed: true },
+    ];
+    storage.setItem("flotestro.columns.units", JSON.stringify(["age", "unit"]));
+    const units = renderHook(() => useColumns("units", named));
+    expect(units.result.current.visible.map((column) => column.key)).toEqual(["unit"]);
+    expect(withIdentityColumn(named)).toBe(named);
   });
 });
 

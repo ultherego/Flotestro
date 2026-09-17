@@ -8,17 +8,21 @@ import (
 // The path alone is not enough: /dev/sdb after a reboot can be a different
 // disk than the one the operator viewed.
 func TestDeviceIdentityMustMatch(t *testing.T) {
-	device := &Device{Path: "/dev/sdb", Serial: "VB1234", SizeBytes: 2147483648}
+	device := &Device{Path: "/dev/sdb", Serial: "VB1234", WWN: "0x5000c500aaaa",
+		ByID: "/dev/disk/by-id/wwn-0x5000c500aaaa", SizeBytes: 2147483648}
 
-	if err := (DeviceIdentity{Path: "/dev/sdb", Serial: "VB1234", SizeBytes: 2147483648}).
-		Matches(device); err != nil {
+	if err := (DeviceIdentity{Path: "/dev/sdb", Serial: "VB1234", WWN: "0x5000c500aaaa",
+		ByID: "/dev/disk/by-id/wwn-0x5000c500aaaa"}).Matches(device); err != nil {
 		t.Errorf("rejected a matching device: %v", err)
 	}
 	if err := (DeviceIdentity{Path: "/dev/sdb", Serial: "OTHER"}).Matches(device); err == nil {
 		t.Error("accepted a device with a different serial")
 	}
-	if err := (DeviceIdentity{Path: "/dev/sdb", SizeBytes: 1024}).Matches(device); err == nil {
-		t.Error("accepted a device with a different size")
+	if err := (DeviceIdentity{Path: "/dev/sdb", WWN: "0x5000c500bbbb"}).Matches(device); err == nil {
+		t.Error("accepted a device with a different WWN")
+	}
+	if err := (DeviceIdentity{Path: "/dev/sdb", ByID: "/dev/disk/by-id/wwn-0x5000c500bbbb"}).Matches(device); err == nil {
+		t.Error("accepted a device with a different by-id link")
 	}
 	if err := (DeviceIdentity{Path: "/dev/sdz"}).Matches(nil); err == nil {
 		t.Error("accepted a device that does not exist")

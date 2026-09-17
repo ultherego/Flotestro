@@ -3,7 +3,9 @@ package gateway
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -42,6 +44,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 	packagestore "github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relayproof"
 	"github.com/ultherego/flotestro/internal/relays"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
@@ -152,6 +155,11 @@ type AgentService struct {
 	// capability, and the helpers under prefer treat every task as a
 	// legacy one.
 	helperSigner *helpercap.Signer
+	// envelopes verifies the host's own signature on a relayed message,
+	// and challenges keeps the one-time challenges of a renewal through a
+	// relay. Both read the same stores as the rest of the service.
+	envelopes  *RelayVerifier
+	challenges identityChallenges
 
 	heartbeatSeconds int
 	heartbeatJitter  int
@@ -170,7 +178,9 @@ func NewAgentService(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore 
 		audit:        recorder, registry: registry, certIssuer: certIssuer, relays: relayStore,
 		log: log, gatewayID: gatewayID,
 		heartbeatSeconds: heartbeatSeconds, heartbeatJitter: heartbeatJitter,
-		attempts: map[string]attemptContextEntry{},
+		attempts:   map[string]attemptContextEntry{},
+		envelopes:  NewRelayVerifier(hostStore, hostStore, relaySequences{pool: pool}),
+		challenges: identityChallenges{pool: pool},
 	}
 }
 
@@ -309,6 +319,22 @@ func (s *AgentService) Connect(ctx context.Context,
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("the first message has to be Hello"))
 	}
 
+	// The host's own proof on a relayed session: the envelope on Hello,
+	// signed with the host key, settles whether the session is end_to_end
+	// or rests on the relay alone - and whether it opens at all under the
+	// mode of the installation. A direct session carries the proof in its
+	// handshake; an envelope on it is ignored.
+	var relayed *relayedSession
+	if relayID != "" {
+		strength, err := s.admitRelayedHello(ctx, who, first)
+		if err != nil {
+			return err
+		}
+		who.Identity = strength
+		metrics.RelaySessionIdentity.Inc(strength)
+		relayed = &relayedSession{peer: who.Relay, endToEnd: strength == hosts.RelayIdentityEndToEnd}
+	}
+
 	// The protocol is judged by what the agent says it speaks, and by the
 	// table of releases for an agent that says nothing. Only a definite
 	// incompatibility closes the door: a version the panel cannot read is
@@ -343,11 +369,6 @@ func (s *AgentService) Connect(ctx context.Context,
 		// was not written down is still a host to manage.
 		s.log.Error("the agent's report of its build was not recorded", "host_id", hostID, "err", err)
 	}
-	// The return of the agent settles its replacement rather than the exit code
-	// of the package manager: the process that carried the job out was
-	// replaced halfway.
-	s.settleAgentUpgrade(ctx, hostID, hello.GetAgentVersion())
-
 	session := NewSession(uuid.NewString(), hostID, hello.GetAgentVersion(),
 		hello.GetBootId(), remoteAddr(ctx), 32)
 	session.RelayID = relayID
@@ -360,6 +381,11 @@ func (s *AgentService) Connect(ctx context.Context,
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
+	// The return of the agent settles its replacement rather than the exit code
+	// of the package manager: the process that carried the job out was
+	// replaced halfway. The settlement is a result and is fenced with the
+	// session that has just claimed the host.
+	s.settleAgentUpgrade(ctx, hostID, hello.GetAgentVersion(), session.Fence())
 	// The management address is refreshed at every connection: a host can
 	// change its address, move behind a relay or come back from behind one.
 	if address, source := managementAddress(session.RemoteAddr, hello.GetLocalAddress(), relayID); address != "" {
@@ -388,6 +414,9 @@ func (s *AgentService) Connect(ctx context.Context,
 	// session rather than over the stream directly.
 	sendCtx, stopSender := context.WithCancel(ctx)
 	defer stopSender()
+	// The claim on the host is renewed while the stream lives; a session
+	// the row no longer names closes itself as superseded.
+	go s.keepOwnership(sendCtx, session)
 	senderErr := make(chan error, 1)
 	go func() {
 		for {
@@ -478,10 +507,136 @@ func (s *AgentService) Connect(ctx context.Context,
 			if !ok {
 				return nil
 			}
+			if relayed != nil {
+				switch problem := s.checkRelayedMessage(ctx, hostID, relayed, msg); {
+				case errors.Is(problem, errMessageDropped):
+					continue
+				case problem != nil:
+					return problem
+				}
+			}
 			if err := s.handle(ctx, hostID, session, msg); err != nil {
 				s.log.Error("an error while handling a message of the agent", "host_id", hostID, "err", err)
 			}
 		}
+	}
+}
+
+// relayedSession is what the stream keeps of a relayed session for the
+// messages after Hello: the relay and the host as identified, and whether
+// the host signed its Hello - a session that did signs everything.
+type relayedSession struct {
+	peer     RelayPeer
+	endToEnd bool
+}
+
+// errMessageDropped says a relayed message was refused on its own without
+// ending the session: a sequence the session accepted before, or a
+// message without an envelope on a session that signs. A relay that lost
+// the connection halfway through sending its buffer sends the message
+// again, and the host must not lose its session over the relay's honest
+// retry; the message itself is not handled twice, and an unsigned one is
+// not handled at all.
+var errMessageDropped = errors.New("the message was dropped")
+
+// admitRelayedHello settles the strength of a relayed session from its
+// Hello. An envelope is verified under every mode, and a bad one refuses
+// the session with its code: a host that signs and does not verify is not
+// a host to take on the relay's word instead. No envelope is the relay's
+// attestation or word alone, let in and counted under observe and prefer;
+// under enforce the session is refused - as relay_identity_missing when
+// the relay itself is from before the attestation, or as
+// blocked_upgrade_required when the relay did its part and it is the
+// agent that predates the envelope.
+func (s *AgentService) admitRelayedHello(ctx context.Context, who peer, first *agentv1.AgentMessage) (string, error) {
+	if first.GetEnvelope() == nil {
+		if s.relayIdentity == RelayIdentityEnforce {
+			s.refused(ctx, who.HostID, hosts.RefusalBlockedUpgradeRequired,
+				"the agent does not sign the relay envelope ("+relayproof.Capability+" "+relayproof.Feature+
+					"), which this installation requires; upgrade the agent")
+			return "", connect.NewError(connect.CodeFailedPrecondition,
+				errors.New("the agent does not sign the relay envelope; upgrade the agent"))
+		}
+		s.log.Info("the relayed session rests on the relay's attestation; the agent did not sign the envelope",
+			"host_id", who.HostID, "relay_id", who.RelayID, "identity", who.Identity,
+			"mode", string(s.relayIdentity))
+		return who.Identity, nil
+	}
+	verified, err := s.envelopes.VerifyMessage(ctx, who.Relay, first)
+	if err != nil {
+		return "", s.refuseEnvelope(ctx, who.HostID, err)
+	}
+	s.learnPublicKey(ctx, who.HostID, verified)
+	return hosts.RelayIdentityEndToEnd, nil
+}
+
+// checkRelayedMessage verifies a message after Hello on a relayed session.
+// A session that signed its Hello has to sign every message: one without
+// an envelope is not the host's word and is dropped, named on the host and
+// counted - dropped rather than ending the session, because the relay's
+// buffer may still hold unsigned results of the agent from before its
+// upgrade, and a session that dies on each of them would drain that
+// buffer one reconnect at a time. Nothing unsigned is handled either
+// way. A session that did not sign its Hello is checked whenever a
+// message carries an envelope all the same - the buffer may hold messages
+// of an earlier, signing session of the host, and a bad envelope is
+// refused under every mode.
+func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, relayed *relayedSession,
+	msg *agentv1.AgentMessage) error {
+	if msg.GetEnvelope() == nil {
+		if !relayed.endToEnd {
+			return nil
+		}
+		s.refused(ctx, hostID, hosts.RefusalRelayEnvelopeInvalid,
+			"a message without the identity envelope on a session that signed its Hello was dropped")
+		metrics.RelayEnvelopeRefusal.Inc(hosts.RefusalRelayEnvelopeInvalid)
+		s.log.Warn("an unsigned message on a signed relayed session was dropped",
+			"host_id", hostID, "relay_id", relayed.peer.RelayID)
+		return errMessageDropped
+	}
+	verified, err := s.envelopes.VerifyMessage(ctx, relayed.peer, msg)
+	if err != nil {
+		if refusal := RelayRefusalOf(err); refusal != nil && refusal.Code == hosts.RefusalRelaySequenceReplayed {
+			s.refused(ctx, hostID, refusal.Code, refusal.Detail)
+			metrics.RelayEnvelopeRefusal.Inc(refusal.Code)
+			s.log.Warn("a relayed message was carried a second time and was dropped",
+				"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
+			return errMessageDropped
+		}
+		return s.refuseEnvelope(ctx, hostID, err)
+	}
+	s.learnPublicKey(ctx, hostID, verified)
+	return nil
+}
+
+// refuseEnvelope turns a failed verification into the session's refusal:
+// the code on the host and the trail, the counter, and the error the
+// stream ends with. An error of the database is an internal error, not a
+// refusal of the host.
+func (s *AgentService) refuseEnvelope(ctx context.Context, hostID string, err error) error {
+	refusal := RelayRefusalOf(err)
+	if refusal == nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	s.refused(ctx, hostID, refusal.Code, refusal.Detail)
+	metrics.RelayEnvelopeRefusal.Inc(refusal.Code)
+	code := connect.CodeUnauthenticated
+	if refusal.Code == hosts.RefusalRelayScopeMismatch || strings.HasPrefix(refusal.Code, "lifecycle_") {
+		code = connect.CodePermissionDenied
+	}
+	return connect.NewError(code, errors.New(refusal.Detail))
+}
+
+// learnPublicKey writes the key of an older certificate on its record once
+// the relay's certificate supplied it. Best effort: the session is worth
+// more than the record, and the next session brings the key again.
+func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verified *Verified) {
+	if verified == nil || len(verified.LearnedKeyDER) == 0 {
+		return
+	}
+	if err := s.hosts.RecordCertificatePublicKey(ctx, nil, verified.Serial, verified.LearnedKeyDER); err != nil {
+		s.log.Error("the public key of the certificate was not recorded",
+			"host_id", hostID, "serial", verified.Serial, "err", err)
 	}
 }
 
@@ -572,7 +727,10 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 		return s.samples.Record(ctx, hostID, sampleFromProto(payload.MetricsSample))
 
 	case *agentv1.AgentMessage_TaskResult:
-		return s.recordTaskResult(ctx, hostID, payload.TaskResult)
+		return s.recordTaskResult(ctx, session, payload.TaskResult)
+
+	case *agentv1.AgentMessage_CancelAck:
+		return s.recordCancelAck(ctx, session, payload.CancelAck)
 
 	case *agentv1.AgentMessage_TaskLogLines:
 		// The live view of a log goes straight to the screen of the operator
@@ -840,8 +998,9 @@ func (s *AgentService) leaseRenewalDue(attemptID, hostID string, now time.Time) 
 // recordTaskResult writes the result reported by the agent and moves the job
 // into a final state. The result always reaches the attempt; whether it
 // changes the state of the job is decided by the state machine.
-func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
+func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	result *agentv1.TaskResult) error {
+	hostID := session.HostID
 	attemptID := result.GetTaskId()
 	jobID, action, attemptStatus, err := s.jobs.AttemptOwner(ctx, attemptID, hostID)
 	if err != nil {
@@ -911,7 +1070,28 @@ func (s *AgentService) recordTaskResult(ctx context.Context, hostID string,
 		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
 		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
 		Detail:          resultDetailJSON(result),
-	}, state)
+	}, state, session.Fence())
+	if errors.Is(err, jobs.ErrStaleFence) {
+		// The database refused the settlement: the host was claimed by a
+		// newer session and this one no longer owns it. Nothing was
+		// written, the owner settles the job from the host's replay, and
+		// this stream closes as superseded - the notification that should
+		// have closed it was late or lost.
+		metrics.SessionFence.Inc("result_refused")
+		s.audit.Record(ctx, audit.Event{
+			ActorType: audit.ActorAgent, ActorID: hostID,
+			Action: "job.result", TargetType: "job", TargetID: jobID, Outcome: audit.OutcomeDenied,
+			Detail: map[string]any{
+				"attempt_id": attemptID, "status": statusName, "applied": false,
+				"error_code": jobs.ErrorSessionFenceStale,
+				"session_id": session.ID, "fencing_token": session.FenceToken,
+			},
+		})
+		s.log.Warn("the result was refused: the session no longer owns the host",
+			"job_id", jobID, "attempt_id", attemptID, "host_id", hostID, "session_id", session.ID)
+		session.End("superseded")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -1892,6 +2072,18 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 			"metadata_refreshed":   schedule.GetMetadataRefreshed(),
 			"blocked":              blockedJSON(schedule.GetBlocked()),
 			"space":                spaceJSON(schedule.GetSpace()),
+			"schema_version":       schedule.GetSchemaVersion(),
+			"planner_version":      schedule.GetPlannerVersion(),
+			"host_id":              schedule.GetHostId(),
+			"inventory_revision":   schedule.GetInventoryRevision(),
+			"resource_revision":    schedule.GetResourceRevision(),
+			"expires_at":           unixRFC3339(schedule.GetExpiresAtUnix()),
+			"description":          schedule.GetDescription(),
+			"rollback": map[string]any{
+				"mechanism": schedule.GetRollbackMechanism(), "id": schedule.GetRollbackId(),
+				"available": schedule.GetRollbackAvailable(), "reason": schedule.GetRollbackReason(),
+			},
+			"envelope": rawJSONOrNil(schedule.GetEnvelope()),
 		})
 		if err != nil {
 			return nil
@@ -1966,10 +2158,22 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	case *agentv1.TaskResult_PackageApply:
 		apply := detail.PackageApply
+		// The settled effects of an approved plan travel among the applied
+		// changes; the record keeps them apart, achieved and missed with
+		// the version observed after the transaction.
+		var applied, effects []*agentv1.PackageChange
+		for _, change := range apply.GetApplied() {
+			if change.GetEffect() != "" {
+				effects = append(effects, change)
+			} else {
+				applied = append(applied, change)
+			}
+		}
 		encoded, err := json.Marshal(map[string]any{
 			"kind":                       "package_apply",
 			"manager":                    apply.GetManager(),
-			"applied":                    packageChangesJSON(apply.GetApplied()),
+			"applied":                    packageChangesJSON(applied),
+			"effects":                    packageChangesJSON(effects),
 			"reboot_required":            apply.GetRebootRequired(),
 			"services_needing_restart":   apply.GetServicesNeedingRestart(),
 			"package_database_broken":    apply.GetPackageDatabaseBroken(),
@@ -2114,15 +2318,46 @@ func preflightChecksJSON(checks []*agentv1.PreflightCheck) []map[string]any {
 func packageChangesJSON(changes []*agentv1.PackageChange) []map[string]any {
 	items := make([]map[string]any, 0, len(changes))
 	for _, change := range changes {
-		items = append(items, map[string]any{
-			"name":              change.GetName(),
-			"current_version":   change.GetCurrentVersion(),
-			"candidate_version": change.GetCandidateVersion(),
-			"origin":            change.GetOrigin(),
-			"security":          change.GetSecurity(),
-		})
+		item := map[string]any{
+			"name":                  change.GetName(),
+			"current_version":       change.GetCurrentVersion(),
+			"candidate_version":     change.GetCandidateVersion(),
+			"origin":                change.GetOrigin(),
+			"security":              change.GetSecurity(),
+			"architecture":          change.GetArchitecture(),
+			"action":                change.GetAction(),
+			"reason":                change.GetReason(),
+			"blocked":               change.GetBlocked(),
+			"protected":             change.GetProtected(),
+			"installed_delta_bytes": change.GetInstalledDeltaBytes(),
+			"installed_delta_known": change.GetInstalledDeltaKnown(),
+			"digest":                change.GetDigest(),
+		}
+		if change.GetEffect() != "" {
+			item["effect"] = change.GetEffect()
+			item["observed_version"] = change.GetObservedVersion()
+		}
+		items = append(items, item)
 	}
 	return items
+}
+
+// unixRFC3339 spells a moment exactly as the panel will carry it back in a
+// payload (RFC 3339, UTC); empty when unknown.
+func unixRFC3339(unix int64) string {
+	if unix <= 0 {
+		return ""
+	}
+	return time.Unix(unix, 0).UTC().Format(time.RFC3339)
+}
+
+// rawJSONOrNil keeps a document the host sent as it is when it parses,
+// and drops it otherwise rather than break the record around it.
+func rawJSONOrNil(raw []byte) any {
+	if len(raw) == 0 || !json.Valid(raw) {
+		return nil
+	}
+	return json.RawMessage(raw)
 }
 
 func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
@@ -2190,16 +2425,23 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	// insert is refused and tried again over the number the first one took.
 	// The retries are bounded, because a host reconnecting in a storm on
 	// several gateways must not keep a request spinning on the database.
+	// The strength of the session goes on the row: end_to_end for a host
+	// that signed its envelope, relay_only for a session on the relay's
+	// attestation or word, null for a direct connection. The operator
+	// reads the fleet's readiness for enforce from it.
 	const query = `
 		insert into agent_sessions
-			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch)
+			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch,
+			 auth_strength)
 		values ($1, $2, $3, $4, $5, $6, $7, nullif($8, '')::uuid,
-			(select coalesce(max(epoch), 0) + 1 from agent_sessions where host_id = $2))
+			(select coalesce(max(epoch), 0) + 1 from agent_sessions where host_id = $2),
+			nullif($9, ''))
 		returning epoch`
 	var err error
 	for attempt := 0; attempt < sessionEpochAttempts; attempt++ {
 		err = s.pool.QueryRow(ctx, query, session.ID, session.HostID, s.gatewayID,
-			fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID).
+			fingerprint, session.RemoteAddr, session.AgentVersion, session.BootID, relayID,
+			hosts.AuthStrength(session.RelayIdentity)).
 			Scan(&session.Epoch)
 		if err == nil {
 			break
@@ -2213,6 +2455,16 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	if err != nil {
 		return fmt.Errorf("opening the session after %d attempts at an epoch: %w", sessionEpochAttempts, err)
 	}
+	// The session claims the host: the token it gets is what every
+	// delivery and every result on this session carries, and the claim
+	// always takes the host - it does not guess whether the previous
+	// instance is really gone. A session that cannot claim is not opened;
+	// nothing would ever be delivered over it.
+	token, err := s.jobs.ClaimSession(ctx, session.HostID, session.ID, jobs.InstanceID(), jobs.OwnerLeaseTTL)
+	if err != nil {
+		return fmt.Errorf("claiming the host for the session: %w", err)
+	}
+	session.FenceToken, session.OwnerInstanceID = token, jobs.InstanceID()
 
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
 	s.countReconnect(ctx, session)
@@ -2301,6 +2553,7 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 			"epoch":         session.Epoch,
 			"agent_version": session.AgentVersion, "boot_id": session.BootID,
 			"relay_identity": nullableRelay(session.RelayIdentity),
+			"auth_strength":  nullableRelay(hosts.AuthStrength(session.RelayIdentity)),
 		},
 	})
 	return nil
@@ -2576,6 +2829,39 @@ func (s *AgentService) newerSessionOpen(ctx context.Context, session *Session) b
 	return open
 }
 
+// keepOwnership renews the session's claim on its host every
+// jobs.OwnerRenewEvery until the stream ends. A renewal the database
+// refuses means the row names another session: the host was claimed on
+// another instance and this stream is closed as superseded, the way the
+// epoch notification closes it - only this signal cannot be lost, because
+// it is the write itself that fails.
+func (s *AgentService) keepOwnership(ctx context.Context, session *Session) {
+	ticker := time.NewTicker(jobs.OwnerRenewEvery)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-session.Closed():
+			return
+		case <-ticker.C:
+			err := s.jobs.RenewOwnership(ctx, session.HostID, session.ID, session.OwnerInstanceID,
+				session.FenceToken, jobs.OwnerLeaseTTL)
+			if errors.Is(err, jobs.ErrStaleFence) {
+				metrics.SessionFence.Inc("renewal_lost")
+				s.log.Info("the session no longer owns the host and is closed",
+					"host_id", session.HostID, "session_id", session.ID, "fencing_token", session.FenceToken)
+				session.End("superseded")
+				return
+			}
+			if err != nil && ctx.Err() == nil {
+				s.log.Error("the ownership of the host was not renewed",
+					"host_id", session.HostID, "session_id", session.ID, "err", err)
+			}
+		}
+	}
+}
+
 func (s *AgentService) closeSession(ctx context.Context, session *Session, hostID string) {
 	// A session the panel ended keeps the reason it was ended with; one
 	// the agent closed, or the link dropped, is a closed stream.
@@ -2587,6 +2873,14 @@ func (s *AgentService) closeSession(ctx context.Context, session *Session, hostI
 		where id = $1 and ended_at is null`
 	if _, err := s.pool.Exec(ctx, query, session.ID, reason); err != nil {
 		s.log.Error("the session was not closed", "session_id", session.ID, "err", err)
+	}
+	// The host is given up with the session; a session that was superseded
+	// gives up nothing, because the row is the newer session's already.
+	if session.FenceToken > 0 {
+		if err := s.jobs.ReleaseOwnership(ctx, hostID, session.ID, session.FenceToken); err != nil &&
+			!errors.Is(err, jobs.ErrStaleFence) {
+			s.log.Error("the ownership of the host was not released", "host_id", hostID, "session_id", session.ID, "err", err)
+		}
 	}
 	// A host is offline only when it has not managed to open a newer session.
 	// The registry alone does not settle that: a superseding session ends
@@ -2818,26 +3112,39 @@ const (
 	relayHostHeader            = "Flotestro-Relay-Host"
 	relayHostFingerprintHeader = "Flotestro-Relay-Host-Fingerprint"
 	relayHostSerialHeader      = "Flotestro-Relay-Host-Serial"
+	// relayHostCertificateHeader carries the certificate itself, as DER in
+	// base64. The gateway needs its public key for the host's envelope
+	// when the record of an older certificate has none; the fingerprint on
+	// record is what confirms the certificate is the issued one.
+	relayHostCertificateHeader = "Flotestro-Relay-Host-Certificate"
 )
 
 // RelayIdentityMode says what the gateway does with a session through a
-// relay that names the host alone, without the certificate it presented.
+// relay in which the host did not sign its own envelope: one the relay
+// attests with the certificate it saw, or one the relay names the host
+// alone in. A signed envelope is verified under every mode, and a bad one
+// is refused under every mode; the mode decides only what an absent proof
+// is worth.
 type RelayIdentityMode string
 
 const (
-	// RelayIdentityObserve lets such a session in, counts it and marks the
-	// host as weakly identified: for an installation taking stock of its
-	// relays before asking anything. It is the same as prefer today and
-	// kept apart so a later step can tighten prefer without touching an
-	// installation that only watches.
+	// RelayIdentityObserve lets a session without the host's envelope in,
+	// counts it and marks the host as attested or weak: for an
+	// installation taking stock of its relays and agents before asking
+	// anything. It is the same as prefer today and kept apart so a later
+	// step can tighten prefer without touching an installation that only
+	// watches.
 	RelayIdentityObserve RelayIdentityMode = "observe"
-	// RelayIdentityPrefer lets such a session in, counts it, and marks
-	// the host as weakly identified so the operator sees which relays are
-	// due for an upgrade. The packaged default.
+	// RelayIdentityPrefer lets a session without the host's envelope in,
+	// counts it, and marks the host as attested or weak so the operator
+	// sees which relays and agents are due for an upgrade. The packaged
+	// default.
 	RelayIdentityPrefer RelayIdentityMode = "prefer"
-	// RelayIdentityEnforce refuses such a session: the relay has to attest
-	// the certificate, and a relay that cannot is one the fleet does not
-	// take a host's identity from.
+	// RelayIdentityEnforce requires the host's envelope on a relayed
+	// session: a relay that names the host alone is refused as
+	// relay_identity_missing, and an agent that does not sign behind a
+	// relay that attests as blocked_upgrade_required. A relayed renewal
+	// and a relayed secret fetch require the envelope under every mode.
 	RelayIdentityEnforce RelayIdentityMode = "enforce"
 )
 
@@ -2866,6 +3173,10 @@ func (s *AgentService) SetRelayIdentityMode(mode RelayIdentityMode) { s.relayIde
 type hostAttestation struct {
 	Fingerprint []byte
 	Serial      string
+	// Certificate is the certificate itself when the relay sent it, nil
+	// for a relay from before it did. Its fingerprint is the one above:
+	// the header is refused otherwise.
+	Certificate *x509.Certificate
 }
 
 // peer is who a session belongs to and on what grounds.
@@ -2873,8 +3184,12 @@ type peer struct {
 	HostID  string
 	RelayID string
 	// Identity is how the host was identified through a relay - attested
-	// or weak - and empty for a direct connection.
+	// or weak from the headers, end_to_end once the envelope verified -
+	// and empty for a direct connection.
 	Identity string
+	// Relay is the relay and the host as the envelope verifier needs
+	// them; zero for a direct connection.
+	Relay RelayPeer
 }
 
 // identifyPeer establishes whose session it is and who vouches for it.
@@ -2966,10 +3281,14 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		s.refused(ctx, asserted, hosts.RefusalRelayIdentityInvalid, err.Error())
 		return peer{}, connect.NewError(connect.CodeInvalidArgument, err)
 	}
+	relayPeer := RelayPeer{
+		RelayID: status.ID, Site: status.Site, Environment: status.Environment,
+		Revoked: status.Revoked, HostID: asserted,
+	}
 	if attestation == nil {
 		// The relay named the host alone. Whether its word is enough is
-		// the installation's decision; what it is not is invisible.
-		metrics.RelaySessionIdentity.Inc(hosts.RelayIdentityWeak)
+		// the installation's decision; what it is not is invisible. The
+		// session is counted once its strength is settled, in Connect.
 		if s.relayIdentity == RelayIdentityEnforce {
 			s.refused(ctx, asserted, hosts.RefusalRelayIdentityMissing,
 				"relay "+status.Name+" did not attest the certificate of the host; upgrade the relay")
@@ -2979,8 +3298,9 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		s.log.Warn("the relay named the host without its certificate; the session rests on the relay's word",
 			"host_id", asserted, "relay_id", status.ID, "relay", status.Name,
 			"mode", string(s.relayIdentity))
-		return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityWeak}, nil
+		return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityWeak, Relay: relayPeer}, nil
 	}
+	relayPeer.HostCertificate = attestation.Certificate
 
 	// The certificate the host presented to the relay goes through the
 	// same checks as one in a direct handshake: on record, not revoked,
@@ -3000,20 +3320,50 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		return peer{}, connect.NewError(connect.CodeUnauthenticated,
 			errors.New("the serial named by the relay does not match the certificate"))
 	}
-	metrics.RelaySessionIdentity.Inc(hosts.RelayIdentityAttested)
-	return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityAttested}, nil
+	return peer{HostID: asserted, RelayID: status.ID, Identity: hosts.RelayIdentityAttested, Relay: relayPeer}, nil
+}
+
+// identifyCaller establishes whose unary call it is - a renewal, a secret
+// fetch, a challenge - the way Connect establishes whose session it is. A
+// direct caller is checked against the record of the certificate it
+// presented; a relayed caller has only the relay's attestation here, and
+// the certificate the envelope names is checked when the envelope is.
+func (s *AgentService) identifyCaller(ctx context.Context, headers http.Header) (peer, *x509.Certificate, error) {
+	cert, ok := clientCertificate(ctx)
+	if !ok {
+		return peer{}, nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
+	}
+	if problem := s.rejectStaleCertificate(ctx, cert); problem != nil {
+		return peer{}, nil, problem
+	}
+	who, err := s.identifyPeer(ctx, cert, headers)
+	if err != nil {
+		return peer{}, nil, err
+	}
+	if who.RelayID == "" {
+		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
+		if err != nil {
+			return peer{}, nil, connect.NewError(connect.CodeInternal, err)
+		}
+		if problem := s.rejectCertificate(ctx, status, who.HostID); problem != nil {
+			return peer{}, nil, problem
+		}
+	}
+	return who, cert, nil
 }
 
 // readRelayAttestation decodes what the relay said about the certificate
 // of the host. Nil without an error is a relay that said nothing - one
 // from before the attestation. A fingerprint that does not read as one is
-// an error: a relay that sends the header sends it whole.
+// an error: a relay that sends the header sends it whole. A certificate,
+// when the relay sends one, has to be the certificate of that fingerprint.
 func readRelayAttestation(headers http.Header) (*hostAttestation, error) {
 	encoded := strings.TrimSpace(headers.Get(relayHostFingerprintHeader))
 	serial := strings.TrimSpace(headers.Get(relayHostSerialHeader))
+	certificate := strings.TrimSpace(headers.Get(relayHostCertificateHeader))
 	if encoded == "" {
-		if serial != "" {
-			return nil, errors.New("the relay named the serial of the certificate without its fingerprint")
+		if serial != "" || certificate != "" {
+			return nil, errors.New("the relay named the certificate of the host without its fingerprint")
 		}
 		return nil, nil
 	}
@@ -3021,7 +3371,22 @@ func readRelayAttestation(headers http.Header) (*hostAttestation, error) {
 	if err != nil || len(fingerprint) != sha256.Size {
 		return nil, errors.New("the fingerprint named by the relay is not a SHA-256 in hex")
 	}
-	return &hostAttestation{Fingerprint: fingerprint, Serial: serial}, nil
+	attestation := &hostAttestation{Fingerprint: fingerprint, Serial: serial}
+	if certificate != "" {
+		der, err := base64.StdEncoding.DecodeString(certificate)
+		if err != nil {
+			return nil, errors.New("the certificate presented by the relay is not DER in base64")
+		}
+		parsed, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, errors.New("the certificate presented by the relay does not parse")
+		}
+		if sum := sha256.Sum256(parsed.Raw); subtle.ConstantTimeCompare(sum[:], fingerprint) != 1 {
+			return nil, errors.New("the certificate presented by the relay is not the one of the fingerprint it named")
+		}
+		attestation.Certificate = parsed
+	}
+	return attestation, nil
 }
 
 // rejectCertificate checks the state of the certificate of a host for a

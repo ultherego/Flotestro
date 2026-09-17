@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"slices"
@@ -60,75 +61,9 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
-	// The order is authorised where the machine will live: an operator of
-	// one site invites machines into that site, not into the whole fleet.
-	// A relay is a separate right - it carries the traffic of a site.
-	permission := authz.PermHostEnrollCreate
-	if req.Kind == enrollment.KindRelay {
-		permission = authz.PermRelayEnrollCreate
-	}
-	scope := authz.Scope{Site: req.Site, Environment: req.Environment}
-	principal, ok := s.authorize(w, r, permission, scope, "enrollment_request", "")
+	principal, stepUpEvidence, ok := s.authorizeOrder(w, r, &req, "host.enrollment.create", "")
 	if !ok {
 		return
-	}
-	// A token good for many machines is a right on top of inviting one:
-	// a pool of uses is a standing door, and the document prefers a token
-	// per host. The refusal names the permission, so the operator learns
-	// what is missing rather than reading "forbidden" on an order they
-	// may place for one machine.
-	if req.MaxUses > 1 && req.Kind != enrollment.KindRelay {
-		if _, ok := s.authorize(w, r, authz.PermHostEnrollBatch, scope, "enrollment_request", ""); !ok {
-			return
-		}
-	}
-	// Identity recovery has its own entry on the host and its own
-	// permission: only orders for new machines and relays are accepted
-	// here.
-	if req.Purpose == enrollment.PurposeReplace {
-		problem(w, http.StatusBadRequest, "purpose_not_allowed",
-			"identity recovery is requested on the host itself")
-		return
-	}
-	// The facts for the host are checked here, where the order is placed:
-	// an order that fails at enrollment time would fail in the middle of
-	// the night, on the machine, with nobody to read the reason.
-	owner, err := hosts.NormalizeOwner(req.Owner)
-	if errors.Is(err, hosts.ErrInvalidOwner) {
-		problem(w, http.StatusBadRequest, "invalid_owner", err.Error())
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	req.Owner = owner
-	tags, err := hosts.NormalizeTags(req.Tags)
-	if errors.Is(err, hosts.ErrInvalidTags) {
-		problem(w, http.StatusBadRequest, "invalid_tags", err.Error())
-		return
-	}
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	req.Tags = tags
-	// Enrollment opens the way to root on the machine through the helper.
-	// An order for production, a token good for many machines or a relay
-	// requires fresh authentication, like any change of that weight.
-	var stepUpEvidence map[string]any
-	if s.requiresSecondPerson(req.Environment) || req.MaxUses > 1 || req.Kind == enrollment.KindRelay {
-		reason := strings.TrimSpace(req.Reason)
-		if reason == "" {
-			reason = strings.TrimSpace(req.Description)
-		}
-		evidence, ok := s.requireStepUp(w, r, principal, reason,
-			"host.enrollment.create", "enrollment_request", "")
-		if !ok {
-			return
-		}
-		stepUpEvidence = evidence
 	}
 
 	order, err := s.createOrder(r, req, principal.Subject, "")
@@ -162,6 +97,236 @@ func (s *Server) handleCreateEnrollmentRequest(w http.ResponseWriter, r *http.Re
 		RequestID: order.ID, Change: events.EnrollmentCreated,
 		Site: order.Site, Environment: order.Environment, Kind: order.Kind,
 	})
+	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
+}
+
+// authorizeOrder checks an order for a new machine or a relay before it is
+// placed: the right where the machine will live, the batch right for a
+// pool of uses, the facts of the host, fresh authentication where the
+// order asks for it. The body is normalised in place. A refusal is
+// answered here; the caller places the order and records it in its own
+// words. targetID names the order the request is about, when there is
+// one - a replacement names the order it replaces.
+func (s *Server) authorizeOrder(w http.ResponseWriter, r *http.Request, req *enrollmentRequestBody,
+	stepUpAction, targetID string) (authz.Principal, map[string]any, bool) {
+	req.Site, req.Environment = orderPlacement(req.Site, req.Environment)
+	// The order is authorised where the machine will live: an operator of
+	// one site invites machines into that site, not into the whole fleet.
+	// A relay is a separate right - it carries the traffic of a site.
+	permission := authz.PermHostEnrollCreate
+	if req.Kind == enrollment.KindRelay {
+		permission = authz.PermRelayEnrollCreate
+	}
+	scope := authz.Scope{Site: req.Site, Environment: req.Environment}
+	principal, ok := s.authorize(w, r, permission, scope, "enrollment_request", targetID)
+	if !ok {
+		return principal, nil, false
+	}
+	// A token good for many machines is a right on top of inviting one:
+	// a pool of uses is a standing door, and the document prefers a token
+	// per host. The refusal names the permission, so the operator learns
+	// what is missing rather than reading "forbidden" on an order they
+	// may place for one machine.
+	if req.MaxUses > 1 && req.Kind != enrollment.KindRelay {
+		if _, ok := s.authorize(w, r, authz.PermHostEnrollBatch, scope, "enrollment_request", targetID); !ok {
+			return principal, nil, false
+		}
+	}
+	// Identity recovery has its own entry on the host and its own
+	// permission: only orders for new machines and relays are accepted
+	// here.
+	if req.Purpose == enrollment.PurposeReplace {
+		problem(w, http.StatusBadRequest, "purpose_not_allowed",
+			"identity recovery is requested on the host itself")
+		return principal, nil, false
+	}
+	// The facts for the host are checked here, where the order is placed:
+	// an order that fails at enrollment time would fail in the middle of
+	// the night, on the machine, with nobody to read the reason.
+	owner, err := hosts.NormalizeOwner(req.Owner)
+	if errors.Is(err, hosts.ErrInvalidOwner) {
+		problem(w, http.StatusBadRequest, "invalid_owner", err.Error())
+		return principal, nil, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return principal, nil, false
+	}
+	req.Owner = owner
+	tags, err := hosts.NormalizeTags(req.Tags)
+	if errors.Is(err, hosts.ErrInvalidTags) {
+		problem(w, http.StatusBadRequest, "invalid_tags", err.Error())
+		return principal, nil, false
+	}
+	if err != nil {
+		s.fail(w, err)
+		return principal, nil, false
+	}
+	req.Tags = tags
+	// Enrollment opens the way to root on the machine through the helper.
+	// An order for production, a token good for many machines or a relay
+	// requires fresh authentication, like any change of that weight.
+	var stepUpEvidence map[string]any
+	if s.requiresSecondPerson(req.Environment) || req.MaxUses > 1 || req.Kind == enrollment.KindRelay {
+		reason := strings.TrimSpace(req.Reason)
+		if reason == "" {
+			reason = strings.TrimSpace(req.Description)
+		}
+		evidence, ok := s.requireStepUp(w, r, principal, reason, stepUpAction, "enrollment_request", targetID)
+		if !ok {
+			return principal, nil, false
+		}
+		stepUpEvidence = evidence
+	}
+	return principal, stepUpEvidence, true
+}
+
+// replacementBody is what a replacement may say of its own. Everything
+// else comes from the order it replaces.
+type replacementBody struct {
+	Description string `json:"description"`
+	TTLMinutes  int    `json:"ttl_minutes"`
+	Reason      string `json:"reason"`
+}
+
+// similarOrder is an order like the one given: the same placement, kind,
+// relay binding, owner, tags and pool of uses, with a fresh token and a
+// fresh deadline. The token is a new secret - nothing of the old one is
+// copied, and the store keeps only its digest anyway. The expected
+// machine is not copied either: it bound one order to one machine, and a
+// new order is bound when it is placed for one.
+func similarOrder(order *enrollment.Request, body replacementBody) enrollmentRequestBody {
+	ttl := body.TTLMinutes
+	if ttl <= 0 {
+		// The lifetime of the old order, as it was ordered: the deadline
+		// against the moment of placing it, rounded up to whole minutes.
+		ttl = int((order.ExpiresAt.Sub(order.CreatedAt) + time.Minute - time.Nanosecond) / time.Minute)
+	}
+	description := strings.TrimSpace(body.Description)
+	if description == "" {
+		description = order.Description
+	}
+	tags := order.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	return enrollmentRequestBody{
+		Description: description, Site: order.Site, Environment: order.Environment,
+		Kind: order.Kind, Purpose: order.Purpose, RelayID: order.RelayID,
+		Owner: order.Owner, Tags: tags, MaxUses: order.MaxUses,
+		TTLMinutes: ttl, Reason: body.Reason,
+	}
+}
+
+// handleReplaceEnrollmentRequest places an order like the one named and
+// shows its token once. An order still open is revoked first: two live
+// tokens for one placement would be one too many, and an operator who
+// asks for a new token means the old one is not to work. A settled,
+// expired or revoked order is only copied.
+//
+// The old token is never shown again, on this path or any other: the
+// store holds its digest alone. The right is judged twice, where the
+// machine will live: to close the old order and to place the new one, so
+// an operator of one site replaces the orders of that site without a
+// global right. The revocation goes first, and a failure of the placement
+// after it leaves the old order closed: a closed door is the safe side of
+// a half-done replacement, and the answer says so.
+func (s *Server) handleReplaceEnrollmentRequest(w http.ResponseWriter, r *http.Request) {
+	old, ok := s.readableOrder(w, r)
+	if !ok {
+		return
+	}
+	// The body is optional: a replacement says nothing of its own unless
+	// the operator gives a description, a lifetime or a reason.
+	var body replacementBody
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+		return
+	}
+	// A recovery order is bound to its host and placed on the host; it is
+	// not copied from here.
+	if old.Purpose == enrollment.PurposeReplace {
+		problem(w, http.StatusBadRequest, "purpose_not_allowed",
+			"an identity recovery order is placed on the host itself")
+		return
+	}
+	req := similarOrder(old, body)
+	principal, stepUpEvidence, ok := s.authorizeOrder(w, r, &req, "host.enrollment.replace", old.ID)
+	if !ok {
+		return
+	}
+	scope := authz.Scope{Site: old.Site, Environment: old.Environment}
+	revoked := false
+	if old.Status == enrollment.StatusPending {
+		if _, ok := s.authorize(w, r, authz.PermHostEnrollRevoke, scope, "enrollment_request", old.ID); !ok {
+			return
+		}
+		err := s.tokens.Revoke(r.Context(), old.ID)
+		if errors.Is(err, enrollment.ErrUnknownRequest) {
+			problem(w, http.StatusNotFound, "not_found", "enrollment request not found")
+			return
+		}
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+		revoked = true
+		s.publishEnrollment(r.Context(), events.EnrollmentChange{
+			RequestID: old.ID, Change: events.EnrollmentRevoked,
+			Site: old.Site, Environment: old.Environment, Kind: old.Kind,
+		})
+	}
+
+	order, err := s.createOrder(r, req, principal.Subject, "")
+	if err != nil && !errors.Is(err, enrollment.ErrRepeated) {
+		s.audit.Record(r.Context(), audit.Event{
+			ActorType: audit.ActorUser, ActorID: principal.Subject,
+			Action: "host.enrollment.replace", TargetType: "enrollment_request",
+			TargetID: old.ID, Outcome: audit.OutcomeFailure,
+			Detail: withStepUp(map[string]any{
+				"old_request_id": old.ID, "old_status": old.Status, "revoked": revoked,
+				"site": old.Site, "environment": old.Environment, "kind": old.Kind,
+				"error": err.Error(),
+			}, stepUpEvidence),
+		})
+		if revoked {
+			s.lapseRecoveries(r.Context(), principal.Subject)
+			problem(w, http.StatusBadRequest, "invalid_request",
+				"the order was revoked, but no order was placed in its place: "+err.Error())
+			return
+		}
+		problem(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "host.enrollment.replace", TargetType: "enrollment_request",
+		TargetID: order.ID, Outcome: audit.OutcomeSuccess,
+		// Neither token goes to the trail: the old one is closed and the
+		// new one was shown once.
+		Detail: withStepUp(map[string]any{
+			"old_request_id": old.ID, "new_request_id": order.ID,
+			"old_status": old.Status, "revoked": revoked,
+			"site": order.Site, "environment": order.Environment,
+			"kind": order.Kind, "purpose": order.Purpose,
+			"relay_id": order.RelayID,
+			"owner":    order.Owner, "tags": order.Tags,
+			"max_uses": order.MaxUses, "expires_at": order.ExpiresAt,
+		}, stepUpEvidence),
+	})
+	if errors.Is(err, enrollment.ErrRepeated) {
+		// The same replacement again, from a caller that lost the first
+		// answer: the order placed then is the answer, without its token.
+		writeJSON(w, http.StatusOK, orderView{Request: order, ConfigURL: configURL(order.ID)})
+		return
+	}
+	s.publishEnrollment(r.Context(), events.EnrollmentChange{
+		RequestID: order.ID, Change: events.EnrollmentCreated,
+		Site: order.Site, Environment: order.Environment, Kind: order.Kind,
+	})
+	if revoked {
+		s.lapseRecoveries(r.Context(), principal.Subject)
+	}
 	writeJSON(w, http.StatusCreated, orderView{Request: order, ConfigURL: configURL(order.ID)})
 }
 

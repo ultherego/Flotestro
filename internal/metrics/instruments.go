@@ -260,14 +260,26 @@ var (
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
 	// RelaySessionIdentity counts the sessions opened through a relay by
-	// how the host was identified: attested, when the relay named the
-	// certificate the host presented and the gateway checked it, or weak,
-	// when the relay named the host alone. The gateway increments it
-	// where it identifies the peer (agent_service.go); a fleet with weak
-	// sessions has relays to upgrade before the mode can be enforced.
+	// how the host was identified: end_to_end, when the host signed its
+	// envelope and the gateway verified the signature against the
+	// certificate on record; attested, when the relay named the
+	// certificate the host presented and the gateway checked it; or weak,
+	// when the relay named the host alone. The gateway increments it once
+	// the strength of a session is settled (agent_service.go); a fleet
+	// with weak or attested sessions has relays or agents to upgrade
+	// before the mode can be enforced.
 	RelaySessionIdentity = Default.NewCounter("flotestro_relay_session_identity_total",
 		"Agent sessions opened through a relay, by the strength of the host's identity.",
 		"strength")
+	// RelayEnvelopeRefusal counts the relayed messages and calls whose
+	// identity envelope was refused, by the refusal code:
+	// relay_envelope_invalid, relay_body_hash_mismatch,
+	// relay_sequence_replayed, relay_host_signature_invalid. A steady
+	// count of replays is a relay retrying honestly after a broken link;
+	// anything else on this counter is a relay or a path to inspect.
+	RelayEnvelopeRefusal = Default.NewCounter("flotestro_relay_envelope_refusal_total",
+		"Relayed messages whose identity envelope was refused, by code.",
+		"code")
 	// AgentRenewal counts the certificate renewals by how they ended. The
 	// gateway increments it where the renewal is settled (renewal.go):
 	// renewed, refused, or failed - a refusal is the panel's decision, a
@@ -275,4 +287,15 @@ var (
 	// in the expiry gauges, not here.
 	AgentRenewal = Default.NewCounter("flotestro_agent_renewal_total",
 		"Agent certificate renewals, by outcome.", "outcome")
+	// SessionFence counts what the session ownership fence refused or
+	// held, by outcome: delivery_held when the scheduler kept a task in
+	// the queue because the host had no live owner or another instance's
+	// session owned it; dispatch_refused and result_refused when the
+	// database refused a delivery or a result written under a superseded
+	// token; renewal_lost when a session found at its renewal that the
+	// host is no longer its own and closed. A steady trickle is hosts
+	// moving between instances; a stream from one instance is an instance
+	// that keeps streams it no longer owns.
+	SessionFence = Default.NewCounter("flotestro_session_fence_total",
+		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
 )

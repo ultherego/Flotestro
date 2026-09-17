@@ -103,6 +103,14 @@ type Job struct {
 	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
 	CanceledBy         string          `json:"canceled_by,omitempty"`
 	CancelReason       string          `json:"cancel_reason,omitempty"`
+	// CancelRequestedAt is when a cancel was asked of the host holding the
+	// task; CancelAckAt, CancelOutcome and CancelPhase are the agent's
+	// answer - what the request found on the host and what the host was
+	// doing. All empty for a job that never left the panel.
+	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
+	CancelAckAt       *time.Time `json:"cancel_ack_at,omitempty"`
+	CancelOutcome     string     `json:"cancel_outcome,omitempty"`
+	CancelPhase       string     `json:"cancel_phase,omitempty"`
 	// WaitReason says why a job has not started yet: the budget a queued
 	// job waits for, as awaiting_budget:<key>, or the resource lock a
 	// delivered job waits for on its host, as awaiting_lock:<blocker>. A
@@ -357,23 +365,45 @@ func requiredApprovals(spec Spec) int {
 }
 
 // Cancel cancels a task that has not reached a final state yet.
+//
+// A task still in the panel - planned, awaiting an approval, queued, or
+// taken by a scheduler and not yet handed over - ends canceled at once:
+// no host holds it, and the tokens a lease may have taken go back with
+// it. A task the host holds - dispatched or running - is not written off:
+// the cancel becomes a request, the job stands cancel_requested with its
+// tokens, a record of the request goes on the durable trail for the
+// instance that holds the host's session to deliver, and the agent's
+// acknowledgement or the operation's timeout settles it. Writing
+// "canceled" on a task the host is carrying would hand its capacity to
+// the next task while the host is still using it, and meet the host's
+// result as one for a job that no longer exists.
 func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
-	const query = `
-		update jobs set state = $2, canceled_by = $3, canceled_at = now(),
-		                cancel_reason = $4, wait_reason = '', finished_at = now(), updated_at = now()
-		where id = $1
-		  and state in ('planned', 'awaiting_approval', 'queued', 'leased', 'dispatched', 'running')
-		returning id`
-	var updated string
-	err := tx.QueryRow(ctx, query, jobID, string(StateCanceled), actor, nullable(reason)).Scan(&updated)
+	var state string
+	err := tx.QueryRow(ctx, `select state from jobs where id = $1 for update`, jobID).Scan(&state)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrConflict
+		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := releaseBudgets(ctx, tx, jobID); err != nil {
-		return nil, err
+	switch State(state) {
+	case StatePlanned, StateAwaitingApproval, StateQueued, StateLeased:
+		if _, err := tx.Exec(ctx, `
+			update jobs set state = $2, canceled_by = $3, canceled_at = now(),
+			                cancel_reason = $4, wait_reason = '', finished_at = now(), updated_at = now()
+			where id = $1`,
+			jobID, string(StateCanceled), actor, nullable(reason)); err != nil {
+			return nil, err
+		}
+		if err := releaseBudgets(ctx, tx, jobID); err != nil {
+			return nil, err
+		}
+	case StateDispatched, StateRunning:
+		if err := requestCancel(ctx, tx, jobID, actor, reason); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, ErrConflict
 	}
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
@@ -420,7 +450,7 @@ func (s *Store) OpenTasksOfAction(ctx context.Context, hostID,
 			order by attempt_number desc limit 1
 		) a on true
 		where j.host_id = $1::uuid and j.action_type = $2
-		  and j.state in ('queued', 'leased', 'dispatched', 'running')
+		  and j.state in ('queued', 'leased', 'dispatched', 'running', 'cancel_requested')
 		order by j.created_at`
 	rows, err := s.pool.Query(ctx, query, hostID, action)
 	if err != nil {
@@ -592,7 +622,7 @@ func (s *Store) SetWaitReason(ctx context.Context, jobID, reason string) error {
 func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 	return collectIDs(s.pool.Query(ctx, `
 		select id from jobs
-		where state in ('leased', 'dispatched', 'running')
+		where state in ('leased', 'dispatched', 'running', 'cancel_requested')
 		  and campaign_id is null and fanout_id is null`))
 }
 
@@ -601,8 +631,8 @@ func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 // gave the execution lease at the take, and until the agent acknowledges
 // the task nothing runs that the lease would have to outlast. A lease
 // already shorter than that stays as it is.
-func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID string) error {
-	return s.MarkDispatchedWithLease(ctx, jobID, attemptID, sessionID, DispatchLease)
+func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID string, fence Fence) error {
+	return s.MarkDispatchedWithLease(ctx, jobID, attemptID, fence, DispatchLease)
 }
 
 // MarkDispatchedWithLease is MarkDispatched with the lease the caller
@@ -610,8 +640,14 @@ func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID, sessionID 
 // the execution lease for one that never will - an agent from before the
 // acknowledgement would be reclaimed and redelivered every minute for the
 // length of every operation.
-func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, sessionID string,
-	lease time.Duration) error {
+//
+// The write is fenced: the fence names the session the envelope went over
+// and the token that session claimed the host with, and a session that
+// no longer owns the host - superseded, or with a lease that ran out -
+// gets ErrStaleFence and records nothing. The caller gives the lease
+// back; it never repeats the write without the fence.
+func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID string,
+	fence Fence, lease time.Duration) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -630,11 +666,17 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, s
 		  from agent_sessions s join jobs j on j.host_id = s.host_id
 		 where s.id = nullif($2, '')::uuid and j.id = $1 and s.ended_at is null
 		   for update of s`,
-		jobID, sessionID).Scan(&openSession)
+		jobID, fence.SessionID).Scan(&openSession)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrSessionStale
 	}
 	if err != nil {
+		return err
+	}
+	// An open row is the session's word that it is the newest; the fence
+	// is the database's word that it owns the host right now. The second
+	// is the one a late or lost notification cannot fool.
+	if err := fenceHolds(ctx, tx, jobID, fence); err != nil {
 		return err
 	}
 
@@ -654,7 +696,7 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID, s
 		                               then least(lease_expires_at, now() + make_interval(secs => $3))
 		                               else lease_expires_at end
 		 where id = $1`,
-		attemptID, nullableUUID(sessionID), lease.Seconds()); err != nil {
+		attemptID, nullableUUID(fence.SessionID), lease.Seconds()); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -861,7 +903,7 @@ func (s *Store) RenewAttemptLease(ctx context.Context, attemptID, hostID string,
 		   and j.host_id = $2::uuid
 		   and a.finished_at is null
 		   and a.lease_expires_at is not null
-		   and j.state in ('leased', 'dispatched', 'running')`,
+		   and j.state in ('leased', 'dispatched', 'running', 'cancel_requested')`,
 		attemptID, hostID, extension.Seconds())
 	if err != nil {
 		return false, fmt.Errorf("renewing the lease of the attempt: %w", err)
@@ -926,8 +968,21 @@ type Result struct {
 // late in that sense: the host was carrying the operation the whole time,
 // and the job is still open. It settles the job, and the newer attempt the
 // redelivery opened - which did no work - is closed as superseded by it.
+//
+// The settlement is fenced: the fence names the session the result came
+// in on and the token that session claimed the host with. A result
+// replayed from the agent's journal arrives on the host's current session
+// and is fenced with the current owner, which is right - it is the
+// session that carries the host now. A result on a session that no longer
+// owns the host - the instance holding the stream was superseded and has
+// not noticed, or its lease ran out - is refused with ErrStaleFence and
+// writes nothing; the newer instance settles the job from the replay. The
+// state is judged before the fence, so that a late result after a
+// settlement keeps its own answer (not accepted, recorded on the attempt)
+// and a stale owner keeps its own (refused): both are one row short in
+// the database, and the trail has to tell them apart.
 func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
-	result Result, jobState State) (accepted bool, err error) {
+	result Result, jobState State, fence Fence) (accepted bool, err error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -979,6 +1034,13 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 			}
 		}
 		return false, tx.Commit(ctx)
+	}
+
+	// The job is open and the result would settle it: only the session
+	// that owns the host may do that. A refused write leaves the job as
+	// it was, for the owner's copy of the result.
+	if err := fenceHolds(ctx, tx, jobID, fence); err != nil {
+		return false, err
 	}
 
 	// The agent is asked to bound its output, but the bound is the task's
@@ -1070,7 +1132,8 @@ func clampOutput(stdout, stderr []byte, truncated bool, limit int) ([]byte, []by
 // again rather than retry.
 func staleReason(code string) bool {
 	switch code {
-	case "precondition_failed", "precondition_changed", "payload_hash_mismatch", "plan_hash_mismatch", "plan_stale":
+	case "precondition_failed", "precondition_changed", "payload_hash_mismatch", "plan_hash_mismatch", "plan_stale",
+		"stale_plan", "replan_required", "plan_expired":
 		return true
 	}
 	return false
@@ -1581,7 +1644,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 		       required_approvals,
 		       (select count(*) from job_approvals a where a.job_id = jobs.id),
 		       coalesce((select h.hostname from hosts h where h.id = jobs.host_id), ''),
-		       fanout_id, wait_reason, budget_class
+		       fanout_id, wait_reason, budget_class,
+		       cancel_requested_at, cancel_ack_at, coalesce(cancel_outcome, ''), coalesce(cancel_phase, '')
 		from jobs ` + clause
 
 	rows, err := q.Query(ctx, query, args...)
@@ -1601,7 +1665,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.CanceledBy, &j.CancelReason, &j.ResultStatus, &j.ResultErrorCode,
 			&j.ResultMessage, &j.FinishedAt, &j.CreatedAt, &j.UpdatedAt,
 			&j.RequiredApprovals, &collected, &j.Hostname, &j.FanoutID,
-			&j.WaitReason, &j.BudgetClass); err != nil {
+			&j.WaitReason, &j.BudgetClass,
+			&j.CancelRequestedAt, &j.CancelAckAt, &j.CancelOutcome, &j.CancelPhase); err != nil {
 			return nil, err
 		}
 		// Every view of a task carries the number of collected approvals:

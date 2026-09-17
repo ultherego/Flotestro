@@ -13,6 +13,7 @@ import (
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
+	planenvelope "github.com/ultherego/flotestro/internal/plan"
 )
 
 // The paths of the mount tools. Fixed, not looked up in PATH.
@@ -22,6 +23,12 @@ const (
 	fsckPath   = "/usr/sbin/fsck"
 	blkidPath  = "/usr/sbin/blkid"
 )
+
+// errorStalePlan is the answer to a change whose plan no longer matches the
+// host: the fingerprint computed again under the lock differs from the one
+// the operator approved. The code is the one every planned family reports;
+// the operator computes the plan again and approves the new one.
+const errorStalePlan = planenvelope.ErrorStalePlan
 
 // applyStorage handles the operations on the disk space of the host.
 func (s *Server) applyStorage(ctx context.Context, request *helperv1.HelperRequest,
@@ -156,32 +163,56 @@ func storageGuard(operation helperv1.StorageRequest_Operation) string {
 // host has: that UUID then travels in the change, so a disk that got a
 // different path after a restart is not mounted in somebody else's place.
 func (s *Server) planMount(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	plan, state, refused := s.computeMountPlan(ctx, action)
+	if refused != nil {
+		return refused
+	}
+	encoded, err := json.Marshal(plan)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	response := storageResponse(state, describeMountPlan(plan), "")
+	if response.GetStorageResult() != nil {
+		response.StorageResult.Plan = encoded
+	}
+	return response
+}
+
+// computeMountPlan is the one place a mount plan is computed: the plan
+// operation and the change before it run the same code, so the fingerprint
+// the change carries is compared with a plan of the same shape. The plan
+// covers the device identity, the fstab revision and the state of the mount
+// point; any of them moving between the plan and the change is a stale
+// plan.
+func (s *Server) computeMountPlan(ctx context.Context, action *helperv1.StorageRequest) (
+	storage.MountPlan, storage.Snapshot, *helperv1.HelperResponse) {
 	if err := storage.ValidateTarget(action.GetTarget()); err != nil {
-		return reject(ErrorMalformed, err.Error())
+		return storage.MountPlan{}, storage.Snapshot{}, reject(ErrorMalformed, err.Error())
 	}
 	// A plan without a source is an unmount plan: a mount always has a source,
 	// an unmount never does. The result names this directly in the action field.
 	unmounting := action.GetSource() == ""
 	if !unmounting {
 		if err := storage.ValidateSource(action.GetSource()); err != nil {
-			return reject(ErrorMalformed, err.Error())
+			return storage.MountPlan{}, storage.Snapshot{}, reject(ErrorMalformed, err.Error())
 		}
 		if err := storage.ValidateOptions(action.GetOptions(), action.GetFsType()); err != nil {
-			return reject(ErrorMalformed, err.Error())
+			return storage.MountPlan{}, storage.Snapshot{}, reject(ErrorMalformed, err.Error())
 		}
 	}
 
 	state := s.storagePicture(ctx)
 	if state.UnavailableReason != "" {
-		return reject(ErrorUnsupported, state.UnavailableReason)
+		return storage.MountPlan{}, state, reject(ErrorUnsupported, state.UnavailableReason)
 	}
 	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
 	if err != nil {
-		return reject(ErrorExecFailed, "mountinfo: "+err.Error())
+		return storage.MountPlan{}, state, reject(ErrorExecFailed, "mountinfo: "+err.Error())
 	}
 	fstab, _ := os.ReadFile(storage.FstabPath)
 	state.Mounts = storage.MergeMounts(
 		storage.ParseMountinfo(string(mountinfo)), storage.ParseFstab(string(fstab)))
+	state.FstabRevision = storage.FstabRevision(fstab)
 
 	var plan storage.MountPlan
 	if unmounting {
@@ -197,6 +228,7 @@ func (s *Server) planMount(ctx context.Context, action *helperv1.StorageRequest)
 		plan = storage.ComputeMount(state, action.GetSource(), action.GetTarget(),
 			action.GetFsType(), action.GetOptions(), action.GetPersist())
 	}
+	plan.ObserveTarget(targetState(action.GetTarget()))
 	// A plan computed in a private mount namespace would describe a change that
 	// never enters the host. The refusal is to stand in the plan, not in the
 	// execution.
@@ -206,16 +238,40 @@ func (s *Server) planMount(ctx context.Context, action *helperv1.StorageRequest)
 			plan.Refuse(err.Error())
 		}
 	}
+	return plan, state, nil
+}
 
-	encoded, err := json.Marshal(plan)
-	if err != nil {
-		return reject(ErrorExecFailed, err.Error())
+// targetState says what stat finds at the mount point.
+func targetState(target string) string {
+	info, err := os.Stat(target)
+	switch {
+	case err != nil:
+		return storage.TargetMissing
+	case info.IsDir():
+		return storage.TargetDirectory
 	}
-	response := storageResponse(state, describeMountPlan(plan), "")
-	if response.GetStorageResult() != nil {
-		response.StorageResult.Plan = encoded
+	return storage.TargetNotADirectory
+}
+
+// checkMountPlanDigest compares the plan computed now with the one the
+// operator consented to. The comparison runs under the storage guard, right
+// before the change: a different fingerprint means the device, the fstab or
+// the mount point moved since the planning - and that is a stale plan, not
+// a warning.
+func (s *Server) checkMountPlanDigest(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
+	expected := action.GetPlanHash()
+	if expected == "" {
+		return nil
 	}
-	return response
+	plan, _, refused := s.computeMountPlan(ctx, action)
+	if refused != nil {
+		return refused
+	}
+	if plan.PlanHash != expected {
+		return reject(errorStalePlan,
+			"the mount "+action.GetTarget()+" changed since the planning (device, fstab or mount point); the change needs a new plan")
+	}
+	return nil
 }
 
 // describeMountPlan sums the plan up in one sentence for the operation journal.
@@ -255,6 +311,9 @@ func (s *Server) mount(ctx context.Context, action *helperv1.StorageRequest) *he
 
 	if err := sharedMountNamespace(); err != nil {
 		return reject(ErrorUnsupported, err.Error())
+	}
+	if response := s.checkMountPlanDigest(ctx, action); response != nil {
+		return response
 	}
 
 	// A filesystem the host does not see cannot be mounted - and it is better to
@@ -298,6 +357,9 @@ func (s *Server) unmount(ctx context.Context, action *helperv1.StorageRequest) *
 	}
 	if err := sharedMountNamespace(); err != nil {
 		return reject(ErrorUnsupported, err.Error())
+	}
+	if response := s.checkMountPlanDigest(ctx, action); response != nil {
+		return response
 	}
 	// Unmounting a busy filesystem will not succeed, and the message of umount
 	// itself does not say who holds it.
@@ -382,10 +444,11 @@ func (s *Server) extendFilesystem(ctx context.Context, action *helperv1.StorageR
 	state := s.storagePicture(ctx)
 	device := state.DeviceAt(action.GetDevice())
 	if err := (storage.DeviceIdentity{
-		Path:      action.GetDevice(),
-		Serial:    action.GetExpectedSerial(),
-		UUID:      action.GetExpectedUuid(),
-		SizeBytes: action.GetExpectedSizeBytes(),
+		Path:   action.GetDevice(),
+		ByID:   action.GetExpectedById(),
+		WWN:    action.GetExpectedWwn(),
+		Serial: action.GetExpectedSerial(),
+		UUID:   action.GetExpectedUuid(),
 	}).Matches(device); err != nil {
 		return reject(ErrorPreconditionFailed, err.Error())
 	}
@@ -411,8 +474,7 @@ func (s *Server) extendFilesystem(ctx context.Context, action *helperv1.StorageR
 // anything stands on it. The operator consent was already collected in the
 // panel; here the fact decides.
 func (s *Server) createFilesystem(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	state := s.storagePicture(ctx)
-	if response := s.checkDestructiveTarget(state, action); response != nil {
+	if response := s.checkDestructiveTarget(ctx, action); response != nil {
 		return response
 	}
 	arguments, err := storage.FormatArguments(action.GetDevice(),
@@ -430,8 +492,7 @@ func (s *Server) createFilesystem(ctx context.Context, action *helperv1.StorageR
 
 // wipeDevice removes the filesystem signatures.
 func (s *Server) wipeDevice(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	state := s.storagePicture(ctx)
-	if response := s.checkDestructiveTarget(state, action); response != nil {
+	if response := s.checkDestructiveTarget(ctx, action); response != nil {
 		return response
 	}
 	arguments, err := storage.WipeArguments(action.GetDevice())
@@ -452,21 +513,55 @@ func (s *Server) wipeDevice(ctx context.Context, action *helperv1.StorageRequest
 
 // checkDestructiveTarget makes sure the operation hits the device the operator
 // looked at and that nothing stands on it.
-func (s *Server) checkDestructiveTarget(state storage.Snapshot,
+//
+// The state is read again here, under the storage guard the operation holds,
+// not taken from the request: the request says what the operator saw, the
+// host says what is there now. The plan is computed once more and compared
+// with the approved fingerprint where the order carries one; then the
+// identity the order carries - by-id, WWN, serial - is compared with the
+// device under the path. A missing identity is a refusal, not a pass: the
+// size of the device is a description and matches nothing.
+func (s *Server) checkDestructiveTarget(ctx context.Context,
 	action *helperv1.StorageRequest) *helperv1.HelperResponse {
-	if err := (storage.DeviceIdentity{
-		Path:      action.GetDevice(),
-		Serial:    action.GetExpectedSerial(),
-		UUID:      action.GetExpectedUuid(),
-		SizeBytes: action.GetExpectedSizeBytes(),
-	}).Matches(state.DeviceAt(action.GetDevice())); err != nil {
-		return reject(ErrorPreconditionFailed, err.Error())
+	state := s.deviceState(ctx)
+	if state.UnavailableReason != "" {
+		return reject(ErrorUnsupported, state.UnavailableReason)
 	}
-	if point := storage.InUse(state, action.GetDevice()); point != "" {
-		return reject(ErrorUnsupported,
-			"the device is in use (mounted at "+point+"); a destructive operation needs it unmounted")
+	if expected := action.GetPlanHash(); expected != "" {
+		if now := devicePlan(state, action); now.PlanHash != expected {
+			return reject(errorStalePlan,
+				"the device "+action.GetDevice()+" changed since the planning; the change needs a new plan")
+		}
+	}
+	observed := state.DeviceAt(action.GetDevice())
+	if observed == nil {
+		return reject(ErrorPreconditionFailed, "the device "+action.GetDevice()+" does not exist on this host")
+	}
+	consented := storage.DevicePlan{
+		Device: action.GetDevice(),
+		ByID:   action.GetExpectedById(),
+		WWN:    action.GetExpectedWwn(),
+		Serial: action.GetExpectedSerial(),
+	}
+	if err := storage.ValidateDestructiveTarget(consented, *observed); err != nil {
+		return reject(refusalCode(err), err.Error())
+	}
+	if expected := action.GetExpectedUuid(); expected != "" && observed.UUID != expected {
+		return reject(storage.CodeDiskChanged,
+			"the device "+action.GetDevice()+" carries the filesystem "+observed.UUID+
+				", and the plan was computed for "+expected)
 	}
 	return nil
+}
+
+// refusalCode reads the typed code out of a storage refusal; a plain error
+// is a failed precondition.
+func refusalCode(err error) string {
+	var refusal *storage.Refusal
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return ErrorPreconditionFailed
 }
 
 // noSpaceInGroup returns the reason when the volume group has no space left.
@@ -489,7 +584,7 @@ func (s *Server) noSpaceInGroup(ctx context.Context, volume string) string {
 // storagePicture reads the device topology on the helper side.
 func (s *Server) storagePicture(ctx context.Context) storage.Snapshot {
 	output, err := toolOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
-		"NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,PARTUUID,MOUNTPOINTS,MODEL,SERIAL,WWN,ROTA,RO,PKNAME")
+		storage.Columns(storage.IdentityColumns))
 	if err != nil {
 		return storage.Snapshot{UnavailableReason: "lsblk: " + err.Error()}
 	}
@@ -497,12 +592,16 @@ func (s *Server) storagePicture(ctx context.Context) storage.Snapshot {
 	if err != nil {
 		return storage.Snapshot{UnavailableReason: err.Error()}
 	}
+	// The by-id links and the holders come from udev and sysfs, not from
+	// lsblk; without them a plan has no stable identity to bind to.
+	storage.ReadIdentity(devices)
 	return storage.Snapshot{Devices: devices}
 }
 
-// planDevice computes the plan of a check or an extension without touching the
-// host. A device that does not exist, a filesystem mounted before an fsck and a
-// group without space are a refusal in the plan, not a failure of the execution.
+// planDevice computes the plan of a check, an extension, a format or a wipe
+// without touching the host. A device that does not exist, a filesystem
+// mounted before an fsck, a group without space and a disk without a stable
+// identity are a refusal in the plan, not a failure of the execution.
 func (s *Server) planDevice(ctx context.Context, action *helperv1.StorageRequest) *helperv1.HelperResponse {
 	state := s.deviceState(ctx)
 	plan := devicePlan(state, action)
@@ -532,6 +631,10 @@ func devicePlan(state storage.Snapshot, action *helperv1.StorageRequest) storage
 		kind = storage.PlanFSResize
 	case helperv1.StorageRequest_OPERATION_LVM_EXTEND:
 		kind = storage.PlanLVExtend
+	case helperv1.StorageRequest_OPERATION_FS_CREATE:
+		kind = storage.PlanFormat
+	case helperv1.StorageRequest_OPERATION_DISK_WIPE:
+		kind = storage.PlanWipe
 	}
 	switch kind {
 	case storage.PlanFSResize:
@@ -540,6 +643,10 @@ func devicePlan(state storage.Snapshot, action *helperv1.StorageRequest) storage
 		return storage.ComputeLVExtend(state, action.GetDevice(), action.GetSize())
 	case storage.PlanCheck:
 		return storage.ComputeCheck(state, action.GetDevice(), action.GetRepair())
+	case storage.PlanFormat:
+		return storage.ComputeFormat(state, action.GetDevice(), action.GetFsType(), action.GetLabel())
+	case storage.PlanWipe:
+		return storage.ComputeWipe(state, action.GetDevice())
 	}
 	plan := storage.DevicePlan{Operation: kind, Device: action.GetDevice()}
 	plan.Refuse("unknown plan kind " + kind)
@@ -555,7 +662,7 @@ func (s *Server) checkDevicePlanDigest(ctx context.Context, action *helperv1.Sto
 		return nil
 	}
 	if now := devicePlan(s.deviceState(ctx), action); now.PlanHash != expected {
-		return reject(ErrorPreconditionFailed,
+		return reject(errorStalePlan,
 			"the device "+action.GetDevice()+" changed since the planning; the change needs a new plan")
 	}
 	return nil

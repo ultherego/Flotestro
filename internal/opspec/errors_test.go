@@ -19,7 +19,8 @@ func TestErrorGuidesAreComplete(t *testing.T) {
 	for _, excluded := range []string{"capability_missing", "maintenance", "offline", "conflict", "quarantined",
 		"recovery", "retiring", "retired", "host_retiring",
 		"skipped_offline", "offline_deadline", "plan_changed_offline",
-		"inventory_stale", "dispatch_ambiguous", "operation_non_cancelable"} {
+		"inventory_stale", "dispatch_ambiguous", "operation_non_cancelable",
+		"session_stale", "session_unowned", "session_fence_stale", "boot_filter_unsupported"} {
 		guide, ok := ErrorGuideFor(excluded)
 		if !ok || guide.CountsAsFailure {
 			t.Errorf("%s counts as a failure of the change: %+v (%v)", excluded, guide, ok)

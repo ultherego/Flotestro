@@ -191,6 +191,12 @@ var reportedGuides = []ErrorGuide{
 	{Code: "session_stale", Stage: "dispatch", Retry: RetryAutomatic,
 		Meaning: "The task was sent over a session the host had already left for another gateway; the delivery was not recorded and the task went back to the queue.",
 		Action:  "Nothing; the next pass delivers over the host's current session. If it repeats, the host is switching gateways in a loop - read the agent journal on the host. Not a failure."},
+	{Code: "session_unowned", Stage: "dispatch", Retry: RetryAutomatic,
+		Meaning: "When its turn came the host had no live owner: no session had claimed it, or the claim's lease had run out; the task stayed in the queue and was not marked delivered.",
+		Action:  "Nothing; the host's next session claims it and the next pass delivers. If it repeats for a connected host, the panel instance holding its session is not renewing its claims - check that instance's database access. Not a failure."},
+	{Code: "session_fence_stale", Stage: "dispatch", Retry: RetryAutomatic,
+		Meaning: "The panel instance that wrote this no longer owns the host's session: a newer session claimed the host with a higher fencing token, and the database refused the delivery or the result written under the older one; the write was refused and the newer instance carries on.",
+		Action:  "Nothing; the owner delivers the task again or settles it from the host's replay. A refused delivery goes back to the queue; a refused result is on the trail as not applied. If it repeats on one instance, that instance keeps streams it no longer owns - restart it. Not a failure."},
 	{Code: "targets_invalid", Stage: "materialize", Retry: RetryNever,
 		Meaning: "The explicit host list of the order names a host it cannot carry; the answer names each one with its reason: unknown_host, out_of_scope, excluded_and_listed or invalid_host_id.",
 		Action:  "Take the named hosts out of the list, or ask for the right over their site; the list is never trimmed quietly."},
@@ -419,6 +425,74 @@ var reportedGuides = []ErrorGuide{
 	{Code: "helper_capability_unsupported", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The panel runs the capability rollout in enforce mode and the agent of the host does not forward a helper capability, so no mutating task is delivered to it.",
 		Action:  "Upgrade the agent on the host; until then the host takes reads only.", CountsAsFailure: true},
+	{Code: "boot_filter_unsupported", Stage: "preflight", Retry: RetryAfterChange,
+		Meaning: "The read asked for one boot of the host and the agent of the host does not apply a boot filter: an older agent would ignore it and answer with every boot under the name of one, so the read was not sent.",
+		Action:  "Read the journal without the boot filter and narrow it by time, or upgrade the agent on the host; not a failure."},
+
+	// The plan envelope: the binding of a plan to its execution (security
+	// remediation, chapter 7.1 and 7.2). stale_plan, the shared refusal of
+	// a plan whose fingerprint moved, is listed with the plans bound to a
+	// stable identity below.
+	{Code: "replan_required", Stage: "helper", Retry: RetryAfterReplan,
+		Meaning: "The plan was made by another version of the planner than the one that would execute it - the agent or the helper was upgraded between the plan and the change. That is not a change of the host and not a broken plan: the new planner computes something else for the same host, so the old consent cannot be carried over.",
+		Action:  "Compute the plan again with the current planner and approve the new set; the previous approval does not apply.", CountsAsFailure: true},
+	{Code: "plan_expired", Stage: "helper", Retry: RetryAfterReplan,
+		Meaning: "The plan reached the host past its expiry: the state it described is too old to be trusted blind, whatever its fingerprint still looks like.",
+		Action:  "Compute the plan again and approve the new set.", CountsAsFailure: true},
+	{Code: "effects_partial", Stage: "helper", Retry: RetryReadState,
+		Meaning: "The transaction ran and the state read afterwards does not show every effect the plan promised: the result lists each effect achieved and each not achieved, with the version found instead.",
+		Action:  "Read the missed effects in the result and the package state of the host before ordering anything else; a repeat of the same plan is refused as stale, because the host no longer computes it.", CountsAsFailure: true},
+
+	// Plans bound to a stable identity: mounts, disks, filesystems and
+	// Compose projects (security remediation, chapter 7.3).
+	{Code: "stale_plan", Stage: "helper", Retry: RetryAfterReplan,
+		Meaning: "The host computed the plan again under its lock right before the change and got another fingerprint: the device, the fstab, the mount point, the repository or the image digest behind a tag moved since the operator approved.",
+		Action:  "Do not repeat the old plan; compute it again on the host as it is now and approve the new set. The previous consent does not carry over.", CountsAsFailure: true},
+	{Code: "stable_identity_required", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "A destructive disk operation names its device by nothing that survives a reboot: no /dev/disk/by-id link, and neither a WWN nor a serial. The size of the device is a description and is never taken as its identity.",
+		Action:  "Read the device row on the host's storage tab: a device without a by-id link is not formatted or wiped by the panel. Give the disk a serial (virtual machines) or do the operation by hand on the console.", CountsAsFailure: true},
+	{Code: "disk_changed", Stage: "helper", Retry: RetryAfterReplan,
+		Meaning: "The device under the path is not the one the plan was computed for: the by-id link, the WWN, the serial or the filesystem UUID differ. A disk of the same size with another WWN is another disk.",
+		Action:  "Read the host's storage again, find the disk the operator meant by its serial or WWN, and plan the operation once more against it.", CountsAsFailure: true},
+	{Code: "disk_in_use", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The device carries the root filesystem, has a mounted partition or swap under it, or is held by a volume group, an array or an encrypted container. Nothing was written.",
+		Action:  "Unmount what stands on the device, remove it from the volume group or array, and plan again; the root disk is never formatted by the panel.", CountsAsFailure: true},
+	{Code: "image_digest_unresolved", Stage: "planning", Retry: RetryAfterChange,
+		Meaning: "A Compose service names its image by a tag the host could resolve to a digest neither at the registry (no network, or a private registry the host is not logged into) nor among the images already on the host. The plan binds digests, so it was not computed.",
+		Action:  "Pin the digest in the manifest (image@sha256:...), pull the image on the host first, or give the host access to the registry; then plan again.", CountsAsFailure: true},
+
+	// The inner identity envelope of a session through a relay (security
+	// remediation, chapter 4). The gateway refuses the session, the
+	// message or the call and writes the code on the host as its last
+	// connection refusal; none of these sits on a job, so none counts
+	// against a campaign.
+	{Code: "relay_envelope_invalid", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The identity envelope of a relayed message could not be accepted: another layout, a relay or a host other than the one the message came through or was named for, a message kind other than the payload, a missing envelope on a session that signed its Hello (that message alone is dropped), a spent or foreign renewal challenge, or no public key on record to check it against.",
+		Action:  "Read the detail on the host. A layout or a missing key is a release to bring level - panel, relay, agent, in that order; a relay or a host that does not match is a path to inspect before the host is trusted again."},
+	{Code: "relay_body_hash_mismatch", Stage: "admission", Retry: RetryNever,
+		Meaning: "The payload of a relayed message is not the one the host signed: it changed on the way, or it carries a field this panel does not know.",
+		Action:  "If the panel is older than the agent, upgrade the panel first - the fleet rule. Otherwise the relay or the path altered the message: inspect the relay before the host is trusted again."},
+	{Code: "relay_sequence_replayed", Stage: "admission", Retry: RetryNever,
+		Meaning: "A signed relayed message was carried a second time under a sequence the session had already accepted; the second copy was dropped and not handled.",
+		Action:  "One after a broken link is the relay retrying its buffer honestly and needs nothing. A stream of them is a relay or a path replaying the host's messages: inspect the relay."},
+	{Code: "relay_host_signature_invalid", Stage: "admission", Retry: RetryNever,
+		Meaning: "The signature of the host on a relayed message, a renewal proof or a one-time secret key does not verify under the certificate the host named.",
+		Action:  "The message was not signed by the key of the certificate on record: a host whose key was replaced outside the panel, or a relay speaking in its name. Inspect the host and the relay; order an identity recovery if the host's key is in doubt."},
+	{Code: "blocked_upgrade_required", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The host's agent predates a proof this installation requires: behind a relay under FLOTESTRO_RELAY_IDENTITY=enforce it does not sign the identity envelope (relay.identity v2), or it renews or fetches a secret through a relay without the host's proof.",
+		Action:  "Upgrade the agent on the host - the relay did its part. Until then the host connects directly if it can, or stays refused; not a failure of any change."},
+	{Code: "cancel_ack_timeout", Stage: "reconcile", Retry: RetryReadState,
+		Meaning: "A cancel was asked of the host holding the task and no acknowledgement came within the operation's own timeout; the host may have run the operation to its end, cut it short or never started it. The job ended with an unknown outcome that needs reconciliation, and a campaign host ends unknown with this code.",
+		Action:  "Read the state of the host (packages.list, unit.status) before ordering anything again; do not repeat a destructive step blind. A host that answers nothing is offline or runs an agent from before the cancel protocol - upgrade it.", CountsAsFailure: true},
+	{Code: "canceled_before_start", Stage: "cancel", Retry: RetryNever,
+		Meaning: "A cancel reached the task on the host before it touched anything - during its checks, while it waited for a resource of the host, or before it was delivered - and the host refused to start it.",
+		Action:  "Nothing ran on the host; order again if the change is still wanted."},
+	{Code: "skipped_by_operator", Stage: "dispatch", Retry: RetryNever,
+		Meaning: "An operator left the host out of the campaign by name while it waited for its connection - the offline canary the wave barrier was waiting for - with a reason recorded on the host, its step and the trail.",
+		Action:  "Nothing; the host took no part. Run the change on it separately or in a retry campaign once it is back."},
+	{Code: "skip_not_allowed", Stage: "cancel", Retry: RetryAfterChange,
+		Meaning: "The skip named a host that is not waiting for its connection: a host under way settles on its own, a host in the queue starts on the next pass, and a settled host is settled.",
+		Action:  "Read the host's state again. Cancel the campaign to stop a host that has not started; a host carrying its task cannot be skipped."},
 }
 
 // RefusalError is a validation refusal with a code of its own. Validate

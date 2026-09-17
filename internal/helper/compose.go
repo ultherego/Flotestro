@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,8 +32,17 @@ func (s *Server) composeDirectory() string {
 // given, puts the argument array under a resource scope; it changes nothing
 // in the array itself.
 func composeRunner(ctx context.Context, wrap func([]string) []string) compose.Runner {
+	return dockerRunner(ctx, wrap, "compose")
+}
+
+// dockerRunner runs the Docker client with a fixed prefix of arguments. The
+// plan resolves image tags with it ("docker manifest inspect", "docker
+// image inspect"); the client runs with a bare environment and no
+// credential store, so it reaches what an anonymous pull would.
+func dockerRunner(ctx context.Context, wrap func([]string) []string, prefix ...string) compose.Runner {
 	return func(callCtx context.Context, args ...string) (string, string, error) {
-		argv := append([]string{dockerCLI, "compose"}, args...)
+		argv := append([]string{dockerCLI}, prefix...)
+		argv = append(argv, args...)
 		if wrap != nil {
 			argv = wrap(argv)
 		}
@@ -71,13 +81,17 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	actionCtx, cancel := deadline(ctx, request, 15*time.Minute, time.Hour)
 	defer cancel()
 
-	planner := compose.Planner{Runner: composeRunner(actionCtx, nil), Dir: s.composeDirectory()}
+	planner := compose.Planner{
+		Runner:   composeRunner(actionCtx, nil),
+		Resolver: compose.ResolveWithDocker(dockerRunner(actionCtx, nil)),
+		Dir:      s.composeDirectory(),
+	}
 
 	switch action.GetOperation() {
 	case helperv1.ComposeRequest_OPERATION_PLAN:
 		plan, err := planner.Plan(actionCtx, action.GetProject(), action.GetManifest())
 		if err != nil {
-			return reject(ErrorExecFailed, err.Error())
+			return reject(composeErrorCode(err), err.Error())
 		}
 		return composeResponse(plan)
 
@@ -89,11 +103,11 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 		})
 		executor := compose.Executor{Planner: planner}
 		result, err := executor.Deploy(actionCtx, action.GetProject(),
-			action.GetManifest(), action.GetPlanDigest())
+			action.GetManifest(), action.GetPlanDigest(), action.GetImageDigests())
 		if err != nil {
 			// The partial result goes into the answer on failure as well:
 			// without it there is no telling what managed to take hold.
-			response := reject(ErrorExecFailed, err.Error())
+			response := reject(composeErrorCode(err), err.Error())
 			if encoded, marshalErr := json.Marshal(result); marshalErr == nil {
 				response.ComposeResult = &helperv1.ComposeResult{Payload: encoded}
 			}
@@ -103,6 +117,23 @@ func (s *Server) applyCompose(ctx context.Context, request *helperv1.HelperReque
 	}
 	return reject(ErrorUnknownAction, "unknown Compose project operation")
 }
+
+// composeErrorCode names the refusal. A plan that moved since the approval
+// and a tag nobody can resolve are typed answers the panel acts on; the rest
+// is a failed tool.
+func composeErrorCode(err error) string {
+	switch {
+	case errors.Is(err, compose.ErrPlanMismatch):
+		return errorStalePlan
+	case errors.Is(err, compose.ErrDigestUnresolved):
+		return errorImageDigestUnresolved
+	}
+	return ErrorExecFailed
+}
+
+// errorImageDigestUnresolved: a service names an image by a tag the host
+// could resolve neither at the registry nor among its own images.
+const errorImageDigestUnresolved = "image_digest_unresolved"
 
 func composeResponse(content any) *helperv1.HelperResponse {
 	encoded, err := json.Marshal(content)

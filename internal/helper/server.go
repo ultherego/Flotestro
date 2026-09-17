@@ -66,6 +66,11 @@ type Server struct {
 	// trust is the root-owned keyring and host identity the trust update
 	// writes.
 	trust helpercap.TrustStore
+	// packageManager stands in for the detection of the package manager.
+	// Nil means the real one; a test puts a planner of its own here, so
+	// the binding of a plan to its execution can be checked without a
+	// package database.
+	packageManager func() (packages.Manager, error)
 }
 
 func NewServer(allowedUID uint32, log *slog.Logger) *Server {
@@ -436,7 +441,7 @@ func (s *Server) perform(ctx context.Context, request *helperv1.HelperRequest,
 // package database can damage it.
 func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.PackageActionRequest, progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
-	manager, err := packages.Detect()
+	manager, err := s.detectPackages()
 	if err != nil {
 		return reject(packages.ErrorUnsupported, err.Error())
 	}
@@ -466,20 +471,35 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		SecurityOnly: action.GetSecurityOnly(),
 	}
 
-	// A change that does not fit on the disk is refused here, before the
-	// lock is taken and the first archive lands. The package manager itself
-	// finds out halfway through unpacking - and leaves a database nobody can
-	// trust and a host nobody can upgrade.
-	if refusal := s.packageSpacePreflight(operationCtx, request, manager, action, options); refusal != nil {
-		return refusal
-	}
-
 	if progress != nil {
 		options.Progress = func(p packages.Progress) {
 			progress(&helperv1.TaskProgress{
 				Step: p.Step, Total: p.Total, Percent: p.Percent, Message: p.Message,
 			})
 		}
+	}
+
+	// An order bound to an approved plan runs that plan and nothing else:
+	// the plan is computed again here, under the lock, and compared before
+	// the transaction. Replacing the agent itself stays on its own path,
+	// because that transaction must not run in the helper's control group.
+	if _, _, bound := approvedPlan(action); bound {
+		switch action.GetOperation() {
+		case helperv1.PackageActionRequest_OPERATION_UPGRADE, helperv1.PackageActionRequest_OPERATION_REMOVE:
+			return s.executeApproved(operationCtx, request, manager, action, options)
+		case helperv1.PackageActionRequest_OPERATION_INSTALL:
+			if _, selfReplacement := agentReplacement(options.Packages); !selfReplacement {
+				return s.executeApproved(operationCtx, request, manager, action, options)
+			}
+		}
+	}
+
+	// A change that does not fit on the disk is refused here, before the
+	// lock is taken and the first archive lands. The package manager itself
+	// finds out halfway through unpacking - and leaves a database nobody can
+	// trust and a host nobody can upgrade.
+	if refusal := s.packageSpacePreflight(operationCtx, request, manager, action, options); refusal != nil {
+		return refusal
 	}
 
 	switch action.GetOperation() {
@@ -642,6 +662,8 @@ func packageResultToProto(apply packages.Apply) *helperv1.PackageActionResult {
 		SelfRepair:               apply.SelfRepair,
 		Output:                   apply.Output,
 		ScriptletErrors:          apply.ScriptletErrors,
+		EffectsAchieved:          effectOutcomesToProto(apply.EffectsAchieved),
+		EffectsMissed:            effectOutcomesToProto(apply.EffectsMissed),
 	}
 }
 
@@ -799,7 +821,7 @@ func ListenerFromSystemd() (net.Listener, bool, error) {
 // only carry it out.
 func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.PackageRepairRequest) *helperv1.HelperResponse {
-	manager, err := packages.Detect()
+	manager, err := s.detectPackages()
 	if err != nil {
 		return reject(ErrorUnsupported, err.Error())
 	}

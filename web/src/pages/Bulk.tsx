@@ -308,7 +308,6 @@ export function emptyOrder(): Order {
     maintenanceEnd: "",
     healthCheckUnits: "",
     jobTimeoutSeconds: 0,
-    requiresApproval: true,
     schedule: { enabled: false, startAt: "", recurrence: emptyRecurrence() },
   };
 }
@@ -421,15 +420,6 @@ export function reasonValid(reason: string): boolean {
   return reason.trim().length >= MIN_REASON;
 }
 
-/**
- * The risk classes whose campaigns cannot skip the approval gate: an
- * operation that can cut a host off or destroy what it holds is never one
- * decision short of running on the fleet.
- */
-export function approvalForced(risk: string | undefined): boolean {
-  return risk === "critical" || risk === "destructive";
-}
-
 /** What is wrong with the maintenance window, or null when nothing is. */
 export type WindowProblem = "start_invalid" | "end_invalid" | "start_past" | "end_past" | "end_before_start";
 
@@ -484,7 +474,7 @@ export function windowInstant(value: string): string | undefined {
  * its default is not sent, so an order that said nothing about it reads
  * like one on the server as well.
  */
-export function campaignBody(order: Order, risk: string | undefined): Record<string, unknown> {
+export function campaignBody(order: Order): Record<string, unknown> {
   const expression = expressionOf(order);
   const units = parseUnits(order.healthCheckUnits);
   return {
@@ -521,9 +511,9 @@ export function campaignBody(order: Order, risk: string | undefined): Record<str
     maintenance_end: windowInstant(order.maintenanceEnd),
     health_check_units: units.length > 0 ? units : undefined,
     job_timeout_seconds: order.jobTimeoutSeconds > 0 ? order.jobTimeoutSeconds : undefined,
-    // A critical operation carries the gate whatever the box says; the
-    // box is disabled for it, and the body says the same thing.
-    requires_approval: approvalForced(risk) ? true : order.requiresApproval,
+    // Every campaign carries the gate: the server forces it whatever a
+    // client says, and the body says the same thing.
+    requires_approval: true,
     compensates_campaign_id: order.compensates || undefined,
   };
 }
@@ -602,7 +592,6 @@ type Order = {
   jobTimeoutSeconds: number;
   // Whether the campaign waits for a consent before anything runs. A
   // critical operation cannot turn it off.
-  requiresApproval: boolean;
   // Whether the order is kept for a moment instead of placed now: the
   // first run as a datetime-local value in the browser's zone, and the
   // rule of the moments after it. The schedule places the same order
@@ -639,11 +628,11 @@ export function scheduleProblem(choice: ScheduleChoice, now: Date): "start_inval
  * well - it is what the trail keeps next to the schedule and what every
  * campaign it places carries.
  */
-export function scheduleBody(order: Order, risk: string | undefined): Record<string, unknown> {
+export function scheduleBody(order: Order): Record<string, unknown> {
   const rule = recurrenceText(order.schedule.recurrence);
   return {
     name: order.name,
-    order: campaignBody(order, risk),
+    order: campaignBody(order),
     start_at: windowInstant(order.schedule.startAt),
     recurrence: rule || undefined,
     timezone: browserZone(),
@@ -1828,7 +1817,6 @@ function WindowStep({
   const t = useT();
   const problem = windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date());
   const units = parseUnits(order.healthCheckUnits);
-  const forced = approvalForced(operation?.risk);
   const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
   const schedule = order.schedule;
   const scheduleFault = scheduleWords(t, scheduleProblem(schedule, new Date()));
@@ -1872,20 +1860,9 @@ function WindowStep({
           <input type="number" min={0} max={JOB_TIMEOUT.max} step={30} value={order.jobTimeoutSeconds}
             onChange={(e) => change({ jobTimeoutSeconds: +e.target.value })} />
         </Field>
-        <div className="field">
-          <label className="toggle">
-            <input
-              type="checkbox"
-              checked={forced || order.requiresApproval}
-              disabled={forced}
-              onChange={(e) => change({ requiresApproval: e.target.checked })}
-            />{" "}
-            {t("requires an approval before anything runs")}
-          </label>
+        <div className="field wide">
           <span className="field-hint">
-            {forced
-              ? t("A {risk} operation cannot skip the approval: the consent is what binds the fingerprint of what runs on the fleet.", { risk: operation?.risk ?? "critical" })
-              : t("The approver signs the operation, the payload, the host list, the rollout policy and the set of plans as one fingerprint.")}
+            {t("Every campaign waits for an approval before anything runs: the approver signs the operation, the payload, the host list, the rollout policy and the set of plans as one fingerprint.")}
           </span>
         </div>
       </FieldGrid>
@@ -1941,11 +1918,10 @@ function CreateStep({
   const t = useT();
   const [errorMessage, setErrorMessage] = useState("");
   const queryClient = useQueryClient();
-  const operation = useOperation(order.action || undefined);
   const reasonOK = reasonValid(order.reason);
 
   const create = useMutation({
-    mutationFn: () => api.post<Campaign>("/api/v1/campaigns", campaignBody(order, operation?.risk)),
+    mutationFn: () => api.post<Campaign>("/api/v1/campaigns", campaignBody(order)),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       onCreated(campaign.id);
@@ -1956,7 +1932,7 @@ function CreateStep({
   // record, and the wizard ends here with a link to it.
   const [scheduled, setScheduled] = useState("");
   const schedule = useMutation({
-    mutationFn: () => api.post<{ id: string }>("/api/v1/campaign-schedules", scheduleBody(order, operation?.risk)),
+    mutationFn: () => api.post<{ id: string }>("/api/v1/campaign-schedules", scheduleBody(order)),
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["campaign-schedules"] });
       clearDraft(sessionStorageOrNull());

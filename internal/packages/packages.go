@@ -5,7 +5,6 @@ package packages
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -18,13 +17,17 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/ultherego/flotestro/internal/helper/runscope"
+	"github.com/ultherego/flotestro/internal/plan"
 )
 
 // The stable error codes of the adapter. They are part of the contract of
 // the result of a job.
 const (
-	ErrorLocked         = "package_manager_locked"
-	ErrorPlanMismatch   = "plan_changed"
+	ErrorLocked = "package_manager_locked"
+	// ErrorPlanMismatch is the code of a plan the host no longer computes:
+	// the shared code of the plan envelope, so a package transaction and
+	// every other planned change refuse a moved plan with one word.
+	ErrorPlanMismatch   = plan.ErrorStalePlan
 	ErrorTransaction    = "transaction_failed"
 	ErrorUnsupported    = "unsupported_manager"
 	ErrorDatabaseBroken = "package_database_broken"
@@ -72,6 +75,11 @@ func ErrorCodeOf(err error) (string, bool) {
 	case errors.Is(err, ErrNoSpace):
 		return ErrorNoSpace, true
 	}
+	// The refusals of the plan envelope - a stale plan, another planner,
+	// an expired plan, a partial result - carry their own codes.
+	if code, ok := plan.CodeOf(err); ok {
+		return code, true
+	}
 	return "", false
 }
 
@@ -81,7 +89,8 @@ func ErrorCodeOf(err error) (string, bool) {
 func Refused(err error) bool {
 	return errors.Is(err, ErrLocked) || errors.Is(err, ErrCheckupdatesMissing) ||
 		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown) ||
-		errors.Is(err, ErrNoSpace)
+		errors.Is(err, ErrNoSpace) || errors.Is(err, plan.ErrStalePlan) ||
+		errors.Is(err, plan.ErrReplanRequired) || errors.Is(err, plan.ErrPlanExpired)
 }
 
 // compareSets returns a description of the difference, or nothing when the
@@ -122,14 +131,51 @@ func compareSets(expected, current []string) string {
 	return ""
 }
 
-// Change describes one change of the version of a package.
+// Change describes one element of a plan: what happens to one package.
+//
+// The name and the versions alone are not what the operator approves. The
+// same name can come from another repository or in another architecture,
+// and "openssl changes" does not say whether it goes up, down or away - so
+// every element names its origin, its architecture and its direction, and
+// all of that enters the plan digest.
 type Change struct {
 	Name             string `json:"name"`
 	CurrentVersion   string `json:"current_version,omitempty"`
 	CandidateVersion string `json:"candidate_version,omitempty"`
-	Origin           string `json:"origin,omitempty"`
-	Security         bool   `json:"security"`
+	// Origin is the repository the candidate comes from, as the manager
+	// names it: "Debian-Security:12/stable-security", "updates", "extra".
+	Origin   string `json:"origin,omitempty"`
+	Security bool   `json:"security"`
+	// Architecture is the architecture of the candidate. Empty means the
+	// manager did not say, never "any".
+	Architecture string `json:"architecture,omitempty"`
+	// Action is the direction: install, upgrade, downgrade or remove.
+	Action string `json:"action,omitempty"`
+	// Reason says why the element is in the plan: requested by the order,
+	// pulled in as a dependency, or an orphan the manager drops along the
+	// way. A removal of a dependency is what the operator most needs to
+	// see before the consent.
+	Reason string `json:"reason,omitempty"`
+	// Blocked marks a package that stops every transaction on the host;
+	// Protected marks one the policy does not let go away.
+	Blocked   bool `json:"blocked,omitempty"`
+	Protected bool `json:"protected,omitempty"`
+	// InstalledDeltaBytes is how the installed files of this package grow
+	// or shrink; it is meaningful only when InstalledDeltaKnown says so.
+	InstalledDeltaBytes int64 `json:"installed_delta_bytes,omitempty"`
+	InstalledDeltaKnown bool  `json:"installed_delta_known,omitempty"`
+	// Digest is the checksum of the archive as the index publishes it,
+	// hexadecimal with the algorithm in front ("sha256:..."). Empty means
+	// the index carries none.
+	Digest string `json:"digest,omitempty"`
 }
+
+// The reasons an element is in a plan.
+const (
+	ReasonRequested  = "requested"
+	ReasonDependency = "dependency"
+	ReasonOrphan     = "orphan"
+)
 
 // Plan describes what would be changed.
 type Plan struct {
@@ -161,6 +207,28 @@ type Plan struct {
 	// Protected lists the protected packages that ended up in the plan. Their
 	// presence means the operation will not be carried out.
 	Protected []string `json:"protected,omitempty"`
+
+	// The header of the plan envelope (package plan): who made the plan,
+	// for which host and picture of it, against which repository metadata,
+	// and until when it holds. The execution rebuilds the same header from
+	// the approved reference and compares the digest of the whole.
+	SchemaVersion     uint32    `json:"schema_version,omitempty"`
+	PlannerVersion    string    `json:"planner_version,omitempty"`
+	HostID            string    `json:"host_id,omitempty"`
+	InventoryRevision string    `json:"inventory_revision,omitempty"`
+	ResourceRevision  string    `json:"resource_revision,omitempty"`
+	ExpiresAt         time.Time `json:"expires_at"`
+	// Rollback says how the change could be taken back, or why it cannot.
+	Rollback Rollback `json:"rollback"`
+}
+
+// Rollback is the plan's answer about undoing the change: the mechanism
+// with its identifier, or unavailable with the reason.
+type Rollback struct {
+	Mechanism string `json:"mechanism"`
+	ID        string `json:"id,omitempty"`
+	Available bool   `json:"available"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // Apply describes the result of a transaction that was carried out.
@@ -170,6 +238,12 @@ type Apply struct {
 	RebootRequired         bool     `json:"reboot_required"`
 	ServicesNeedingRestart []string `json:"services_needing_restart,omitempty"`
 	DatabaseBroken         bool     `json:"package_database_broken"`
+	// EffectsAchieved and EffectsMissed settle the expected effects of the
+	// approved plan against the state read after the transaction. A
+	// transaction that ran and left an effect unreached is a partial
+	// result, and the operator reads here which effect.
+	EffectsAchieved []plan.Outcome `json:"effects_achieved,omitempty"`
+	EffectsMissed   []plan.Outcome `json:"effects_missed,omitempty"`
 	// PackagesNeedingAttention names the packages that block the transaction.
 	// Without them the message about repairing the database does not say what
 	// to repair.
@@ -230,6 +304,20 @@ type Options struct {
 	// off by default: package managers refuse it for a good reason, because
 	// going back a version is sometimes irreversible for the data format.
 	AllowDowngrade bool
+	// Header is the part of the plan envelope the planner does not compute
+	// from the host: the host identity, the inventory picture and the
+	// expiry. The agent fills it when it plans; the helper fills it from
+	// the approved reference when it plans again before the transaction,
+	// so the two compute the same envelope over the same state.
+	Header PlanHeader
+}
+
+// PlanHeader is the identity of a plan: for which host, against which
+// inventory picture, and until when.
+type PlanHeader struct {
+	HostID            string
+	InventoryRevision string
+	ExpiresAt         time.Time
 }
 
 // Manager is the adapter of a specific package manager.
@@ -507,24 +595,13 @@ func matchesFilter(change Change, options Options) bool {
 	return false
 }
 
-// Hash computes the digest of the content of a plan. The execution compares
-// it with its own plan, so a change of the repository metadata between the
-// plan and the transaction is detectable. The order of the changes must not
+// Hash computes the digest of a plan: the digest of its envelope, over
+// every artifact with its version, architecture and origin, every step,
+// every expected effect and the header. The execution computes the same
+// envelope right before the transaction and compares, so a repository, a
+// version, an architecture or an origin that moved between the approval
+// and the transaction is a stale plan. The order of the changes does not
 // influence the result.
 func (p Plan) Hash() []byte {
-	names := make([]string, 0, len(p.Changes))
-	index := map[string]Change{}
-	for _, change := range p.Changes {
-		names = append(names, change.Name)
-		index[change.Name] = change
-	}
-	sort.Strings(names)
-
-	hasher := sha256.New()
-	fmt.Fprintf(hasher, "%s\n", p.Manager)
-	for _, name := range names {
-		change := index[name]
-		fmt.Fprintf(hasher, "%s\t%s\t%s\n", change.Name, change.CurrentVersion, change.CandidateVersion)
-	}
-	return hasher.Sum(nil)
+	return p.Envelope().Hash()
 }

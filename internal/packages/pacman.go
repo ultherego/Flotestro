@@ -156,6 +156,14 @@ func SyncCopyAge() (time.Duration, bool) {
 // database, and a refresh without an upgrade is exactly the state Arch warns
 // against.
 func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
+	plan, err := p.plan(ctx, options)
+	if err != nil {
+		return plan, err
+	}
+	return finishPlan(ctx, p, plan, options), nil
+}
+
+func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: p.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 	// A lock left by a crashed pacman stops every transaction; the plan says
 	// so before anyone orders one.
@@ -294,10 +302,32 @@ func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) [
 	needs.download = plan.DownloadBytes
 	needs.kernel = anyKernel(p.Name(), plan.Changes)
 	names := changeNames(plan.Changes)
-	candidate := p.packageInfoSizes(ctx, append(append([]string{"-Si"}, database...), names...)...)
+	info := p.packageInfo(ctx, append(append([]string{"-Si"}, database...), names...)...)
+	candidate := map[string]uint64{}
+	for name, entry := range info {
+		candidate[name] = entry.InstalledSize
+	}
 	current := p.packageInfoSizes(ctx, append([]string{"-Qi"}, names...)...)
 	grown, measured := growth(names, candidate, current)
 	installNeeds(&needs, grown, measured)
+	// The same records give per package what the plan digest is made of:
+	// the architecture and the checksum of the archive the repository
+	// publishes, and the growth of the installed files where measured.
+	for i := range plan.Changes {
+		change := &plan.Changes[i]
+		entry, ok := info[change.Name]
+		if !ok {
+			continue
+		}
+		if change.Architecture == "" {
+			change.Architecture = entry.Architecture
+		}
+		if change.Digest == "" && entry.SHA256 != "" {
+			change.Digest = "sha256:" + entry.SHA256
+		}
+		change.InstalledDeltaBytes = int64(entry.InstalledSize) - int64(current[change.Name])
+		change.InstalledDeltaKnown = true
+	}
 	return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
 }
 
@@ -306,11 +336,28 @@ func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) [
 // and the records of the known ones on the standard output; what it printed
 // is used.
 func (p *Pacman) packageInfoSizes(ctx context.Context, args ...string) map[string]uint64 {
+	sizes := map[string]uint64{}
+	for name, entry := range p.packageInfo(ctx, args...) {
+		sizes[name] = entry.InstalledSize
+	}
+	return sizes
+}
+
+func (p *Pacman) packageInfo(ctx context.Context, args ...string) map[string]PacmanInfo {
 	result := run(ctx, 2*time.Minute, pacmanPath, args...)
 	if !result.Ran {
 		return nil
 	}
-	return ParsePacmanInfoSizes(result.Stdout)
+	return ParsePacmanInfo(result.Stdout)
+}
+
+// PacmanInfo is what one record of "pacman -Si" or "pacman -Qi" says that
+// the plan needs: the size of the installed files, the architecture and,
+// for a sync record, the checksum of the archive.
+type PacmanInfo struct {
+	InstalledSize uint64
+	Architecture  string
+	SHA256        string
 }
 
 // ParsePacmanInfoSizes reads the "Name" and "Installed Size" lines of
@@ -320,22 +367,57 @@ func (p *Pacman) packageInfoSizes(ctx context.Context, args ...string) map[strin
 //	Installed Size  : 143.39 MiB
 func ParsePacmanInfoSizes(output string) map[string]uint64 {
 	sizes := map[string]uint64{}
+	for name, entry := range ParsePacmanInfo(output) {
+		sizes[name] = entry.InstalledSize
+	}
+	return sizes
+}
+
+// ParsePacmanInfo reads the records of "pacman -Si" and "pacman -Qi". A
+// record without an installed size is left out: an unknown size is not a
+// size of zero.
+func ParsePacmanInfo(output string) map[string]PacmanInfo {
+	info := map[string]PacmanInfo{}
 	name := ""
+	pending := map[string]PacmanInfo{}
 	for _, line := range strings.Split(output, "\n") {
 		key, value, found := strings.Cut(line, ":")
 		if !found {
 			continue
 		}
+		value = strings.TrimSpace(value)
 		switch strings.TrimSpace(key) {
 		case "Name":
-			name = strings.TrimSpace(value)
+			name = value
+			pending[name] = PacmanInfo{}
+		case "Architecture":
+			if entry, ok := pending[name]; ok {
+				entry.Architecture = value
+				pending[name] = entry
+			}
+		case "SHA-256 Sum":
+			if entry, ok := pending[name]; ok && value != "None" {
+				entry.SHA256 = strings.ToLower(value)
+				pending[name] = entry
+			}
 		case "Installed Size":
 			if size, ok := ParseHumanSize(value); ok && name != "" {
-				sizes[name] = size
+				entry := pending[name]
+				entry.InstalledSize = size
+				info[name] = entry
+				pending[name] = entry
 			}
 		}
 	}
-	return sizes
+	// The architecture and the checksum are printed after the size in the
+	// record, so the entries are completed once the whole record is read.
+	for pkg, entry := range pending {
+		if complete, ok := info[pkg]; ok {
+			complete.Architecture, complete.SHA256 = entry.Architecture, entry.SHA256
+			info[pkg] = complete
+		}
+	}
+	return info
 }
 
 // checkupdatesNoUpdates is the exit code checkupdates ends with when there is
@@ -382,22 +464,52 @@ func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir str
 	for i := range plan.Changes {
 		if target, ok := targets[plan.Changes[i].Name]; ok {
 			plan.Changes[i].Origin = target.Origin
+			plan.Changes[i].Architecture = target.Architecture()
 			plan.DownloadBytes += target.Size
 		}
 	}
 }
 
-// pacmanPrintFormat asks --print for the name, the version, the repository
-// and the size of every target, separated by tabs.
-const pacmanPrintFormat = "%n\t%v\t%r\t%s"
+// pacmanPrintFormat asks --print for the name, the version, the repository,
+// the size and the location of every target, separated by tabs. The
+// location names the archive file the transaction installs.
+const pacmanPrintFormat = "%n\t%v\t%r\t%s\t%l"
 
 // PacmanTarget is one line of a printed transaction.
 type PacmanTarget struct {
 	Name, Version, Origin string
 	Size                  uint64
+	// Location is the URL of the archive as the mirror serves it.
+	Location string
 }
 
-// ParsePacmanTargets reads the output of --print in pacmanPrintFormat.
+// File is the name of the archive in the package cache: the last element
+// of the location.
+func (t PacmanTarget) File() string {
+	if t.Location == "" {
+		return ""
+	}
+	return filepath.Base(strings.TrimSpace(t.Location))
+}
+
+// Architecture reads the architecture off the archive name:
+// name-version-arch.pkg.tar.zst. Empty when the location is unknown.
+func (t PacmanTarget) Architecture() string {
+	file := t.File()
+	index := strings.Index(file, ".pkg.tar")
+	if index < 0 {
+		return ""
+	}
+	stem := file[:index]
+	if dash := strings.LastIndexByte(stem, '-'); dash >= 0 {
+		return stem[dash+1:]
+	}
+	return ""
+}
+
+// ParsePacmanTargets reads the output of --print in pacmanPrintFormat. A
+// line of the older four-column format is read as well: the location is
+// then unknown.
 func ParsePacmanTargets(output string) map[string]PacmanTarget {
 	targets := map[string]PacmanTarget{}
 	for _, line := range strings.Split(output, "\n") {
@@ -406,9 +518,13 @@ func ParsePacmanTargets(output string) map[string]PacmanTarget {
 			continue
 		}
 		size, _ := strconv.ParseUint(strings.TrimSpace(fields[3]), 10, 64)
-		targets[fields[0]] = PacmanTarget{
+		target := PacmanTarget{
 			Name: fields[0], Version: fields[1], Origin: fields[2], Size: size,
 		}
+		if len(fields) > 4 {
+			target.Location = strings.TrimSpace(fields[4])
+		}
+		targets[fields[0]] = target
 	}
 	return targets
 }
@@ -637,6 +753,7 @@ func (p *Pacman) planInstall(ctx context.Context, plan Plan, options Options) (P
 		plan.Changes = append(plan.Changes, Change{
 			Name: name, CurrentVersion: installed[name],
 			CandidateVersion: target.Version, Origin: target.Origin,
+			Architecture: target.Architecture(),
 		})
 		plan.DownloadBytes += target.Size
 	}

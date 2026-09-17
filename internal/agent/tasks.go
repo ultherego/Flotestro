@@ -115,6 +115,13 @@ const (
 	// it is, so the panel tells a helper that disagrees with the agent from
 	// an agent that does not know the operation.
 	RejectHelperRejected = "helper_rejected"
+	// RejectCanceledBeforeStart marks a task a cancel reached before the
+	// host touched anything: while it went through its checks, waited for
+	// a resource of the host, or before it was even delivered. Nothing
+	// ran, and the result says so with STATUS_CANCELED. Like a refusal for
+	// a busy resource it is an answer to this delivery only and is not
+	// remembered under the key.
+	RejectCanceledBeforeStart = "canceled_before_start"
 )
 
 // TaskExecutor performs the tasks delivered by the control plane.
@@ -142,6 +149,10 @@ type TaskExecutor struct {
 	logLines func(*agentv1.TaskLogLines)
 	// cancels allows interrupting the tasks that can be interrupted safely.
 	cancels *cancellations
+	// phases records where every attempt handed to this process stands,
+	// so that a cancel is answered by what it finds rather than by a
+	// guess: not started, interrupted, not interruptible, already done.
+	phases *taskPhases
 	// secrets fetches the value of a secret for the duration of one operation.
 	// Nil means there is no session with the panel - and without one there is no
 	// point in asking for a secret.
@@ -179,6 +190,7 @@ func NewTaskExecutor(helperClient *HelperClient, journal *IdempotencyJournal,
 	executor := &TaskExecutor{
 		helper: helperClient, journal: journal, facts: facts, log: log,
 		cancels:      newCancellationTable(),
+		phases:       newTaskPhases(),
 		running:      newRunningKeys(),
 		packageState: packageStateNow,
 	}
@@ -218,6 +230,23 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	}
 	defer e.running.release(idempotencyKey)
 
+	// The task runs under a context of its own, which a cancel that
+	// arrives before the start closes: the checks and the wait for the
+	// host's resources end at once, and the task is refused rather than
+	// started. Past the start the context is left alone - the operation
+	// is interrupted through the module's own registration, or not at
+	// all. A cancel that reached the attempt before its delivery refuses
+	// it here, before anything is looked at.
+	taskCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	if e.phases.enter(taskID, idempotencyKey, stop) {
+		e.log.Info("the task was refused: a cancel reached it before its delivery", "task_id", taskID)
+		result := canceledBeforeStart(task, "a cancel reached the task before it was delivered")
+		e.phases.finish(taskID, result)
+		return result
+	}
+	ctx = taskCtx
+
 	// A repeated delivery returns the previous result instead of performing the
 	// mutation a second time. That is the whole point of at-least-once.
 	if previous := e.journal.Lookup(idempotencyKey); previous != nil {
@@ -228,6 +257,7 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		// the result.
 		replayed.TaskId = taskID
 		replayed.Replayed = true
+		e.phases.finish(taskID, replayed)
 		return replayed
 	}
 
@@ -241,6 +271,7 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 			"started_at", marker.StartedAt.Format(time.RFC3339))
 		result := e.outcomeUnknown(ctx, marker)
 		e.settle(task, result, marker.StartedAt)
+		e.phases.finish(taskID, result)
 		return result
 	}
 
@@ -249,6 +280,9 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		if settled {
 			return
 		}
+		// Whatever the exit, the attempt is over for the cancel protocol:
+		// a cancel of it from here on finds a task that ended.
+		e.phases.finish(taskID, nil)
 		// Leaving without a result - a panic on the way - must not leave the
 		// marker for a later delivery to judge as a restart. What is known is
 		// the same as after a restart: the operation started and nobody saw
@@ -268,6 +302,7 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 				"the helper capability does not bind the payload of the task")
 			e.settle(task, result, started)
 			settled = true
+			e.phases.finish(taskID, result)
 			return result
 		}
 		e.helper.Attach(taskID, capability, task.GetHelperCapabilitySignature(), task.GetCanonicalPayload())
@@ -275,19 +310,72 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	}
 	result := e.run(ctx, task, started)
 	switch result.GetErrorCode() {
-	case RejectResourceBusy, StatusAbandoned:
+	case RejectResourceBusy, StatusAbandoned, RejectCanceledBeforeStart:
 		// The task never reached the host: it waited for a resource and
-		// the wait ended, with a refusal or with the session. A refusal is
-		// an answer to this delivery and not to the next one - the resource
-		// may be free by then - so neither is remembered as the result of
-		// the key.
+		// the wait ended, with a refusal, with the session or with a
+		// cancel. A refusal is an answer to this delivery and not to the
+		// next one - the resource may be free by then - so none is
+		// remembered as the result of the key.
 		result.TaskId = task.GetTaskId()
 		result.IdempotencyKey = idempotencyKey
 	default:
 		e.settle(task, result, started)
 	}
 	settled = true
+	e.phases.finish(taskID, result)
 	return result
+}
+
+// canceledBeforeStart is the result of a task a cancel reached before it
+// started: nothing ran on the host.
+func canceledBeforeStart(task *agentv1.TaskEnvelope, why string) *agentv1.TaskResult {
+	result := rejected(agentv1.TaskResult_STATUS_CANCELED, RejectCanceledBeforeStart, why)
+	result.TaskId = task.GetTaskId()
+	result.IdempotencyKey = task.GetIdempotencyKey()
+	return result
+}
+
+// lookup returns the interruption registered for a task without calling
+// it. The cancel protocol decides on the answer first and interrupts
+// after the answer went out, so that the host's own account of the
+// interrupted work follows the acknowledgement on the stream.
+func (c *cancellations) lookup(taskID string) (context.CancelFunc, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cancel, known := c.actions[taskID]
+	return cancel, known
+}
+
+// CancelTask answers a cancel request for an attempt: the outcome and the
+// phase for the acknowledgement, the hash of the result when the task is
+// done, and the interruption to carry out once the acknowledgement went
+// out - nil when there is nothing to interrupt.
+//
+// The panel may name a redelivered attempt of an operation still under
+// way; the answer is about the execution behind it. A task in its checks
+// or waiting for a resource of the host has not started: it is refused at
+// its next step and answered NOT_STARTED. A read under way is INTERRUPTED
+// when its module registered an interruption for it, and a mutation under
+// way is NOT_INTERRUPTIBLE: the helper runs a transaction to its end, and
+// the result says how it ended. A task that ended is ALREADY_DONE with the
+// digest of the result the journal holds.
+func (e *TaskExecutor) CancelTask(taskID string) (outcome agentv1.CancelAck_Outcome,
+	phase string, resultHash []byte, interrupt func()) {
+	if e == nil {
+		return agentv1.CancelAck_NOT_STARTED, PhaseNotDelivered, nil, nil
+	}
+	if origin := e.running.origin(taskID); origin != "" {
+		taskID = origin
+	}
+	var interruptible func(string) (context.CancelFunc, bool)
+	if e.cancels != nil {
+		interruptible = e.cancels.lookup
+	}
+	outcome, phase, resultHash, stop := e.phases.answer(taskID, interruptible)
+	if stop != nil {
+		interrupt = func() { stop() }
+	}
+	return outcome, phase, resultHash, interrupt
 }
 
 // reportStage sends one stage of the acknowledgement of a task. It goes
@@ -445,10 +533,16 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	// not lost.
 	claims := taskClaims(task)
 	e.reportStage(task, StageAccepted, "", nil)
+	// A cancel that arrived during the checks refuses the task here:
+	// nothing has touched the host, and nothing will.
+	if e.phases.canceledBeforeStart(task.GetTaskId()) {
+		return canceledBeforeStart(task, "a cancel reached the task before it started")
+	}
 	if e.admit != nil {
 		release, reason := e.admit(ctx, task, claims, func(blocker string) {
 			e.log.Info("the task waits for a resource of the host",
 				"task_id", task.GetTaskId(), "blocker", blocker)
+			e.phases.move(task.GetTaskId(), PhaseAwaitingLock)
 			e.reportStage(task, StageAwaitingLock, blocker, nil)
 		})
 		if reason != "" {
@@ -459,10 +553,21 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectResourceBusy, reason)
 		}
 		if release == nil {
+			// The wait ended without the resources: with the session, or
+			// with a cancel that closed the task's context. The two are
+			// told apart, because one is answered and the other is not.
+			if e.phases.canceledBeforeStart(task.GetTaskId()) {
+				return canceledBeforeStart(task, "a cancel reached the task while it waited for the resources of the host")
+			}
 			return rejected(agentv1.TaskResult_STATUS_UNSPECIFIED, StatusAbandoned,
 				"the session ended while the task waited for the resources of the host")
 		}
 		defer release()
+		// The resources are held; a cancel that arrived meanwhile still
+		// finds nothing started, and the task gives them back unused.
+		if e.phases.canceledBeforeStart(task.GetTaskId()) {
+			return canceledBeforeStart(task, "a cancel reached the task before it started")
+		}
 
 		// The preconditions were checked before the wait, against the host
 		// as it was then. A wait behind a package transaction or a reboot
@@ -489,7 +594,14 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 			"the in-flight marker was not written to the journal: "+err.Error())
 	}
 	// The marker is down and the claims are held: the operation starts this
-	// instant, and the panel counts the host as running from here.
+	// instant, and the panel counts the host as running from here. From
+	// here a cancel finds a task under way: a mutation runs to its end,
+	// a read is interrupted where its module allows.
+	if action.Mutating() {
+		e.phases.move(task.GetTaskId(), PhaseMutating)
+	} else {
+		e.phases.move(task.GetTaskId(), PhaseStarted)
+	}
 	e.reportStage(task, StageStarted, "", claimNames(claims))
 
 	switch action {
@@ -954,6 +1066,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		if len(request.GetPlanHash()) > 0 {
 			payload.PlanHash = hex.EncodeToString(request.GetPlanHash())
 		}
+		payload.Plan = planReferenceFromProto(request.GetPlanReference())
 		return opspec.ActionPackageUpgrade, opspec.Payload{PackageUpgrade: &payload}, nil
 
 	case *agentv1.TaskEnvelope_AgentUpgrade:
@@ -1091,9 +1204,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionComposeDeploy
 		}
 		return kind, opspec.Payload{Compose: &opspec.ComposePayload{
-			Project:    action.Compose.GetProject(),
-			Manifest:   action.Compose.GetManifest(),
-			PlanDigest: action.Compose.GetPlanDigest(),
+			Project:      action.Compose.GetProject(),
+			Manifest:     action.Compose.GetManifest(),
+			PlanDigest:   action.Compose.GetPlanDigest(),
+			ImageDigests: action.Compose.GetImageDigests(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_UnitToggle:
@@ -1120,6 +1234,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			ExpectedRemovals: change.GetExpectedRemovals(),
 			Hold:             change.GetHold(),
 			PlanHash:         change.GetPlanHash(),
+			Plan:             planReferenceFromProto(change.GetPlanReference()),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_File:
@@ -1396,6 +1511,8 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Repair:            przestrzen.GetRepair(),
 			ExpectedSerial:    przestrzen.GetExpectedSerial(),
 			ExpectedSizeBytes: przestrzen.GetExpectedSizeBytes(),
+			ExpectedByID:      przestrzen.GetExpectedById(),
+			ExpectedWWN:       przestrzen.GetExpectedWwn(),
 			Size:              przestrzen.GetSize(),
 			Label:             przestrzen.GetLabel(),
 			Plan:              przestrzen.GetPlan(),
@@ -1553,6 +1670,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Since:       request.GetSince(),
 			Until:       request.GetUntil(),
 			AfterCursor: request.GetAfterCursor(),
+			BootID:      request.GetBootId(),
 		}
 		if request.MaxPriority != nil {
 			priority := request.GetMaxPriority()
@@ -1711,4 +1829,26 @@ func (e *TaskExecutor) applyUnitToggle(ctx context.Context, task *agentv1.TaskEn
 			"the description of the unit change is missing")
 	}
 	return e.applyUnitAction(ctx, task, action, &opspec.UnitPayload{Unit: toggle.GetUnit()})
+}
+
+// planReferenceFromProto reads the approved plan reference back into the
+// payload shape the panel hashed; nil for an order without one.
+func planReferenceFromProto(reference *agentv1.PackagePlanReference) *opspec.PlanReference {
+	if reference == nil {
+		return nil
+	}
+	out := &opspec.PlanReference{
+		SchemaVersion:     reference.GetSchemaVersion(),
+		PlannerVersion:    reference.GetPlannerVersion(),
+		InventoryRevision: reference.GetInventoryRevision(),
+		ResourceRevision:  reference.GetResourceRevision(),
+		ExpiresAt:         reference.GetExpiresAt(),
+	}
+	for _, change := range reference.GetChanges() {
+		out.Changes = append(out.Changes, opspec.PlanChangeEntry{
+			Name: change.GetName(), CurrentVersion: change.GetCurrentVersion(), CandidateVersion: change.GetCandidateVersion(),
+			Architecture: change.GetArchitecture(), Origin: change.GetOrigin(), Action: change.GetAction(),
+		})
+	}
+	return out
 }

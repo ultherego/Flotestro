@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  approvalForced, campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
+  campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
   orderTargets, parseUnits, prefilledOrder, reasonValid, REVERSE_OPERATION, reversePayload, saveDraft,
   windowInstant, windowProblem,
 } from "./Bulk";
@@ -112,16 +112,6 @@ describe("orderTargets", () => {
   });
 });
 
-describe("approvalForced", () => {
-  it("forces the gate for the classes that can cut a host off or destroy it", () => {
-    expect(approvalForced("critical")).toBe(true);
-    expect(approvalForced("destructive")).toBe(true);
-    expect(approvalForced("high")).toBe(false);
-    expect(approvalForced("low")).toBe(false);
-    expect(approvalForced(undefined)).toBe(false);
-  });
-});
-
 describe("campaignBody", () => {
   const order = {
     ...emptyOrder(),
@@ -132,14 +122,14 @@ describe("campaignBody", () => {
   };
 
   it("sends the operator's reason, trimmed, instead of the operation name", () => {
-    const body = campaignBody(order, "high");
+    const body = campaignBody(order);
     expect(body.reason).toBe("CHG-1234: cron leaks memory");
     expect(body.name).toBe("Restart cron");
     expect(body.payload).toEqual({ unit: { unit: "cron.service" } });
   });
 
   it("leaves the window, the units and the timeout out when the order says nothing about them", () => {
-    const body = campaignBody(order, "high");
+    const body = campaignBody(order);
     expect(body.maintenance_start).toBeUndefined();
     expect(body.maintenance_end).toBeUndefined();
     expect(body.health_check_units).toBeUndefined();
@@ -155,21 +145,19 @@ describe("campaignBody", () => {
       maintenanceEnd: "2026-09-16T02:00",
       healthCheckUnits: "cron.service\nnginx.service",
       jobTimeoutSeconds: 600,
-    }, "high");
+    });
     expect(body.maintenance_start).toBe(new Date("2026-09-15T22:00").toISOString());
     expect(body.maintenance_end).toBe(new Date("2026-09-16T02:00").toISOString());
     expect(body.health_check_units).toEqual(["cron.service", "nginx.service"]);
     expect(body.job_timeout_seconds).toBe(600);
   });
 
-  it("keeps the approval gate on a critical operation whatever the box says", () => {
-    expect(campaignBody({ ...order, requiresApproval: false }, "critical").requires_approval).toBe(true);
-    expect(campaignBody({ ...order, requiresApproval: false }, "destructive").requires_approval).toBe(true);
-    expect(campaignBody({ ...order, requiresApproval: false }, "high").requires_approval).toBe(false);
+  it("always carries the approval gate", () => {
+    expect(campaignBody(order).requires_approval).toBe(true);
   });
 
   it("sends the named hosts instead of the filters and the expression", () => {
-    const body = campaignBody({ ...order, hostIDs: ["host-a"], site: "warsaw" }, "high");
+    const body = campaignBody({ ...order, hostIDs: ["host-a"], site: "warsaw" });
     const selector = body.selector as Record<string, unknown>;
     expect(selector.host_ids).toEqual(["host-a"]);
     expect(selector.expression).toBeUndefined();
@@ -177,8 +165,8 @@ describe("campaignBody", () => {
   });
 
   it("does not gate on a canary of zero", () => {
-    expect(campaignBody({ ...order, manualGate: true, canary: 0 }, "high").manual_gate).toBe(false);
-    expect(campaignBody({ ...order, manualGate: true, canary: 2 }, "high").manual_gate).toBe(true);
+    expect(campaignBody({ ...order, manualGate: true, canary: 0 }).manual_gate).toBe(false);
+    expect(campaignBody({ ...order, manualGate: true, canary: 2 }).manual_gate).toBe(true);
   });
 });
 
@@ -216,7 +204,6 @@ describe("the draft in the browser", () => {
     expect(draft?.order.name).toBe("Old draft");
     expect(draft?.order.canary).toBe(3);
     expect(draft?.order.reason).toBe("");
-    expect(draft?.order.requiresApproval).toBe(true);
     expect(draft?.order.rules).toEqual(emptyOrder().rules);
   });
 

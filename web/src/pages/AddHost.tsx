@@ -139,9 +139,14 @@ export function AddHost() {
   // after the form is filled in.
   const canEnrollBatch = permissions.includes("host.enroll.batch");
 
+  // The history of orders within the operator's scope - the server keeps
+  // out what lies elsewhere - narrowed by status on request. Pending is
+  // the default: what still waits for a host is the reason to look.
+  const [historyStatus, setHistoryStatus] = useState<EnrollmentOrder["status"] | "">("pending");
   const list = useQuery({
-    queryKey: ["enrollment-requests"],
-    queryFn: () => api.get<{ items: EnrollmentOrder[] }>("/api/v1/enrollment-requests"),
+    queryKey: ["enrollment-requests", historyStatus],
+    queryFn: () => api.get<{ items: EnrollmentOrder[] }>(
+      `/api/v1/enrollment-requests?limit=100${historyStatus ? `&status=${historyStatus}` : ""}`),
   });
 
   // The placement the fleet already has, offered under the inputs.
@@ -250,22 +255,49 @@ export function AddHost() {
     onError: failed,
   });
 
-  // Regenerate first revokes the order in hand, then places another: two
-  // live tokens for one host would be one too many.
-  const regenerate = useMutation({
-    mutationFn: async (previous: string) => {
-      await api.post(`/api/v1/enrollment-requests/${previous}/revoke`, {});
-      return api.post<NewOrder>("/api/v1/enrollment-requests", orderBody());
-    },
-    onSuccess: (result) => {
+  // The wizard takes the shape of an order: the placement, the route, the
+  // owner and the tags, so the installation commands and a further
+  // regeneration follow the order in hand rather than the last form.
+  const adopt = (shape: EnrollmentOrder) => {
+    setKind(shape.kind);
+    setDescription(shape.description ?? "");
+    setSite(shape.site);
+    setEnvironment(shape.environment);
+    setOwner(shape.owner ?? "");
+    setTags((shape.tags ?? []).join(" "));
+    setMaxUses(shape.max_uses);
+    setMinutes(Math.max(1, Math.round((new Date(shape.expires_at).getTime() - new Date(shape.created_at).getTime()) / 60000)));
+    setRoute(shape.relay_id ? "relay" : "direct");
+    setRelayId(shape.relay_id ?? "");
+  };
+
+  // Regenerate is the same replacement the history offers: the server
+  // revokes the order in hand and places one like it in one call, so two
+  // live tokens for one host never exist side by side, and the old token
+  // comes back on no read. A settled or closed order is only copied.
+  const replace = useMutation({
+    mutationFn: (previous: EnrollmentOrder) =>
+      api.post<NewOrder>(`/api/v1/enrollment-requests/${previous.id}/replace`, { reason }),
+    onSuccess: (result, previous) => {
+      adopt(result);
       setCreated(result);
       setCopied("");
-      setMessage(t("The previous order was revoked; this is the new token."));
+      setMessage(previous.status === "pending"
+        ? t("The previous order was revoked; this is the new token.")
+        : t("A similar order was placed; this is its token."));
       setRefusal(null);
+      setStep(4);
       queryClient.invalidateQueries({ queryKey: ["enrollment-requests"] });
     },
     onError: failed,
   });
+  const regenerate = {
+    isPending: replace.isPending,
+    mutate: (id: string) => {
+      const previous = created?.id === id ? (state ?? created) : list.data?.items.find((entry) => entry.id === id);
+      if (previous) replace.mutate(previous);
+    },
+  };
 
   const revoke = useMutation({
     mutationFn: (id: string) => api.post(`/api/v1/enrollment-requests/${id}/revoke`, {}),
@@ -306,7 +338,7 @@ export function AddHost() {
   const blocker = (index: number) => gates.slice(0, index).find((gate) => !gate.open)?.reason;
 
   const currentFamily = profile.data?.families.find((entry) => entry.key === family);
-  const pending = (list.data?.items ?? []).filter((entry) => entry.status === "pending");
+  const orders = list.data?.items ?? [];
   const expired = created ? new Date(created.expires_at).getTime() <= now : false;
   const currentStatus = state?.status ?? "pending";
   const active = currentStatus === "pending" && !expired;
@@ -755,32 +787,73 @@ export function AddHost() {
 
       {message && <p className="source">{message}</p>}
 
-      <Card title={t("Pending installations")} flush>
-        {!pending.length ? (
-          <Empty>{t("No installation is waiting for a host right now.")}</Empty>
+      {/* The history of orders: what waits for a host, what came in and
+          what was closed, within the operator's own scope. An open order
+          is revoked, or revoked and replaced in one step; a closed one is
+          copied - the same placement, route, owner, tags and pool of
+          uses, with a token of its own shown once. No token of an earlier
+          order comes back here. */}
+      <Card
+        title={t("Enrollment history")}
+        actions={
+          <select value={historyStatus} onChange={(e) => setHistoryStatus(e.target.value as EnrollmentOrder["status"] | "")} aria-label={t("Status")}>
+            <option value="pending">{t("pending")}</option>
+            <option value="enrolled">{t("enrolled")}</option>
+            <option value="expired">{t("expired")}</option>
+            <option value="revoked">{t("revoked")}</option>
+            <option value="failed">{t("failed")}</option>
+            <option value="">{t("any status")}</option>
+          </select>
+        }
+        flush
+      >
+        {!orders.length ? (
+          <Empty>{historyStatus === "pending" ? t("No installation is waiting for a host right now.") : t("No order with this status.")}</Empty>
         ) : (
           <table>
             <thead>
               <tr>
-                <th>{t("What for")}</th><th>{t("Scope")}</th><th className="num">{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
+                <th>{t("What for")}</th><th>{t("Scope")}</th><th>{t("Status")}</th><th className="num">{t("Uses")}</th><th>{t("Expires")}</th><th>{t("Requested by")}</th><th></th>
               </tr>
             </thead>
             <tbody>
-              {pending.map((entry) => (
+              {orders.map((entry) => (
                 <tr key={entry.id}>
                   <td>
                     {entry.description || "—"}
-                    <div className="source">{entry.purpose}</div>
+                    <div className="source">{entry.kind} · {entry.purpose}{entry.relay_id ? ` · ${t("via relay")}` : ""}</div>
                   </td>
                   <td className="source">{entry.site} / {entry.environment}</td>
+                  <td><span className={`badge ${entry.status === "pending" ? "ok" : entry.status === "enrolled" ? "info" : entry.status === "failed" ? "error" : "unknown"}`}>{t(entry.status)}</span></td>
                   <td className="num">{entry.uses} / {entry.max_uses}</td>
                   <td className="source"><Time value={entry.expires_at} /></td>
                   <td className="source">{entry.created_by}</td>
                   <td className="actions-cell">
                     <div className="row-actions">
-                      <button className="secondary" onClick={() => revoke.mutate(entry.id)}>
-                        {t("Revoke")}
-                      </button>
+                      {entry.status === "pending" ? (
+                        <>
+                          <button className="secondary" onClick={() => revoke.mutate(entry.id)} disabled={revoke.isPending}>
+                            {t("Revoke")}
+                          </button>
+                          <button
+                            className="secondary"
+                            onClick={() => replace.mutate(entry)}
+                            disabled={replace.isPending || entry.purpose === "replace_identity"}
+                            title={entry.purpose === "replace_identity" ? t("An identity recovery order is placed on the host itself.") : t("Revokes this order and places one like it; the new token is shown once.")}
+                          >
+                            {t("Revoke and replace")}
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          className="secondary"
+                          onClick={() => replace.mutate(entry)}
+                          disabled={replace.isPending || entry.purpose === "replace_identity"}
+                          title={entry.purpose === "replace_identity" ? t("An identity recovery order is placed on the host itself.") : t("Places an order like this one: the same placement, route, owner, tags and uses, with a new token shown once.")}
+                        >
+                          {t("Create similar")}
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

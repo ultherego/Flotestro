@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/agentconfig"
@@ -292,7 +293,9 @@ type Host struct {
 	// never outlives a reconnect.
 	LastConnectionRefusal *ConnectionRefusal `json:"last_connection_refusal,omitempty"`
 	// RelayIdentity says how the host's last session through a relay was
-	// identified: attested, or weak when the relay named the host alone.
+	// identified: end_to_end when the host's own signature on the envelope
+	// verified, attested when the relay named the certificate and the
+	// gateway checked it, or weak when the relay named the host alone.
 	// Empty for a host that last connected directly.
 	RelayIdentity string       `json:"relay_identity,omitempty"`
 	Identity      HostIdentity `json:"identity"`
@@ -343,6 +346,28 @@ const (
 	// RefusalRelayScopeMismatch is a host attested by a relay of another
 	// site or environment: a relay mediates for its own scope alone.
 	RefusalRelayScopeMismatch = "relay_scope_mismatch"
+	// RefusalRelayEnvelopeInvalid is a relayed message whose identity
+	// envelope the gateway could not accept for a reason other than the
+	// three below: another schema, a relay other than the one that
+	// forwarded it, a host other than the one the relay named, a kind
+	// other than the payload, a missing envelope on a session that
+	// signed its Hello, or no public key to check it against.
+	RefusalRelayEnvelopeInvalid = "relay_envelope_invalid"
+	// RefusalRelayBodyHashMismatch is a payload other than the one the
+	// host signed: changed on the way, or carrying a field this panel does
+	// not know, which the fleet rule - panel before agents - rules out.
+	RefusalRelayBodyHashMismatch = "relay_body_hash_mismatch"
+	// RefusalRelaySequenceReplayed is a signed message carried a second
+	// time under a sequence the session already accepted.
+	RefusalRelaySequenceReplayed = "relay_sequence_replayed"
+	// RefusalRelayHostSignatureInvalid is an envelope whose signature does
+	// not verify under the key of the certificate it names.
+	RefusalRelayHostSignatureInvalid = "relay_host_signature_invalid"
+	// RefusalBlockedUpgradeRequired is a host whose agent predates a proof
+	// the installation requires: behind a relay under
+	// FLOTESTRO_RELAY_IDENTITY=enforce, an agent that does not sign the
+	// envelope. The relay did its part; the remedy is the agent's upgrade.
+	RefusalBlockedUpgradeRequired = "blocked_upgrade_required"
 )
 
 // The strength of the identity behind a host's session, as the host
@@ -357,7 +382,27 @@ const (
 	// alone: the relay vouches for it, and the gateway could check nothing
 	// about the certificate. Let in under prefer; refused under enforce.
 	RelayIdentityWeak = "weak"
+	// RelayIdentityEndToEnd is a session through a relay in which the host
+	// itself signed the envelope of every message with its key, and the
+	// gateway verified the signature against the certificate on record.
+	// The relay carried the host's word; it did not speak for it.
+	RelayIdentityEndToEnd = "end_to_end"
 )
+
+// AuthStrength is the strength of a session as agent_sessions records it:
+// end_to_end for a verified envelope, relay_only for a session that rests
+// on the relay's attestation or word, empty for a direct connection. It
+// follows from the relay identity, so it is derived rather than stored
+// twice in memory.
+func AuthStrength(relayIdentity string) string {
+	switch relayIdentity {
+	case RelayIdentityEndToEnd:
+		return "end_to_end"
+	case RelayIdentityAttested, RelayIdentityWeak:
+		return "relay_only"
+	}
+	return ""
+}
 
 // MaintenanceWindow describes a host's maintenance window.
 //
@@ -741,6 +786,14 @@ type CertificateStatus struct {
 	// attested by a relay has only the record, so the record carries them.
 	NotBefore time.Time
 	NotAfter  time.Time
+	// Fingerprint is the SHA-256 of the certificate as issued, and
+	// PublicKeyDER its SubjectPublicKeyInfo. The envelope of a relayed
+	// session names the certificate by serial, and the signature is
+	// checked against this key; a certificate issued before the key was
+	// recorded has none here, and the gateway learns it from the
+	// certificate the relay presents once the fingerprint confirms it.
+	Fingerprint  []byte
+	PublicKeyDER []byte
 }
 
 // LookupCertificate checks whether the certificate is known and not revoked
@@ -765,6 +818,55 @@ func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Cert
 	}
 	status.Known = true
 	return status, nil
+}
+
+// LookupCertificateBySerial reads the record of a certificate the gateway
+// never saw itself: the envelope of a relayed session names it by serial.
+// The fingerprint and the public key come with it, for the signature and
+// for confirming a certificate a relay presents.
+func (s *Store) LookupCertificateBySerial(ctx context.Context, serial string) (CertificateStatus, error) {
+	const query = `
+		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial,
+		       c.not_before, c.not_after, c.fingerprint_sha256, c.public_key_der
+		from agent_certificates c
+		join hosts h on h.id = c.host_id
+		where c.serial = $1`
+	var status CertificateStatus
+	err := s.pool.QueryRow(ctx, query, serial).
+		Scan(&status.HostID, &status.LifecycleState, &status.LifecycleChangedAt, &status.Revoked, &status.Serial,
+			&status.NotBefore, &status.NotAfter, &status.Fingerprint, &status.PublicKeyDER)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CertificateStatus{}, nil
+	}
+	if err != nil {
+		return CertificateStatus{}, err
+	}
+	status.Known = true
+	return status, nil
+}
+
+// Executor is what a statement runs on: the pool or a transaction.
+type Executor interface {
+	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
+}
+
+// RecordCertificatePublicKey writes the public key of an issued certificate
+// on its record, once: a key already on record is not replaced, because
+// the record is what the envelopes of the host are checked against and a
+// certificate has one key. The renewal writes it in its transaction at
+// issue; the gateway writes it when it learns the key of an older
+// certificate from the relay's attestation.
+func (s *Store) RecordCertificatePublicKey(ctx context.Context, db Executor, serial string, der []byte) error {
+	if db == nil {
+		db = s.pool
+	}
+	_, err := db.Exec(ctx, `
+		update agent_certificates set public_key_der = $2
+		 where serial = $1 and public_key_der is null`, serial, der)
+	if err != nil {
+		return fmt.Errorf("recording the public key of certificate %s: %w", serial, err)
+	}
+	return nil
 }
 
 // ApplyHello records the session data reported in the first message of the stream.
@@ -892,8 +994,8 @@ func (s *Store) RecordConnectionRefusal(ctx context.Context, hostID, code, detai
 }
 
 // RecordRelayIdentity writes down how the session that has just opened
-// identified the host: attested or weak through a relay, empty for a
-// direct connection. It is a fact of the newest session, so every open
+// identified the host: end_to_end, attested or weak through a relay, empty
+// for a direct connection. It is a fact of the newest session, so every open
 // overwrites it - a host that came back directly no longer carries the
 // weakness of a relay it left.
 func (s *Store) RecordRelayIdentity(ctx context.Context, hostID, strength string) error {

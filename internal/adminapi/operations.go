@@ -171,6 +171,16 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			"the host lacks capability "+capability)
 		return
 	}
+	// A read narrowed to one boot is refused where the agent does not
+	// apply the filter: an older agent ignores the field and answers with
+	// every boot, which would look like the boot that was asked for. The
+	// host has to say it has the feature; silence is not enough here,
+	// because silence is exactly what an old agent says.
+	if payload.Journal != nil && payload.Journal.BootID != "" && !bootFilterSupported(host) {
+		problem(w, http.StatusConflict, "boot_filter_unsupported",
+			"the agent of this host does not filter the journal by boot; read without the boot filter or upgrade the agent")
+		return
+	}
 
 	// A highest-risk operation requires fresh authentication: one that can
 	// cut off access to the host or wipe data must not go from an hour-old
@@ -204,6 +214,16 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		})
 		problem(w, http.StatusBadRequest, "target_confirmation_required",
 			"this operation is irreversible; repeat the name of its target in target_confirmation")
+		return
+	}
+
+	// A package change bound to a plan the host no longer computes is
+	// refused here, before a job is queued for it: a plan past its expiry,
+	// or a plan made by another planner than the one the host plans with
+	// now. The host checks the same and more right before the transaction;
+	// this is the answer the screen gets at once.
+	if code, detail := s.planReferenceConflict(r.Context(), hostID, action, payload); code != "" {
+		problem(w, http.StatusConflict, code, detail)
 		return
 	}
 
@@ -513,13 +533,10 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	}
 
 	// A cancellation recorded in the database does not stop the work on the
-	// host. An operation already delivered keeps going - a log preview would
-	// hold the process for its whole timeout even though nobody is watching
-	// any more. So the interrupt request also goes to the agent; the agent
-	// interrupts what can be interrupted safely and notes the rest.
-	if operation == "cancel" {
-		s.requestInterrupt(r.Context(), job)
-	}
+	// host by itself. The request to the host - with its revision and its
+	// deadline - goes out from the outbox row the store wrote in the same
+	// transaction, by the instance that holds the host's session; the host
+	// answers what it found and the job settles on that answer.
 
 	writeJSON(w, http.StatusOK, job)
 }
@@ -860,12 +877,85 @@ func (s *Server) handleListErrors(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": guides, "count": len(guides)})
 }
 
+// bootFilterSupported says whether the agent of the host applies a boot
+// identifier to a journal read: the journald adapter has to name the
+// boot_filter feature as present. An adapter silent about the feature is
+// an agent from before it, which would not apply the filter.
+func bootFilterSupported(host *hosts.Host) bool {
+	return host.Capabilities.Feature(hosts.CapJournald, "boot_filter")
+}
+
 // hostHasCapability resolves the operation requirement against the host's
 // adapter registry. The decision belongs to the registry, not to this file:
 // the operation states a logical requirement, the host says which adapters
 // it has.
 func hostHasCapability(host *hosts.Host, capability string) bool {
 	return host.Capabilities.Satisfies(capability)
+}
+
+// planReferenceConflict says whether a package change is bound to a plan
+// the host no longer computes: plan_expired when the envelope is past its
+// expiry, replan_required when the newest plan the host computed names
+// another planner version than the one the order carries. An order
+// without a plan reference is not judged - it binds by its digest alone,
+// and the host decides.
+func (s *Server) planReferenceConflict(ctx context.Context, hostID string,
+	action opspec.ActionType, payload opspec.Payload) (string, string) {
+	var reference *opspec.PlanReference
+	switch action {
+	case opspec.ActionPackageUpgrade:
+		if payload.PackageUpgrade != nil {
+			reference = payload.PackageUpgrade.Plan
+		}
+	case opspec.ActionPackageInstall, opspec.ActionPackageRemove:
+		if payload.PackageChange != nil {
+			reference = payload.PackageChange.Plan
+		}
+	}
+	if reference == nil {
+		return "", ""
+	}
+	if reference.ExpiresAt != "" {
+		if expiry, err := time.Parse(time.RFC3339, reference.ExpiresAt); err == nil && time.Now().After(expiry) {
+			return "plan_expired", "the plan expired at " + expiry.UTC().Format(time.RFC3339) +
+				"; compute it again and approve the new one"
+		}
+	}
+	if reference.PlannerVersion == "" {
+		return "", ""
+	}
+	current := s.hostPlannerVersion(ctx, hostID)
+	if current != "" && current != reference.PlannerVersion {
+		return "replan_required", "the host plans with planner " + current + " now and the order carries a plan of planner " +
+			reference.PlannerVersion + "; compute the plan again and approve the new one"
+	}
+	return "", ""
+}
+
+// hostPlannerVersion reads the planner version off the newest package plan
+// the host computed, or nothing when the host has not planned yet or its
+// plans carry no planner version.
+func (s *Server) hostPlannerVersion(ctx context.Context, hostID string) string {
+	page, err := s.jobs.ListPaged(ctx, jobs.ListFilter{
+		HostID: hostID, Action: string(opspec.ActionPackagePlan), State: string(jobs.StateSucceeded),
+	}, jobs.Cursor{}, 1)
+	if err != nil || len(page.Items) == 0 {
+		return ""
+	}
+	attempts, err := s.jobs.Attempts(ctx, page.Items[0].ID)
+	if err != nil {
+		return ""
+	}
+	for i := len(attempts) - 1; i >= 0; i-- {
+		var parsed struct {
+			PlannerVersion string `json:"planner_version"`
+		}
+		if len(attempts[i].Detail) == 0 || json.Unmarshal(attempts[i].Detail, &parsed) != nil {
+			continue
+		}
+		return parsed.PlannerVersion
+	}
+	return ""
 }
 
 func joinActions() string {

@@ -400,15 +400,7 @@ func (o *Orchestrator) settle(ctx context.Context, campaign Campaign, targets []
 // renewed along the way, because a wave of many hosts outlasts a tick.
 func (o *Orchestrator) launchWave(ctx context.Context, campaign Campaign,
 	targets []Target, wave int) error {
-	running := 0
-	for _, target := range targets {
-		// A host waiting for a budget takes no concurrency slot: it is doing
-		// nothing yet, and counted as working it would block a wave that has
-		// free capacity elsewhere.
-		if target.Wave == wave && !target.State.Finished() && !target.State.Waiting() {
-			running++
-		}
-	}
+	running := activeTargets(targets)
 	if running >= campaign.MaxConcurrent {
 		return nil
 	}
@@ -867,6 +859,26 @@ func (o *Orchestrator) submitJobTx(ctx context.Context, tx pgx.Tx, campaign Camp
 	return job.ID, nil
 }
 
+// activeTargets counts the hosts of the campaign that hold a concurrency
+// slot right now, across every wave. The limit is the campaign's, not the
+// wave's: a canary host that came back from being offline and runs under
+// the waves, or a wave that is still draining when the barrier opens on a
+// skip, is as much a mutation in flight as a host of the current wave,
+// and a count per wave would let the campaign carry twice its limit.
+//
+// A host waiting - for its turn, for a budget, for its connection - takes
+// no slot: it is doing nothing yet, and counted as working it would block
+// a wave that has free capacity elsewhere.
+func activeTargets(targets []Target) int {
+	active := 0
+	for _, target := range targets {
+		if !target.State.Finished() && !target.State.Waiting() {
+			active++
+		}
+	}
+	return active
+}
+
 func allFinished(targets []Target) bool {
 	for _, target := range targets {
 		if !target.State.Finished() {
@@ -877,12 +889,13 @@ func allFinished(targets []Target) bool {
 }
 
 // currentWave returns the lowest wave that still has targets to start or
-// to settle. A host queued offline does not hold its wave: it is looked
-// after separately and joins the queue again when it comes back.
+// to settle. A host queued offline in a wave does not hold it: it is
+// looked after separately and joins the queue again when it comes back.
+// An offline canary does hold wave zero (Target.HoldsWave).
 func currentWave(targets []Target) int {
 	wave := -1
 	for _, target := range targets {
-		if !target.State.HoldsWave() {
+		if !target.HoldsWave() {
 			continue
 		}
 		if wave < 0 || target.Wave < wave {
@@ -893,13 +906,15 @@ func currentWave(targets []Target) int {
 }
 
 // waveFinished says whether every target of the given wave is settled or
-// waiting for its connection.
+// - outside the canary - waiting for its connection. The canary with an
+// offline host is not finished: the barrier stays closed until the host
+// runs, the deadline passes or an operator skips it.
 func waveFinished(targets []Target, wave int) bool {
 	if wave < 0 {
 		return true
 	}
 	for _, target := range targets {
-		if target.Wave == wave && target.State.HoldsWave() {
+		if target.Wave == wave && target.HoldsWave() {
 			return false
 		}
 	}

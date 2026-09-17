@@ -2,6 +2,8 @@ package compose
 
 import (
 	"context"
+	"errors"
+	"os"
 	"strings"
 	"testing"
 )
@@ -18,9 +20,31 @@ func runner(answers map[string]string) Runner {
 	}
 }
 
+const (
+	digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	digestB = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+)
+
+// resolver fakes the registry: every tag resolves to the given digest.
+func resolver(digests map[string]string) ImageResolver {
+	return func(_ context.Context, image string) (ResolvedImage, error) {
+		digest, known := digests[image]
+		if !known {
+			return ResolvedImage{}, context.Canceled
+		}
+		return ResolvedImage{Digest: digest, Source: DigestFromRegistry}, nil
+	}
+}
+
+func testPlanner(t *testing.T, answers map[string]string) Planner {
+	t.Helper()
+	return Planner{Dir: t.TempDir(), Runner: runner(answers),
+		Resolver: resolver(map[string]string{"postgres:16": digestA, "nginx:alpine": digestA})}
+}
+
 const configuration = `{
   "services": {
-    "web": {"image": "nginx@sha256:aaaa", "environment": {"PORT": "80"}},
+    "web": {"image": "nginx@` + digestA + `", "environment": {"PORT": "80"}},
     "db":  {"image": "postgres:16", "environment": {"POSTGRES_PASSWORD": "secret"}}
   }
 }`
@@ -73,10 +97,10 @@ func TestDigestCoversWholeManifest(t *testing.T) {
 // so a value written into it directly stops being a secret. The operator is
 // meant to see that before approving, not after the leak.
 func TestPlanWarnsAboutSecretsInManifest(t *testing.T) {
-	planner := Planner{Dir: t.TempDir(), Runner: runner(map[string]string{
+	planner := testPlanner(t, map[string]string{
 		"config": configuration,
 		"up":     " DRY-RUN MODE -  Container shop-web-1  Creating",
-	})}
+	})
 	plan, err := planner.Plan(context.Background(), "shop", "services: {}")
 	if err != nil {
 		t.Fatalf("plan: %v", err)
@@ -103,10 +127,10 @@ func TestPlanWarnsAboutSecretsInManifest(t *testing.T) {
 // A service pinned by a digest is not a moving target and must not be
 // marked as one - otherwise the warnings stop meaning anything.
 func TestPinnedImageIsNotWarnedAbout(t *testing.T) {
-	planner := Planner{Dir: t.TempDir(), Runner: runner(map[string]string{
-		"config": `{"services": {"web": {"image": "nginx@sha256:aaaa"}}}`,
+	planner := testPlanner(t, map[string]string{
+		"config": `{"services": {"web": {"image": "nginx@` + digestA + `"}}}`,
 		"up":     "",
-	})}
+	})
 	plan, err := planner.Plan(context.Background(), "shop", "services: {}")
 	if err != nil {
 		t.Fatalf("plan: %v", err)
@@ -154,17 +178,138 @@ func TestProjectNameIsValidated(t *testing.T) {
 // different digest means the deployment would bring something else than
 // what they viewed.
 func TestDeploymentRefusesOnDifferentPlan(t *testing.T) {
-	executor := Executor{Planner: Planner{Dir: t.TempDir(), Runner: runner(map[string]string{
+	executor := Executor{Planner: testPlanner(t, map[string]string{
 		"config": configuration,
 		"up":     "",
 		"ps":     "",
-	})}}
-	_, err := executor.Deploy(context.Background(), "shop", "services: {}", "0000000000000000")
+	})}
+	_, err := executor.Deploy(context.Background(), "shop", "services: {}", "0000000000000000", nil)
 	if err == nil {
 		t.Fatal("the deployment passed despite a different plan")
 	}
-	if !strings.Contains(err.Error(), "changed since approval") {
+	if !errors.Is(err, ErrPlanMismatch) || !strings.Contains(err.Error(), "changed since approval") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+// A mutable tag is planned only once its digest is known, and the
+// deployment binds that digest: a tag that moved between the approval and
+// the deployment is a stale plan, not a surprise in production.
+func TestMutableTagIsBoundToTheResolvedDigest(t *testing.T) {
+	answers := map[string]string{"config": configuration, "up": "", "ps": ""}
+	planner := Planner{Dir: t.TempDir(), Runner: runner(answers),
+		Resolver: resolver(map[string]string{"postgres:16": digestA})}
+	plan, err := planner.Plan(context.Background(), "shop", "services: {}")
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	var db Service
+	for _, service := range plan.Services {
+		if service.Name == "db" {
+			db = service
+		}
+	}
+	if db.ImageDigest != digestA || db.DigestSource != DigestFromRegistry ||
+		db.PinnedImage != "postgres@"+digestA {
+		t.Fatalf("the tag was not bound to its digest: %+v", db)
+	}
+	digests := plan.ImageDigests()
+	if digests["db"] != digestA || digests["web"] != digestA {
+		t.Errorf("image digests = %v", digests)
+	}
+
+	// The registry now serves another image under the same tag.
+	moved := Executor{Planner: Planner{Dir: t.TempDir(), Runner: runner(answers),
+		Resolver: resolver(map[string]string{"postgres:16": digestB})}}
+	_, err = moved.Deploy(context.Background(), "shop", "services: {}", plan.Digest, plan.ImageDigests())
+	if !errors.Is(err, ErrPlanMismatch) {
+		t.Fatalf("a moved tag was deployed: %v", err)
+	}
+	// The same digest deploys, and the containers are started from the
+	// pinned references through an override file next to the manifest.
+	var upArguments []string
+	steady := Executor{Planner: Planner{Dir: t.TempDir(),
+		Runner: func(ctx context.Context, args ...string) (string, string, error) {
+			if len(args) > 0 && strings.Contains(strings.Join(args, " "), " up ") && !strings.Contains(strings.Join(args, " "), "--dry-run") {
+				upArguments = args
+				for i, argument := range args {
+					if argument == "-f" && i+1 < len(args) && strings.HasSuffix(args[i+1], "digests.override.yml") {
+						content, err := os.ReadFile(args[i+1])
+						if err != nil || !strings.Contains(string(content), "postgres@"+digestA) {
+							t.Errorf("the override file does not pin the digest: %s (%v)", content, err)
+						}
+					}
+				}
+			}
+			return runner(answers)(ctx, args...)
+		},
+		Resolver: resolver(map[string]string{"postgres:16": digestA})}}
+	if _, err := steady.Deploy(context.Background(), "shop", "services: {}", plan.Digest, plan.ImageDigests()); err != nil {
+		t.Fatalf("the same plan was refused: %v", err)
+	}
+	if !strings.Contains(strings.Join(upArguments, " "), "digests.override.yml") {
+		t.Errorf("compose up ran without the override file: %v", upArguments)
+	}
+}
+
+// A tag nobody can resolve is not planned: a plan with an empty digest
+// would approve whatever the registry serves at deployment time.
+func TestUnresolvedTagIsNotPlanned(t *testing.T) {
+	planner := Planner{Dir: t.TempDir(), Runner: runner(map[string]string{"config": configuration, "up": ""}),
+		Resolver: resolver(map[string]string{})}
+	if _, err := planner.Plan(context.Background(), "shop", "services: {}"); !errors.Is(err, ErrDigestUnresolved) {
+		t.Fatalf("a tag without a digest was planned: %v", err)
+	}
+	// A planner without a resolver plans only pinned references.
+	pinnedOnly := Planner{Dir: t.TempDir(), Runner: runner(map[string]string{
+		"config": `{"services": {"web": {"image": "nginx@` + digestA + `"}}}`, "up": ""})}
+	if _, err := pinnedOnly.Plan(context.Background(), "shop", "services: {}"); err != nil {
+		t.Fatalf("a pinned reference needs no resolver: %v", err)
+	}
+}
+
+// The tag is replaced by the digest, and a registry port is not a tag.
+func TestPinReferenceKeepsTheRepository(t *testing.T) {
+	for image, want := range map[string]string{
+		"nginx:alpine":                      "nginx@" + digestA,
+		"nginx":                             "nginx@" + digestA,
+		"registry.example:5000/shop/web:v2": "registry.example:5000/shop/web@" + digestA,
+		"registry.example:5000/shop/web":    "registry.example:5000/shop/web@" + digestA,
+		"nginx@" + digestB:                  "nginx@" + digestB,
+	} {
+		if got := PinReference(image, digestA); got != want {
+			t.Errorf("PinReference(%q) = %q, want %q", image, got, want)
+		}
+	}
+}
+
+// The registry answer names one manifest per platform; the plan takes the
+// one this host would pull and never an attestation.
+func TestDigestIsPickedForTheHostPlatform(t *testing.T) {
+	list := `[
+	 {"Ref": "nginx:alpine@sha256:1", "Descriptor": {"digest": "` + digestB + `", "platform": {"architecture": "arm64", "os": "linux"}}},
+	 {"Ref": "nginx:alpine@sha256:2", "Descriptor": {"digest": "` + digestA + `", "platform": {"architecture": "amd64", "os": "linux"}}},
+	 {"Ref": "nginx:alpine@sha256:3", "Descriptor": {"digest": "` + digestB + `", "platform": {"architecture": "unknown", "os": "unknown"}}}
+	]`
+	if digest, err := digestFromManifest(list, "amd64"); err != nil || digest != digestA {
+		t.Errorf("amd64 = %q, %v", digest, err)
+	}
+	if _, err := digestFromManifest(list, "s390x"); err == nil {
+		t.Error("a platform the image lacks resolved to a digest")
+	}
+	single := `{"Ref": "shop/web:v2", "Descriptor": {"digest": "` + digestA + `"}}`
+	if digest, err := digestFromManifest(single, "amd64"); err != nil || digest != digestA {
+		t.Errorf("single manifest = %q, %v", digest, err)
+	}
+
+	// The local record names the repository with the digest; a bare name
+	// is the library namespace on Docker Hub.
+	local := `["docker.io/library/nginx@` + digestA + `"]`
+	if digest, err := digestFromLocalImage(local, "nginx:alpine"); err != nil || digest != digestA {
+		t.Errorf("local digest = %q, %v", digest, err)
+	}
+	if _, err := digestFromLocalImage(`[]`, "shop/web:v2"); err == nil {
+		t.Error("an image built on the host resolved to a digest")
 	}
 }
 
@@ -179,7 +324,7 @@ func TestChangesAreReadFromBothStreams(t *testing.T) {
 		}
 		// The dry run goes only to the diagnostic stream.
 		return "", " DRY-RUN MODE -  Container shop-web-1  Creating", nil
-	}}
+	}, Resolver: resolver(map[string]string{"postgres:16": digestA})}
 	plan, err := planner.Plan(context.Background(), "shop", "services: {}")
 	if err != nil {
 		t.Fatalf("plan: %v", err)

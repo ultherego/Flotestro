@@ -309,7 +309,7 @@ func (s *Server) outboxStatus(ctx context.Context) statusBlock {
 func (s *Server) schedulerStatus(ctx context.Context) statusBlock {
 	rows, err := s.pool.Query(ctx, `
 		select state, count(*) from jobs
-		 where state in ('awaiting_approval', 'queued', 'leased', 'dispatched', 'running')
+		 where state in ('awaiting_approval', 'queued', 'leased', 'dispatched', 'running', 'cancel_requested')
 		 group by 1`)
 	if err != nil {
 		return statusUnknown("the queue could not be read: "+err.Error(), nil)

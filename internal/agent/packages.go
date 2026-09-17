@@ -2,15 +2,15 @@ package agent
 
 import (
 	"context"
-	"encoding/hex"
 	"errors"
-	"strings"
+	"fmt"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
+	"github.com/ultherego/flotestro/internal/plan"
 )
 
 // planPackages computes what would be upgraded. The simulation needs neither
@@ -55,10 +55,11 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 		refreshed = true
 	}
 
-	plan, err := manager.Plan(planCtx, packages.Options{
+	computed, err := manager.Plan(planCtx, packages.Options{
 		Mode:         payload.Mode,
 		Packages:     payload.OnlyPackages,
 		SecurityOnly: payload.SecurityOnly,
+		Header:       e.planHeader(),
 	})
 	if err != nil {
 		status := agentv1.TaskResult_STATUS_FAILED
@@ -70,22 +71,92 @@ func (e *TaskExecutor) planPackages(ctx context.Context, task *agentv1.TaskEnvel
 		}
 		return rejected(status, packageErrorCode(err), err.Error())
 	}
-	plan.MetadataRefreshed = refreshed
+	computed.MetadataRefreshed = refreshed
 
 	return &agentv1.TaskResult{
 		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode: 0,
-		Detail:   &agentv1.TaskResult_PackagePlan{PackagePlan: planToProto(plan)},
+		Detail:   &agentv1.TaskResult_PackagePlan{PackagePlan: planToProto(computed)},
 	}
 }
 
-// upgradePackages performs the transaction through the helper. Before the
-// execution the plan is recomputed and compared with the approved one: the
-// repository metadata may have changed between the plan and the execution.
+// planHeader is the identity the agent gives a plan it computes: this
+// host, the picture of it the panel holds now, and an expiry a day away.
+// The helper rebuilds the same header from the approved reference when it
+// computes the plan again, so the two envelopes hash the same over the
+// same state.
+func (e *TaskExecutor) planHeader() packages.PlanHeader {
+	header := packages.PlanHeader{
+		HostID:    e.hostID,
+		ExpiresAt: time.Now().Add(plan.DefaultTTL).UTC().Truncate(time.Second),
+	}
+	if e.facts != nil {
+		if revision, _, err := e.facts().Revision(); err == nil {
+			header.InventoryRevision = revision
+		}
+	}
+	return header
+}
+
+// approvedReference turns the plan reference of an order into the fields
+// the helper request carries. The digest always goes to the helper, which
+// decides: an order that binds a digest without its envelope is one the
+// host cannot compute the same way - the digest was made over a header
+// the host does not have - and the helper refuses it as stale. The planner
+// version and the expiry are checked here already: neither needs the plan
+// computed, and an order that cannot pass is not worth a transaction's
+// lock.
+func approvedReference(hash string, reference *opspec.PlanReference,
+	request *helperv1.PackageActionRequest) *agentv1.TaskResult {
+	if hash == "" {
+		return nil
+	}
+	sum, err := plan.ParseHash(hash)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
+	}
+	request.PlanHash = sum
+	if reference == nil {
+		return nil
+	}
+	if reference.PlannerVersion != "" && reference.PlannerVersion != packages.PlannerVersion {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, plan.ErrorReplanRequired,
+			fmt.Sprintf("planner %s made the plan, planner %s would execute it; plan again",
+				reference.PlannerVersion, packages.PlannerVersion))
+	}
+	request.PlanSchemaVersion = reference.SchemaVersion
+	request.PlannerVersion = reference.PlannerVersion
+	request.PlanInventoryRevision = reference.InventoryRevision
+	request.PlanResourceRevision = reference.ResourceRevision
+	if reference.ExpiresAt != "" {
+		expiry, err := time.Parse(time.RFC3339, reference.ExpiresAt)
+		if err != nil {
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+				"the expiry of the plan is not an RFC 3339 time: "+err.Error())
+		}
+		if time.Now().After(expiry) {
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, plan.ErrorPlanExpired,
+				"the plan expired at "+expiry.UTC().Format(time.RFC3339)+"; plan again")
+		}
+		request.PlanExpiresAtUnix = expiry.Unix()
+	}
+	for _, change := range reference.Changes {
+		request.ExactSpecs = append(request.ExactSpecs, &helperv1.PackageExactSpec{
+			Name: change.Name, CurrentVersion: change.CurrentVersion, CandidateVersion: change.CandidateVersion,
+			Architecture: change.Architecture, Origin: change.Origin, Action: change.Action,
+		})
+	}
+	return nil
+}
+
+// upgradePackages performs the transaction through the helper. An order
+// bound to an approved plan carries the plan's reference to the helper,
+// which computes the plan again under the package lock right before the
+// transaction and compares the digest: the agent hands the reference
+// over as the panel signed it and cannot change what the helper expects.
 func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.PackageUpgradePayload) *agentv1.TaskResult {
-	manager, err := packages.Detect()
-	if err != nil {
+	if _, err := packages.Detect(); err != nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorUnsupported, err.Error())
 	}
 
@@ -93,19 +164,14 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 	upgradeCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
 	defer cancel()
 
-	options := packages.Options{Packages: payload.Packages, SecurityOnly: payload.SecurityOnly}
-
-	if payload.PlanHash != "" {
-		current, err := manager.Plan(upgradeCtx, options)
-		if err != nil {
-			return rejected(agentv1.TaskResult_STATUS_FAILED, packageErrorCode(err), err.Error())
-		}
-		if hex.EncodeToString(current.Hash()) != strings.ToLower(payload.PlanHash) {
-			// A refusal is the right reaction here: the administrator approved a
-			// different set of changes than the one that would be applied now.
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorPlanMismatch,
-				"the repository metadata changed since the plan was approved")
-		}
+	request := &helperv1.PackageActionRequest{
+		Operation:    helperv1.PackageActionRequest_OPERATION_UPGRADE,
+		Packages:     payload.Packages,
+		SecurityOnly: payload.SecurityOnly,
+		PlanHostId:   e.hostID,
+	}
+	if refusal := approvedReference(payload.PlanHash, payload.Plan, request); refusal != nil {
+		return refusal
 	}
 
 	// A package transaction takes minutes. The operator is to see where it
@@ -127,13 +193,7 @@ func (e *TaskExecutor) upgradePackages(ctx context.Context, task *agentv1.TaskEn
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
-		Action: &helperv1.HelperRequest_PackageAction{
-			PackageAction: &helperv1.PackageActionRequest{
-				Operation:    helperv1.PackageActionRequest_OPERATION_UPGRADE,
-				Packages:     payload.Packages,
-				SecurityOnly: payload.SecurityOnly,
-			},
-		},
+		Action:         &helperv1.HelperRequest_PackageAction{PackageAction: request},
 	}, timeout, reportProgress)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
@@ -163,30 +223,65 @@ func packageErrorCode(err error) string {
 	return packages.ErrorTransaction
 }
 
-func planToProto(plan packages.Plan) *agentv1.PackagePlanResult {
-	changes := make([]*agentv1.PackageChange, 0, len(plan.Changes))
-	for _, change := range plan.Changes {
-		changes = append(changes, &agentv1.PackageChange{
-			Name:             change.Name,
-			CurrentVersion:   change.CurrentVersion,
-			CandidateVersion: change.CandidateVersion,
-			Origin:           change.Origin,
-			Security:         change.Security,
-		})
+func planToProto(computed packages.Plan) *agentv1.PackagePlanResult {
+	changes := make([]*agentv1.PackageChange, 0, len(computed.Changes))
+	for _, change := range computed.Changes {
+		changes = append(changes, changeToProto(change))
+	}
+	envelope := computed.Envelope()
+	// The canonical bytes are what the digest was computed over; the panel
+	// keeps them as the plan body next to the approval. A plan whose
+	// envelope cannot be rendered has no digest either, and a plan without
+	// a digest cannot be approved.
+	canonical, err := envelope.Canonical()
+	if err != nil {
+		canonical = nil
 	}
 	return &agentv1.PackagePlanResult{
-		Manager:            plan.Manager,
+		Manager:            computed.Manager,
 		Changes:            changes,
-		DownloadBytes:      plan.DownloadBytes,
-		DiskAvailableBytes: plan.DiskAvailableBytes,
-		PlanHash:           plan.Hash(),
-		RebootPredicted:    plan.RebootPredicted,
-		MetadataRefreshed:  plan.MetadataRefreshed,
-		Blocked:            blockedPlanToProto(plan.Blocked),
-		Mode:               plan.Mode,
-		Removals:           plan.Removals,
-		Protected:          plan.Protected,
-		Space:              spaceToProto(plan.Space),
+		DownloadBytes:      computed.DownloadBytes,
+		DiskAvailableBytes: computed.DiskAvailableBytes,
+		PlanHash:           envelope.Hash(),
+		RebootPredicted:    computed.RebootPredicted,
+		MetadataRefreshed:  computed.MetadataRefreshed,
+		Blocked:            blockedPlanToProto(computed.Blocked),
+		Mode:               computed.Mode,
+		Removals:           computed.Removals,
+		Protected:          computed.Protected,
+		Space:              spaceToProto(computed.Space),
+		SchemaVersion:      envelope.SchemaVersion,
+		PlannerVersion:     envelope.PlannerVersion,
+		HostId:             envelope.HostID,
+		InventoryRevision:  envelope.InventoryRevision,
+		ResourceRevision:   envelope.ResourceRevision,
+		ExpiresAtUnix:      envelope.ExpiresAt.Unix(),
+		RollbackMechanism:  computed.Rollback.Mechanism,
+		RollbackId:         computed.Rollback.ID,
+		RollbackAvailable:  computed.Rollback.Available,
+		RollbackReason:     computed.Rollback.Reason,
+		Envelope:           canonical,
+		Description:        envelope.Description,
+	}
+}
+
+// changeToProto carries one element of a plan with everything the digest
+// covers: the version, the origin, the architecture and the direction.
+func changeToProto(change packages.Change) *agentv1.PackageChange {
+	return &agentv1.PackageChange{
+		Name:                change.Name,
+		CurrentVersion:      change.CurrentVersion,
+		CandidateVersion:    change.CandidateVersion,
+		Origin:              change.Origin,
+		Security:            change.Security,
+		Architecture:        change.Architecture,
+		Action:              change.Action,
+		Reason:              change.Reason,
+		Blocked:             change.Blocked,
+		Protected:           change.Protected,
+		InstalledDeltaBytes: change.InstalledDeltaBytes,
+		InstalledDeltaKnown: change.InstalledDeltaKnown,
+		Digest:              change.Digest,
 	}
 }
 
@@ -235,6 +330,23 @@ func applyToProto(result *helperv1.PackageActionResult) *agentv1.PackageApplyRes
 			CurrentVersion:   change.GetVersionBefore(),
 			CandidateVersion: change.GetVersionAfter(),
 		})
+	}
+	// The settled effects of the approved plan ride in the same list, each
+	// marked achieved or missed with what was found: the operator reads
+	// which effect the host reached and which it did not.
+	for _, outcomes := range [][]*helperv1.PackageEffectOutcome{result.GetEffectsAchieved(), result.GetEffectsMissed()} {
+		for _, outcome := range outcomes {
+			effect := "missed"
+			if outcome.GetAchieved() {
+				effect = "achieved"
+			}
+			changes = append(changes, &agentv1.PackageChange{
+				Name:             outcome.GetSubject(),
+				CandidateVersion: outcome.GetExpected(),
+				ObservedVersion:  outcome.GetObserved(),
+				Effect:           effect,
+			})
+		}
 	}
 	return &agentv1.PackageApplyResult{
 		Manager:                  result.GetManager(),
@@ -298,21 +410,22 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		operation = helperv1.PackageActionRequest_OPERATION_HOLD
 	}
 
-	// An installation approved on the basis of a plan is to install what the
-	// operator looked at. Repository metadata changed since the planning gives a
-	// different plan - and that is a refusal, not a warning.
-	if action == opspec.ActionPackageInstall && payload.PlanHash != "" {
-		manager, err := packages.Detect()
-		if err != nil {
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorUnsupported, err.Error())
-		}
-		current, err := manager.Plan(callCtx, packages.Options{Mode: "install", Packages: payload.Packages})
-		if err != nil {
-			return rejected(agentv1.TaskResult_STATUS_FAILED, packageErrorCode(err), err.Error())
-		}
-		if hex.EncodeToString(current.Hash()) != strings.ToLower(payload.PlanHash) {
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorPlanMismatch,
-				"the repository metadata changed since the plan was approved")
+	// An installation or a removal approved on the basis of a plan is to do
+	// what the operator looked at. The reference of the plan goes to the
+	// helper, which computes the plan again right before the transaction;
+	// repository metadata changed since the planning gives a different
+	// plan - and that is a refusal, not a warning.
+	request := &helperv1.PackageActionRequest{
+		Operation:        operation,
+		Packages:         payload.Packages,
+		ExpectedRemovals: payload.ExpectedRemovals,
+		Hold:             payload.Hold,
+		PlanHostId:       e.hostID,
+	}
+	if action != opspec.ActionPackageHoldSet {
+		if refusal := approvedReference(payload.PlanHash, payload.Plan, request); refusal != nil {
+			refusal.TaskId = task.GetTaskId()
+			return refusal
 		}
 	}
 
@@ -334,14 +447,7 @@ func (e *TaskExecutor) applyPackageLifecycle(ctx context.Context, task *agentv1.
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
 		TimeoutSeconds: uint32(timeout.Seconds()),
-		Action: &helperv1.HelperRequest_PackageAction{
-			PackageAction: &helperv1.PackageActionRequest{
-				Operation:        operation,
-				Packages:         payload.Packages,
-				ExpectedRemovals: payload.ExpectedRemovals,
-				Hold:             payload.Hold,
-			},
-		},
+		Action:         &helperv1.HelperRequest_PackageAction{PackageAction: request},
 	}, timeout, reportProgress)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())

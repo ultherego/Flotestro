@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/security"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
+	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
 // The names of the adapters. A name says what the host has and not what an
@@ -79,6 +80,14 @@ const (
 	// helper has answered; all false is a helper that has not said, which
 	// the panel shows as unknown rather than as a helper without the check.
 	CapHelperCapability = "helper.capability"
+	// CapRelayIdentity says this agent signs the inner identity envelope
+	// of every message when its session goes through a relay, and the
+	// feature names the layout: v2 is the envelope of the security
+	// document, chapter 4. The panel reads it to tell a host that cannot
+	// sign from one that did not: behind a relay under enforce the first
+	// is blocked_upgrade_required, and the fleet is ready for enforce once
+	// no relayed host lacks the feature.
+	CapRelayIdentity = "relay.identity"
 )
 
 // The requirements of operations. A logical name does not point at an
@@ -286,6 +295,12 @@ func DetectCapabilities() Capabilities {
 				"enforce": helperMode == "enforce",
 			},
 			Reason: reason(helperMode != "", "the helper has not reported its capability mode"),
+		},
+		{
+			Name:      CapRelayIdentity,
+			Version:   adapterVersion,
+			Available: true,
+			Features:  map[string]bool{relayproof.Feature: true},
 		},
 		{
 			Name:      CapSystemd,
@@ -497,7 +512,13 @@ func DetectCapabilities() Capabilities {
 			Name:      CapJournald,
 			Version:   adapterVersion,
 			Available: journald,
-			Reason:    reason(journald, "this host has no journald socket"),
+			// boot_filter says this agent applies a boot identifier to a
+			// journal read. The panel refuses a read by boot for a host
+			// without it, because an agent from before the feature would
+			// ignore the field and answer with every boot under the name
+			// of one.
+			Features: map[string]bool{"boot_filter": journald && isExecutable(journalctlPath)},
+			Reason:   reason(journald, "this host has no journald socket"),
 		},
 		{
 			Name:      CapCompose,

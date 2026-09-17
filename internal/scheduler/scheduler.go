@@ -274,13 +274,64 @@ func (s *Scheduler) dispatchOnce(ctx context.Context) {
 		}
 		return
 	}
+	// Who owns each host is read from the database for the batch, once. A
+	// host nobody owns right now - no session claimed it, or the claim's
+	// lease ran out - gets nothing: the task stays in the queue until a
+	// session claims the host again. The registry of this gateway is not
+	// asked instead, because the registry is the memory of one process
+	// and ownership is decided by the table.
+	owners, err := s.store.OwnersOf(ctx, hostsOf(leased))
+	if err != nil {
+		s.log.Error("the owners of the hosts were not read; the batch is held", "err", err)
+		for _, item := range leased {
+			s.holdUnowned(ctx, item, ErrorSessionUnowned)
+		}
+		return
+	}
 	for _, item := range leased {
 		if ambiguous[item.Job.HostID] {
 			s.holdAmbiguous(ctx, item)
 			continue
 		}
-		s.deliver(ctx, item)
+		s.deliver(ctx, item, owners[item.Job.HostID])
 	}
+}
+
+// ErrorSessionUnowned is the reason a task is held back from a host whose
+// ownership row names no live owner: no session claimed the host, or the
+// claim's lease ran out. It is the code on the released attempt and the
+// outcome in the dispatch metrics; a host owned by a session other than
+// this gateway's is held under jobs.ErrorSessionFenceStale instead.
+const ErrorSessionUnowned = "session_unowned"
+
+// deliverable says whether the task may go out over the session this
+// gateway holds for the host, by the host's ownership row: the row has to
+// name a live owner, and the owner has to be this very session with the
+// token it claimed. A session the row does not name any more was
+// superseded on another instance and has not closed yet; a row without
+// a live owner belongs to nobody. In both cases the task waits, with the
+// reason returned, and is never marked delivered.
+func deliverable(owner jobs.Owner, session *gateway.Session, now time.Time) (string, bool) {
+	if !owner.Live(now) {
+		return ErrorSessionUnowned, false
+	}
+	if owner.SessionID != session.ID || owner.Token != session.FenceToken {
+		return jobs.ErrorSessionFenceStale, false
+	}
+	return "", true
+}
+
+// holdUnowned puts a task back in the queue because its host is not owned
+// by the session that would carry it. The next pass reads the row again;
+// by then the host has usually been claimed, by this instance or another.
+func (s *Scheduler) holdUnowned(ctx context.Context, item jobs.LeasedJob, reason string) {
+	s.log.Info("the task was held: the host is not owned by the session that would carry it",
+		"job_id", item.Job.ID, "host_id", item.Job.HostID, "reason", reason)
+	if err := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID, reason); err != nil {
+		s.log.Error("the held task was not returned to the queue", "job_id", item.Job.ID, "err", err)
+	}
+	metrics.JobDispatch.Inc(reason, s.options.GatewayID)
+	metrics.SessionFence.Inc("delivery_held")
 }
 
 // hostsOf lists the hosts of the leased tasks, each once.
@@ -338,7 +389,26 @@ func (s *Scheduler) holdAmbiguous(ctx context.Context, item jobs.LeasedJob) {
 	metrics.JobDispatch.Inc("ambiguous", s.options.GatewayID)
 }
 
-func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
+func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs.Owner) {
+	// The session and the ownership are settled before the envelope is
+	// built: the envelope issues secret leases and one-time credentials,
+	// and a host that cannot be delivered to must not cost any of them.
+	session, connected := s.registry.Get(item.Job.HostID)
+	if !connected {
+		s.log.Info("the task was not delivered, going back to the queue",
+			"job_id", item.Job.ID, "host_id", item.Job.HostID, "reason", gateway.ErrNotConnected)
+		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID,
+			gateway.ErrNotConnected.Error()); releaseErr != nil {
+			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
+		}
+		metrics.JobDispatch.Inc("undelivered", s.options.GatewayID)
+		return
+	}
+	if reason, ok := deliverable(owner, session, time.Now()); !ok {
+		s.holdUnowned(ctx, item, reason)
+		return
+	}
+
 	envelope, err := s.buildEnvelopeFor(ctx, item)
 	if err != nil {
 		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
@@ -367,10 +437,13 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 		return
 	}
 
-	sessionID, err := s.registry.Dispatch(item.Job.HostID,
-		&agentv1.ServerMessage{Payload: &agentv1.ServerMessage_Task{Task: envelope}},
-		s.options.SendTimeout)
-	if err != nil {
+	// The envelope goes over the very session the ownership was checked
+	// for: a session that replaced it in the registry in the meantime
+	// has a token of its own, and the record below would be fenced with
+	// the wrong one.
+	sessionID := session.ID
+	if err := session.Send(&agentv1.ServerMessage{Payload: &agentv1.ServerMessage_Task{Task: envelope}},
+		s.options.SendTimeout); err != nil {
 		// The host disconnected between the fetch and the send. The task goes
 		// back to the queue and will be delivered on the next connection.
 		s.log.Info("the task was not delivered, going back to the queue",
@@ -385,10 +458,10 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 	// The dispatch lease is short only for an agent that will acknowledge
 	// the task; an older one keeps the execution lease from the start.
 	lease := s.options.LeaseDuration
-	if session, ok := s.registry.Get(item.Job.HostID); ok && buildinfo.AcknowledgesTasks(session.AgentVersion) {
+	if buildinfo.AcknowledgesTasks(session.AgentVersion) {
 		lease = jobs.DispatchLease
 	}
-	err = s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, sessionID, lease)
+	err = s.store.MarkDispatchedWithLease(ctx, item.Job.ID, item.AttemptID, session.Fence(), lease)
 	if errors.Is(err, jobs.ErrSessionStale) {
 		// The host left this gateway between the send and the record:
 		// the session the envelope went over is closed in the database.
@@ -401,6 +474,23 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob) {
 			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
 		}
 		metrics.JobDispatch.Inc("session_stale", s.options.GatewayID)
+		return
+	}
+	if errors.Is(err, jobs.ErrStaleFence) {
+		// The row is still open, but the host's ownership moved: another
+		// instance claimed the host between the check and the record, and
+		// the database refused the delivery under this session's token.
+		// The envelope the agent got is answered on a released attempt,
+		// and the owner delivers the task again. The write is not
+		// repeated without the fence - that is the whole point of it.
+		s.log.Info("the delivery was refused: the session no longer owns the host, going back to the queue",
+			"job_id", item.Job.ID, "host_id", item.Job.HostID, "session_id", sessionID)
+		if releaseErr := s.store.ReleaseLease(ctx, item.Job.ID, item.AttemptID,
+			jobs.ErrorSessionFenceStale); releaseErr != nil {
+			s.log.Error("the task was not returned to the queue", "job_id", item.Job.ID, "err", releaseErr)
+		}
+		metrics.JobDispatch.Inc(jobs.ErrorSessionFenceStale, s.options.GatewayID)
+		metrics.SessionFence.Inc("dispatch_refused")
 		return
 	}
 	if err != nil {
@@ -600,8 +690,9 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionPackageUpgrade:
 		request := &agentv1.PackageUpgrade{
-			Packages:     payload.PackageUpgrade.Packages,
-			SecurityOnly: payload.PackageUpgrade.SecurityOnly,
+			Packages:      payload.PackageUpgrade.Packages,
+			SecurityOnly:  payload.PackageUpgrade.SecurityOnly,
+			PlanReference: planReferenceToProto(payload.PackageUpgrade.Plan),
 		}
 		if payload.PackageUpgrade.PlanHash != "" {
 			hash, err := hex.DecodeString(payload.PackageUpgrade.PlanHash)
@@ -744,6 +835,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				ExpectedRemovals: payload.PackageChange.ExpectedRemovals,
 				Hold:             payload.PackageChange.Hold,
 				PlanHash:         payload.PackageChange.PlanHash,
+				PlanReference:    planReferenceToProto(payload.PackageChange.Plan),
 			},
 		}
 
@@ -1081,6 +1173,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			storage.Repair = payload.Storage.Repair
 			storage.ExpectedSerial = payload.Storage.ExpectedSerial
 			storage.ExpectedSizeBytes = payload.Storage.ExpectedSizeBytes
+			storage.ExpectedById = payload.Storage.ExpectedByID
+			storage.ExpectedWwn = payload.Storage.ExpectedWWN
 			storage.Size = payload.Storage.Size
 			storage.Label = payload.Storage.Label
 			storage.Plan = payload.Storage.Plan
@@ -1269,10 +1363,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Compose{
 			Compose: &agentv1.ComposeAction{
-				Operation:  operation,
-				Project:    payload.Compose.Project,
-				Manifest:   payload.Compose.Manifest,
-				PlanDigest: payload.Compose.PlanDigest,
+				Operation:    operation,
+				Project:      payload.Compose.Project,
+				Manifest:     payload.Compose.Manifest,
+				PlanDigest:   payload.Compose.PlanDigest,
+				ImageDigests: payload.Compose.ImageDigests,
 			},
 		}
 
@@ -1306,6 +1401,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			Since:       payload.Journal.Since,
 			Until:       payload.Journal.Until,
 			AfterCursor: payload.Journal.AfterCursor,
+			BootId:      payload.Journal.BootID,
 		}
 		if payload.Journal.MaxPriority != nil {
 			request.MaxPriority = payload.Journal.MaxPriority
@@ -1421,4 +1517,28 @@ func dockerEnvelope(action opspec.ActionType, payload opspec.Payload) *agentv1.D
 		envelope.Operation = agentv1.DockerAction_OPERATION_PRUNE
 	}
 	return envelope
+}
+
+// planReferenceToProto carries the approved plan envelope reference of an
+// order to the agent: the header the host rebuilds the envelope with and
+// the elements the operator approved, verbatim - the agent rebuilds the
+// payload from the envelope and hashes it against the panel's digest.
+func planReferenceToProto(reference *opspec.PlanReference) *agentv1.PackagePlanReference {
+	if reference == nil {
+		return nil
+	}
+	out := &agentv1.PackagePlanReference{
+		SchemaVersion:     reference.SchemaVersion,
+		PlannerVersion:    reference.PlannerVersion,
+		InventoryRevision: reference.InventoryRevision,
+		ResourceRevision:  reference.ResourceRevision,
+		ExpiresAt:         reference.ExpiresAt,
+	}
+	for _, change := range reference.Changes {
+		out.Changes = append(out.Changes, &agentv1.PackageChange{
+			Name: change.Name, CurrentVersion: change.CurrentVersion, CandidateVersion: change.CandidateVersion,
+			Architecture: change.Architecture, Origin: change.Origin, Action: change.Action,
+		})
+	}
+	return out
 }

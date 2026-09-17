@@ -5,11 +5,13 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/ultherego/flotestro/internal/audit"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
-	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/metrics"
+	"github.com/ultherego/flotestro/internal/relayproof"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
@@ -45,26 +47,34 @@ func (s *AgentService) SetSecretLeases(store SecretLeases) { s.leases = store }
 // The identity of the host comes from the client certificate, never from the
 // content of the job: otherwise knowing somebody else's attempt identifier
 // would be enough.
+//
+// Through a relay the certificate is the relay's, so the request carries
+// the host's own proof - the identity envelope - and a one-time X25519 key
+// signed by the host key; the value then goes back sealed to that key and
+// the relay, which forwards the call without spooling it, sees routing
+// metadata and cipher text. A relayed fetch without the proof is refused
+// under every mode: it was never possible without one.
 func (s *AgentService) FetchSecret(ctx context.Context,
 	req *connect.Request[agentv1.FetchSecretRequest],
 ) (*connect.Response[agentv1.FetchSecretResponse], error) {
-	cert, ok := clientCertificate(ctx)
-	if !ok {
-		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no client certificate"))
-	}
-	hostID, err := pki.HostIDFromCert(cert)
+	who, _, err := s.identifyCaller(ctx, req.Header())
 	if err != nil {
-		return nil, connect.NewError(connect.CodeUnauthenticated, err)
+		return nil, err
 	}
-	// The certificate is checked the way Connect checks it: a revoked or
-	// unknown one, or one of a host that is no longer active, fetches
-	// nothing - even with a lease issued before the revocation.
-	status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if problem := s.rejectCertificate(ctx, status, hostID); problem != nil {
-		return nil, problem
+	hostID := who.HostID
+	// A direct caller was checked against the record of the certificate
+	// it presented, the way Connect checks it: a revoked or unknown one,
+	// or one of a host that is no longer active, fetches nothing - even
+	// with a lease issued before the revocation. A relayed caller is
+	// checked against the certificate its envelope names, here.
+	var sealTo []byte
+	if who.RelayID != "" {
+		verified, problem := s.verifySecretEnvelope(ctx, who, req.Msg)
+		if problem != nil {
+			return nil, problem
+		}
+		s.learnPublicKey(ctx, hostID, verified)
+		sealTo = req.Msg.GetEphemeralPublicKey()
 	}
 	if s.secrets == nil {
 		return nil, connect.NewError(connect.CodeUnimplemented,
@@ -110,20 +120,75 @@ func (s *AgentService) FetchSecret(ctx context.Context,
 	}
 
 	// The audit notes the fact of the release: who, what, which version and
-	// within which operation. The value is neither here nor in any other
-	// record.
+	// within which operation, and whether it went out sealed. The value is
+	// neither here nor in any other record.
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: hostID,
 		Action: "secret.fetch", TargetType: "secret", TargetID: name,
 		Outcome: audit.OutcomeSuccess,
 		Detail: map[string]any{
 			"job_id": jobID, "host_id": hostID, "version": version,
-			"size_bytes": len(value),
+			"size_bytes": len(value), "relay_id": nullableRelay(who.RelayID),
+			"sealed": sealTo != nil,
 		},
 	})
+	if sealTo == nil {
+		return connect.NewResponse(&agentv1.FetchSecretResponse{
+			Value: value, Version: uint32(version), Sha256: secrets.Fingerprint(value),
+		}), nil
+	}
+	// Sealed to the host's one-time key under the lease as associated data:
+	// the plaintext leaves this process only inside the cipher text, and
+	// the digest stays out - the cipher authenticates the content, and a
+	// digest of a short value in a relay's journal would be a hint.
+	sealed, nonce, serverPublic, err := relayproof.Seal(sealTo, value,
+		relayproof.SecretAAD(req.Msg.GetTaskId(), name, uint32(version)))
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 	return connect.NewResponse(&agentv1.FetchSecretResponse{
-		Value: value, Version: uint32(version), Sha256: secrets.Fingerprint(value),
+		Version:         uint32(version),
+		SealedValue:     sealed,
+		SealedNonce:     nonce,
+		ServerPublicKey: serverPublic,
+		Sealing:         relayproof.Sealing,
 	}), nil
+}
+
+// verifySecretEnvelope checks the host's proof on a relayed fetch: the
+// envelope over the request with its identity cleared, then the one-time
+// key under the certificate the envelope named, for this task and this
+// secret.
+func (s *AgentService) verifySecretEnvelope(ctx context.Context, who peer,
+	request *agentv1.FetchSecretRequest) (*Verified, error) {
+	hostID := who.HostID
+	if request.GetIdentity() == nil || len(request.GetEphemeralPublicKey()) == 0 {
+		s.refused(ctx, hostID, hosts.RefusalBlockedUpgradeRequired,
+			"a secret fetch through relay "+who.RelayID+" without the host's proof ("+relayproof.Capability+" "+
+				relayproof.Feature+"); upgrade the agent")
+		s.refuseSecret(ctx, hostID, request.GetSecretName(), hosts.RefusalBlockedUpgradeRequired)
+		return nil, connect.NewError(connect.CodeFailedPrecondition,
+			errors.New("a secret fetch through a relay needs the host's proof"))
+	}
+	body := proto.Clone(request).(*agentv1.FetchSecretRequest)
+	body.Identity = nil
+	verified, err := s.envelopes.VerifyRequest(ctx, who.Relay, request.GetIdentity(), relayproof.KindFetchSecret, body)
+	if err != nil {
+		if refusal := RelayRefusalOf(err); refusal != nil {
+			s.refuseSecret(ctx, hostID, request.GetSecretName(), refusal.Code)
+		}
+		return nil, s.refuseEnvelope(ctx, hostID, err)
+	}
+	if err := relayproof.VerifyEphemeralKey(verified.PublicKey, request.GetTaskId(), request.GetSecretName(),
+		request.GetEphemeralPublicKey(), request.GetEphemeralKeySignature()); err != nil {
+		s.refused(ctx, hostID, hosts.RefusalRelayHostSignatureInvalid,
+			"the one-time key of the secret fetch is not signed by certificate "+verified.Serial+": "+err.Error())
+		s.refuseSecret(ctx, hostID, request.GetSecretName(), hosts.RefusalRelayHostSignatureInvalid)
+		metrics.RelayEnvelopeRefusal.Inc(hosts.RefusalRelayHostSignatureInvalid)
+		return nil, connect.NewError(connect.CodeUnauthenticated,
+			errors.New("the one-time key is not signed by the host"))
+	}
+	return verified, nil
 }
 
 // refuseSecret records a refusal together with its reason.

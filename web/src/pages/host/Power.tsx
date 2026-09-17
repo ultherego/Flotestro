@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import type { Host, Job } from "../../lib/types";
@@ -41,6 +42,16 @@ export function dashedBootID(id: string): string {
   const bare = id.replace(/-/g, "");
   if (!/^[0-9a-f]{32}$/i.test(bare)) return id;
   return `${bare.slice(0, 8)}-${bare.slice(8, 12)}-${bare.slice(12, 16)}-${bare.slice(16, 20)}-${bare.slice(20)}`;
+}
+
+/**
+ * The Logs tab of the host narrowed to one boot. The address carries the
+ * journal's bare form of the identifier, which is what the host takes;
+ * the Logs tab says whether the agent applies the filter.
+ */
+export function bootLogsPath(hostID: string, bootID: string): string {
+  const bare = bootID.replace(/-/g, "").toLowerCase();
+  return `/hosts/${encodeURIComponent(hostID)}/logs?boot=${encodeURIComponent(bare)}`;
 }
 
 /** The uptime in a form that reads without arithmetic in one's head. */
@@ -163,7 +174,11 @@ export function Power() {
           the width instead of running down the left edge. */}
       <Section title={t("Boot")} span={7} flush>
         <Facts>
-          <Fact label={t("Boot ID")}><span className="hm-mono">{snapshot?.boot_id || unknown}</span></Fact>
+          <Fact label={t("Boot ID")}>
+            {snapshot?.boot_id
+              ? <Link className="hm-mono" to={bootLogsPath(host.id, snapshot.boot_id)} title={t("The journal of this boot")}>{snapshot.boot_id}</Link>
+              : <span className="hm-mono">{unknown}</span>}
+          </Fact>
           {/* The boot instant absolute beside the relative one, and the
               uptime marked as of the read: the two are read at different
               moments and would otherwise seem to disagree. */}
@@ -300,8 +315,9 @@ export function Power() {
                   <td className="hm-num">{boot.index}</td>
                   {/* The journal numbers boots back from the current one:
                       0 is this boot, -1 the one before. */}
+                  {/* Each boot opens the Logs tab narrowed to it. */}
                   <td className="hm-mono">
-                    {dashedBootID(boot.boot_id)}
+                    <Link to={bootLogsPath(host.id, boot.boot_id)} title={t("The journal of this boot")}>{dashedBootID(boot.boot_id)}</Link>
                     {boot.index === 0 && <span className="badge ok"> {t("this boot")}</span>}
                   </td>
                   <td><Time value={boot.first_entry} /> <span className="source">· {absoluteTime(boot.first_entry)}</span></td>

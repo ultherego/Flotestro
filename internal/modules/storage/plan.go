@@ -30,15 +30,35 @@ type MountPlan struct {
 
 	// RequestedSource is the source from the order; ResolvedSource - the
 	// same source after resolving to a UUID on this host. The latter goes in
-	// the change. If the order was already by UUID, both are equal.
+	// the change. If the order was already by UUID, both are equal. The
+	// requested source stays out of the fingerprint: the change comes back
+	// with the resolved one, and the plan it is compared against has to be
+	// the same plan.
 	RequestedSource string `json:"requested_source,omitempty"`
 	ResolvedSource  string `json:"resolved_source,omitempty"`
-	// Device describes the device the host has under the source.
+	// SourceUUID and SourcePartUUID are the identity of the filesystem and
+	// of the partition it sits on: together with the target and the type
+	// they say what the plan is about, whatever path the source has today.
+	SourceUUID     string `json:"source_uuid,omitempty"`
+	SourcePartUUID string `json:"source_part_uuid,omitempty"`
+	// Device describes the device the host has under the source, without
+	// the usage counters, which change between two reads and would make
+	// every plan stale on nothing.
 	Device *Device `json:"device,omitempty"`
 
 	DesiredFSType  string `json:"desired_fs_type,omitempty"`
 	DesiredOptions string `json:"desired_options,omitempty"`
 	DesiredPersist bool   `json:"desired_persist,omitempty"`
+
+	// FstabRevision is the digest of /etc/fstab the plan was computed
+	// against. The change is compared with a plan computed again on the
+	// host: an fstab edited in between gives another revision, another
+	// fingerprint, and a refusal to write into a file nobody approved.
+	FstabRevision string `json:"fstab_revision,omitempty"`
+	// TargetState is what stat says about the mount point: missing,
+	// directory or not_a_directory. A target that appeared or vanished
+	// since the plan is a changed base.
+	TargetState string `json:"target_state,omitempty"`
 
 	// Changes lists in human terms what will change.
 	Changes []string `json:"changes,omitempty"`
@@ -66,6 +86,7 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 	plan := MountPlan{
 		Target: target, RequestedSource: source, DesiredFSType: fsType,
 		DesiredOptions: options, DesiredPersist: persist,
+		FstabRevision: state.FstabRevision,
 	}
 
 	device := state.SourceDevice(source)
@@ -75,7 +96,10 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 		return plan
 	}
 	copied := *device
+	copied.FSUsedBytes, copied.FSAvailBytes = nil, nil
 	plan.Device = &copied
+	plan.SourceUUID = device.UUID
+	plan.SourcePartUUID = device.PartUUID
 	switch {
 	case device.UUID == "":
 		// Without a UUID there is nothing to bind the change to: the
@@ -121,7 +145,7 @@ func ComputeMount(state Snapshot, source, target, fsType, options string,
 
 // ComputeUnmount computes the difference for removing a mount.
 func ComputeUnmount(state Snapshot, target string) MountPlan {
-	plan := MountPlan{Target: target}
+	plan := MountPlan{Target: target, FstabRevision: state.FstabRevision}
 	current := state.MountAt(target)
 	if current == nil {
 		plan.Action = PlanRemoveAbsent
@@ -146,6 +170,22 @@ func ComputeUnmount(state Snapshot, target string) MountPlan {
 // different answer than a plan without one.
 func (p *MountPlan) Refuse(reason string) {
 	p.Refusal = reason
+	p.PlanHash = mountPlanFingerprint(*p)
+}
+
+// Mount point states as stat reports them.
+const (
+	TargetMissing       = "missing"
+	TargetDirectory     = "directory"
+	TargetNotADirectory = "not_a_directory"
+)
+
+// ObserveTarget records what stat says about the mount point and
+// recomputes the fingerprint. The host calls it on the plan and again
+// before the change, so a target that appeared, vanished or turned into a
+// file in between is a different plan.
+func (p *MountPlan) ObserveTarget(state string) {
+	p.TargetState = state
 	p.PlanHash = mountPlanFingerprint(*p)
 }
 
@@ -231,10 +271,13 @@ func orDefaults(options string) string {
 }
 
 // mountPlanFingerprint computes the plan fingerprint excluding the
-// fingerprint itself.
+// fingerprint itself and the requested source: the change carries the
+// resolved source, and the plan it is compared against on the host has to
+// come out the same.
 func mountPlanFingerprint(plan MountPlan) string {
 	stripped := plan
 	stripped.PlanHash = ""
+	stripped.RequestedSource = ""
 	encoded, err := json.Marshal(stripped)
 	if err != nil {
 		return ""

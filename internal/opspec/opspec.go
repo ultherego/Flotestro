@@ -27,6 +27,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/hostname"
 	"github.com/ultherego/flotestro/internal/modules/kernel"
+	"github.com/ultherego/flotestro/internal/modules/logs"
 	monitoringmodul "github.com/ultherego/flotestro/internal/modules/monitoring"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/power"
@@ -1174,6 +1175,13 @@ func validateJournalPayload(payload *JournalPayload) error {
 	if priority := payload.MaxPriority; priority != nil && *priority > 7 {
 		return fmt.Errorf("the syslog priority has to be in the range 0-7")
 	}
+	if payload.BootID != "" {
+		normalised, err := logs.NormalizeBootID(payload.BootID)
+		if err != nil {
+			return err
+		}
+		payload.BootID = normalised
+	}
 	if payload.Unit != "" {
 		if err := validateUnitName(payload.Unit); err != nil {
 			return err
@@ -1573,6 +1581,11 @@ type JournalPayload struct {
 	// both to the window of a job, so the lines are the ones written while
 	// the operation ran and a little after; a live view ignores it.
 	Until string `json:"until,omitempty"`
+	// BootID narrows the read to one boot of the host, in either spelling
+	// the kernel and the journal use; normalised before it travels. The
+	// panel sends it only to an agent whose journald adapter names the
+	// boot_filter feature, and refuses the read otherwise.
+	BootID string `json:"boot_id,omitempty"`
 	// FollowSeconds bounds the live view. Zero means the default limit; a
 	// stream without an upper bound would keep a process on the host
 	// forever, including when nobody is watching any more.
@@ -1597,6 +1610,41 @@ type PackageChangePayload struct {
 	// computes the plan once more and refuses when the repository metadata
 	// changed since the approval.
 	PlanHash string `json:"plan_hash,omitempty"`
+	// Plan is the approved plan envelope the change is bound to: the
+	// header the host rebuilds the envelope with and the elements the
+	// operator approved. PlanHash is the digest of that envelope.
+	Plan *PlanReference `json:"plan,omitempty"`
+}
+
+// PlanReference is what an execution carries of the approved plan
+// envelope (chapter 7 of the security remediation plan). The content is
+// not carried in full - the host computes it again right before the
+// change, that is the point - only the header the planner does not
+// compute from the host and the elements the operator approved, so a
+// refusal names the element that moved. It travels in the payload the
+// panel hashes and the capability signs, so the agent cannot change what
+// the helper expects.
+type PlanReference struct {
+	SchemaVersion     uint32 `json:"schema_version,omitempty"`
+	PlannerVersion    string `json:"planner_version,omitempty"`
+	InventoryRevision string `json:"inventory_revision,omitempty"`
+	ResourceRevision  string `json:"resource_revision,omitempty"`
+	// ExpiresAt is the expiry of the plan in RFC 3339; it is part of the
+	// digest, so the host needs the same moment to compute the same one.
+	ExpiresAt string            `json:"expires_at,omitempty"`
+	Changes   []PlanChangeEntry `json:"changes,omitempty"`
+}
+
+// PlanChangeEntry is one approved element of a package plan: the exact
+// version, architecture and origin of a package and the direction of its
+// change.
+type PlanChangeEntry struct {
+	Name             string `json:"name"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	CandidateVersion string `json:"candidate_version,omitempty"`
+	Architecture     string `json:"architecture,omitempty"`
+	Origin           string `json:"origin,omitempty"`
+	Action           string `json:"action,omitempty"`
 }
 
 // PackagePlanPayload describes planning an upgrade.
@@ -1617,6 +1665,9 @@ type PackageUpgradePayload struct {
 	PlanHash     string   `json:"plan_hash,omitempty"`
 	Packages     []string `json:"packages,omitempty"`
 	SecurityOnly bool     `json:"security_only,omitempty"`
+	// Plan is the approved plan envelope the execution is bound to, see
+	// PlanReference.
+	Plan *PlanReference `json:"plan,omitempty"`
 }
 
 // AgentUpgradePayload describes replacing the agent with a named version.
@@ -2154,6 +2205,11 @@ type StoragePayload struct {
 	// reboot.
 	ExpectedSerial    string `json:"expected_serial,omitempty"`
 	ExpectedSizeBytes uint64 `json:"expected_size_bytes,omitempty"`
+	// ExpectedByID and ExpectedWWN are the stable identity of the device a
+	// destructive operation binds to; the host refuses without them. The
+	// size stays a description and is never an identity.
+	ExpectedByID string `json:"expected_by_id,omitempty"`
+	ExpectedWWN  string `json:"expected_wwn,omitempty"`
 	// Size is the increment of the volume, e.g. "+10G".
 	Size  string `json:"size,omitempty"`
 	Label string `json:"label,omitempty"`
@@ -2322,6 +2378,9 @@ type ComposePayload struct {
 	// PlanDigest binds the deployment to a plan. An empty one is allowed only
 	// while planning; a deployment without it has no basis.
 	PlanDigest string `json:"plan_digest,omitempty"`
+	// ImageDigests are the digests the plan bound, by service; the host
+	// refuses the deployment when a tag has moved since.
+	ImageDigests map[string]string `json:"image_digests,omitempty"`
 }
 
 // DockerContainerPayload names the container of an operation.
@@ -3219,10 +3278,11 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		// A destructive operation has to know what it aims at: the path alone
 		// is not enough, because /dev/sdX points at a different disk after a
-		// reboot.
-		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
-			payload.Storage.ExpectedUUID == "" {
-			return fmt.Errorf("formatting requires the identity of the device (serial, UUID or size)")
+		// reboot, and a size is a description shared by every disk of that
+		// model. The stable identity is the by-id link.
+		if payload.Storage.ExpectedByID == "" {
+			return &RefusalError{Code: "stable_identity_required",
+				Err: fmt.Errorf("formatting requires the stable identity of the device (its /dev/disk/by-id link); the size is not an identity")}
 		}
 		_, err := storage.FormatArguments(payload.Storage.Device,
 			payload.Storage.FSType, payload.Storage.Label)
@@ -3232,9 +3292,9 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		if payload.Storage.ExpectedSerial == "" && payload.Storage.ExpectedSizeBytes == 0 &&
-			payload.Storage.ExpectedUUID == "" {
-			return fmt.Errorf("wiping requires the identity of the device (serial, UUID or size)")
+		if payload.Storage.ExpectedByID == "" {
+			return &RefusalError{Code: "stable_identity_required",
+				Err: fmt.Errorf("wiping requires the stable identity of the device (its /dev/disk/by-id link); the size is not an identity")}
 		}
 		_, err := storage.WipeArguments(payload.Storage.Device)
 		return err
@@ -3469,6 +3529,9 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		if payload.Journal.FollowSeconds > maxFollowSeconds {
 			return fmt.Errorf("a live view must not last longer than %d s", maxFollowSeconds)
+		}
+		if payload.Journal.BootID != "" {
+			return fmt.Errorf("a live view has one boot, the current one; boot_id is a filter of journal.read")
 		}
 		return validateJournalPayload(payload.Journal)
 

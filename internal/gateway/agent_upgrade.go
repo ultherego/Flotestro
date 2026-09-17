@@ -24,7 +24,7 @@ import (
 // campaign engine reads the job states the way it does for every other
 // operation.
 func (s *AgentService) settleAgentUpgrade(ctx context.Context,
-	hostID, version string) {
+	hostID, version string, fence jobs.Fence) {
 	jobsOpen, err := s.jobs.OpenTasksOfAction(ctx, hostID, string(opspec.ActionAgentUpgrade))
 	if err != nil {
 		s.log.Error("the jobs of the agent replacement were not read", "host_id", hostID, "err", err)
@@ -49,24 +49,24 @@ func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 			// That is a failure of the job rather than a failure of the
 			// host.
 			s.closeUpgrade(ctx, hostID, job, jobs.StateFailed, "agent_version_mismatch",
-				fmt.Sprintf("the host came back in version %s, expected %s", version, target))
+				fmt.Sprintf("the host came back in version %s, expected %s", version, target), fence)
 			continue
 		}
 		s.closeUpgrade(ctx, hostID, job, jobs.StateSucceeded, "",
-			"the agent came back in version "+version)
+			"the agent came back in version "+version, fence)
 	}
 }
 
 // closeUpgrade writes the result of a job of an agent replacement.
 func (s *AgentService) closeUpgrade(ctx context.Context, hostID string,
-	job jobs.OpenTask, state jobs.State, code, message string) {
+	job jobs.OpenTask, state jobs.State, code, message string, fence jobs.Fence) {
 	status := "succeeded"
 	if state != jobs.StateSucceeded {
 		status = "failed"
 	}
 	if _, err := s.jobs.RecordResult(ctx, job.JobID, job.AttemptID, jobs.Result{
 		Status: status, ErrorCode: code, Message: message,
-	}, state); err != nil {
+	}, state, fence); err != nil {
 		s.log.Error("the result of the agent replacement was not written",
 			"host_id", hostID, "job_id", job.JobID, "err", err)
 		return

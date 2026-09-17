@@ -3,11 +3,12 @@ package agent
 import (
 	"context"
 	"strconv"
+	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/logs"
 	"github.com/ultherego/flotestro/internal/opspec"
-	"time"
 )
 
 const journalctlPath = "/usr/bin/journalctl"
@@ -40,6 +41,20 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 	// after the position the cursor names, still bounded by the line count.
 	if payload.AfterCursor != "" {
 		args = append(args, "--after-cursor="+payload.AfterCursor)
+	}
+	// A boot narrows the read to one boot of the host. The identifier is
+	// checked once more here, on the machine: the panel checks it too, but
+	// the argument goes to journalctl from this process, and a value that
+	// is not a boot must not become "every boot" on the way. This agent
+	// announces the filter as a feature of its journald adapter; an agent
+	// without the feature never sees the field, because the panel refuses
+	// the read before dispatch.
+	if payload.BootID != "" {
+		bootID, err := logs.NormalizeBootID(payload.BootID)
+		if err != nil {
+			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
+		}
+		args = append(args, "--boot="+bootID)
 	}
 
 	timeout := timeoutOf(task, opspec.ActionReadJournal)

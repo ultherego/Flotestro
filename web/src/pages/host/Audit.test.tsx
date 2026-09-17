@@ -29,6 +29,33 @@ describe("actorLabel", () => {
     expect(actorLabel({ actor_type: "user", actor_id: "bootstrap-admin" }, host, t)).toEqual({ text: "bootstrap-admin" });
     expect(actorLabel({ actor_type: "system", actor_id: "panel" }, host, t)).toEqual({ text: "panel" });
   });
+
+  it("reads the snapshot: the name as it was, the identifier on hover, a link only to a resource with a page", () => {
+    const person = { actor_type: "user", actor_id: "alice", actor: {
+      principal_id: "6f1d2c3b-4a5e-4f60-8b71-9c8d7e6f5a4b", subject: "alice", display_name: "Alice Kowalska", kind: "user",
+    } };
+    expect(actorLabel(person, host, t)).toEqual({ text: "Alice Kowalska", to: undefined, title: "6f1d2c3b-4a5e-4f60-8b71-9c8d7e6f5a4b" });
+
+    // The agent of this host is named as such and not linked to itself.
+    const own = { actor_type: "agent", actor_id: host.id, actor: {
+      subject: host.id, kind: "agent", resource_type: "host", resource_id: host.id, resource_name: "old-name",
+    } };
+    expect(actorLabel(own, host, t)).toEqual({ text: "agent of agent-arch", title: host.id });
+
+    // A machine identifier that parses as a host identifier is not a host.
+    const machine = { actor_type: "agent", actor_id: "2cd1131243654fe6b49ee4d704ea2c5a", actor: {
+      subject: "2cd1131243654fe6b49ee4d704ea2c5a", kind: "machine", resource_type: "machine", resource_name: "2cd1131243654fe6b49ee4d704ea2c5a",
+    } };
+    expect(actorLabel(machine, host, t).to).toBeUndefined();
+
+    const campaign = { actor_type: "system", actor_id: "campaign:b9aa09ed-534f-48d5-89fb-12750d0560b6", actor: {
+      subject: "campaign:b9aa09ed-534f-48d5-89fb-12750d0560b6", kind: "system", resource_type: "campaign",
+      resource_id: "b9aa09ed-534f-48d5-89fb-12750d0560b6", resource_name: "kernel rollout",
+    } };
+    expect(actorLabel(campaign, host, t)).toEqual({
+      text: "campaign kernel rollout", to: "/campaigns/b9aa09ed-534f-48d5-89fb-12750d0560b6", title: "b9aa09ed-534f-48d5-89fb-12750d0560b6",
+    });
+  });
 });
 
 describe("digest", () => {

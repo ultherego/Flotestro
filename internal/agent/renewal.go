@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,11 +14,11 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
+	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
 // renewalThreshold says when to start renewing: when less than a third of the
@@ -157,22 +159,32 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	}
 
 	// The renewal goes over mTLS with the current certificate: that is the proof
-	// of identity. The enrollment token takes no part in it.
+	// of identity. The enrollment token takes no part in it. The material is
+	// read once, so the handshake and the proof use the same key.
+	material := identity.Certificate
+	peer := newPeerIdentity()
 	client := agentv1connect.NewAgentServiceClient(&http.Client{
-		Timeout: 60 * time.Second,
-		Transport: &http2.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{identity.Certificate},
-				RootCAs:      identity.CAPool,
-				MinVersion:   tls.VersionTLS13,
-			},
-		},
+		Timeout:   60 * time.Second,
+		Transport: newObservedHTTP2Client(material, identity.CAPool, peer).Transport,
 	}, options.GatewayURL)
 
-	response, err := client.RenewCertificate(ctx, connect.NewRequest(&agentv1.RenewCertificateRequest{
+	request := &agentv1.RenewCertificateRequest{
 		CsrPem: csrPEM,
 		Build:  &agentv1.AgentBuild{AgentVersion: Version},
-	}))
+	}
+	// Through a relay the handshake proves the relay, so the request has to
+	// carry the host's own proof: a challenge the panel issued for this
+	// host and this relay, signed with the key the host holds now together
+	// with the CSR, and the envelope over the request. The challenge is
+	// asked for first - the call is also what makes the handshake happen
+	// and tells the agent whom it reached. A panel from before the
+	// challenge answers Unimplemented, and the renewal goes on as before:
+	// such a panel accepts a direct renewal on the handshake alone.
+	if err := proveRenewal(ctx, client, peer, material, identity.HostID, request, csrPEM, options.Log); err != nil {
+		return err
+	}
+
+	response, err := client.RenewCertificate(ctx, connect.NewRequest(request))
 	if err != nil {
 		return fmt.Errorf("the renewal was refused: %w", err)
 	}
@@ -204,6 +216,59 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 	// The renewal carries the panel's current capability keys: a rotated
 	// key reaches the helper here, and again with the next session.
 	deliverHelperTrust(ctx, response.Msg.GetHelperTrust(), options.Log)
+	return nil
+}
+
+// proveRenewal asks the panel for a challenge and binds the request to the
+// current host key when the path goes through a relay. On a direct
+// connection the challenge is asked for all the same - the agent does not
+// know whom it reached until the handshake - and the proof is attached;
+// the gateway ignores it there, because the handshake is the proof.
+func proveRenewal(ctx context.Context, client agentv1connect.AgentServiceClient, peer *peerIdentity,
+	material tls.Certificate, hostID string, request *agentv1.RenewCertificateRequest, csrPEM []byte,
+	log *slog.Logger) error {
+	if log == nil {
+		log = slog.Default()
+	}
+	challenge, err := client.RequestIdentityChallenge(ctx, connect.NewRequest(&agentv1.IdentityChallengeRequest{}))
+	if err != nil {
+		if connect.CodeOf(err) == connect.CodeUnimplemented {
+			// A panel from before the challenge. A relay in the path would
+			// have forwarded the refusal of the panel just the same, and a
+			// relayed renewal never worked against such a panel.
+			log.Info("the panel issues no renewal challenge; renewing on the handshake alone")
+			return nil
+		}
+		return fmt.Errorf("the renewal challenge was refused: %w", err)
+	}
+	relayID := peer.relayID(ctx, handshakeWait)
+	if named := challenge.Msg.GetRelayId(); named != relayID {
+		// The panel bound the challenge to another relay than the one this
+		// connection reached - or to none. The proof would not verify;
+		// better to say so here than to spend the challenge on a refusal.
+		return fmt.Errorf("the challenge names relay %q, the connection reached %q", named, relayID)
+	}
+	signer := newEnvelopeSigner(material, hostID, relayID, log)
+	if signer == nil {
+		return errors.New("the identity carries no key to sign the renewal proof with")
+	}
+	block, _ := pem.Decode(csrPEM)
+	if block == nil {
+		return errors.New("the certificate request is not PEM")
+	}
+	proof, err := relayproof.SignRenewalProof(signer.Key(), block.Bytes, challenge.Msg.GetChallenge(), relayID)
+	if err != nil {
+		return err
+	}
+	request.ServerChallenge = challenge.Msg.GetChallenge()
+	request.Proof = proof
+	// The envelope signs the request as it stands without the envelope
+	// itself; the gateway clears the field before it digests.
+	envelope, err := signer.SignRequest(relayproof.KindRenewCertificate, request)
+	if err != nil {
+		return err
+	}
+	request.Identity = envelope
 	return nil
 }
 

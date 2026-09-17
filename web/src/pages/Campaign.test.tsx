@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compensationOffer, secretReferences, timelineCSV } from "./Campaign";
+import { cancelOutcomeLine, canSkipTarget, compensationOffer, secretReferences, timelineCSV } from "./Campaign";
 import { bulkPrefill } from "./Bulk";
 
 /* The compensation card is a decision read off the record and the
@@ -117,5 +117,50 @@ describe("timelineCSV", () => {
     expect(lines[0]).toBe("occurred_at,event_type,host,host_id,job_id,detail");
     expect(lines[1]).toBe('"2026-09-15T10:00:00Z","campaign.approved","","","","—"');
     expect(lines[2]).toBe('"2026-09-15T10:01:00Z","target.failed","alpha","host-a","job-1","wave 0 · unit_not_found · =SUM(1) ""quoted"""');
+  });
+});
+
+/* The cancel protocol on a row: the host's answer in a sentence, or the
+   wait for it, and nothing for a host nobody asked. The sentence carries
+   the phase the host named, because the outcome alone does not say what
+   the host was doing. */
+describe("cancelOutcomeLine", () => {
+  const t = (key: string, params?: Record<string, string | number>) =>
+    key.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ""));
+
+  it("says nothing for a host nobody asked to stop", () => {
+    expect(cancelOutcomeLine({}, t)).toBe("");
+    expect(cancelOutcomeLine({ cancel_phase: "started" }, t)).toBe("");
+  });
+
+  it("says the answer is awaited once the cancel was asked", () => {
+    expect(cancelOutcomeLine({ cancel_requested_at: "2026-09-17T10:00:00Z" }, t)).toContain("waiting for the host");
+  });
+
+  it("names every outcome of the protocol with the phase the host was in", () => {
+    const asked = { cancel_requested_at: "2026-09-17T10:00:00Z" };
+    expect(cancelOutcomeLine({ ...asked, cancel_outcome: "not_started", cancel_phase: "awaiting_lock" }, t)).toContain("had not started");
+    expect(cancelOutcomeLine({ ...asked, cancel_outcome: "interrupted", cancel_phase: "started" }, t)).toContain("interrupted the task while it was started");
+    expect(cancelOutcomeLine({ ...asked, cancel_outcome: "not_interruptible", cancel_phase: "mutating" }, t)).toContain("runs the task to its end (mutating)");
+    expect(cancelOutcomeLine({ ...asked, cancel_outcome: "already_done" }, t)).toContain("already finished");
+  });
+});
+
+/* The skip is offered where the server allows it: a host waiting for its
+   connection in a campaign that may still change hosts. */
+describe("canSkipTarget", () => {
+  it("offers the skip for a host waiting for its connection while the campaign runs", () => {
+    for (const state of ["canary", "running", "paused", "manual_gate", "planned"]) {
+      expect(canSkipTarget({ state: "queued_offline" }, state)).toBe(true);
+    }
+  });
+
+  it("offers nothing for a host that is not waiting offline, or once the campaign settled", () => {
+    for (const state of ["pending", "running", "dispatched", "skipped", "succeeded", "canceled"]) {
+      expect(canSkipTarget({ state }, "running")).toBe(false);
+    }
+    for (const state of ["completed", "failed", "canceled", "expired"]) {
+      expect(canSkipTarget({ state: "queued_offline" }, state)).toBe(false);
+    }
   });
 });

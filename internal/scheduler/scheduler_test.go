@@ -4,7 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"testing"
+	"time"
 
+	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/jobs"
 )
 
@@ -31,5 +33,39 @@ func TestTheAmbiguityCheckNamesEachHostOnceAndNeedsNoDatabaseToPass(t *testing.T
 	}
 	if ambiguous["h1"] {
 		t.Error("a nil answer must read as nobody ambiguous")
+	}
+}
+
+// A task goes out only to the session the host's ownership row names,
+// with the token it claimed: a host nobody owns, a host whose lease ran
+// out, and a host a newer session claimed on another instance all hold
+// the task, each under its own reason. The registry is not asked - it is
+// the memory of one process, and the row decides.
+func TestATaskGoesOutOnlyToTheLiveOwnerWithItsToken(t *testing.T) {
+	now := time.Now()
+	session := gateway.NewSession("session-b", "h1", "0.53.0", "boot", "203.0.113.9", 1)
+	session.FenceToken = 42
+
+	cases := []struct {
+		name   string
+		owner  jobs.Owner
+		reason string
+	}{
+		{name: "no row", owner: jobs.Owner{}, reason: ErrorSessionUnowned},
+		{name: "released row", owner: jobs.Owner{Token: 42}, reason: ErrorSessionUnowned},
+		{name: "lease ran out", owner: jobs.Owner{SessionID: "session-b", Token: 42,
+			LeaseUntil: now.Add(-time.Second)}, reason: ErrorSessionUnowned},
+		{name: "another session owns the host", owner: jobs.Owner{SessionID: "session-c", Token: 43,
+			LeaseUntil: now.Add(time.Minute)}, reason: jobs.ErrorSessionFenceStale},
+		{name: "same session, older token", owner: jobs.Owner{SessionID: "session-b", Token: 41,
+			LeaseUntil: now.Add(time.Minute)}, reason: jobs.ErrorSessionFenceStale},
+		{name: "the live owner", owner: jobs.Owner{SessionID: "session-b", Token: 42,
+			LeaseUntil: now.Add(time.Minute)}},
+	}
+	for _, c := range cases {
+		reason, ok := deliverable(c.owner, session, now)
+		if ok != (c.reason == "") || reason != c.reason {
+			t.Errorf("%s: deliverable = %v with reason %q, expected reason %q", c.name, ok, reason, c.reason)
+		}
 	}
 }

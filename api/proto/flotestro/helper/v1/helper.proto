@@ -294,6 +294,37 @@ message PackageActionRequest {
   // names the version explicitly enables it - such as replacing the agent
   // with the rollback version.
   bool allow_downgrade = 6;
+  // The approved plan the transaction is bound to. The helper computes the
+  // plan again under the package lock right before the transaction,
+  // rebuilds the envelope with this header and compares the digest: a
+  // difference is stale_plan, another planner version replan_required, a
+  // plan past its expiry plan_expired. With a digest the transaction runs
+  // on the exact specs of the plan computed then - never on names the
+  // tool resolves anew. Without a digest the operation is a legacy one
+  // and runs as before.
+  bytes plan_hash = 7;
+  uint32 plan_schema_version = 8;
+  string planner_version = 9;
+  string plan_host_id = 10;
+  string plan_inventory_revision = 11;
+  string plan_resource_revision = 12;
+  int64 plan_expires_at_unix = 13;
+  // The elements the operator approved, so a refusal names the one that
+  // moved rather than two digests.
+  repeated PackageExactSpec exact_specs = 14;
+}
+
+// PackageExactSpec is one approved element of a package plan: the exact
+// version, architecture and origin of one package and the direction of
+// its change.
+message PackageExactSpec {
+  string name = 1;
+  string current_version = 2;
+  string candidate_version = 3;
+  string architecture = 4;
+  string origin = 5;
+  // install, upgrade, downgrade or remove.
+  string action = 6;
 }
 
 message UnitActionRequest {
@@ -700,6 +731,15 @@ message StorageRequest {
   // The fingerprint of the plan the operator agreed to; the helper computes
   // it once more.
   string plan_hash = 15;
+  // The stable identity of the device a destructive operation binds to: the
+  // /dev/disk/by-id link and the WWN the plan was computed for. The helper
+  // reads the device again under the storage lock and refuses without a
+  // by-id link (stable_identity_required), on a different link, WWN or
+  // serial (disk_changed) and on a device that carries root, mounted
+  // partitions or a volume group member (disk_in_use). The size is never an
+  // identity.
+  string expected_by_id = 16;
+  string expected_wwn = 17;
 }
 
 message StorageResult {
@@ -1159,6 +1199,11 @@ message ComposeRequest {
   string manifest = 3;
   // The hash of the approved plan. A deployment without it has no basis.
   string plan_digest = 4;
+  // The image digests the plan resolved, by service name. The deployment
+  // resolves the tags once more right before "up" and refuses with
+  // stale_plan when any moved; the containers run image@sha256, never the
+  // tag as it resolves at that moment.
+  map<string, string> image_digests = 5;
 }
 
 message ComposeResult {
@@ -1413,6 +1458,23 @@ message PackageActionResult {
   // only the script did not do its part. The transaction is a success with
   // a defect, and the defect is named rather than hidden in the output.
   repeated string scriptlet_errors = 9;
+  // The expected effects of the approved plan settled against the state
+  // read after the transaction: each one achieved or not, with what was
+  // found. A transaction that left an effect unreached ends with the code
+  // effects_partial and both lists filled.
+  repeated PackageEffectOutcome effects_achieved = 10;
+  repeated PackageEffectOutcome effects_missed = 11;
+}
+
+// PackageEffectOutcome is one expected effect of a plan after the
+// transaction: the subject, what was expected of it, what was found.
+message PackageEffectOutcome {
+  // package_version or package_absent.
+  string kind = 1;
+  string subject = 2;
+  string expected = 3;
+  string observed = 4;
+  bool achieved = 5;
 }
 
 // PackageRepairRequest unblocks package operations. The answers to the

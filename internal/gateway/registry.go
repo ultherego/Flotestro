@@ -7,6 +7,7 @@ import (
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/jobs"
 )
 
 // ErrNotConnected means the host has no active session on this gateway.
@@ -43,6 +44,17 @@ type Session struct {
 	// Two gateways do not see each other; they see a shared database, so the
 	// number comes from it and it points at the winner.
 	Epoch int64
+	// FenceToken is the token the session got when it claimed the host in
+	// host_session_owners, and OwnerInstanceID names the control-plane
+	// process that claimed it. The epoch says which session is the newest;
+	// the token is what every delivery and every result written on this
+	// session carries, so that the database refuses the writes of a
+	// session that was superseded - a late notification closes the stream
+	// slowly, the token refuses the write at once. Both are set once at
+	// the open, before the session enters the registry, and are read from
+	// the registry under its lock.
+	FenceToken      uint64
+	OwnerInstanceID string
 
 	// outbound is the only path of sending to the agent. A stream is not safe
 	// for concurrent Sends, so only one goroutine writes to it.
@@ -79,6 +91,12 @@ func NewSession(id, hostID, agentVersion, bootID, remoteAddr string, buffer int)
 		finalReady: make(chan *agentv1.FinalReady, 1),
 		finished:   make(chan struct{}),
 	}
+}
+
+// Fence is what the writes made on this session carry: its identifier
+// and the token of its claim on the host.
+func (s *Session) Fence() jobs.Fence {
+	return jobs.Fence{SessionID: s.ID, Token: s.FenceToken}
 }
 
 // AcceptFinalReady hands the agent's answer to the handshake. A second

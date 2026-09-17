@@ -671,7 +671,7 @@ func (s *Server) fanOutsInFlight(ctx context.Context, subject string) (mine, tot
 		select count(distinct f.id) filter (where f.created_by = $1), count(distinct f.id)
 		  from read_fanouts f
 		  join jobs j on j.fanout_id = f.id
-		 where j.state in ('planned', 'awaiting_approval', 'queued', 'leased', 'dispatched', 'running')`,
+		 where j.state in ('planned', 'awaiting_approval', 'queued', 'leased', 'dispatched', 'running', 'cancel_requested')`,
 		subject).Scan(&mine, &total)
 	return mine, total, err
 }

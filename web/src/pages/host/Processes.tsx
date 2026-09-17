@@ -5,6 +5,7 @@ import type { Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
+import { ColumnChooser, Td, Th, useColumns, type ColumnDef } from "../../components/SortableTable";
 import {
   Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
   useHost, useModule, useModuleRefresh,
@@ -67,6 +68,25 @@ export function kernelThread(process: Pick<Process, "pid" | "ppid">): boolean {
  * taken on request and has an upper bound. The trend of the host over
  * time is the Monitoring module's.
  */
+/**
+ * The columns of the process table. The PID and the command are the
+ * identity of a row and cannot be taken off the screen: a process is
+ * known by its number and by what it runs, and a signal is aimed by both.
+ */
+export function processColumns(t: (text: string) => string): ColumnDef[] {
+  return [
+    { key: "pid", label: "PID", fixed: true, className: "hm-num" },
+    { key: "user", label: t("User") },
+    { key: "memory", label: t("Memory") },
+    { key: "cpu", label: t("CPU time share"), secondary: true },
+    { key: "threads", label: t("Threads"), secondary: true, className: "hm-num" },
+    { key: "state", label: t("State") },
+    { key: "managed_by", label: t("Managed by") },
+    { key: "command", label: t("Command"), fixed: true },
+    { key: "actions", label: t("Actions") },
+  ];
+}
+
 export function Processes() {
   const t = useT();
   const host = useHost();
@@ -78,6 +98,8 @@ export function Processes() {
   const [filter, setFilter] = useState("");
   const [tree, setTree] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<number>>(() => new Set());
+  // The columns of the table, remembered per table in the browser.
+  const columns = useColumns("host-processes", processColumns(t));
   const [toSignal, setToSignal] = useState<{ process: Process; signal: string } | null>(null);
   const [message, setMessage] = useState("");
 
@@ -218,6 +240,7 @@ export function Processes() {
               <input type="checkbox" checked={tree} onChange={(e) => setTree(e.target.checked)} />
               {t("Tree")}
             </label>
+            <ColumnChooser columns={columns} />
           </>
         )}
         flush
@@ -241,43 +264,47 @@ export function Processes() {
             <Table>
               <thead>
                 <tr>
-                  <th className="hm-num">PID</th><th>{t("User")}</th><th>{t("Memory")}</th>
                   {/* The snapshot has no rate: the share is of the CPU time
                       the slice has used since its processes started. */}
-                  <th title={t("The share of the CPU time used so far by the processes in this slice, not a load of the moment.")}>{t("CPU time share")}</th>
-                  <th className="hm-num">{t("Threads")}</th>
-                  <th>{t("State")}</th><th>{t("Managed by")}</th><th>{t("Command")}</th><th>{t("Actions")}</th>
+                  {columns.all.map((column) => (
+                    <Th
+                      key={column.key}
+                      columns={columns}
+                      name={column.key}
+                      title={column.key === "cpu" ? t("The share of the CPU time used so far by the processes in this slice, not a load of the moment.") : undefined}
+                    />
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {rows.map(({ process, depth, children }) => (
                   <tr key={process.pid}>
-                    <td className="hm-num">{process.pid}</td>
-                    <td>{process.user || <span className="badge unknown">{t("unknown")}</span>}</td>
-                    <td>
+                    <Td columns={columns} name="pid">{process.pid}</Td>
+                    <Td columns={columns} name="user">{process.user || <span className="badge unknown">{t("unknown")}</span>}</Td>
+                    <Td columns={columns} name="memory">
                       {kernelThread(process)
                         ? <span className="source" title={t("A kernel thread has no address space of its own.")}>—</span>
                         : <Meter value={process.rss_bytes} max={maxRss} tone="info" text={bytes(process.rss_bytes)} />}
-                    </td>
-                    <td>
+                    </Td>
+                    <Td columns={columns} name="cpu">
                       <Meter
                         value={process.cpu_ticks}
                         max={cpuTotal}
                         tone="info"
                         text={cpuTotal > 0 ? `${(process.cpu_ticks / cpuTotal * 100).toFixed(1)}%` : "—"}
                       />
-                    </td>
-                    <td className="hm-num">{process.threads}</td>
-                    <td title={process.state}>{t(stateWords(process.state))}</td>
+                    </Td>
+                    <Td columns={columns} name="threads">{process.threads}</Td>
+                    <Td columns={columns} name="state" title={process.state}>{t(stateWords(process.state))}</Td>
                     {/* The PID alone says nothing about whose process it is. */}
-                    <td className="hm-mono">
+                    <Td columns={columns} name="managed_by" className="hm-mono">
                       {process.container
                         ? `${t("container")} ${process.container.slice(0, 12)}`
                         : process.unit || (kernelThread(process) ? <span className="source">{t("kernel")}</span> : "—")}
-                    </td>
+                    </Td>
                     {/* In the tree the command is indented by its depth and a
                         parent carries the fold; the flat table has neither. */}
-                    <td className="hm-mono" title={process.command || process.name}>
+                    <Td columns={columns} name="command" className="hm-mono" title={process.command || process.name}>
                       {tree && depth > 0 && (
                         <span data-testid="process-indent" data-depth={depth} style={{ display: "inline-block", width: depth * 16 }} />
                       )}
@@ -294,14 +321,14 @@ export function Processes() {
                       )}
                       {tree && children > 0 && " "}
                       {(process.command || process.name).slice(0, 60)}
-                    </td>
+                    </Td>
                     {/* PID 1 and a kernel thread take no signal from here:
                         init ignores what it does not handle and a kernel
                         thread cannot be ended; the buttons say so instead
                         of ordering a job the host refuses. The agent's own
                         process is a warning, not a refusal - killing it
                         cuts the host off until systemd brings it back. */}
-                    <td>
+                    <Td columns={columns} name="actions">
                       {process.pid === 1 || kernelThread(process) ? (
                         <span className="source" title={process.pid === 1
                           ? t("PID 1 ignores signals it does not handle; a reboot is ordered on the Power tab.")
@@ -315,7 +342,7 @@ export function Processes() {
                           <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
                         </div>
                       )}
-                    </td>
+                    </Td>
                   </tr>
                 ))}
               </tbody>

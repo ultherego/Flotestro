@@ -22,12 +22,27 @@ type Change struct {
 type Service struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`
-	// ImageDigest is filled when the image is already on the host. Empty
-	// means an image yet to be pulled - and then it cannot be said up front
-	// what exactly will come up.
+	// ImageDigest is the digest the tag resolved to when the plan was
+	// computed - from the reference itself when it is pinned, from the
+	// registry, or from the image already on the host. A plan is not
+	// computed without it: a tag says what the operator meant, the digest
+	// says what will run.
 	ImageDigest string `json:"image_digest,omitempty"`
+	// DigestSource names where the digest came from: reference, registry
+	// or local.
+	DigestSource string `json:"digest_source,omitempty"`
+	// PinnedImage is the reference the deployment uses: the repository with
+	// the digest instead of the tag.
+	PinnedImage string `json:"pinned_image,omitempty"`
 	Replicas    int    `json:"replicas,omitempty"`
 }
+
+// Sources of an image digest.
+const (
+	DigestFromReference = "reference"
+	DigestFromRegistry  = "registry"
+	DigestFromLocal     = "local"
+)
 
 // Plan describes what the deployment changes on the host.
 type Plan struct {
@@ -46,6 +61,15 @@ type Plan struct {
 	// UnavailableReason says why the plan could not be computed.
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ComputedAt        time.Time `json:"computed_at"`
+}
+
+// ImageDigests maps every service to the digest the plan bound it to.
+func (p Plan) ImageDigests() map[string]string {
+	digests := make(map[string]string, len(p.Services))
+	for _, service := range p.Services {
+		digests[service.Name] = service.ImageDigest
+	}
+	return digests
 }
 
 // Result describes the deployment result.

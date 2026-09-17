@@ -29,7 +29,7 @@ func CollectStorage(ctx context.Context) storage.Snapshot {
 		return snapshot
 	}
 	output, err := commandOutput(ctx, storage.LsblkPath, "-J", "-b", "-o",
-		columns(storage.LsblkColumns))
+		storage.Columns(storage.LsblkColumns))
 	if err != nil {
 		snapshot.UnavailableReason = "lsblk: " + err.Error()
 		return snapshot
@@ -39,6 +39,11 @@ func CollectStorage(ctx context.Context) storage.Snapshot {
 		snapshot.UnavailableReason = err.Error()
 		return snapshot
 	}
+	// The by-id links and the holders need no root either: /dev/disk/by-id
+	// and /sys/class/block are readable by everyone. They are what the
+	// panel shows as the identity of a device and what a destructive plan
+	// binds to.
+	storage.ReadIdentity(devices)
 	snapshot.Devices = devices
 
 	mountinfo, err := os.ReadFile("/proc/self/mountinfo")
@@ -46,9 +51,10 @@ func CollectStorage(ctx context.Context) storage.Snapshot {
 		snapshot.UnavailableReason = "mountinfo: " + err.Error()
 		return snapshot
 	}
-	fstab, _ := os.ReadFile("/etc/fstab")
+	fstab, _ := os.ReadFile(storage.FstabPath)
 	snapshot.Mounts = storage.MergeMounts(
 		storage.ParseMountinfo(string(mountinfo)), storage.ParseFstab(string(fstab)))
+	snapshot.FstabRevision = storage.FstabRevision(fstab)
 	fillUsage(snapshot.Mounts)
 
 	if lvmProbe != nil {
@@ -67,16 +73,4 @@ func CollectStorage(ctx context.Context) storage.Snapshot {
 		snapshot.RAIDUnavailableReason = "this kernel has no software RAID support (/proc/mdstat)"
 	}
 	return snapshot
-}
-
-// columns assembles the list of columns for lsblk.
-func columns(names []string) string {
-	result := ""
-	for i, name := range names {
-		if i > 0 {
-			result += ","
-		}
-		result += name
-	}
-	return result
 }

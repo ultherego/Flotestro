@@ -148,6 +148,11 @@ export function refusalName(code: string): string {
     case "relay_identity_missing": return "relay did not attest the certificate";
     case "relay_identity_invalid": return "relay attestation unreadable";
     case "relay_scope_mismatch": return "relay of another site or environment";
+    case "relay_envelope_invalid": return "relay envelope invalid";
+    case "relay_body_hash_mismatch": return "relayed payload altered";
+    case "relay_sequence_replayed": return "relayed message replayed";
+    case "relay_host_signature_invalid": return "host signature invalid";
+    case "blocked_upgrade_required": return "agent upgrade required";
     default:
       return code.startsWith("lifecycle_") ? `host ${code.slice("lifecycle_".length)}` : code;
   }
@@ -264,6 +269,11 @@ export type Job = {
   hostname?: string;
   campaign_id?: string;
   action_type: string;
+  /** The cancel protocol: when it was asked, when the host answered, and what it found. */
+  cancel_requested_at?: string;
+  cancel_ack_at?: string;
+  cancel_outcome?: string;
+  cancel_phase?: string;
   state: string;
   payload: unknown;
   payload_hash: string;
@@ -405,6 +415,9 @@ export type CampaignTarget = {
   host_id: string;
   hostname?: string;
   wave: number;
+  cancel_requested_at?: string;
+  cancel_outcome?: string;
+  cancel_phase?: string;
   // One of TARGET_STATES in lib/targets. A terminal state is one of
   // succeeded, no_change, failed, unknown, skipped, ineligible, excluded,
   // canceled; the report totals count each of them apart.
@@ -457,6 +470,11 @@ export type AuditEvent = {
   approval_chain?: { created_by: string; approvers: string[] };
   before?: unknown;
   after?: unknown;
+  /** The actor as it was when the event was written; a link is made only from resource_type host, relay or campaign. */
+  actor?: {
+    principal_id?: string; subject?: string; display_name?: string; kind?: string;
+    resource_type?: string; resource_id?: string; resource_name?: string; credential_id?: string;
+  };
 };
 
 export type Whoami = {

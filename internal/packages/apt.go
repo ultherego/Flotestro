@@ -17,6 +17,9 @@ const (
 	aptMarkPath    = "/usr/bin/apt-mark"
 	aptCachePath   = "/usr/bin/apt-cache"
 	dpkgStatusPath = "/var/lib/dpkg/status"
+	// aptListsDir holds the package lists and the release files that sign
+	// them; the release files are the identity of the metadata a plan reads.
+	aptListsDir = "/var/lib/apt/lists"
 	// The archives land in the cache and the database lives under /var/lib;
 	// both are on /var, which is often a file system of its own.
 	aptCacheDir     = "/var/cache/apt/archives"
@@ -61,6 +64,14 @@ func (a *APT) LockHeld() (bool, string) {
 // the lock nor root, so planning does not collide with the manual work of the
 // administrator.
 func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
+	plan, err := a.plan(ctx, options)
+	if err != nil {
+		return plan, err
+	}
+	return finishPlan(ctx, a, plan, options), nil
+}
+
+func (a *APT) plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: a.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 	// A package waiting for its configuration stops every transaction, so the
 	// plan says so at once. Without that the operator learns about the block
@@ -86,6 +97,11 @@ func (a *APT) Plan(ctx context.Context, options Options) (Plan, error) {
 			continue
 		}
 		plan.Changes = append(plan.Changes, change)
+		// An upgrade can drop a package as well - a conflict resolved by a
+		// replacement - and that is a removal the operator approves or not.
+		if name, ok := parseAptRemvLine(line); ok {
+			plan.Removals = append(plan.Removals, name)
+		}
 	}
 
 	// The archives of a narrowed upgrade are those of the named packages,
@@ -111,11 +127,26 @@ func (a *APT) planSpace(ctx context.Context, changes []Change, sizing []string) 
 	if len(changes) == 0 {
 		return 0, spaceFacts(aptCacheDir, dpkgDatabaseDir, needs)
 	}
-	needs.download, needs.downloadKnown = a.downloadSize(ctx, sizing...)
+	var digests map[string]string
+	needs.download, digests, needs.downloadKnown = a.downloadManifest(ctx, sizing...)
 	needs.kernel = anyKernel(a.Name(), changes)
 	names := changeNames(changes)
-	grown, measured := growth(names, a.candidateSizes(ctx, names), a.installedSizes(ctx, names))
+	candidate, installed := a.candidateSizes(ctx, names), a.installedSizes(ctx, names)
+	grown, measured := growth(names, candidate, installed)
 	installNeeds(&needs, grown, measured)
+	// The plan carries per package what the sums were made of: the digest
+	// of the archive the index publishes and the growth of the installed
+	// files, each only where it was measured.
+	for i := range changes {
+		change := &changes[i]
+		if digest, ok := digests[change.Name]; ok {
+			change.Digest = digest
+		}
+		if size, ok := candidate[change.Name]; ok {
+			change.InstalledDeltaBytes = int64(size) - int64(installed[change.Name])
+			change.InstalledDeltaKnown = true
+		}
+	}
 	return needs.download, spaceFacts(aptCacheDir, dpkgDatabaseDir, needs)
 }
 
@@ -209,9 +240,16 @@ func parseAptInstLine(line string) (Change, bool) {
 	}
 
 	change := Change{Name: fields[0]}
-	if start := strings.Index(rest, "["); start >= 0 {
-		if end := strings.Index(rest[start:], "]"); end > 0 {
-			change.CurrentVersion = rest[start+1 : start+end]
+	// The current version stands in brackets before the parenthesis; the
+	// brackets after it hold the architecture, and a fresh install has no
+	// current version at all.
+	head := rest
+	if open := strings.Index(rest, "("); open >= 0 {
+		head = rest[:open]
+	}
+	if start := strings.Index(head, "["); start >= 0 {
+		if end := strings.Index(head[start:], "]"); end > 0 {
+			change.CurrentVersion = head[start+1 : start+end]
 		}
 	}
 	if start := strings.Index(rest, "("); start >= 0 {
@@ -219,6 +257,13 @@ func parseAptInstLine(line string) (Change, bool) {
 			inner := strings.Fields(rest[start+1 : end])
 			if len(inner) > 0 {
 				change.CandidateVersion = inner[0]
+			}
+			// The architecture closes the line in brackets; what stands
+			// between the version and it is the origin, possibly more than
+			// one repository separated by commas.
+			if last := len(inner) - 1; last > 0 && strings.HasPrefix(inner[last], "[") && strings.HasSuffix(inner[last], "]") {
+				change.Architecture = strings.Trim(inner[last], "[]")
+				inner = inner[:last]
 			}
 			if len(inner) > 1 {
 				change.Origin = strings.Join(inner[1:], " ")
@@ -234,28 +279,51 @@ func parseAptInstLine(line string) (Change, bool) {
 	return change, true
 }
 
-// downloadSize sums up the sizes of the packages the operation fetches. The
-// value is an estimate of the plan rather than a promise; on an error the
-// size is not known, and the caller says so rather than guessing.
-func (a *APT) downloadSize(ctx context.Context, operation ...string) (uint64, bool) {
+// downloadManifest reads what the operation fetches: the sum of the sizes
+// of the archives and the digest of each, keyed by package name. The sum
+// is an estimate of the plan rather than a promise; on an error nothing is
+// known, and the caller says so rather than guessing.
+func (a *APT) downloadManifest(ctx context.Context, operation ...string) (uint64, map[string]string, bool) {
 	args := append([]string{"--print-uris", "--quiet", "--yes", "-o", "Debug::NoLocking=true"},
 		operation...)
 	result := run(ctx, 2*time.Minute, aptGetPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
-		return 0, false
+		return 0, nil, false
 	}
+	total, digests := ParseAPTPrintURIs(result.Stdout)
+	return total, digests, true
+}
+
+// ParseAPTPrintURIs reads the lines of apt-get --print-uris:
+//
+//	'http://deb.debian.org/.../openssl_3.0.16-1~deb12u1_amd64.deb' openssl_3.0.16-1~deb12u1_amd64.deb 1456 SHA256:9f86...
+//
+// The digest is the one the index publishes for the archive - apt checks
+// it after the download - and the plan carries it so the approval names
+// the bytes and not only the version.
+func ParseAPTPrintURIs(output string) (uint64, map[string]string) {
 	var total uint64
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	digests := map[string]string{}
+	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
-		// The format: 'uri' file_name size SHA256:...
 		if len(fields) < 3 || !strings.HasPrefix(fields[0], "'") {
 			continue
 		}
 		if size, err := strconv.ParseUint(fields[2], 10, 64); err == nil {
 			total += size
 		}
+		// The file name is name_version_arch.deb; the name ends at the
+		// first underscore, and a version never carries one.
+		name, _, found := strings.Cut(fields[1], "_")
+		if !found || len(fields) < 4 {
+			continue
+		}
+		algorithm, sum, found := strings.Cut(fields[3], ":")
+		if found && sum != "" {
+			digests[name] = strings.ToLower(algorithm) + ":" + strings.ToLower(sum)
+		}
 	}
-	return total, true
+	return total, digests
 }
 
 // rebootPredicted guesses the need for a restart from the packages being

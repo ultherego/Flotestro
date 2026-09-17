@@ -20,9 +20,19 @@ type ProjectVersion = {
   applied: boolean;
 };
 
-type PlanService = { name: string; image: string; image_digest?: string; replicas?: number };
+type PlanService = {
+  name: string;
+  image: string;
+  /** The digest the tag resolved to when the plan was computed: what the deployment binds. */
+  image_digest?: string;
+  /** Where the digest came from: reference, registry or local. */
+  digest_source?: string;
+  /** The reference the containers are started from: the repository with the digest. */
+  pinned_image?: string;
+  replicas?: number;
+};
 type PlanChange = { kind: string; name: string; action: string };
-type ProjectPlan = {
+export type ProjectPlan = {
   project: string;
   digest: string;
   services?: PlanService[];
@@ -95,12 +105,15 @@ export function Compose() {
   }
 
   const deploy = useMutation({
-    mutationFn: (body: { manifest: string; digest: string; reason: string }) =>
+    // The deployment carries the plan digest and the image digest of every
+    // service: the host resolves the tags once more and refuses when any
+    // moved, and the audit trail says which digests were approved.
+    mutationFn: (body: { manifest: string; digest: string; imageDigests: Record<string, string>; reason: string }) =>
       api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "docker.compose.deploy",
         reason: body.reason,
         payload: {
-          compose: { project, manifest: body.manifest, plan_digest: body.digest },
+          compose: { project, manifest: body.manifest, plan_digest: body.digest, image_digests: body.imageDigests },
         },
       }),
     onSuccess: (job) => {
@@ -258,14 +271,33 @@ export function Compose() {
             </Table>
           </Section>
 
-          <Section title={t("Services after deployment")} count={(plan.services ?? []).length} span={6} flush>
+          <Section
+            title={t("Services after deployment")}
+            count={(plan.services ?? []).length}
+            span={6}
+            description={t("Each service runs the digest shown here; a tag that points at another digest by the time of deployment makes the plan stale.")}
+            flush
+          >
             <Table>
-              <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th className="hm-num">{t("Replicas")}</th></tr></thead>
+              <thead><tr><th>{t("Service")}</th><th>{t("Image")}</th><th>{t("Digest that will run")}</th><th className="hm-num">{t("Replicas")}</th></tr></thead>
               <tbody>
                 {(plan.services ?? []).map((service) => (
                   <tr key={service.name}>
                     <td className="hm-mono hm-primary">{service.name}</td>
                     <td className="hm-mono">{service.image}</td>
+                    {/* The digest is the identity of what runs; the tag is what
+                        the operator wrote. Both are shown so a moved tag can be
+                        read off the plan. */}
+                    <td className="hm-mono" title={service.pinned_image}>
+                      {service.image_digest ? (
+                        <>
+                          {service.image_digest.replace(/^sha256:/, "").slice(0, 16)}…
+                          {service.digest_source && <span className="badge"> {t(digestSourceWords(service.digest_source))}</span>}
+                        </>
+                      ) : (
+                        <span className="badge unknown">{t("unresolved")}</span>
+                      )}
+                    </td>
                     <td className="hm-num">{service.replicas ?? 1}</td>
                   </tr>
                 ))}
@@ -275,13 +307,36 @@ export function Compose() {
 
           <DeployConfirmation
             busy={deploy.isPending}
-            onDeploy={(reason) => deploy.mutate({ manifest, digest: plan.digest, reason })}
+            onDeploy={(reason) => deploy.mutate({ manifest, digest: plan.digest, imageDigests: planImageDigests(plan), reason })}
           />
         </>
       )}
       </Widgets>
     </ModulePage>
   );
+}
+
+/** The digest of every service in the plan, by name: what the deployment binds. */
+export function planImageDigests(plan: ProjectPlan): Record<string, string> {
+  const digests: Record<string, string> = {};
+  for (const service of plan.services ?? []) {
+    if (service.image_digest) digests[service.name] = service.image_digest;
+  }
+  return digests;
+}
+
+/** Where the plan learned the digest, in the operator's words. */
+export function digestSourceWords(source: string): string {
+  switch (source) {
+    case "reference":
+      return "pinned in manifest";
+    case "registry":
+      return "from registry";
+    case "local":
+      return "from host image";
+    default:
+      return source;
+  }
 }
 
 /** A deployment is a critical operation, so it needs a justification in the audit. */

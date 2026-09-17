@@ -102,6 +102,8 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 				Repair:            payload.Repair,
 				ExpectedSerial:    payload.ExpectedSerial,
 				ExpectedSizeBytes: payload.ExpectedSizeBytes,
+				ExpectedById:      payload.ExpectedByID,
+				ExpectedWwn:       payload.ExpectedWWN,
 				Size:              payload.Size,
 				Plan:              payload.Plan,
 				PlanHash:          payload.PlanHash,

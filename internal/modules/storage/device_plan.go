@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -35,8 +36,31 @@ type DevicePlan struct {
 	Size       string   `json:"size,omitempty"`
 	Changes    []string `json:"changes,omitempty"`
 
-	Refusal  string `json:"refusal,omitempty"`
-	PlanHash string `json:"plan_hash"`
+	// The identity of the device the plan binds to. ByID, WWN and Serial
+	// are what the host compares again right before a destructive change;
+	// the size above is a signal for the operator reading the plan, never
+	// an identity. Model and Parent describe; Holders and the three flags
+	// say what stands on the device.
+	ByID                      string   `json:"by_id,omitempty"`
+	WWN                       string   `json:"wwn,omitempty"`
+	Serial                    string   `json:"serial,omitempty"`
+	Model                     string   `json:"model,omitempty"`
+	Parent                    string   `json:"parent,omitempty"`
+	Holders                   []string `json:"holders,omitempty"`
+	RootDevice                bool     `json:"root_device,omitempty"`
+	HasMountedChildren        bool     `json:"has_mounted_children,omitempty"`
+	HasOpenHolders            bool     `json:"has_open_holders,omitempty"`
+	IdentityUnavailableReason string   `json:"identity_unavailable_reason,omitempty"`
+	// FSType and Label of a format plan: what the device will carry.
+	DesiredFSType string `json:"desired_fs_type,omitempty"`
+	DesiredLabel  string `json:"desired_label,omitempty"`
+
+	Refusal string `json:"refusal,omitempty"`
+	// RefusalCode is the typed code of the refusal where one exists:
+	// stable_identity_required, disk_changed, disk_in_use. A refusal
+	// without a code is a plain description of why nothing will happen.
+	RefusalCode string `json:"refusal_code,omitempty"`
+	PlanHash    string `json:"plan_hash"`
 }
 
 // Device plan operation and action names.
@@ -44,9 +68,16 @@ const (
 	PlanCheck    = "check"
 	PlanFSResize = "resize"
 	PlanLVExtend = "lvm_extend"
+	PlanFormat   = "format"
+	PlanWipe     = "wipe"
 
 	PlanRun = "run"
 )
+
+// Destructive says whether the plan kind loses the data on the device.
+func Destructive(kind string) bool {
+	return kind == PlanFormat || kind == PlanWipe
+}
 
 // ComputeCheck computes an fsck plan.
 func ComputeCheck(state Snapshot, device string, repair bool) DevicePlan {
@@ -154,10 +185,96 @@ func ComputeLVExtend(state Snapshot, device, size string) DevicePlan {
 	return plan
 }
 
+// ComputeFormat computes the plan of creating a filesystem on a device.
+//
+// The plan carries the identity the host has for the device now; the
+// change comes back with that identity and the host compares it once more
+// under the storage lock. A device without a stable identity, or with
+// anything standing on it, is refused here - before the consent, with the
+// reason in the plan.
+func ComputeFormat(state Snapshot, device, fsType, label string) DevicePlan {
+	plan := DevicePlan{Operation: PlanFormat, Device: device, DesiredFSType: fsType, DesiredLabel: label}
+	arguments, err := FormatArguments(device, fsType, label)
+	if err != nil {
+		return plan.withRefusal(err.Error())
+	}
+	found, refusal := plan.destructiveTarget(state)
+	if refusal != "" {
+		return plan.withRefusal(refusal)
+	}
+	if err := ValidateDestructiveTarget(plan, *found); err != nil {
+		return plan.withTypedRefusal(err)
+	}
+	plan.Action = PlanRun
+	plan.Changes = []string{describeContent(found) + " on " + device + " will be destroyed and a " +
+		fsType + " filesystem created (" + strings.Join(arguments, " ") + ")"}
+	plan.PlanHash = devicePlanFingerprint(plan)
+	return plan
+}
+
+// ComputeWipe computes the plan of removing the filesystem signatures.
+func ComputeWipe(state Snapshot, device string) DevicePlan {
+	plan := DevicePlan{Operation: PlanWipe, Device: device}
+	arguments, err := WipeArguments(device)
+	if err != nil {
+		return plan.withRefusal(err.Error())
+	}
+	found, refusal := plan.destructiveTarget(state)
+	if refusal != "" {
+		return plan.withRefusal(refusal)
+	}
+	if err := ValidateDestructiveTarget(plan, *found); err != nil {
+		return plan.withTypedRefusal(err)
+	}
+	plan.Action = PlanRun
+	plan.Changes = []string{"the signatures of " + describeContent(found) + " on " + device +
+		" will be removed (" + strings.Join(arguments, " ") + "); the content stays on the medium"}
+	plan.PlanHash = devicePlanFingerprint(plan)
+	return plan
+}
+
+// destructiveTarget finds the device and copies its identity into the
+// plan; a state that could not be read or a device the host does not see
+// is a refusal.
+func (p *DevicePlan) destructiveTarget(state Snapshot) (*Device, string) {
+	if state.UnavailableReason != "" {
+		return nil, state.UnavailableReason
+	}
+	found := state.DeviceAt(p.Device)
+	if found == nil {
+		return nil, "the host does not see the device " + p.Device
+	}
+	p.describe(found)
+	return found, ""
+}
+
+func describeContent(device *Device) string {
+	switch {
+	case device.FSType != "" && device.Label != "":
+		return "the " + device.FSType + " filesystem " + device.Label
+	case device.FSType != "":
+		return "the " + device.FSType + " filesystem"
+	case len(device.Children) > 0:
+		return fmt.Sprintf("the partition table (%d partitions)", len(device.Children))
+	}
+	return "whatever is"
+}
+
 // Refuse records a refusal reason and recomputes the fingerprint.
 func (p *DevicePlan) Refuse(reason string) {
 	p.Refusal = reason
+	p.RefusalCode = ""
 	p.PlanHash = devicePlanFingerprint(*p)
+}
+
+func (p DevicePlan) withTypedRefusal(err error) DevicePlan {
+	p.Refusal = err.Error()
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		p.RefusalCode = refusal.Code
+	}
+	p.PlanHash = devicePlanFingerprint(p)
+	return p
 }
 
 func (p DevicePlan) withRefusal(reason string) DevicePlan {
@@ -176,6 +293,16 @@ func (p *DevicePlan) describe(device *Device) {
 	if len(device.Mountpoints) > 0 {
 		p.Mountpoint = device.Mountpoints[0]
 	}
+	p.ByID = device.ByID
+	p.WWN = device.WWN
+	p.Serial = device.Serial
+	p.Model = device.Model
+	p.Parent = device.Parent
+	p.Holders = device.Holders
+	p.RootDevice = device.RootDevice
+	p.HasMountedChildren = device.HasMountedChildren
+	p.HasOpenHolders = device.HasOpenHolders
+	p.IdentityUnavailableReason = device.IdentityUnavailableReason
 }
 
 // devicePlanFingerprint computes the plan fingerprint excluding the

@@ -61,6 +61,11 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 				}
 				principal = *authenticated
 				ctx = ContextWithSession(ctx, session)
+				// The trail keeps the actor as it is now: a later rename
+				// or removal must not rewrite who did this.
+				actor.PrincipalID, actor.Subject = principal.ID, principal.Subject
+				actor.DisplayName, actor.Kind = principal.DisplayName, principal.Kind
+				actor.CredentialID = session.ID
 				actor.SessionID = audit.SessionDigest(session.ID)
 				actor.ACR = session.Auth.ACR
 				actor.AMR = session.Auth.AMR
@@ -72,6 +77,8 @@ func (a Authenticator) Middleware(next http.Handler) http.Handler {
 			if token := bearerToken(r); token != "" {
 				if authenticated, err := a.Tokens.Authenticate(ctx, token); err == nil {
 					principal = *authenticated
+					actor.PrincipalID, actor.Subject = principal.ID, principal.Subject
+					actor.DisplayName, actor.Kind = principal.DisplayName, principal.Kind
 				}
 			}
 		}

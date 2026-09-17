@@ -7,6 +7,7 @@ import { RELEASE_CHANNELS, type Attempt, type Host, type Job, type ReleaseChanne
 import { Empty, ErrorCode, JobState, Time } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import { VirtualRows } from "../../components/virtual";
+import { ColumnChooser, Td, Th, useColumns } from "../../components/SortableTable";
 import {
   Check, Fact, Facts, Field, Fields, Foot, Form, FormActions, Message, ModuleFreshness, ModuleHeader,
   ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, useHost, useModule,
@@ -88,13 +89,30 @@ type PackageList = {
   state: PackageListState;
 };
 
-/** One change of an upgrade plan: what the host would move a package to. */
+/**
+ * One change of an upgrade plan: what the host would move a package to,
+ * from which repository, in which architecture and in which direction.
+ * The direction and the origin enter the plan digest, so the row shows
+ * them as the host named them.
+ */
 export type PlanChange = {
   name: string;
   current_version?: string;
   candidate_version?: string;
   origin?: string;
   security?: boolean;
+  architecture?: string;
+  action?: string;
+};
+
+/**
+ * The header of the last upgrade plan: who made it and until when it
+ * holds. A plan of an agent from before the envelope carries none of it.
+ */
+export type PlanHeader = {
+  planner_version?: string;
+  expires_at?: string;
+  plan_hash?: string;
 };
 
 /** A row of the package table: the package with what the host says about it. */
@@ -104,6 +122,9 @@ export type PackageRow = InstalledPackage & {
   /** The version the last upgrade plan would move it to; absent when nothing waits. */
   candidate?: string;
   security: boolean;
+  /** The direction the plan named for the move, and where the candidate comes from. */
+  action?: string;
+  candidateOrigin?: string;
 };
 
 export type PackageFilter = "all" | "upgradable" | "security" | "held";
@@ -146,8 +167,20 @@ export function packageRows(
       held: held ? held.has(pkg.name) : undefined,
       candidate: change?.candidate_version || (change ? "?" : undefined),
       security: change?.security === true,
+      action: change?.action || undefined,
+      candidateOrigin: change?.origin || undefined,
     };
   });
+}
+
+/**
+ * Whether the plan is past its expiry: its digest may still match, but
+ * the host does not start on it, and the caption says so.
+ */
+export function planExpired(header: PlanHeader | undefined, now = Date.now()): boolean {
+  if (!header?.expires_at) return false;
+  const expiry = new Date(header.expires_at).getTime();
+  return !Number.isNaN(expiry) && expiry < now;
 }
 
 /**
@@ -661,7 +694,17 @@ function InstalledPackages({
   // columns until a plan exists - the caption says one is missing.
   const showArchitecture = rows.some((row) => !!row.architecture);
   const showPlan = plan.changes !== undefined;
-  const columns = 3 + (showArchitecture ? 1 : 0) + (showPlan ? 2 : 0);
+  // The columns the operator may fold, remembered per table; the name of
+  // the package stays whatever the preference says. A column the host
+  // gives nothing for is not offered at all.
+  const columns = useColumns("host-packages", [
+    { key: "name", label: t("Package"), fixed: true },
+    { key: "version", label: t("Version") },
+    ...(showArchitecture ? [{ key: "architecture", label: t("Architecture"), secondary: true }] : []),
+    { key: "source", label: t("Source"), secondary: true },
+    ...(showPlan ? [{ key: "candidate", label: t("Upgrade to") }, { key: "security", label: t("Security") }] : []),
+    { key: "held", label: t("Held") },
+  ]);
 
   return (
     <>
@@ -686,6 +729,7 @@ function InstalledPackages({
               <option value="asc">{t("name A–Z")}</option>
               <option value="desc">{t("name Z–A")}</option>
             </select>
+            <ColumnChooser columns={columns} />
           </>
         )}
         flush
@@ -735,20 +779,16 @@ function InstalledPackages({
                 items={shown}
                 rowHeight={PACKAGE_ROW}
                 height={480}
-                columns={columns}
+                columns={columns.visible.length}
                 rowKey={key}
                 head={
                   <tr>
-                    <th>{t("Package")}</th><th>{t("Version")}</th>
-                    {showArchitecture && <th>{t("Architecture")}</th>}
-                    <th>{t("Source")}</th>
-                    {showPlan && <><th>{t("Upgrade to")}</th><th>{t("Security")}</th></>}
-                    <th>{t("Held")}</th>
+                    {columns.all.map((column) => <Th key={column.key} columns={columns} name={column.key} />)}
                   </tr>
                 }
                 render={(row) => (
                   <>
-                    <td>
+                    <Td columns={columns} name="name">
                       <button
                         className="inline"
                         aria-pressed={selected === key(row)}
@@ -757,25 +797,28 @@ function InstalledPackages({
                       >
                         {row.name}
                       </button>
-                    </td>
-                    <td className="hm-mono">{packageVersion(row)}</td>
-                    {showArchitecture && <td>{row.architecture || "—"}</td>}
-                    <td className="source" title={row.origin || undefined}>
+                    </Td>
+                    <Td columns={columns} name="version" className="hm-mono">{packageVersion(row)}</Td>
+                    <Td columns={columns} name="architecture">{row.architecture || "—"}</Td>
+                    <Td columns={columns} name="source" className="source" title={row.origin || undefined}>
                       {row.repository_id || row.origin || originWords(t, row.origin_class)}
-                    </td>
-                    {showPlan && (
-                      <>
-                        <td className="hm-mono">{row.candidate ?? ""}</td>
-                        <td>{row.security && <span className="badge error">{t("security")}</span>}</td>
-                      </>
-                    )}
-                    <td>
+                    </Td>
+                    {/* The candidate with its origin on hover, and the
+                        direction where it is not an upgrade: a plan that
+                        takes a package back a version is what the
+                        operator must not miss in a column of upgrades. */}
+                    <Td columns={columns} name="candidate" className="hm-mono" title={row.candidateOrigin || undefined}>
+                      {row.candidate ?? ""}
+                      {row.action && row.action !== "upgrade" && <> <span className="badge warn">{t(row.action)}</span></>}
+                    </Td>
+                    <Td columns={columns} name="security">{row.security && <span className="badge error">{t("security")}</span>}</Td>
+                    <Td columns={columns} name="held">
                       {row.held === true
                         ? <span className="badge warn">{t("held")}</span>
                         : row.held === undefined
                           ? <span className="badge unknown" title={t("The holds were not read.")}>?</span>
                           : ""}
-                    </td>
+                    </Td>
                   </>
                 )}
               />
@@ -788,7 +831,13 @@ function InstalledPackages({
                 {state?.job_id && <> (<Link to={`/jobs/${state.job_id}`} className="mono">{state.job_id.slice(0, 8)}</Link>)</>}
                 {" · "}
                 {plan.at
-                  ? <>{t("upgrade plan from")} <Time value={plan.at} /></>
+                  ? <>
+                      {t("upgrade plan from")} <Time value={plan.at} />
+                      {plan.header?.planner_version && <> · {t("planner")} <span className="hm-mono">{plan.header.planner_version}</span></>}
+                      {plan.header?.expires_at && (planExpired(plan.header)
+                        ? <> · <span className="badge error">{t("plan expired")}</span></>
+                        : <> · {t("valid until")} <Time value={plan.header.expires_at} /></>)}
+                    </>
                   : t("no upgrade plan yet; the upgrade column fills in after one")}
               </span>
               <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
@@ -858,7 +907,7 @@ function originWords(t: (key: string) => string, originClass?: string): string {
  * upgrade - a removal plan or an install plan says nothing about what
  * waits - and its changes are in the result of its last attempt.
  */
-function useLastUpgradePlan(hostId: string): { changes?: PlanChange[]; at?: string } {
+function useLastUpgradePlan(hostId: string): { changes?: PlanChange[]; at?: string; header?: PlanHeader } {
   const jobs = useQuery({
     queryKey: ["jobs", hostId, "packages.plan", "succeeded"],
     queryFn: () => api.get<Page<Job>>(`/api/v1/jobs?host_id=${hostId}&action=packages.plan&state=succeeded&limit=10`),
@@ -875,9 +924,12 @@ function useLastUpgradePlan(hostId: string): { changes?: PlanChange[]; at?: stri
   });
   if (!upgrade || !attempts.data) return {};
   const last = attempts.data.items[attempts.data.items.length - 1];
-  const detail = last?.detail as { kind?: string; changes?: PlanChange[] } | undefined;
+  const detail = last?.detail as ({ kind?: string; changes?: PlanChange[] } & PlanHeader) | undefined;
   if (detail?.kind !== "package_plan") return {};
-  return { changes: detail.changes, at: upgrade.finished_at ?? upgrade.created_at };
+  return {
+    changes: detail.changes, at: upgrade.finished_at ?? upgrade.created_at,
+    header: { planner_version: detail.planner_version, expires_at: detail.expires_at, plan_hash: detail.plan_hash },
+  };
 }
 
 /** How many transactions one page of the history carries. */

@@ -33,6 +33,11 @@ type Planner struct {
 	// Runner runs the compose command. Separated so that the plan can be
 	// checked in a test without a container engine.
 	Runner Runner
+	// Resolver turns an image reference into the digest that will run. A
+	// planner without one plans nothing that is not pinned already: a tag
+	// left unresolved is a deployment of whatever the registry serves at
+	// that moment, which is not what the operator approved.
+	Resolver ImageResolver
 	// Dir is the working directory for manifests. It belongs to root and
 	// is not shared with anything else.
 	Dir string
@@ -40,6 +45,11 @@ type Planner struct {
 
 // Runner runs the compose command and returns its output.
 type Runner func(ctx context.Context, args ...string) (stdout string, stderr string, err error)
+
+// ErrDigestUnresolved means a service names an image by a tag whose digest
+// the host could not learn - neither from the registry nor from an image
+// already on the host.
+var ErrDigestUnresolved = fmt.Errorf("the image digest could not be resolved")
 
 // Plan computes the difference between the project state and the manifest.
 func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, error) {
@@ -72,8 +82,20 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 	if err != nil {
 		return plan, err
 	}
+	// Every tag is resolved to a digest before the plan exists. The plan
+	// is what the operator approves, and it has to name what will run, not
+	// what the tag pointed at when they looked.
+	if err := p.resolveDigests(ctx, services); err != nil {
+		return plan, err
+	}
 	plan.Services = services
 	plan.Warnings = warnings
+
+	override, cleanupOverride, err := p.writeOverride(project, services)
+	if err != nil {
+		return plan, err
+	}
+	defer cleanupOverride()
 
 	// The dry run says what will really change. A difference computed from
 	// the manifest alone would be guessing: Compose also takes into account
@@ -81,8 +103,9 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 	// configuration change. Compose reports the dry run on the diagnostic
 	// stream, not on the output, so both are read - otherwise the change
 	// list comes out empty and the plan looks as if the deployment changed
-	// nothing.
-	dryOut, dryErr, err := p.Runner(ctx, "-p", project, "-f", path, "up", "-d", "--dry-run")
+	// nothing. The dry run sees the pinned images, the way the deployment
+	// will.
+	dryOut, dryErr, err := p.Runner(ctx, "-p", project, "-f", path, "-f", override, "up", "-d", "--dry-run")
 	if err == nil {
 		plan.Changes = changesFromDryRun(dryOut + "\n" + dryErr)
 	} else {
@@ -92,6 +115,76 @@ func (p Planner) Plan(ctx context.Context, project, manifest string) (Plan, erro
 
 	plan.Digest = Digest(project, stdout, services)
 	return plan, nil
+}
+
+// resolveDigests binds every service to the digest of its image.
+func (p Planner) resolveDigests(ctx context.Context, services []Service) error {
+	for i := range services {
+		service := &services[i]
+		resolved, err := p.resolve(ctx, service.Image)
+		if err != nil {
+			return fmt.Errorf("%w: service %s (%s): %v", ErrDigestUnresolved, service.Name, service.Image, err)
+		}
+		service.ImageDigest = resolved.Digest
+		service.DigestSource = resolved.Source
+		service.PinnedImage = PinReference(service.Image, resolved.Digest)
+	}
+	return nil
+}
+
+func (p Planner) resolve(ctx context.Context, image string) (ResolvedImage, error) {
+	if digest := pinnedDigest(image); digest != "" {
+		return ResolvedImage{Digest: digest, Source: DigestFromReference}, nil
+	}
+	if p.Resolver == nil {
+		return ResolvedImage{}, fmt.Errorf("the host resolves no tags; pin a digest in the manifest")
+	}
+	resolved, err := p.Resolver(ctx, image)
+	if err != nil {
+		return ResolvedImage{}, err
+	}
+	if !validDigest(resolved.Digest) {
+		return ResolvedImage{}, fmt.Errorf("the resolver returned %q, which is not a sha256 digest", resolved.Digest)
+	}
+	return resolved, nil
+}
+
+// writeOverride writes the file that replaces every tag with the digest
+// the plan resolved. Compose merges it over the manifest, so the project
+// keeps every other setting the operator wrote and only the image
+// references change. The file is JSON, which every YAML reader takes, so
+// no hand-written YAML has to escape anything.
+//
+// The override is the way the digest is bound instead of pulling the image
+// and re-tagging it: a re-tag would rewrite what the tag means on this host
+// for everything else that uses it, and "docker compose" would still record
+// the tag in the container - an operator reading "docker ps" a week later
+// would see a tag and not the digest that really runs.
+func (p Planner) writeOverride(project string, services []Service) (string, func(), error) {
+	type image struct {
+		Image string `json:"image"`
+	}
+	override := struct {
+		Services map[string]image `json:"services"`
+	}{Services: map[string]image{}}
+	for _, service := range services {
+		if service.PinnedImage != "" {
+			override.Services[service.Name] = image{Image: service.PinnedImage}
+		}
+	}
+	encoded, err := json.Marshal(override)
+	if err != nil {
+		return "", func() {}, err
+	}
+	dir := filepath.Join(p.Dir, project)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", func() {}, err
+	}
+	path := filepath.Join(dir, "digests.override.yml")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		return "", func() {}, err
+	}
+	return path, func() { _ = os.Remove(path) }, nil
 }
 
 // Digest binds the deployment to the plan.
@@ -160,12 +253,13 @@ func servicesFromConfiguration(configuration string) ([]Service, []string, error
 		if service.Deploy.Replicas != nil {
 			entry.Replicas = *service.Deploy.Replicas
 		}
-		// An image named by a tag may mean something else tomorrow. That
-		// does not block the deployment, but the operator is meant to know
-		// they approve a moving target.
-		if !strings.Contains(service.Image, "@sha256:") {
+		// An image named by a tag may mean something else tomorrow. The
+		// deployment binds the digest the tag resolves to now, so the
+		// warning is information: the operator approves this digest, and a
+		// tag that moves before the deployment makes the plan stale.
+		if pinnedDigest(service.Image) == "" {
 			warnings = append(warnings,
-				fmt.Sprintf("service %s uses a mutable tag (%s); pin a digest to know what will run",
+				fmt.Sprintf("service %s uses a mutable tag (%s); the deployment binds the digest it resolves to now",
 					name, service.Image))
 		}
 		for key := range service.Environment {

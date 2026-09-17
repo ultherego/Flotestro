@@ -60,7 +60,15 @@ func (d *DNF) LockHeld() (bool, string) {
 // when there are updates and 0 when there are none; every other code is an
 // error.
 func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
-	plan := Plan{Manager: d.Name(), DiskAvailableBytes: diskAvailable("/")}
+	plan, err := d.plan(ctx, options)
+	if err != nil {
+		return plan, err
+	}
+	return finishPlan(ctx, d, plan, options), nil
+}
+
+func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
+	plan := Plan{Manager: d.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 
 	// A removal plan and an installation plan answer a question other than an
 	// upgrade plan: not "what will change on its own" but "what will disappear
@@ -77,11 +85,17 @@ func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 		return plan, fmt.Errorf("dnf check-update: %s", result.Reason())
 	}
 
+	installed := d.installedVersions(ctx)
 	for _, line := range strings.Split(result.Stdout, "\n") {
 		change, ok := parseDNFUpdateLine(line)
 		if !ok || !matchesFilter(change, options) {
 			continue
 		}
+		// check-update names the candidate and nothing about what is there
+		// now; the rpm database does, and the direction of the change
+		// follows from the two.
+		change.CurrentVersion = installed[change.Name]
+		change.Action = ActionUpgrade
 		plan.Changes = append(plan.Changes, change)
 	}
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
@@ -178,12 +192,13 @@ func parseDNFUpdateLine(line string) (Change, bool) {
 	if len(fields) != 3 || !strings.Contains(fields[0], ".") {
 		return Change{}, false
 	}
-	name := fields[0]
+	name, arch := fields[0], ""
 	if index := strings.LastIndex(name, "."); index > 0 {
-		name = name[:index]
+		name, arch = name[:index], name[index+1:]
 	}
 	return Change{
 		Name:             name,
+		Architecture:     arch,
 		CandidateVersion: fields[1],
 		Origin:           fields[2],
 		// Fedora does not publish consistent security metadata for every
@@ -275,6 +290,11 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	return apply, nil
 }
 
+// installedVersions returns a map of package -> version. A package
+// installed in several versions at once - a kernel, which rpm keeps
+// alongside its predecessors - is represented by its newest one: that is
+// the version a transaction moves the host to, and the one an expected
+// effect is read against.
 func (d *DNF) installedVersions(ctx context.Context) map[string]string {
 	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", "%{NAME} %{EVR}\n")
 	if !result.Ran || result.ExitCode != 0 {
@@ -283,9 +303,13 @@ func (d *DNF) installedVersions(ctx context.Context) map[string]string {
 	versions := map[string]string{}
 	for _, line := range strings.Split(result.Stdout, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 {
-			versions[fields[0]] = fields[1]
+		if len(fields) != 2 {
+			continue
 		}
+		if previous, seen := versions[fields[0]]; seen && CompareRPMVersions(previous, fields[1]) >= 0 {
+			continue
+		}
+		versions[fields[0]] = fields[1]
 	}
 	return versions
 }
@@ -323,8 +347,11 @@ func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan,
 		return plan, fmt.Errorf("a removal plan requires a list of packages")
 	}
 	// --assumeno ends with the code 1 and a message about the interruption:
-	// that is how dnf shows a transaction it does not carry out.
-	args := append([]string{"--assumeno", "remove"}, options.Packages...)
+	// that is how dnf shows a transaction it does not carry out. The plan
+	// is read from the cache, like the upgrade plan: what the transaction
+	// runs against later is the metadata the plan was read from, and the
+	// refresh step of the plan is where the cache is brought up to date.
+	args := append([]string{"--assumeno", "--cacheonly", "remove"}, options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf remove: %s", result.Reason())
@@ -366,7 +393,7 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("an installation plan requires a list of packages")
 	}
-	args := append([]string{"--assumeno", "install"}, options.Packages...)
+	args := append([]string{"--assumeno", "--cacheonly", "install"}, options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
 		return plan, fmt.Errorf("dnf install: %s", result.Reason())
@@ -392,7 +419,19 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 		return plan, fmt.Errorf("the installation plan was not recognised in the answer of dnf (code %d)",
 			result.ExitCode)
 	}
+	installed := d.installedVersions(ctx)
+	for i := range changes {
+		if changes[i].Action != ActionRemove {
+			changes[i].CurrentVersion = installed[changes[i].Name]
+		}
+	}
 	plan.Changes = append(plan.Changes, changes...)
+	// An installation can drop packages too - a conflict resolved by a
+	// replacement, or a dependency nothing needs any more - and they go
+	// into the plan as removals the operator sees before the consent.
+	removals, _, _ := ParseDNFRemovalPlan(output)
+	plan.Removals = append(plan.Removals, removals...)
+	plan.Protected = ProtectedInSet(plan.Removals)
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
 	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string { return output })
 	return plan, nil
@@ -422,6 +461,32 @@ var installHeadings = []string{
 	"installing dependencies:",
 	"installing weak dependencies:",
 	"upgrading:",
+	"downgrading:",
+	"reinstalling:",
+}
+
+// dnfSectionAction says which direction a section of the transaction
+// table means, and dnfSectionReason why its packages are in the plan.
+func dnfSectionAction(heading string) string {
+	switch {
+	case strings.HasPrefix(heading, "upgrading"):
+		return ActionUpgrade
+	case strings.HasPrefix(heading, "downgrading"):
+		return ActionDowngrade
+	case strings.HasPrefix(heading, "removing"):
+		return ActionRemove
+	}
+	return ActionInstall
+}
+
+func dnfSectionReason(heading string) string {
+	switch {
+	case strings.Contains(heading, "unused"):
+		return ReasonOrphan
+	case strings.Contains(heading, "dependen"):
+		return ReasonDependency
+	}
+	return ReasonRequested
 }
 
 // ParseDNFRemovalPlan reads the table of a transaction interrupted before
@@ -432,33 +497,49 @@ var installHeadings = []string{
 // means the format of the output has changed and the list shown to a person
 // would be incomplete.
 func ParseDNFRemovalPlan(output string) ([]string, int, error) {
-	names, announced := dnfTransactionSections(output, removalHeadings, removalSummaries)
+	entries, announced := dnfTransactionSections(output, removalHeadings, removalSummaries)
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
 	return names, announced, nil
 }
 
-// ParseDNFInstallPlan reads from the transaction table what will arrive.
+// ParseDNFInstallPlan reads from the transaction table what will arrive:
+// every entry with its architecture, its version and the repository it
+// comes from, and the direction its section means.
 func ParseDNFInstallPlan(output string) []Change {
-	names, _ := dnfTransactionSections(output, installHeadings, installSummaries)
-	changes := make([]Change, 0, len(names))
-	for _, name := range names {
-		changes = append(changes, Change{Name: name})
+	entries, _ := dnfTransactionSections(output, installHeadings, installSummaries)
+	changes := make([]Change, 0, len(entries))
+	for _, entry := range entries {
+		changes = append(changes, Change{
+			Name: entry.Name, Architecture: entry.Architecture, CandidateVersion: entry.Version,
+			Origin: entry.Repository, Action: dnfSectionAction(entry.Section),
+			Reason: dnfSectionReason(entry.Section),
+		})
 	}
 	return changes
 }
 
-// dnfTransactionSections reads the names of the packages from the transaction
-// table.
+// dnfEntry is one row of the transaction table with the section it was
+// read under.
+type dnfEntry struct {
+	Name, Architecture, Version, Repository, Section string
+}
+
+// dnfTransactionSections reads the packages from the transaction table.
 //
 // The table has section headings at the left edge and indented entries; the
 // columns are the name, the architecture, the version, the repository and the
 // size. The summary at the end gives the numbers - and they serve to check
 // whether the read is complete.
-func dnfTransactionSections(output string, headings, summaries []string) ([]string, int) {
-	var names []string
+func dnfTransactionSections(output string, headings, summaries []string) ([]dnfEntry, int) {
+	var entries []dnfEntry
 	seen := map[string]bool{}
 	inSection := false
 	inSummary := false
 	announced := 0
+	section := ""
 
 	for _, line := range strings.Split(output, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -486,6 +567,7 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]stri
 		}
 		if contains(headings, lower) {
 			inSection = true
+			section = lower
 			continue
 		}
 		// The heading of another section ends the previous one.
@@ -505,9 +587,16 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]stri
 			continue
 		}
 		seen[name] = true
-		names = append(names, name)
+		entry := dnfEntry{Name: name, Section: section}
+		// The columns after the name: architecture, version, repository,
+		// size. A row that lacks the tail (a replaced package printed with
+		// the name alone) keeps what it has.
+		if len(fields) > 3 {
+			entry.Architecture, entry.Version, entry.Repository = fields[1], fields[2], fields[3]
+		}
+		entries = append(entries, entry)
 	}
-	return names, announced
+	return entries, announced
 }
 
 // matchesSummary recognises a summary line in both generations of dnf.

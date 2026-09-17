@@ -421,6 +421,24 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 			return binding("the bound payload describes no account")
 		}
 		return same("account name", action.LocalUserAction.GetName(), payload.LocalUser.Name)
+
+	case *helperv1.HelperRequest_Storage:
+		// A destructive storage request is bound to the device and to its
+		// stable identity: a capability for one disk must not format another.
+		if payload.Storage == nil {
+			return nil
+		}
+		switch action.Storage.GetOperation() {
+		case helperv1.StorageRequest_OPERATION_FS_CREATE, helperv1.StorageRequest_OPERATION_DISK_WIPE:
+			if err := same("device", action.Storage.GetDevice(), payload.Storage.Device); err != nil {
+				return err
+			}
+			if err := same("device by-id link", action.Storage.GetExpectedById(), payload.Storage.ExpectedByID); err != nil {
+				return err
+			}
+			return same("device WWN", action.Storage.GetExpectedWwn(), payload.Storage.ExpectedWWN)
+		}
+		return nil
 	}
 	return nil
 }

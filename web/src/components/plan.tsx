@@ -14,7 +14,13 @@ import { useT } from "../i18n";
  * path with a different UUID. The plan computed on the host says what
  * happens there - or why not.
  */
-/** One package of a package plan: the name and the versions it moves between. */
+/**
+ * One element of a package plan: the name, the versions it moves between,
+ * and everything else the plan digest covers - the origin, the
+ * architecture, the direction. A field the host did not fill is absent,
+ * never a default: an older agent names no direction, and the table says
+ * so rather than guessing one.
+ */
 export type PackageChange = {
   name: string;
   current_version?: string;
@@ -22,7 +28,50 @@ export type PackageChange = {
   security?: boolean;
   // The repository the candidate comes from, when the manager names it.
   origin?: string;
+  architecture?: string;
+  // install, upgrade, downgrade or remove.
+  action?: string;
+  // requested, dependency or orphan.
+  reason?: string;
+  blocked?: boolean;
+  protected?: boolean;
+  installed_delta_bytes?: number;
+  installed_delta_known?: boolean;
+  digest?: string;
+  // In a result: achieved or missed for an expected effect, with the
+  // version found on the host.
+  effect?: string;
+  observed_version?: string;
 };
+
+/** How a change could be taken back, or why it cannot. */
+export type PlanRollback = {
+  mechanism?: string;
+  id?: string;
+  available?: boolean;
+  reason?: string;
+};
+
+/** The words of a direction of a change. */
+export const ACTION_WORDS: Record<string, string> = {
+  install: "install",
+  upgrade: "upgrade",
+  downgrade: "downgrade",
+  remove: "remove",
+};
+
+/**
+ * The direction of a change as the host named it. A host that named none
+ * gets the two cases the versions settle - a package without a version
+ * now arrives, one without a candidate goes - and a dash otherwise: the
+ * table does not call a change an upgrade the host did not call one.
+ */
+export function changeAction(change: PackageChange): string {
+  if (change.action) return change.action;
+  if (!change.current_version && change.candidate_version) return "install";
+  if (change.current_version && !change.candidate_version) return "remove";
+  return "";
+}
 
 /** Where the bytes of a package change go, file system by file system. */
 export type SpaceFact = {
@@ -47,6 +96,14 @@ export type PackagePlanFacts = {
   reboot_predicted?: boolean;
   download_bytes?: number;
   space?: SpaceFact[];
+  // The header of the plan envelope: who made the plan and until when it
+  // holds. Absent on a plan of an agent from before the envelope.
+  planner_version?: string;
+  schema_version?: number;
+  expires_at?: string;
+  resource_revision?: string;
+  rollback?: PlanRollback;
+  description?: string;
 };
 
 export type HostPlan = {
@@ -82,7 +139,8 @@ export function changeText(change: string | PackageChange): string {
   const versions = change.current_version && change.candidate_version
     ? ` ${change.current_version} → ${change.candidate_version}`
     : change.candidate_version ? ` ${change.candidate_version}` : "";
-  return `${change.name}${versions}${change.security ? " (security)" : ""}`;
+  const action = change.action === "remove" || change.action === "downgrade" ? ` (${change.action})` : "";
+  return `${change.name}${versions}${action}${change.security ? " (security)" : ""}`;
 }
 
 /** The changes of a plan as one line, the first few spelled out and the rest counted. */
@@ -186,6 +244,8 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
   }
   const rows = all ? packages : packages.slice(0, shown);
   const security = packages.filter((change) => change.security).length;
+  const removals = packages.filter((change) => changeAction(change) === "remove").length;
+  const downgrades = packages.filter((change) => changeAction(change) === "downgrade").length;
   const folded = packages.length > shown;
   return (
     <div className="plan-changes">
@@ -193,32 +253,51 @@ export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string
         <thead>
           <tr>
             <th>{t("Package")}</th>
+            <th>{t("Change")}</th>
             <th>{t("Now")}</th>
             <th>{t("After")}</th>
             <th>{t("Note")}</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((change) => (
-            <tr key={change.name}>
-              <td className="mono">{change.name}</td>
-              {/* A package without a current version is new on the host;
-                  one without a candidate goes away. A dash says so, not
-                  an empty cell that looks like a number missing. */}
-              <td className="mono source">{change.current_version || "—"}</td>
-              <td className="mono">{change.candidate_version || "—"}</td>
-              <td>
-                {change.security && <span className="badge warn">{t("security")}</span>}
-                {change.origin && <span className="source plan-origin">{change.origin}</span>}
-              </td>
-            </tr>
-          ))}
+          {rows.map((change) => {
+            const action = changeAction(change);
+            const delta = change.installed_delta_known ? change.installed_delta_bytes ?? 0 : undefined;
+            return (
+              <tr key={change.name} className={action === "remove" || action === "downgrade" ? "plan-change-attention" : undefined}>
+                <td className="mono">{change.name}</td>
+                {/* The direction is what the host said; a dash is a host
+                    that did not say, never an upgrade by default. */}
+                <td className={action === "remove" || action === "downgrade" ? "badge warn" : "source"} title={action ? undefined : t("The plan does not name the direction of this change.")}>
+                  {action ? t(ACTION_WORDS[action] ?? action) : "—"}
+                </td>
+                {/* A package without a current version is new on the host;
+                    one without a candidate goes away. A dash says so, not
+                    an empty cell that looks like a number missing. */}
+                <td className="mono source">{change.current_version || "—"}</td>
+                <td className="mono">{change.candidate_version || "—"}</td>
+                <td>
+                  {change.security && <span className="badge warn">{t("security")}</span>}
+                  {change.protected && <span className="badge error">{t("protected")}</span>}
+                  {change.blocked && <span className="badge error">{t("blocked")}</span>}
+                  {change.origin && <span className="source plan-origin">{change.origin}</span>}
+                  {change.architecture && <span className="source plan-arch">{change.architecture}</span>}
+                  {change.reason && change.reason !== "requested" && <span className="source">{t(change.reason)}</span>}
+                  {delta !== undefined && delta !== 0 && (
+                    <span className="source">{delta > 0 ? "+" : "−"}{bytes(Math.abs(delta))}</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <div className="plan-changes-foot">
         <span className="source">
           {t("{n} packages", { n: packages.length })}
           {security > 0 && ` · ${t("{n} security", { n: security })}`}
+          {removals > 0 && ` · ${t("{n} removed", { n: removals })}`}
+          {downgrades > 0 && ` · ${t("{n} downgraded", { n: downgrades })}`}
         </span>
         {folded && (
           <button type="button" className="secondary plan-toggle" onClick={() => setAll(!all)}>
@@ -283,6 +362,13 @@ export function PlanFacts({ plan }: { plan: PackagePlanFacts }) {
         : t("{path} ({purpose}): need unknown, {available} free", { path: fact.path, purpose, available: bytes(fact.available_bytes) }),
     });
   }
+  // The rollback answer is a fact of the plan too: a mechanism the host
+  // can undo the change with, or none with the reason.
+  if (plan.rollback?.mechanism) {
+    facts.push(plan.rollback.available
+      ? { key: "rollback", text: t("rollback: {mechanism}", { mechanism: plan.rollback.mechanism }) }
+      : { key: "rollback", text: t("no rollback: {reason}", { reason: plan.rollback.reason ?? plan.rollback.mechanism }), warn: true });
+  }
   if (facts.length === 0) return null;
   return (
     <div className="plan-facts">
@@ -302,7 +388,43 @@ export type PlanGroup = {
   // carries its plan under "plan", a package plan is the detail itself.
   plan?: { plan?: Record<string, unknown> } & Record<string, unknown>;
   expires_at: string;
+  // The header of the plan envelope, as the panel read it off the plan:
+  // the planner that made it and whether the plan is an envelope at all.
+  planner_version?: string;
+  schema_version?: number;
+  envelope?: boolean;
 };
+
+/**
+ * The codes a host answers with when it no longer computes the plan it
+ * was handed. A target that ended with one of them is stale: the consent
+ * does not carry over, and the screen offers to plan again.
+ */
+export const STALE_PLAN_CODES = new Set(["stale_plan", "replan_required", "plan_expired", "plan_stale", "plan_changed", "precondition_failed"]);
+
+export type PlanStatus = "known" | "unknown" | "expired";
+
+/**
+ * Whether the panel can read a group's plan as a declaration of its
+ * effects. A plan is unknown when it has no content the panel recognises
+ * - no envelope, no action, no changes and no refusal - which is what an
+ * agent from before the plans, or a broken result, gives. An approval
+ * covering such a plan would consent to something nobody read, so the
+ * approval is blocked while any host has one.
+ */
+export function planStatus(group: PlanGroup, now = Date.now()): PlanStatus {
+  const plan = (group.plan?.plan ?? group.plan ?? {}) as HostPlan & PackagePlanFacts;
+  if (group.expires_at && new Date(group.expires_at).getTime() < now) return "expired";
+  if (group.envelope || plan.planner_version) return "known";
+  const shaped = Boolean(plan.action || plan.refusal || plan.validator_failed || plan.kind === "package_plan" ||
+    plan.mode || plan.manager || (plan.changes && plan.changes.length > 0) || plan.document || plan.commands?.length);
+  return shaped ? "known" : "unknown";
+}
+
+/** The hosts whose plan the panel cannot read, across the groups. */
+export function unknownPlanHosts(groups: PlanGroup[], now = Date.now()): string[] {
+  return groups.filter((group) => planStatus(group, now) === "unknown").flatMap((group) => group.hosts);
+}
 
 /** How many host names the header of a group spells out before it counts the rest. */
 const HOSTS_SHOWN = 12;
@@ -313,26 +435,42 @@ const HOSTS_SHOWN = 12;
  * words, its facts and the table of changes. A hundred hosts with the
  * same diff are one group, so the operator reads the diff once.
  */
-export function PlanGroupView({ group, action }: { group: PlanGroup; action?: string }) {
+export function PlanGroupView({ group, action, stale = [] }: { group: PlanGroup; action?: string; stale?: string[] }) {
   const t = useT();
   const plan = (group.plan?.plan ?? group.plan ?? {}) as HostPlan & PackagePlanFacts;
   const named = group.hosts.slice(0, HOSTS_SHOWN);
   const more = group.hosts.length - named.length;
   const trouble = Boolean(plan.refusal || plan.validator_failed);
+  const status = planStatus(group);
+  const planner = group.planner_version ?? plan.planner_version;
+  // The hosts of this group the host side has since refused as stale:
+  // their consent does not carry over, whatever the digest still says.
+  const staleHere = stale.filter((host) => group.hosts.includes(host));
   return (
-    <section className="plan-group" data-testid="plan-group">
+    <section className={`plan-group${status === "unknown" ? " plan-group-unknown" : ""}`} data-testid="plan-group" data-status={status}>
       <div className="plan-group-head">
         <span className="plan-group-hosts" title={group.hosts.join("\n")}>
           <strong>{t("{n} hosts", { n: group.count })}</strong>
           <span className="source"> {named.join(", ")}{more > 0 && ` +${more}`}</span>
         </span>
         <span className="source">{t("Plan fingerprint")} <span className="mono" title={group.plan_hash}>{group.plan_hash.slice(0, 16)}</span></span>
+        {/* The planner that made the plan: two plans of different planners
+            are different plans even over the same packages, and the host
+            asks for a new plan when its planner moved. */}
+        <span className="source">{t("Planner")} <span className="mono">{planner || "—"}</span></span>
         {/* A plan is bound in time as well as by its digest: past the expiry
             the hosts are not started on it and the campaign is planned again. */}
         <span className="source">{t("Valid until")} <Time value={group.expires_at} /></span>
+        {status === "expired" && <span className="badge error">{t("expired")}</span>}
+        {status === "unknown" && <span className="badge error" title={t("The panel cannot read this plan as a declaration of its effects; exclude these hosts with a reason or plan again.")}>{t("unknown plan")}</span>}
+        {staleHere.length > 0 && (
+          <span className="badge error" title={staleHere.join("\n")}>{t("stale on {n} hosts", { n: staleHere.length })}</span>
+        )}
       </div>
       <div className="plan-group-body">
-        {trouble ? (
+        {status === "unknown" ? (
+          <p className="warning"><span>{t("The host gave a plan the panel cannot read. Nothing here is approved: exclude the hosts with a reason, or plan the campaign again once the agent is upgraded.")}</span></p>
+        ) : trouble ? (
           <PlanSummary plan={plan} />
         ) : (
           <>

@@ -17,6 +17,13 @@ On `GET /metrics` (permission `metrics.read`):
 - `flotestro_budget_wait_seconds_max{budget,class}`: the longest current wait.
 - `flotestro_dispatch_throttled_total{gateway}`: candidates a scheduler pass left in the queue
   because the rate bucket was empty.
+- `flotestro_job_dispatch_total{outcome="session_fence_stale"}` and
+  `flotestro_session_fence_total{outcome}`: a delivery or a result the database refused because
+  the panel instance that wrote it no longer owned the host's session (a newer session claimed
+  the host with a higher fencing token); the task went back to the queue and the owner carries
+  on. `outcome="session_unowned"` is a connected host whose owner lease ran out: its tasks stay
+  queued, never marked delivered, until a session claims the host again. Neither is a failure;
+  a stream of either from one instance is an instance keeping sessions it no longer owns.
 - `flotestro_job_queue_age_seconds` (oldest `queued` job), `flotestro_jobs{state}`,
   `flotestro_campaign_targets{state,reason_code}` for `awaiting_lock`, `queued_offline`,
   `dispatched`; `flotestro_resource_lock_wait_seconds{action}` for lock waits the agents reported.
@@ -114,7 +121,7 @@ In the API and the panel:
 
 `budget_capacity`, `budget_fair_share` (admission, automatic retry); `resource_busy`,
 `precondition_changed` (agent); `conflict` (preflight, automatic); `offline`, `skipped_offline`,
-`offline_deadline`, `maintenance`, `host_unavailable`, `expired`, `lease_expired`, `canceled`
-(dispatch/reconcile); `offline_policy_loosened`, `plan_changed_offline` (planning). Outside the
+`offline_deadline`, `maintenance`, `host_unavailable`, `expired`, `lease_expired`, `canceled`,
+`session_stale`, `session_unowned`, `session_fence_stale` (dispatch/reconcile); `offline_policy_loosened`, `plan_changed_offline` (planning). Outside the
 guide: `precondition_failed` (412, If-Match), `invalid_state` (409, campaign control),
 `invalid_request` (400, budget body), `budgets_disabled` (501).

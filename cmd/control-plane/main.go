@@ -559,6 +559,22 @@ func run() error {
 	// The session rows stay open after a crash of the process and inflate
 	// every measurement that counts connections from the database.
 	go agentService.ReapOrphanSessions(ctx, time.Minute)
+	// Expired renewal challenges and the sequences of long-silent relayed
+	// sessions are swept hourly.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := agentService.SweepRelayProofs(ctx); err != nil {
+					log.Error("the relay proofs were not swept", "err", err)
+				}
+			}
+		}
+	}()
 	// A host switching between gateways leaves a session on the previous one
 	// that still looks alive. Without this listener both gateways would
 	// consider themselves the right one and the same job would go out twice.
@@ -631,6 +647,9 @@ func run() error {
 	eventBus := events.NewBus(pool)
 	go eventBus.Run(ctx, log)
 	agentService.SetEvents(eventBus)
+	// The cancel relay: sends the open cancel requests to the hosts this
+	// instance holds and settles the ones nobody answered in time.
+	go agentService.RunCancelRelay(ctx)
 
 	// The publisher of the durable trail: the triggers write the events,
 	// this hands them on at least once and marks them published. The
@@ -852,6 +871,16 @@ func run() error {
 	}).
 		WithAudit(recorder).
 		Also("web sessions", authzStore.PurgeExpired).
+		// A host whose owner stopped renewing - an instance that died
+		// without releasing it - is forgotten by its row on the same
+		// clock; the token stays, so the dead instance's writes stay refused.
+		Also("session owners", func(ctx context.Context) error {
+			swept, err := jobStore.SweepExpiredOwners(ctx)
+			if swept > 0 {
+				log.Info("expired session owners were forgotten", "hosts", swept)
+			}
+			return err
+		}).
 		// A host whose recovery order expired unused comes back to active on
 		// the same clock: nobody revoked the order, so nothing else would.
 		Also("lapsed recoveries", func(ctx context.Context) error {

@@ -71,7 +71,7 @@ func (s *Server) openAPI() map[string]any {
 	register("CampaignTarget", campaigns.Target{})
 	register("TimelineEntry", campaigns.Event{})
 	register("CampaignStep", campaigns.Step{})
-	register("AuditEvent", audit.Event{})
+	register("AuditEvent", audit.Record{})
 	register("Payload", opspec.Payload{})
 	register("Budget", budgets.State{})
 	register("BudgetHolder", budgets.Holder{})
@@ -112,6 +112,8 @@ func (s *Server) openAPI() map[string]any {
 	register("CampaignSchedule", campaigns.Schedule{})
 	register("NotificationChannel", notify.Channel{})
 	register("NotificationDelivery", notify.Delivery{})
+	describe(schemas, "AuditEvent", "actor",
+		"The actor as it was when the event was written: principal_id, subject, display_name, kind, resource_type, resource_id, resource_name, credential_id.")
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
 	describe(schemas, "HostAccess", "local_sudo_rules",
@@ -128,6 +130,16 @@ func (s *Server) openAPI() map[string]any {
 	// hosts - gets its sentence here, next to the type it belongs to.
 	describe(schemas, "Campaign", "revision",
 		"Grows with every state change; a client that read the campaign at one revision and orders a transition at another is answered with 409 concurrent_transition.")
+	describe(schemas, "CampaignTarget", "cancel_outcome",
+		"The host's answer to the cancel of its task: not_started, interrupted, not_interruptible or already_done; empty until the host answers.")
+	describe(schemas, "CampaignTarget", "cancel_phase",
+		"What the host was doing when the cancel arrived, as the agent named it.")
+	describe(schemas, "Job", "cancel_requested_at",
+		"When a cancel was asked of the host holding the task; the job stands cancel_requested with its budget tokens until the host answers or the operation's timeout passes (cancel_ack_timeout).")
+	describe(schemas, "Job", "cancel_ack_at", "When the host acknowledged the cancel.")
+	describe(schemas, "Job", "cancel_outcome",
+		"not_started or interrupted end the job canceled; not_interruptible lets it run to its result; already_done means the result is in the host's journal.")
+	describe(schemas, "Job", "cancel_phase", "The phase the host was in when the cancel arrived.")
 	describe(schemas, "CampaignTarget", "cancel_requested_at",
 		"When the cancel of a target already handed to a host was asked for; the target settles once the host acknowledges or its task is taken back from the queue.")
 	describe(schemas, "Campaign", "retried_by",
@@ -516,6 +528,9 @@ var queryParameters = map[string][]queryParameter{
 	},
 	"GET /api/v1/hosts/{id}/audit": append([]queryParameter{
 		{"actor", "string", "The identity that acted."},
+		{"actor_kind", "string", "user, service, anonymous, agent, relay, machine or system."},
+		{"actor_principal_id", "string", "The immutable identifier of the identity that acted."},
+		{"actor_resource_id", "string", "The host, relay or campaign that acted."},
 		{"action", "string", ""},
 		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
 		{"outcome", "string", "success, failure or denied."},
@@ -526,6 +541,9 @@ var queryParameters = map[string][]queryParameter{
 		{"target_id", "string", ""},
 		{"target_type", "string", ""},
 		{"actor", "string", "The identity that acted."},
+		{"actor_kind", "string", "user, service, anonymous, agent, relay, machine or system."},
+		{"actor_principal_id", "string", "The immutable identifier of the identity that acted."},
+		{"actor_resource_id", "string", "The host, relay or campaign that acted."},
 		{"action", "string", ""},
 		{"action_prefix", "string", "The beginning of an action; job. keeps every event about a job."},
 		{"outcome", "string", "success, failure or denied."},
@@ -563,52 +581,53 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/hosts":                            pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":                       ref("Host"),
-	"PUT /api/v1/hosts/{id}/tags":                  ref("Host"),
-	"PUT /api/v1/hosts/{id}/channel":               ref("Host"),
-	"PUT /api/v1/hosts/{id}/owner":                 ref("Host"),
-	"PUT /api/v1/hosts/{id}/management-address":    ref("Host"),
-	"PUT /api/v1/hosts/{id}/failure-domain":        ref("Host"),
-	"PUT /api/v1/hosts/{id}/placement":             ref("Host"),
-	"GET /api/v1/jobs":                             cursorCollection("Job"),
-	"GET /api/v1/jobs/{id}":                        ref("Job"),
-	"POST /api/v1/jobs/{id}/approve":               ref("Job"),
-	"POST /api/v1/jobs/{id}/cancel":                ref("Job"),
-	"GET /api/v1/jobs/{id}/attempts":               collection("Attempt"),
-	"POST /api/v1/hosts/{id}/operations":           ref("Job"),
-	"GET /api/v1/campaigns":                        collection("Campaign"),
-	"POST /api/v1/campaigns":                       ref("Campaign"),
-	"GET /api/v1/campaigns/{id}":                   ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/approve":          ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/pause":            ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/resume":           ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/cancel":           ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/retry":            ref("Campaign"),
-	"GET /api/v1/campaign-schedules":               collection("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules":              ref("CampaignSchedule"),
-	"GET /api/v1/campaign-schedules/{id}":          ref("CampaignSchedule"),
-	"PUT /api/v1/campaign-schedules/{id}":          ref("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules/{id}/run-now": ref("Campaign"),
-	"GET /api/v1/campaigns/{id}/targets":           pagedCollection("CampaignTarget"),
-	"GET /api/v1/campaigns/{id}/timeline":          collection("TimelineEntry"),
-	"GET /api/v1/campaigns/{id}/steps":             cursorCollection("CampaignStep"),
-	"GET /api/v1/audit":                            cursorCollection("AuditEvent"),
-	"GET /api/v1/budgets":                          items("Budget"),
-	"GET /api/v1/fleet/summary":                    ref("FleetSummary"),
-	"GET /api/v1/hosts/{id}/audit":                 cursorCollection("AuditEvent"),
-	"GET /api/v1/hosts/{id}/packages":              ref("HostPackageList"),
-	"GET /api/v1/hosts/{id}/system/history":        collection("SystemHistoryEntry"),
-	"GET /api/v1/hosts/{id}/access":                ref("HostAccess"),
-	"GET /api/v1/policies":                         collection("Policy"),
-	"POST /api/v1/policies":                        ref("Policy"),
-	"GET /api/v1/policies/{id}":                    ref("Policy"),
-	"PUT /api/v1/policies/{id}":                    ref("Policy"),
-	"POST /api/v1/policies/{id}/publish":           ref("Policy"),
-	"POST /api/v1/policies/{id}/evaluate":          ref("PolicyOutcome"),
-	"GET /api/v1/policies/{id}/results":            pagedCollection("PolicyResult"),
-	"GET /api/v1/policies/{id}/versions":           collection("PolicyVersion"),
-	"GET /api/v1/hosts/{id}/policies":              collection("PolicyResult"),
+	"GET /api/v1/hosts":                               pagedCollection("Host"),
+	"GET /api/v1/hosts/{id}":                          ref("Host"),
+	"PUT /api/v1/hosts/{id}/tags":                     ref("Host"),
+	"PUT /api/v1/hosts/{id}/channel":                  ref("Host"),
+	"PUT /api/v1/hosts/{id}/owner":                    ref("Host"),
+	"PUT /api/v1/hosts/{id}/management-address":       ref("Host"),
+	"PUT /api/v1/hosts/{id}/failure-domain":           ref("Host"),
+	"PUT /api/v1/hosts/{id}/placement":                ref("Host"),
+	"GET /api/v1/jobs":                                cursorCollection("Job"),
+	"GET /api/v1/jobs/{id}":                           ref("Job"),
+	"POST /api/v1/jobs/{id}/approve":                  ref("Job"),
+	"POST /api/v1/jobs/{id}/cancel":                   ref("Job"),
+	"GET /api/v1/jobs/{id}/attempts":                  collection("Attempt"),
+	"POST /api/v1/hosts/{id}/operations":              ref("Job"),
+	"GET /api/v1/campaigns":                           collection("Campaign"),
+	"POST /api/v1/campaigns":                          ref("Campaign"),
+	"GET /api/v1/campaigns/{id}":                      ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/approve":             ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/pause":               ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/resume":              ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/cancel":              ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/retry":               ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/targets/{host}/skip": ref("CampaignTarget"),
+	"GET /api/v1/campaign-schedules":                  collection("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules":                 ref("CampaignSchedule"),
+	"GET /api/v1/campaign-schedules/{id}":             ref("CampaignSchedule"),
+	"PUT /api/v1/campaign-schedules/{id}":             ref("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules/{id}/run-now":    ref("Campaign"),
+	"GET /api/v1/campaigns/{id}/targets":              pagedCollection("CampaignTarget"),
+	"GET /api/v1/campaigns/{id}/timeline":             collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":                cursorCollection("CampaignStep"),
+	"GET /api/v1/audit":                               cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                             items("Budget"),
+	"GET /api/v1/fleet/summary":                       ref("FleetSummary"),
+	"GET /api/v1/hosts/{id}/audit":                    cursorCollection("AuditEvent"),
+	"GET /api/v1/hosts/{id}/packages":                 ref("HostPackageList"),
+	"GET /api/v1/hosts/{id}/system/history":           collection("SystemHistoryEntry"),
+	"GET /api/v1/hosts/{id}/access":                   ref("HostAccess"),
+	"GET /api/v1/policies":                            collection("Policy"),
+	"POST /api/v1/policies":                           ref("Policy"),
+	"GET /api/v1/policies/{id}":                       ref("Policy"),
+	"PUT /api/v1/policies/{id}":                       ref("Policy"),
+	"POST /api/v1/policies/{id}/publish":              ref("Policy"),
+	"POST /api/v1/policies/{id}/evaluate":             ref("PolicyOutcome"),
+	"GET /api/v1/policies/{id}/results":               pagedCollection("PolicyResult"),
+	"GET /api/v1/policies/{id}/versions":              collection("PolicyVersion"),
+	"GET /api/v1/hosts/{id}/policies":                 collection("PolicyResult"),
 }
 
 // items is a whole list answered at once, without a count: the budgets
@@ -739,6 +758,15 @@ var requestSchemas = map[string]map[string]any{
 			"reason": map[string]any{"type": "string", "description": "Reading a one-time password is a change of access: the reason and the fresh authentication are recorded. " +
 				"The answer {uid, one_time_password, expires_on_first_login} comes once, to the person who ordered the reset; " +
 				"afterwards 410 secret_consumed, and 404 no_secret when nothing waits - the change has not run, failed, or the value went away with its deadline or a restart."},
+		},
+	},
+	"POST /api/v1/enrollment-requests/{id}/replace": {
+		"type":        "object",
+		"description": "Places an order like the one named (site, environment, kind, relay binding, owner, tags, uses); a pending order is revoked first. 201 with the token shown once; 400 purpose_not_allowed for a recovery order.",
+		"properties": map[string]any{
+			"description": map[string]any{"type": "string"},
+			"ttl_minutes": map[string]any{"type": "integer"},
+			"reason":      map[string]any{"type": "string", "description": "Required for production, a batch token or a relay."},
 		},
 	},
 	"POST /api/v1/enrollment-requests": {

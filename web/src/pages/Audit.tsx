@@ -11,6 +11,72 @@ import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
+ * The actor of an event as it was when the event was written: the
+ * immutable identifier, the name then, the kind, and the resource that
+ * acted for a non-person. The trail keeps it with the row; nothing here
+ * is joined with the live tables.
+ */
+export type AuditActor = {
+  principal_id?: string;
+  subject?: string;
+  display_name?: string;
+  kind?: string;
+  resource_type?: string;
+  resource_id?: string;
+  resource_name?: string;
+  credential_id?: string;
+};
+
+/** The snapshot of an event's actor, where the trail kept one. */
+export function actorOf(event: Pick<AuditEvent, "actor_id">): AuditActor | undefined {
+  return (event as { actor?: AuditActor }).actor;
+}
+
+/** The resource types the panel has a page for. A machine identifier has none, and a host identifier pasted as an actor is not a host. */
+const LINKED_RESOURCES: Record<string, (id: string) => string> = {
+  host: (id) => `/hosts/${encodeURIComponent(id)}/overview`,
+  relay: (id) => `/relays/${encodeURIComponent(id)}`,
+  campaign: (id) => `/campaigns/${encodeURIComponent(id)}`,
+};
+
+/**
+ * How an actor is shown: the name it had, the immutable identifier it
+ * keeps, and a way to it only where the snapshot names a resource the
+ * panel has a page for - a host, a relay, a campaign. The text of
+ * actor_id decides nothing: a machine identifier parses as a host
+ * identifier and is not one, and a name is not a page.
+ */
+export function actorView(
+  event: Pick<AuditEvent, "actor_type" | "actor_id">,
+  t: (text: string) => string,
+): { text: string; id: string; kind: string; to?: string } {
+  const actor = actorOf(event);
+  if (!actor) {
+    return { text: event.actor_id, id: event.actor_id, kind: event.actor_type };
+  }
+  const id = actor.principal_id || actor.resource_id || actor.subject || event.actor_id;
+  const kind = actor.kind || event.actor_type;
+  const named = actor.display_name || actor.resource_name;
+  const text = named
+    ? kind === "agent" ? `${t("agent")} ${named}` : named
+    : actor.subject || event.actor_id;
+  const resourceID = actor.resource_id ?? "";
+  const link = actor.resource_type && resourceID ? LINKED_RESOURCES[actor.resource_type] : undefined;
+  return { text, id, kind, to: link ? link(resourceID) : undefined };
+}
+
+/**
+ * The key a review groups the trail by: the kind and the immutable
+ * identifier, so a renamed person is one actor across both names and a
+ * machine identifier never merges with a host.
+ */
+export function actorKey(event: Pick<AuditEvent, "actor_type" | "actor_id">): string {
+  const actor = actorOf(event);
+  if (!actor) return `${event.actor_type}:${event.actor_id}`;
+  return `${actor.kind || event.actor_type}:${actor.principal_id || actor.resource_id || actor.subject || event.actor_id}`;
+}
+
+/**
  * The audit trail. Denials are as visible as successes.
  *
  * The trail is filtered on the server and read page by page: it grows
@@ -29,6 +95,12 @@ export function Audit() {
   const [action, setAction] = useState(initial.get("action") ?? "");
   const [targetType, setTargetType] = useState(initial.get("target_type") ?? "");
   const [targetID, setTargetID] = useState(initial.get("target_id") ?? "");
+  // One actor by its immutable identifier and its kind: set from the
+  // breakdown or handed over in the address, never typed - a name is
+  // typed into the actor field, which reads actor_id as it was written.
+  const [actorKind, setActorKind] = useState(initial.get("actor_kind") ?? "");
+  const [actorPrincipalID, setActorPrincipalID] = useState(initial.get("actor_principal_id") ?? "");
+  const [actorResourceID, setActorResourceID] = useState(initial.get("actor_resource_id") ?? "");
   // The bounds arrive as instants - a tile links here with one - and are
   // edited as the browser's local time.
   const [since, setSince] = useState(toLocalInput(initial.get("since")));
@@ -46,6 +118,9 @@ export function Audit() {
   const filter = new URLSearchParams();
   if (outcome) filter.set("outcome", outcome);
   if (settledActor) filter.set("actor", settledActor);
+  if (actorKind) filter.set("actor_kind", actorKind);
+  if (actorPrincipalID) filter.set("actor_principal_id", actorPrincipalID);
+  if (actorResourceID) filter.set("actor_resource_id", actorResourceID);
   if (settledAction) filter.set("action", settledAction);
   if (settledTargetType) filter.set("target_type", settledTargetType);
   if (settledTargetID) filter.set("target_id", settledTargetID);
@@ -127,12 +202,27 @@ export function Audit() {
   // dominated by one token or one operator is read here at a glance.
   const byActor = Object.values(
     events.reduce<Record<string, { event: AuditEvent; count: number }>>((acc, event) => {
-      const entry = acc[event.actor_id] ?? { event, count: 0 };
+      const key = actorKey(event);
+      const entry = acc[key] ?? { event, count: 0 };
       entry.count += 1;
-      acc[event.actor_id] = entry;
+      acc[key] = entry;
       return acc;
     }, {}),
   ).sort((x, y) => y.count - x.count).slice(0, 8);
+  // One actor of the breakdown narrows the trail to that actor by its
+  // immutable identifier, whatever it was called at the time.
+  const pickActor = (event: AuditEvent) => {
+    const actor = actorOf(event);
+    if (!actor) {
+      setActor(event.actor_id);
+      return;
+    }
+    setActorKind(actor.kind ?? "");
+    setActorPrincipalID(actor.principal_id ?? "");
+    setActorResourceID(actor.principal_id ? "" : actor.resource_id ?? "");
+    if (!actor.principal_id && !actor.resource_id) setActor(actor.subject ?? event.actor_id);
+  };
+  const clearActor = () => { setActorKind(""); setActorPrincipalID(""); setActorResourceID(""); };
   const hourLabel = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit" });
 
   return (
@@ -178,7 +268,14 @@ export function Audit() {
               ) : byActor.length === 0 ? (
                 <p className="fp-blank">{t("No events.")}</p>
               ) : (
-                <Breakdown tone="neutral" items={byActor.map((entry) => ({ label: <span className="mono"><ActorCell event={entry.event} /></span>, value: entry.count }))} />
+                <Breakdown tone="neutral" items={byActor.map((entry) => ({
+                  label: (
+                    <button type="button" className="link" onClick={() => pickActor(entry.event)} title={t("Only this actor")}>
+                      <ActorCell event={entry.event} plain />
+                    </button>
+                  ),
+                  value: entry.count,
+                }))} />
               )}
             </div>
           </div>
@@ -209,6 +306,12 @@ export function Audit() {
               <option value="success">{t("successes only")}</option>
             </select>
             <input placeholder={t("actor")} aria-label={t("Actor")} value={actor} onChange={(e) => setActor(e.target.value)} />
+            {(actorPrincipalID || actorResourceID) && (
+              <span className="badge" title={actorPrincipalID || actorResourceID}>
+                {actorKind || t("actor")} {(actorPrincipalID || actorResourceID).slice(0, 8)}{" "}
+                <button type="button" className="link" onClick={clearActor} aria-label={t("Clear the actor filter")}>×</button>
+              </span>
+            )}
             <input placeholder={t("operation, e.g. job.create")} aria-label={t("Operation")} value={action} onChange={(e) => setAction(e.target.value)} />
             <input placeholder={t("target type, e.g. host")} aria-label={t("Target type")} value={targetType} onChange={(e) => setTargetType(e.target.value)} />
             <input placeholder={t("target identifier")} aria-label={t("Target identifier")} value={targetID} onChange={(e) => setTargetID(e.target.value)} />
@@ -270,7 +373,7 @@ export function Audit() {
                             </div>
                           )}
                         </td>
-                        <td>{t(ACTOR_KINDS[event.actor_type] ?? event.actor_type)}</td>
+                        <td>{t(ACTOR_KINDS[actorOf(event)?.kind ?? event.actor_type] ?? actorOf(event)?.kind ?? event.actor_type)}</td>
                         <td className="mono">{event.action}</td>
                         <td className="mono"><TargetCell event={event} /></td>
                         <td><OutcomeBadge outcome={event.outcome} /></td>
@@ -422,8 +525,12 @@ export function exportFileName(disposition?: string | null): string {
    their name, the panel itself, or an agent reporting for its host. */
 const ACTOR_KINDS: Record<string, string> = {
   user: "person",
+  service: "service",
+  anonymous: "anonymous",
   system: "panel",
   agent: "agent",
+  relay: "relay",
+  machine: "machine",
 };
 
 /**
@@ -465,20 +572,23 @@ function OutcomeBadge({ outcome }: { outcome: AuditEvent["outcome"] }) {
 }
 
 /**
- * The actor of an event as the trail names it, with a way to it where the
- * panel has one: an agent is its host, a campaign has its page. A person
- * and a token are shown by name.
+ * The actor of an event as the trail kept it: the name it had then, the
+ * immutable identifier on hover and, where the name is not the
+ * identifier, beside it in small print; a link only to a host, a relay
+ * or a campaign the snapshot names. `plain` leaves the link out, for a
+ * cell that is itself a button.
  */
-function ActorCell({ event }: { event: AuditEvent }) {
+function ActorCell({ event, plain }: { event: AuditEvent; plain?: boolean }) {
   const t = useT();
-  if (event.actor_type === "agent") {
-    return <Link to={`/hosts/${encodeURIComponent(event.actor_id)}/overview`} title={event.actor_id}>{t("agent")} {event.actor_id.slice(0, 8)}</Link>;
-  }
-  if (event.actor_id.startsWith("campaign:")) {
-    const id = event.actor_id.slice("campaign:".length);
-    return <Link to={`/campaigns/${encodeURIComponent(id)}`} title={event.actor_id}>{t("campaign")} {id.slice(0, 8)}</Link>;
-  }
-  return <>{event.actor_id}</>;
+  const who = actorView(event, t);
+  const name = who.to && !plain ? <Link to={who.to} title={who.id}>{who.text}</Link> : <span title={who.id}>{who.text}</span>;
+  if (who.text === who.id) return name;
+  return (
+    <>
+      {name}{" "}
+      <span className="source mono" title={who.id}>{who.id.slice(0, 8)}</span>
+    </>
+  );
 }
 
 type Change = { key: string; before: string; after: string };

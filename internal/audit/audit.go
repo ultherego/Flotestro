@@ -154,18 +154,29 @@ func (r *Recorder) record(ctx context.Context, q queryExecutor, event Event) err
 		}
 	}
 
+	// The actor is snapshotted the same way: the identity behind the
+	// event as it was called and identified at this moment, never joined
+	// later. actor_id stays as it was for the readers that know it.
+	who := r.actorSnapshot(ctx, q, request, event)
+
 	const query = `
 		insert into audit_events
 			(actor_type, actor_id, action, target_type, target_id, request_id, outcome, detail,
 			 session_id, acr, amr, auth_time, target_hostname, target_address,
-			 approval_chain, before, after)
-		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`
+			 approval_chain, before, after,
+			 actor_principal_id, actor_subject, actor_display_name, actor_kind,
+			 actor_resource_type, actor_resource_id, actor_resource_name, credential_id)
+		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+			$18::uuid, $19, $20, $21, $22, $23::uuid, $24, $25::uuid)`
 	_, err = q.Exec(ctx, query,
 		string(event.ActorType), event.ActorID, event.Action,
 		nullable(event.TargetType), nullable(event.TargetID), nullable(requestID),
 		string(event.Outcome), payload,
 		nullable(actor.SessionID), nullable(actor.ACR), amr, nullableTime(actor.AuthTime),
-		hostname, address, chain, before, after)
+		hostname, address, chain, before, after,
+		nullableUUID(who.PrincipalID), nullable(who.Subject), nullable(who.DisplayName), nullable(who.Kind),
+		nullable(who.ResourceType), nullableUUID(who.ResourceID), nullable(who.ResourceName),
+		nullableUUID(who.CredentialID))
 	return err
 }
 
@@ -256,6 +267,9 @@ type Record struct {
 	ApprovalChain json.RawMessage `json:"approval_chain,omitempty"`
 	Before        json.RawMessage `json:"before,omitempty"`
 	After         json.RawMessage `json:"after,omitempty"`
+	// The actor as it was when the event was written; absent for an event
+	// from before the snapshot was kept.
+	Actor *ActorSnapshot `json:"actor,omitempty"`
 }
 
 // recordColumns is the projection every read of the trail uses, so the
@@ -266,17 +280,27 @@ const recordColumns = `
 		outcome, detail,
 		coalesce(session_id, ''), coalesce(acr, ''), amr, auth_time,
 		coalesce(target_hostname, ''), coalesce(target_address, ''),
-		approval_chain, before, after`
+		approval_chain, before, after,
+		coalesce(actor_principal_id::text, ''), coalesce(actor_subject, ''),
+		coalesce(actor_display_name, ''), coalesce(actor_kind, ''),
+		coalesce(actor_resource_type, ''), coalesce(actor_resource_id::text, ''),
+		coalesce(actor_resource_name, ''), coalesce(credential_id::text, '')`
 
 // scanRecord reads one row of recordColumns.
 func scanRecord(rows pgx.Rows) (Record, error) {
 	var rec Record
+	var who ActorSnapshot
 	if err := rows.Scan(&rec.ID, &rec.OccurredAt, &rec.ActorType, &rec.ActorID, &rec.Action,
 		&rec.TargetType, &rec.TargetID, &rec.RequestID, &rec.Outcome, &rec.Detail,
 		&rec.SessionID, &rec.ACR, &rec.AMR, &rec.AuthTime,
 		&rec.TargetHostname, &rec.TargetAddress,
-		&rec.ApprovalChain, &rec.Before, &rec.After); err != nil {
+		&rec.ApprovalChain, &rec.Before, &rec.After,
+		&who.PrincipalID, &who.Subject, &who.DisplayName, &who.Kind,
+		&who.ResourceType, &who.ResourceID, &who.ResourceName, &who.CredentialID); err != nil {
 		return Record{}, err
+	}
+	if !who.empty() {
+		rec.Actor = &who
 	}
 	// A null column reads as the JSON null; the answer leaves the field out
 	// instead, as it does for every other value the event does not carry.
@@ -307,10 +331,19 @@ type ListFilter struct {
 	// own trail reads with it; TargetID alone would show the host without
 	// what was done on it.
 	HostID string
-	// Actor is the identity that acted: a principal subject or an agent's
-	// host identifier.
-	Actor  string
-	Action string
+	// Actor is the identity that acted as actor_id spells it: a principal
+	// subject or an agent's host identifier. It stays for the readers
+	// that know it; the three below narrow by the snapshot, which is what
+	// a review groups by - a renamed person keeps one identifier across
+	// both names, and a machine identifier never matches a host.
+	Actor string
+	// ActorKind is one of the ActorKind constants.
+	ActorKind string
+	// ActorPrincipalID keeps the events of one identity by its immutable
+	// identifier; ActorResourceID those of one host, relay or campaign.
+	ActorPrincipalID string
+	ActorResourceID  string
+	Action           string
 	// ActionPrefix keeps a family of actions by the beginning of the name
 	// (job. is every event about a job), the way the job list narrows an
 	// operation family; Action keeps one action alone.
@@ -340,6 +373,11 @@ func (f ListFilter) conditions(args []any) ([]string, []any) {
 			"((target_type = 'host' and target_id = $%d) or detail->>'host_id' = $%d)", len(args), len(args)))
 	}
 	add("actor_id", f.Actor)
+	add("actor_kind", f.ActorKind)
+	// The identifiers are compared as text: a value that is not an
+	// identifier then matches nothing instead of failing the read.
+	add("actor_principal_id::text", f.ActorPrincipalID)
+	add("actor_resource_id::text", f.ActorResourceID)
 	add("action", f.Action)
 	// The prefix is compared as a string, not as a pattern: an action name
 	// carries dots and underscores, which a LIKE would read as its own.

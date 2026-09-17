@@ -32,7 +32,7 @@ export function JobState({ state }: { state: string }) {
   // may have changed.
   const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
     "awaiting_budget", "queued_offline", "awaiting_lock", "dispatched", "manual_gate",
-    "completed_with_issues", "unknown"].includes(state);
+    "cancel_requested", "completed_with_issues", "unknown"].includes(state);
   const kind = succeeded ? "ok" : failed ? "error" : skipped ? "unknown" : waiting ? "warn" : "";
   // The legend travels with the badge: every state says what it means for
   // the host and what, if anything, the operator has to do about it.
@@ -52,6 +52,7 @@ export function stateMeaning(state: string): string {
     lease_expired: "The host did not answer within the lease; the operation was delivered again.",
     superseded_by_result: "The result arrived on an earlier attempt after its lease ran out; this attempt did nothing.",
     awaiting_approval: "Nothing happens until somebody approves; the approval confirms the plan hash.",
+    cancel_requested: "A cancel was asked of the host holding the task; the job waits for the agent to say what it found - not started, interrupted, not interruptible or already done - or for the operation's timeout, after which the outcome is unknown.",
     planning: "Every host computes its own plan; nothing is applied yet.",
     planned: "The plans are in; the campaign waits for the consent.",
     awaiting_budget: "The host is ready, but the fleet or the site has no capacity now; it starts when a token frees up.",
@@ -96,6 +97,7 @@ export function stateName(state: string): string {
     online: "online", offline: "offline", stale: "stale", unknown: "unknown",
     queued: "queued", planned: "planned", leased: "assigned",
     dispatched: "dispatched", running: "running",
+    cancel_requested: "cancel requested",
     awaiting_approval: "awaiting approval",
     // The campaign computes a plan on every host; it changes nothing yet.
     planning: "planning per host",

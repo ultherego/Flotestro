@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterRows, heldCount, packageRows, packageVersion, type InstalledPackage, type PlanChange } from "./Packages";
+import { filterRows, heldCount, packageRows, packageVersion, planExpired, type InstalledPackage, type PlanChange } from "./Packages";
 
 /* The table joins three answers of the host - the installed list, the
    holds and the last upgrade plan - and the join decides what a row says
@@ -47,6 +47,28 @@ describe("packageRows", () => {
   it("shows a change the plan did not price as an unknown version rather than as nothing waiting", () => {
     const rows = packageRows(installed, [], [{ name: "zsh" }]);
     expect(rows.find((row) => row.name === "zsh")?.candidate).toBe("?");
+  });
+
+  it("carries the direction and the origin the plan named, and nothing for a plan that named none", () => {
+    const rows = packageRows(installed, [], [
+      { name: "openssl", candidate_version: "3.0.14-1~deb12u1", action: "downgrade", origin: "Debian:12/stable" },
+      { name: "nano", candidate_version: "7.3-1" },
+    ]);
+    expect(rows.find((row) => row.name === "openssl")).toMatchObject({ action: "downgrade", candidateOrigin: "Debian:12/stable" });
+    const nano = rows.find((row) => row.name === "nano");
+    expect(nano?.action).toBeUndefined();
+    expect(nano?.candidateOrigin).toBeUndefined();
+  });
+});
+
+describe("planExpired", () => {
+  it("is past the expiry the plan carries, and never for a plan without one", () => {
+    const now = Date.parse("2026-09-17T12:00:00Z");
+    expect(planExpired({ expires_at: "2026-09-17T11:59:59Z" }, now)).toBe(true);
+    expect(planExpired({ expires_at: "2026-09-18T12:00:00Z" }, now)).toBe(false);
+    expect(planExpired({}, now)).toBe(false);
+    expect(planExpired(undefined, now)).toBe(false);
+    expect(planExpired({ expires_at: "not a time" }, now)).toBe(false);
   });
 });
 

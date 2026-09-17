@@ -32,10 +32,11 @@ func (e *TaskExecutor) applyCompose(ctx context.Context, task *agentv1.TaskEnvel
 		TimeoutSeconds: uint32(timeout.Seconds()),
 		Action: &helperv1.HelperRequest_Compose{
 			Compose: &helperv1.ComposeRequest{
-				Operation:  operation,
-				Project:    action.GetProject(),
-				Manifest:   action.GetManifest(),
-				PlanDigest: action.GetPlanDigest(),
+				Operation:    operation,
+				Project:      action.GetProject(),
+				Manifest:     action.GetManifest(),
+				PlanDigest:   action.GetPlanDigest(),
+				ImageDigests: action.GetImageDigests(),
 			},
 		},
 	}, timeout)

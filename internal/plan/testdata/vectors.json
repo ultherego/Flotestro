@@ -1,0 +1,69 @@
+{
+  "envelopes": [
+    {
+      "name": "empty upgrade plan: nil collections hash as empty ones, the host identity stays out of the digest",
+      "envelope": {
+        "schema_version": 1,
+        "planner_version": "packages/1",
+        "action_type": "packages.upgrade",
+        "host_id": "h",
+        "inventory_revision": "",
+        "resource_revision": "",
+        "preconditions": null,
+        "steps": null,
+        "effects": {
+          "expected": null,
+          "reboot_required": false,
+          "services_restart": null,
+          "services_restart_known": false,
+          "download_bytes": 0,
+          "download_known": false,
+          "install_delta_bytes": 0,
+          "install_delta_known": false
+        },
+        "artifacts": null,
+        "rollback": {"mechanism": "", "id": "", "available": false, "reason": ""},
+        "expires_at": "0001-01-01T00:00:00Z"
+      },
+      "canonical": "{\"action_type\":\"packages.upgrade\",\"artifacts\":[],\"effects\":{\"download_bytes\":0,\"download_known\":false,\"expected\":[],\"install_delta_bytes\":0,\"install_delta_known\":false,\"reboot_required\":false,\"services_restart\":[],\"services_restart_known\":false},\"expires_at\":\"0001-01-01T00:00:00Z\",\"host_id\":\"\",\"inventory_revision\":\"\",\"planner_version\":\"packages/1\",\"preconditions\":[],\"resource_revision\":\"\",\"rollback\":{\"available\":false,\"id\":\"\",\"mechanism\":\"\",\"reason\":\"\"},\"schema_version\":1,\"steps\":[]}",
+      "sha256": "a8f75421e169aab4ee6821ae373da5d433555a0d07125e0eade5d8d9eef32094"
+    },
+    {
+      "name": "dnf installation of one exact NEVRA: the description, the host, the inventory revision and the expiry stay out of the digest",
+      "envelope": {
+        "schema_version": 1,
+        "planner_version": "packages/1",
+        "action_type": "packages.install",
+        "host_id": "3f2b9d1e-5c1a-4b7e-9e0d-1a2b3c4d5e6f",
+        "inventory_revision": "0123456789abcdef0123456789abcdef",
+        "resource_revision": "dnf:5d41402abc4b2a76b9719d911017c592",
+        "preconditions": [
+          {"kind": "lock_free", "subject": "/var/lib/rpm/.rpm.lock", "expected": "not held"}
+        ],
+        "steps": [
+          {"kind": "install", "subject": "tree", "spec": "tree-2.2.1-1.fc42.x86_64"}
+        ],
+        "effects": {
+          "expected": [
+            {"kind": "package_version", "subject": "tree", "value": "2.2.1-1.fc42"}
+          ],
+          "reboot_required": false,
+          "services_restart": [],
+          "services_restart_known": false,
+          "download_bytes": 61440,
+          "download_known": true,
+          "install_delta_bytes": 122880,
+          "install_delta_known": true
+        },
+        "artifacts": [
+          {"kind": "package", "name": "tree", "version": "2.2.1-1.fc42", "architecture": "x86_64", "origin": "fedora", "digest": ""}
+        ],
+        "rollback": {"mechanism": "dnf_history", "id": "", "available": true, "reason": "dnf history undo of the transaction recorded"},
+        "expires_at": "2026-09-18T12:00:00+02:00",
+        "description": "1 package will be installed (dnf)"
+      },
+      "canonical": "{\"action_type\":\"packages.install\",\"artifacts\":[{\"architecture\":\"x86_64\",\"digest\":\"\",\"kind\":\"package\",\"name\":\"tree\",\"origin\":\"fedora\",\"version\":\"2.2.1-1.fc42\"}],\"effects\":{\"download_bytes\":61440,\"download_known\":true,\"expected\":[{\"kind\":\"package_version\",\"subject\":\"tree\",\"value\":\"2.2.1-1.fc42\"}],\"install_delta_bytes\":122880,\"install_delta_known\":true,\"reboot_required\":false,\"services_restart\":[],\"services_restart_known\":false},\"expires_at\":\"0001-01-01T00:00:00Z\",\"host_id\":\"\",\"inventory_revision\":\"\",\"planner_version\":\"packages/1\",\"preconditions\":[{\"expected\":\"not held\",\"kind\":\"lock_free\",\"subject\":\"/var/lib/rpm/.rpm.lock\"}],\"resource_revision\":\"dnf:5d41402abc4b2a76b9719d911017c592\",\"rollback\":{\"available\":true,\"id\":\"\",\"mechanism\":\"dnf_history\",\"reason\":\"dnf history undo of the transaction recorded\"},\"schema_version\":1,\"steps\":[{\"kind\":\"install\",\"spec\":\"tree-2.2.1-1.fc42.x86_64\",\"subject\":\"tree\"}]}",
+      "sha256": "1921a34709fd3a20462abb5a2397c4fbfa9f6d61f2d6cd23a4b5b68d8d211550"
+    }
+  ]
+}

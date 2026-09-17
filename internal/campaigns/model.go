@@ -231,12 +231,23 @@ func (t TargetState) Succeeded() bool {
 	return t == TargetSucceeded || t == TargetNoChange
 }
 
-// HoldsWave says whether the host keeps its wave open. A host queued
-// offline does not: the wave's verdict comes from the hosts that ran, and
-// the offline one gets its turn when it comes back - otherwise a single
-// unplugged machine would hold the whole fleet until the deadline.
-func (t TargetState) HoldsWave() bool {
-	return !t.Finished() && t != TargetQueuedOffline
+// HoldsWave says whether the host keeps its wave open.
+//
+// A settled host does not. A host queued offline in a wave does not
+// either: the wave's verdict comes from the hosts that ran, and the
+// offline one gets its turn when it comes back - otherwise a single
+// unplugged machine would hold the whole fleet until the deadline. The
+// canary is the exception the document makes: an offline canary holds
+// the barrier. The canary exists to say whether the change is safe, and
+// a canary that never ran has said nothing; opening the waves over it
+// would run the change on the fleet on the word of nobody. The barrier
+// opens when the host comes back and runs, when the deadline closes the
+// queue, or when an operator skips the host by name with a reason.
+func (t Target) HoldsWave() bool {
+	if t.State.Finished() {
+		return false
+	}
+	return t.State != TargetQueuedOffline || t.Wave == 0
 }
 
 // mayBecome says whether a target may move from this state to the given
@@ -846,6 +857,11 @@ type Target struct {
 	// CancelRequestedAt is when a cancel found the host carrying its task.
 	// The task stays with the host; the campaign waits for it to settle.
 	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
+	// CancelOutcome and CancelPhase are the agent's answer to the cancel
+	// of the host's task, read off the job: what the request found on
+	// the host and what the host was doing. Empty until the host answers.
+	CancelOutcome string `json:"cancel_outcome,omitempty"`
+	CancelPhase   string `json:"cancel_phase,omitempty"`
 }
 
 // Report summarises the course of a campaign.
@@ -882,6 +898,19 @@ const ConnectivityLostCode = "lease_expired"
 // see the end of. The helper may have finished it; the agent neither
 // repeats nor invents, and the host ends unknown.
 const OutcomeUnknownCode = "outcome_unknown"
+
+// CancelAckTimeoutCode is the error code of a host whose cancel request
+// got no answer within the operation's timeout (jobs.CancelAckTimeoutCode).
+// The host may have run the change to its end, cut it short or never
+// started it; the panel does not know, and the host ends unknown - the
+// document's unknown_needs_reconciliation - rather than failed, because
+// nothing says the change failed.
+const CancelAckTimeoutCode = "cancel_ack_timeout"
+
+// SkippedByOperatorCode is the error code of a host an operator skipped
+// by name: an offline canary the campaign was waiting for, let go with a
+// reason so that the barrier opens. The host took no part; not a failure.
+const SkippedByOperatorCode = "skipped_by_operator"
 
 // ConnectivityLost says whether the host ended because its session broke
 // while its task ran rather than because the change failed. Such a host

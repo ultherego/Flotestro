@@ -21,6 +21,13 @@ type JobDetail = Job & {
   approved_at?: string;
   canceled_by?: string;
   cancel_reason?: string;
+  // The cancel protocol: when the cancel was asked of the host holding
+  // the task, when the host answered, and what it answered - the outcome
+  // and the phase it was in. Absent for a job canceled in the queue.
+  cancel_requested_at?: string;
+  cancel_ack_at?: string;
+  cancel_outcome?: string;
+  cancel_phase?: string;
   timeout_seconds?: number;
   max_output_bytes?: number;
   preconditions?: unknown;
@@ -78,6 +85,30 @@ export function payloadPairs(value: unknown): { path: string; value: string }[] 
   };
   if (!walk(payload as Record<string, unknown>, "", 0)) return null;
   return pairs.length > 0 && pairs.length <= 24 ? pairs : null;
+}
+
+/**
+ * The host's answer to a cancel, in a sentence: what the request found
+ * and what the host was doing. The outcome is the protocol's word; the
+ * sentence says what it means, because "not_interruptible" reads as an
+ * error to somebody who did not write the protocol. Empty until the
+ * host answered.
+ */
+export function cancelAckLine(job: { cancel_outcome?: string; cancel_phase?: string },
+  t: (key: string, params?: Record<string, string | number>) => string): string {
+  const phase = job.cancel_phase || "under way";
+  switch (job.cancel_outcome) {
+    case "not_started":
+      return t("The host had not started the task; it will not start.");
+    case "interrupted":
+      return t("The host interrupted the task while it was {phase}.", { phase });
+    case "not_interruptible":
+      return t("The host runs the task to its end ({phase}); the result settles it.", { phase });
+    case "already_done":
+      return t("The host had already finished the task; its result settles it.");
+    default:
+      return "";
+  }
 }
 
 /** Whether a JSON value says anything: an order without preconditions carries an empty object or nothing. */
@@ -267,6 +298,24 @@ export function JobPage() {
             </Pair>
             <Pair label={t("Canceled by")}>{data.canceled_by || "—"}</Pair>
             <Pair label={t("Cancel reason")}>{data.cancel_reason || "—"}</Pair>
+            {/* A cancel of a task the host holds is a request and an
+                answer: the request goes out, the host says what it found,
+                and only that settles the job. Both moments are shown, so
+                a job standing in cancel_requested says whom it waits for. */}
+            {data.cancel_requested_at && (
+              <Pair label={t("Cancel requested")}>
+                <Time value={data.cancel_requested_at} /> <span className="source">{absoluteTime(data.cancel_requested_at)}</span>
+                {!data.cancel_ack_at && <> · <span className="badge warn">{t("waiting for the host to answer")}</span></>}
+              </Pair>
+            )}
+            {data.cancel_ack_at && (
+              <Pair label={t("Cancel acknowledged")}>
+                <Time value={data.cancel_ack_at} /> <span className="source">{absoluteTime(data.cancel_ack_at)}</span>
+                {" · "}<span className="mono">{data.cancel_outcome}</span>
+                {data.cancel_phase && <span className="source"> · {data.cancel_phase}</span>}
+                {cancelAckLine(data, t) && <div className="source">{cancelAckLine(data, t)}</div>}
+              </Pair>
+            )}
             <Pair label={t("Result")}>{data.result_status || "—"}</Pair>
             <Pair label={t("Error code")}>{data.result_error_code ? <ErrorCode code={data.result_error_code} /> : "—"}</Pair>
             <Pair label={t("Message")}>{data.result_message || "—"}</Pair>

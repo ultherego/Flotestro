@@ -306,6 +306,13 @@ func (s *EnrollmentService) enrollThroughRelay(ctx context.Context,
 		issued.IssuerSubject, issued.IssuerSerial, issued.IssuerID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
+	// The public key goes on the record with the certificate: the envelopes
+	// of the host's sessions through a relay are checked against it.
+	if der, err := publicKeyDER(issued.PEM); err != nil {
+		s.log.Error("the public key of the issued certificate was not read", "host_id", hostID, "err", err)
+	} else if err := s.hosts.RecordCertificatePublicKey(ctx, tx, issued.Serial, der); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
 
 	// The attempt is written in the same transaction as the host and the
 	// certificate: a write after the commit might not arrive, and the

@@ -50,6 +50,9 @@ const (
 	// AgentServiceFetchSecretProcedure is the fully-qualified name of the AgentService's FetchSecret
 	// RPC.
 	AgentServiceFetchSecretProcedure = "/flotestro.agent.v1.AgentService/FetchSecret"
+	// AgentServiceRequestIdentityChallengeProcedure is the fully-qualified name of the AgentService's
+	// RequestIdentityChallenge RPC.
+	AgentServiceRequestIdentityChallengeProcedure = "/flotestro.agent.v1.AgentService/RequestIdentityChallenge"
 	// RelayServiceRenewCertificateProcedure is the fully-qualified name of the RelayService's
 	// RenewCertificate RPC.
 	RelayServiceRenewCertificateProcedure = "/flotestro.agent.v1.RelayService/RenewCertificate"
@@ -153,6 +156,12 @@ type AgentServiceClient interface {
 	// audit log, nor in the inventory - it is only in the store and briefly in
 	// the host's memory.
 	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
+	// RequestIdentityChallenge hands out a one-time challenge a host signs
+	// with its current key when it renews through a relay. The relay's
+	// handshake proves the relay; the challenge, bound to the host, the relay
+	// and a short expiry, is what proves the host still holds the key the
+	// certificate on record belongs to.
+	RequestIdentityChallenge(context.Context, *connect.Request[v1.IdentityChallengeRequest]) (*connect.Response[v1.IdentityChallengeResponse], error)
 }
 
 // NewAgentServiceClient constructs a client for the flotestro.agent.v1.AgentService service. By
@@ -190,15 +199,22 @@ func NewAgentServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(agentServiceMethods.ByName("FetchSecret")),
 			connect.WithClientOptions(opts...),
 		),
+		requestIdentityChallenge: connect.NewClient[v1.IdentityChallengeRequest, v1.IdentityChallengeResponse](
+			httpClient,
+			baseURL+AgentServiceRequestIdentityChallengeProcedure,
+			connect.WithSchema(agentServiceMethods.ByName("RequestIdentityChallenge")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // agentServiceClient implements AgentServiceClient.
 type agentServiceClient struct {
-	connect          *connect.Client[v1.AgentMessage, v1.ServerMessage]
-	renewCertificate *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
-	ping             *connect.Client[v1.PingRequest, v1.PingResponse]
-	fetchSecret      *connect.Client[v1.FetchSecretRequest, v1.FetchSecretResponse]
+	connect                  *connect.Client[v1.AgentMessage, v1.ServerMessage]
+	renewCertificate         *connect.Client[v1.RenewCertificateRequest, v1.RenewCertificateResponse]
+	ping                     *connect.Client[v1.PingRequest, v1.PingResponse]
+	fetchSecret              *connect.Client[v1.FetchSecretRequest, v1.FetchSecretResponse]
+	requestIdentityChallenge *connect.Client[v1.IdentityChallengeRequest, v1.IdentityChallengeResponse]
 }
 
 // Connect calls flotestro.agent.v1.AgentService.Connect.
@@ -219,6 +235,11 @@ func (c *agentServiceClient) Ping(ctx context.Context, req *connect.Request[v1.P
 // FetchSecret calls flotestro.agent.v1.AgentService.FetchSecret.
 func (c *agentServiceClient) FetchSecret(ctx context.Context, req *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error) {
 	return c.fetchSecret.CallUnary(ctx, req)
+}
+
+// RequestIdentityChallenge calls flotestro.agent.v1.AgentService.RequestIdentityChallenge.
+func (c *agentServiceClient) RequestIdentityChallenge(ctx context.Context, req *connect.Request[v1.IdentityChallengeRequest]) (*connect.Response[v1.IdentityChallengeResponse], error) {
+	return c.requestIdentityChallenge.CallUnary(ctx, req)
 }
 
 // AgentServiceHandler is an implementation of the flotestro.agent.v1.AgentService service.
@@ -243,6 +264,12 @@ type AgentServiceHandler interface {
 	// audit log, nor in the inventory - it is only in the store and briefly in
 	// the host's memory.
 	FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error)
+	// RequestIdentityChallenge hands out a one-time challenge a host signs
+	// with its current key when it renews through a relay. The relay's
+	// handshake proves the relay; the challenge, bound to the host, the relay
+	// and a short expiry, is what proves the host still holds the key the
+	// certificate on record belongs to.
+	RequestIdentityChallenge(context.Context, *connect.Request[v1.IdentityChallengeRequest]) (*connect.Response[v1.IdentityChallengeResponse], error)
 }
 
 // NewAgentServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -276,6 +303,12 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(agentServiceMethods.ByName("FetchSecret")),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentServiceRequestIdentityChallengeHandler := connect.NewUnaryHandler(
+		AgentServiceRequestIdentityChallengeProcedure,
+		svc.RequestIdentityChallenge,
+		connect.WithSchema(agentServiceMethods.ByName("RequestIdentityChallenge")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/flotestro.agent.v1.AgentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AgentServiceConnectProcedure:
@@ -286,6 +319,8 @@ func NewAgentServiceHandler(svc AgentServiceHandler, opts ...connect.HandlerOpti
 			agentServicePingHandler.ServeHTTP(w, r)
 		case AgentServiceFetchSecretProcedure:
 			agentServiceFetchSecretHandler.ServeHTTP(w, r)
+		case AgentServiceRequestIdentityChallengeProcedure:
+			agentServiceRequestIdentityChallengeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,6 +344,10 @@ func (UnimplementedAgentServiceHandler) Ping(context.Context, *connect.Request[v
 
 func (UnimplementedAgentServiceHandler) FetchSecret(context.Context, *connect.Request[v1.FetchSecretRequest]) (*connect.Response[v1.FetchSecretResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.FetchSecret is not implemented"))
+}
+
+func (UnimplementedAgentServiceHandler) RequestIdentityChallenge(context.Context, *connect.Request[v1.IdentityChallengeRequest]) (*connect.Response[v1.IdentityChallengeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("flotestro.agent.v1.AgentService.RequestIdentityChallenge is not implemented"))
 }
 
 // RelayServiceClient is a client for the flotestro.agent.v1.RelayService service.
