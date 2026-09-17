@@ -4,6 +4,7 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -319,7 +320,15 @@ func TestMountPlanCarriesTheFstabRevision(t *testing.T) {
 		t.Skip("the root filesystem has no UUID")
 	}
 
-	target := "/mnt/flotestro-identity-" + root.UUID[:8]
+	// A target of this run alone: a mount that an older helper let through
+	// on a stale plan would otherwise stand in the way of the next run.
+	target := fmt.Sprintf("/mnt/flotestro-identity-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		h.createOperation(host.ID, map[string]any{
+			"action": "mount.remove", "reason": identityReason,
+			"payload": map[string]any{"storage": map[string]any{"target": target}},
+		})
+	})
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "storage.plan", "reason": identityReason,
 		"payload": map[string]any{"storage": map[string]any{

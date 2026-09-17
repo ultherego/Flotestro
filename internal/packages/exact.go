@@ -120,7 +120,10 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 
 // ApplyExact carries the plan out with dnf on the exact NEVRAs and only
 // from the repositories the plan names, against the metadata the plan
-// was read from (--cacheonly). The elements go in by direction - an
+// was read from: the cached metadata is declared never expired, so dnf
+// resolves on what the plan saw and downloads only the archives -
+// --cacheonly would refuse the download itself. The elements go in by
+// direction - an
 // upgrade, an installation and a downgrade are different commands of dnf
 // - and the dependencies of each are already named, so a later command
 // finds its work done by an earlier one rather than resolving anything
@@ -142,7 +145,7 @@ func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
 	}
 
-	base := []string{"--assumeyes", "--quiet", "--cacheonly"}
+	base := []string{"--assumeyes", "--quiet", "--setopt=metadata_expire=-1"}
 	for _, repo := range approved.RepositoryIDs() {
 		base = append(base, "--repo="+repo)
 	}

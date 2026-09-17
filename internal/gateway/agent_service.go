@@ -646,7 +646,12 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	case *agentv1.AgentMessage_Heartbeat:
 		health := payload.Heartbeat.GetHealth()
 		// The fields absent from a message mean an undetermined state and go on
-		// as a missing value rather than as zero.
+		// as a missing value rather than as zero - and a heartbeat without
+		// any health at all says nothing about the host rather than
+		// something about the panel.
+		if health == nil {
+			health = &agentv1.HealthSignals{}
+		}
 		if err := s.hosts.ApplyHeartbeat(ctx, hostID, hosts.Health{
 			FailedUnits:            health.FailedUnits,
 			RebootRequired:         health.RebootRequired,
