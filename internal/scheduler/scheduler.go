@@ -743,19 +743,33 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet,
+		opspec.ActionLocalSSHKeysAdd, opspec.ActionLocalSSHKeysRemove,
+		opspec.ActionLocalSSHKeysReplaceAll,
 		opspec.ActionLocalUserGroupsSet, opspec.ActionLocalUserExpirySet,
 		opspec.ActionLocalUserDelete:
+		keys := make([]*agentv1.SSHKeyInput, 0, len(payload.LocalUser.Keys))
+		for _, key := range payload.LocalUser.Keys {
+			keys = append(keys, &agentv1.SSHKeyInput{PublicKey: key.PublicKey, Comment: key.Comment})
+		}
 		envelope.Action = &agentv1.TaskEnvelope_LocalUserAction{
 			LocalUserAction: &agentv1.LocalUserAction{
-				Operation:  localUserOperations[action],
-				Name:       payload.LocalUser.Name,
-				Gecos:      payload.LocalUser.Gecos,
-				Shell:      payload.LocalUser.Shell,
-				Groups:     payload.LocalUser.Groups,
-				SshKeys:    payload.LocalUser.SSHKeys,
-				CreateHome: payload.LocalUser.CreateHome,
-				ExpiresAt:  payload.LocalUser.ExpiresAt,
-				RemoveHome: payload.LocalUser.RemoveHome,
+				Operation:            localUserOperations[action],
+				Name:                 payload.LocalUser.Name,
+				Gecos:                payload.LocalUser.Gecos,
+				Shell:                payload.LocalUser.Shell,
+				Groups:               payload.LocalUser.Groups,
+				SshKeys:              payload.LocalUser.SSHKeys,
+				CreateHome:           payload.LocalUser.CreateHome,
+				ExpiresAt:            payload.LocalUser.ExpiresAt,
+				RemoveHome:           payload.LocalUser.RemoveHome,
+				Keys:                 keys,
+				Fingerprints:         payload.LocalUser.Fingerprints,
+				IgnoreMissing:        payload.LocalUser.IgnoreMissing,
+				ExpectedFingerprints: payload.LocalUser.ExpectedFingerprints,
+				AllowLockout:         payload.LocalUser.AllowLockout,
+				ManagedFile:          payload.LocalUser.ManagedFile,
+				System:               payload.LocalUser.System,
+				Inactive:             payload.LocalUser.Inactive,
 			},
 		}
 
@@ -1433,10 +1447,13 @@ var unitOperations = map[opspec.ActionType]agentv1.UnitAction_Operation{
 // value. The map is explicit, so adding an action without a mapping does not
 // pass the tests.
 var localUserOperations = map[opspec.ActionType]agentv1.LocalUserAction_Operation{
-	opspec.ActionLocalUserCreate: agentv1.LocalUserAction_OPERATION_CREATE,
-	opspec.ActionLocalUserLock:   agentv1.LocalUserAction_OPERATION_LOCK,
-	opspec.ActionLocalUserUnlock: agentv1.LocalUserAction_OPERATION_UNLOCK,
-	opspec.ActionLocalSSHKeysSet: agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS,
+	opspec.ActionLocalUserCreate:        agentv1.LocalUserAction_OPERATION_CREATE,
+	opspec.ActionLocalUserLock:          agentv1.LocalUserAction_OPERATION_LOCK,
+	opspec.ActionLocalUserUnlock:        agentv1.LocalUserAction_OPERATION_UNLOCK,
+	opspec.ActionLocalSSHKeysSet:        agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS,
+	opspec.ActionLocalSSHKeysAdd:        agentv1.LocalUserAction_OPERATION_ADD_SSH_KEYS,
+	opspec.ActionLocalSSHKeysRemove:     agentv1.LocalUserAction_OPERATION_REMOVE_SSH_KEYS,
+	opspec.ActionLocalSSHKeysReplaceAll: agentv1.LocalUserAction_OPERATION_REPLACE_SSH_KEYS,
 	// The groups, the expiry date and the deletion of an account.
 	opspec.ActionLocalUserGroupsSet: agentv1.LocalUserAction_OPERATION_SET_GROUPS,
 	opspec.ActionLocalUserExpirySet: agentv1.LocalUserAction_OPERATION_SET_EXPIRY,

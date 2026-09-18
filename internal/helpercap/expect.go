@@ -137,6 +137,12 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 			return mutating("localuser.unlock", opspec.ActionLocalUserUnlock)
 		case helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS:
 			return mutating("localuser.sshkeys", opspec.ActionLocalSSHKeysSet)
+		case helperv1.LocalUserActionRequest_OPERATION_ADD_SSH_KEYS:
+			return mutating("localuser.sshkeys.add", opspec.ActionLocalSSHKeysAdd)
+		case helperv1.LocalUserActionRequest_OPERATION_REMOVE_SSH_KEYS:
+			return mutating("localuser.sshkeys.remove", opspec.ActionLocalSSHKeysRemove)
+		case helperv1.LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS:
+			return mutating("localuser.sshkeys.replace", opspec.ActionLocalSSHKeysReplaceAll)
 		case helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS:
 			return mutating("localuser.groups", opspec.ActionLocalUserGroupsSet)
 		case helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY:

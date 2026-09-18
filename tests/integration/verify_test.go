@@ -3,11 +3,22 @@
 package integration
 
 import (
+	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"connectrpc.com/connect"
+	"github.com/google/uuid"
+	"golang.org/x/net/http2"
+
+	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 )
 
 // The verification of a change on a live fleet: only a state the host
@@ -181,6 +192,17 @@ func TestARestartOfAMaskedUnitIsNeverASuccess(t *testing.T) {
 // succeeded only once a session with another boot identifier is there,
 // with that identifier in the result.
 func TestARestartSettlesOnTheReturnOfTheHost(t *testing.T) {
+	// The machines of this laboratory do not come back from a restart
+	// they order themselves: VirtualBox leaves the guest stopped, and the
+	// workstation brings it back with vagrant. A test that orders a real
+	// restart therefore waits for a host nobody will start, so the
+	// restart is exercised only where a host really comes back. The panel
+	// side of the settlement - a job open until a session with another
+	// boot identifier arrives - is proven without a restart in
+	// TestARestartWaitsForAnotherBootIdentifier.
+	if os.Getenv("FLOTESTRO_TEST_REBOOT") == "" {
+		t.Skip("set FLOTESTRO_TEST_REBOOT=1 on a fleet whose hosts come back from a restart on their own")
+	}
 	h := newHarness(t)
 	host := h.hostByName("agent-debian")
 	if host.BootID == "" {
@@ -307,4 +329,162 @@ func TestACopyBoundToAForeignPlanIsRefused(t *testing.T) {
 			t.Errorf("the refused copy left %d snapshot(s) behind", *definition.Snapshots)
 		}
 	}
+}
+
+// TestARestartWaitsForAnotherBootIdentifier proves the panel's half of the
+// settlement without restarting anything: a synthetic host takes the order,
+// its session ends the way a machine going down ends one, and the job stays
+// open until a session with another boot identifier arrives. It is the same
+// path a real restart takes; what it leaves out is the machine.
+func TestARestartWaitsForAnotherBootIdentifier(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	pool := h.database(ctx)
+	host, identity := h.enrollSyntheticHostWithIdentity(t)
+	gateway := envOr("FLOTESTRO_TEST_GATEWAY", defaultGateway)
+
+	// The host announces the adapter the operation needs and a boot it is
+	// on, the way an agent does at its first session.
+	if _, err := pool.Exec(ctx, `
+		insert into host_capability_registry (host_id, name, version, available, features)
+		values ($1::uuid, 'systemd', 1, true, '{}'::jsonb)
+		on conflict (host_id, name) do update set available = true`, host.ID); err != nil {
+		t.Fatalf("giving the synthetic host a systemd adapter: %v", err)
+	}
+	bootBefore := uuid.NewString()
+	session, err := openSyntheticSession(ctx, gateway, identity, bootBefore)
+	if err != nil {
+		t.Fatalf("the synthetic host did not open its first session: %v", err)
+	}
+
+	job := h.createOperation(host.ID, map[string]any{
+		"action": "system.reboot", "reason": verifyReason,
+		"payload": map[string]any{"reboot": map[string]any{
+			"delay_seconds": 5, "reason": "Flotestro: " + verifyReason,
+		}},
+	})
+	if job.RequiresApproval {
+		job = h.approve(job.ID, job.PayloadHash)
+	}
+	t.Cleanup(func() { h.cancelJob(job.ID) })
+
+	// The task reaches the host, which answers nothing: a machine that
+	// goes down does not report the restart it is carrying out.
+	if task := session.awaitTask(60 * time.Second); task == nil {
+		t.Fatalf("the restart did not reach the host; the job is %s", h.job(job.ID).State)
+	}
+	session.close()
+
+	// The host is away: no session, and nothing settles the job. A
+	// success here would be the false success this whole chapter is about.
+	time.Sleep(20 * time.Second)
+	if state := h.job(job.ID).State; state == "succeeded" {
+		t.Fatalf("the restart was settled succeeded while the host was away on boot %s", bootBefore)
+	}
+
+	// The host comes back on another boot: that, and only that, settles it.
+	back, err := openSyntheticSession(ctx, gateway, identity, uuid.NewString())
+	if err != nil {
+		t.Fatalf("the returning host did not open a session: %v", err)
+	}
+	defer back.close()
+	deadline := time.Now().Add(90 * time.Second)
+	current := h.job(job.ID)
+	for current.State != "succeeded" && time.Now().Before(deadline) {
+		time.Sleep(2 * time.Second)
+		current = h.job(job.ID)
+	}
+	if current.State != "succeeded" {
+		t.Fatalf("the restart did not settle on the host's return: %s/%s %s",
+			current.State, current.ResultErrorCode, current.ResultMessage)
+	}
+	attempt := lastVerifiedAttempt(t, h, job.ID)
+	if attempt.Verification == nil || attempt.Verification.Verifier != "reboot" || !attempt.Verification.Verified {
+		t.Fatalf("the settled restart carries no verification of the return: %+v", attempt.Verification)
+	}
+}
+
+// syntheticSession is a host that connects and listens: the test drives
+// what it answers, which for a restart is nothing at all.
+type syntheticSession struct {
+	stream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]
+	cancel context.CancelFunc
+	server chan *agentv1.ServerMessage
+}
+
+// awaitTask waits for the next task the panel sends down the session.
+func (s *syntheticSession) awaitTask(limit time.Duration) *agentv1.TaskEnvelope {
+	deadline := time.After(limit)
+	for {
+		select {
+		case message, ok := <-s.server:
+			if !ok {
+				return nil
+			}
+			if task := message.GetTask(); task != nil {
+				return task
+			}
+		case <-deadline:
+			return nil
+		}
+	}
+}
+
+// close ends the session the way a machine going down ends one.
+func (s *syntheticSession) close() {
+	_ = s.stream.CloseRequest()
+	_ = s.stream.CloseResponse()
+	s.cancel()
+}
+
+// openSyntheticSession opens a session with the identity and the boot
+// identifier given and keeps it open, reading what the panel sends.
+func openSyntheticSession(ctx context.Context, gateway string,
+	identity tls.Certificate, bootID string) (*syntheticSession, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	client := agentv1connect.NewAgentServiceClient(&http.Client{
+		Transport: &http2.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{identity},
+				RootCAs:      testTrustPool(),
+				MinVersion:   tls.VersionTLS13,
+			},
+		},
+	}, gateway, connect.WithGRPC())
+	stream := client.Connect(ctx)
+	if err := stream.Send(&agentv1.AgentMessage{
+		Payload: &agentv1.AgentMessage_Hello{Hello: &agentv1.Hello{
+			AgentVersion: "test", BootId: bootID,
+			Capabilities: &agentv1.Capabilities{Registry: []*agentv1.Capability{
+				{Name: "systemd", Version: 1, Available: true},
+			}},
+		}},
+	}); err != nil {
+		cancel()
+		return nil, err
+	}
+	first, err := stream.Receive()
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if first.GetSessionConfig() == nil {
+		cancel()
+		return nil, errors.New("the server answered Hello with something other than the session configuration")
+	}
+	session := &syntheticSession{stream: stream, cancel: cancel, server: make(chan *agentv1.ServerMessage, 16)}
+	go func() {
+		defer close(session.server)
+		for {
+			message, err := stream.Receive()
+			if err != nil {
+				return
+			}
+			select {
+			case session.server <- message:
+			default:
+			}
+		}
+	}()
+	return session, nil
 }

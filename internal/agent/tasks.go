@@ -619,6 +619,22 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 	}
 	e.reportStage(task, StageStarted, "", claimNames(claims))
 
+	// The state the host is in before the change: the verifier compares
+	// against it where the promise is relative - a key that must differ, a
+	// volume that must have grown. A read has no baseline, and a host the
+	// baseline cannot be read from is judged on what the verifier finds.
+	before := e.observeBaseline(ctx, task, action, payload)
+	result := e.perform(ctx, task, action, payload)
+	// The change is done; now the host is read again and the result says
+	// what was seen. A change nobody could observe is not a success.
+	return e.verifyOutcome(ctx, task, action, payload, before, result)
+}
+
+// perform hands the task to the module of its operation. Every check that
+// can refuse it without touching the host is behind it, and the resources
+// of the host are held.
+func (e *TaskExecutor) perform(ctx context.Context, task *agentv1.TaskEnvelope,
+	action opspec.ActionType, payload opspec.Payload) *agentv1.TaskResult {
 	switch action {
 	case opspec.ActionReadJournal:
 		return e.readJournal(ctx, task, payload.Journal)
@@ -715,6 +731,8 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 		return e.signalProcess(ctx, task, payload.ProcessSignal)
 	case opspec.ActionLocalUserCreate, opspec.ActionLocalUserLock,
 		opspec.ActionLocalUserUnlock, opspec.ActionLocalSSHKeysSet,
+		opspec.ActionLocalSSHKeysAdd, opspec.ActionLocalSSHKeysRemove,
+		opspec.ActionLocalSSHKeysReplaceAll,
 		opspec.ActionLocalUserGroupsSet, opspec.ActionLocalUserExpirySet,
 		opspec.ActionLocalUserDelete:
 		return e.applyLocalUser(ctx, task, action, payload.LocalUser)
@@ -929,6 +947,14 @@ func (e *TaskExecutor) rebootHost(ctx context.Context, task *agentv1.TaskEnvelop
 
 func (e *TaskExecutor) applyUnitAction(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.UnitPayload) *agentv1.TaskResult {
+	// The unit handler is the last branch of the dispatch, so an operation
+	// the switch forgot lands here with a payload of another shape. It is
+	// refused by name rather than carried out on nothing: a panel and an
+	// agent that disagree about an operation must not touch the host.
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectUnknownAction,
+			"this agent does not know how to perform "+string(action))
+	}
 	timeout := timeoutOf(task, action)
 	callCtx, cancel := context.WithTimeout(ctx, timeout+15*time.Second)
 	defer cancel()
@@ -1168,16 +1194,28 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		if !known {
 			return "", opspec.Payload{}, fmt.Errorf("unknown account operation: %v", request.GetOperation())
 		}
+		keys := make([]opspec.SSHKeyInput, 0, len(request.GetKeys()))
+		for _, key := range request.GetKeys() {
+			keys = append(keys, opspec.SSHKeyInput{PublicKey: key.GetPublicKey(), Comment: key.GetComment()})
+		}
 		return actionType, opspec.Payload{
 			LocalUser: &opspec.LocalUserPayload{
-				Name:       request.GetName(),
-				Gecos:      request.GetGecos(),
-				Shell:      request.GetShell(),
-				Groups:     request.GetGroups(),
-				SSHKeys:    request.GetSshKeys(),
-				CreateHome: request.GetCreateHome(),
-				ExpiresAt:  request.GetExpiresAt(),
-				RemoveHome: request.GetRemoveHome(),
+				Name:                 request.GetName(),
+				Gecos:                request.GetGecos(),
+				Shell:                request.GetShell(),
+				Groups:               request.GetGroups(),
+				SSHKeys:              request.GetSshKeys(),
+				CreateHome:           request.GetCreateHome(),
+				ExpiresAt:            request.GetExpiresAt(),
+				RemoveHome:           request.GetRemoveHome(),
+				Keys:                 keys,
+				Fingerprints:         request.GetFingerprints(),
+				IgnoreMissing:        request.GetIgnoreMissing(),
+				ExpectedFingerprints: request.GetExpectedFingerprints(),
+				AllowLockout:         request.GetAllowLockout(),
+				ManagedFile:          request.GetManagedFile(),
+				System:               request.GetSystem(),
+				Inactive:             request.GetInactive(),
 			},
 		}, nil
 
@@ -1765,13 +1803,16 @@ func unitStateToAgent(state *helperv1.UnitState) *agentv1.UnitState {
 // types. The agent accepts no operation from outside the map, so an extension
 // of the contract by a third party gives it no new abilities.
 var localUserActions = map[agentv1.LocalUserAction_Operation]opspec.ActionType{
-	agentv1.LocalUserAction_OPERATION_CREATE:       opspec.ActionLocalUserCreate,
-	agentv1.LocalUserAction_OPERATION_LOCK:         opspec.ActionLocalUserLock,
-	agentv1.LocalUserAction_OPERATION_UNLOCK:       opspec.ActionLocalUserUnlock,
-	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS: opspec.ActionLocalSSHKeysSet,
-	agentv1.LocalUserAction_OPERATION_SET_GROUPS:   opspec.ActionLocalUserGroupsSet,
-	agentv1.LocalUserAction_OPERATION_SET_EXPIRY:   opspec.ActionLocalUserExpirySet,
-	agentv1.LocalUserAction_OPERATION_DELETE:       opspec.ActionLocalUserDelete,
+	agentv1.LocalUserAction_OPERATION_CREATE:           opspec.ActionLocalUserCreate,
+	agentv1.LocalUserAction_OPERATION_LOCK:             opspec.ActionLocalUserLock,
+	agentv1.LocalUserAction_OPERATION_UNLOCK:           opspec.ActionLocalUserUnlock,
+	agentv1.LocalUserAction_OPERATION_SET_SSH_KEYS:     opspec.ActionLocalSSHKeysSet,
+	agentv1.LocalUserAction_OPERATION_ADD_SSH_KEYS:     opspec.ActionLocalSSHKeysAdd,
+	agentv1.LocalUserAction_OPERATION_REMOVE_SSH_KEYS:  opspec.ActionLocalSSHKeysRemove,
+	agentv1.LocalUserAction_OPERATION_REPLACE_SSH_KEYS: opspec.ActionLocalSSHKeysReplaceAll,
+	agentv1.LocalUserAction_OPERATION_SET_GROUPS:       opspec.ActionLocalUserGroupsSet,
+	agentv1.LocalUserAction_OPERATION_SET_EXPIRY:       opspec.ActionLocalUserExpirySet,
+	agentv1.LocalUserAction_OPERATION_DELETE:           opspec.ActionLocalUserDelete,
 }
 
 // joinNames assembles the names into a readable list for the message shown to

@@ -454,22 +454,25 @@ func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 	}
 	defer session.close()
 
-	// The task arrives on the stream; the test reads until it does.
-	tasks := make(chan *agentv1.TaskEnvelope, 1)
-	go func() {
+	// The task arrives on the stream the session already reads: the
+	// acknowledgements of the panel come down the same one, and a second
+	// reader would take the task off it.
+	awaitTask := func(limit time.Duration) *agentv1.TaskEnvelope {
+		deadline := time.After(limit)
 		for {
-			message, err := session.stream.Receive()
-			if err != nil {
-				return
-			}
-			if task := message.GetTask(); task != nil {
-				select {
-				case tasks <- task:
-				default:
+			select {
+			case message, ok := <-session.server:
+				if !ok {
+					return nil
 				}
+				if task := message.GetTask(); task != nil {
+					return task
+				}
+			case <-deadline:
+				return nil
 			}
 		}
-	}()
+	}
 	job := h.createOperation(host.ID, map[string]any{
 		"action": "file.ensure", "reason": secretReason,
 		"payload": map[string]any{"file": map[string]any{
@@ -481,10 +484,8 @@ func TestASecretFetchedThroughARelayIsSealed(t *testing.T) {
 		h.approve(job.ID, job.PayloadHash)
 	}
 	t.Cleanup(func() { h.cancelJob(job.ID) })
-	var task *agentv1.TaskEnvelope
-	select {
-	case task = <-tasks:
-	case <-time.After(90 * time.Second):
+	task := awaitTask(90 * time.Second)
+	if task == nil {
 		t.Fatalf("the task did not reach the relayed session; the job is %s", h.job(job.ID).State)
 	}
 
