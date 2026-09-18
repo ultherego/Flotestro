@@ -3,6 +3,7 @@ package freeipa
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -429,6 +430,44 @@ func (c *Client) PreserveUser(ctx context.Context, uid string) error {
 	}
 	c.invalidate()
 	return nil
+}
+
+// ErrEntryMoved says the directory no longer holds the entry the way the
+// plan described it: another name, another entry under the same name, or a
+// change somebody made in between. It is a refusal rather than a failure -
+// nothing was ordered - and the caller reports it as a stale plan.
+var ErrEntryMoved = errors.New("the entry is not the one the plan named")
+
+// PreserveUserAt preserves an account only while it is still the entry the
+// plan was made for.
+//
+// The check lives here rather than only in the caller because the adapter
+// is the last place before the directory: a preserve carries the entry's
+// distinguished name, its unique identifier and its modify timestamp where
+// the directory reports one, and every one of those the plan has is read
+// again and compared before the move is ordered. What the directory does
+// not report is not invented - a plan bound to two of the three says so -
+// and what it does report has to agree.
+//
+// The window between the read and the move is not closed by this: it is
+// made small and observable. A directory that moved the entry in that
+// instant refuses the move itself, which is why the directory goes first
+// and nothing local is touched until it has answered.
+func (c *Client) PreserveUserAt(ctx context.Context, uid string, planned EntryReference) error {
+	if !userNamePattern.MatchString(uid) {
+		return fmt.Errorf("invalid account name %q", uid)
+	}
+	if !planned.Complete() {
+		return fmt.Errorf("%w: the plan names no entry to bind to", ErrEntryMoved)
+	}
+	current, err := c.UserEntry(ctx, uid)
+	if err != nil {
+		return err
+	}
+	if reason, moved := planned.Moved(current); moved {
+		return fmt.Errorf("%w: %s (the plan was %s)", ErrEntryMoved, reason, planned.Binding())
+	}
+	return c.PreserveUser(ctx, uid)
 }
 
 // ResetUserPassword asks the directory for a new password of the account.

@@ -83,7 +83,7 @@ func (f *fakeDirectory) UserEntry(_ context.Context, uid string) (freeipa.EntryR
 	}, nil
 }
 
-func (f *fakeDirectory) Capabilities(context.Context) (freeipa.DirectoryCapabilities, error) {
+func (f *fakeDirectory) CapabilitiesFor(context.Context, string) (freeipa.DirectoryCapabilities, error) {
 	return freeipa.DirectoryCapabilities{UserCreate: true, UserDisable: true, UserModDN: true}, nil
 }
 

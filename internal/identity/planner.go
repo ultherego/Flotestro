@@ -30,9 +30,13 @@ type Directory interface {
 	// UserEntry reads the identity of an account's entry, so the plan can
 	// be bound to the entry it was made for.
 	UserEntry(ctx context.Context, uid string) (freeipa.EntryReference, error)
-	// Capabilities says what the directory can do for the connector, so an
-	// operation it would refuse is refused before it is approved.
-	Capabilities(ctx context.Context) (freeipa.DirectoryCapabilities, error)
+	// CapabilitiesFor says what the directory can do to one account's
+	// entry, so an operation it would refuse is refused before it is
+	// approved. It asks about that entry rather than about a sample: an
+	// ACI is written against a container, a filter or a group as often as
+	// against the whole subtree, and only the answer about this entry
+	// decides this operation.
+	CapabilitiesFor(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 }
 
 // Planner builds a preview of a change's impact. The plan shows the resulting

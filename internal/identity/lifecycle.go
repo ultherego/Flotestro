@@ -208,14 +208,23 @@ func (p *Planner) planUserPreserve(ctx context.Context, uid string) (Plan, error
 		return plan, err
 	}
 	plan.PreserveEntry = &entry
+	// The plan says which of the three values it is bound to. The strength
+	// of the check differs between directories: one that reports no modify
+	// timestamp cannot tell an entry somebody edited in the meantime from
+	// one nobody touched, and the operator approving this is entitled to
+	// know that.
+	plan.Warnings = append(plan.Warnings, "the plan is "+entry.Binding())
 
-	// A directory that proved it cannot move an entry blocks the preserve
-	// before the operator approves anything.
-	capabilities, err := p.directory.Capabilities(ctx)
+	// A directory that proved it cannot move this entry blocks the preserve
+	// before the operator approves anything, and the conflict carries what
+	// lifts it.
+	capabilities, err := p.directory.CapabilitiesFor(ctx, uid)
 	if err == nil {
 		if reason, blocked := capabilities.PreserveBlocked(); blocked {
 			plan.Conflicts = append(plan.Conflicts,
-				"the directory cannot preserve an account: "+reason)
+				"the directory cannot preserve an account: "+reason+"; "+capabilities.Instruction)
+		} else if capabilities.Instruction != "" {
+			plan.Warnings = append(plan.Warnings, capabilities.Instruction)
 		}
 	}
 	return plan, nil

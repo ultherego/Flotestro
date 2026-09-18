@@ -74,9 +74,9 @@ type Executor struct {
 	// local denial marker. Nil means the real connector and the real
 	// change store. They stand apart because the order between them is
 	// what this operation is about, and a test has to be able to watch it.
-	capabilities func(ctx context.Context) (freeipa.DirectoryCapabilities, error)
+	capabilities func(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 	entryOf      func(ctx context.Context, uid string) (freeipa.EntryReference, error)
-	preserve     func(ctx context.Context, uid string) error
+	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) error
 	localDeny    func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
@@ -513,13 +513,13 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	var phases []Phase
 
 	phase := startPhase("asking the directory what it can do")
-	capabilities, err := e.directoryCapabilities(ctx)
+	capabilities, err := e.directoryCapabilities(ctx, ref.UID)
 	if err != nil {
 		return append(phases, refusedPhase(phase, RefusalDirectoryUnreachable, err.Error())), nil
 	}
 	if reason, blocked := capabilities.PreserveBlocked(); blocked {
 		return append(phases, refusedPhase(phase, RefusalModDNUnsupported,
-			"the directory cannot preserve an account: "+reason)), nil
+			"the directory cannot preserve an account: "+reason+"; "+capabilities.Instruction)), nil
 	}
 	// The reads that come before the change are recorded for what they are:
 	// carried out, and no part of the change. A read that succeeded must not
@@ -546,11 +546,15 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	if moved, ok := planned.Moved(current); ok {
 		return append(phases, refusedPhase(phase, RefusalStalePlan, moved)), nil
 	}
-	phases = append(phases, skipPhase(phase, "the entry is the one the plan named"))
+	phases = append(phases, skipPhase(phase, "the entry is the one the plan named ("+planned.Binding()+")"))
 
 	phase = startPhase("preserving the account in the directory")
-	if err := e.preserveInDirectory(ctx, ref.UID); err != nil {
-		return append(phases, refusedPhase(phase, RefusalDirectoryRefused, err.Error())), nil
+	if err := e.preserveInDirectory(ctx, ref.UID, planned); err != nil {
+		code := RefusalDirectoryRefused
+		if errors.Is(err, freeipa.ErrEntryMoved) {
+			code = RefusalStalePlan
+		}
+		return append(phases, refusedPhase(phase, code, err.Error())), nil
 	}
 	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
 
@@ -573,11 +577,11 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 // directoryCapabilities, directoryEntry, preserveInDirectory and denyLocally
 // are the four halves of a preserve behind their seams. Each falls back to
 // the real connector or the real change store when no seam was set.
-func (e *Executor) directoryCapabilities(ctx context.Context) (freeipa.DirectoryCapabilities, error) {
+func (e *Executor) directoryCapabilities(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
 	if e.capabilities != nil {
-		return e.capabilities(ctx)
+		return e.capabilities(ctx, uid)
 	}
-	return e.directory.Capabilities(ctx)
+	return e.directory.CapabilitiesFor(ctx, uid)
 }
 
 func (e *Executor) directoryEntry(ctx context.Context, uid string) (freeipa.EntryReference, error) {
@@ -587,11 +591,15 @@ func (e *Executor) directoryEntry(ctx context.Context, uid string) (freeipa.Entr
 	return e.directory.UserEntry(ctx, uid)
 }
 
-func (e *Executor) preserveInDirectory(ctx context.Context, uid string) error {
+func (e *Executor) preserveInDirectory(ctx context.Context, uid string,
+	planned freeipa.EntryReference) error {
 	if e.preserve != nil {
-		return e.preserve(ctx, uid)
+		return e.preserve(ctx, uid, planned)
 	}
-	return e.directory.PreserveUser(ctx, uid)
+	// The adapter binds the move to the entry a second time, immediately
+	// before ordering it: this check and the one above are the same
+	// question asked at the two ends of the window between them.
+	return e.directory.PreserveUserAt(ctx, uid, planned)
 }
 
 func (e *Executor) denyLocally(ctx context.Context, subject, reason string,

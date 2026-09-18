@@ -362,6 +362,15 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 	if !allowedMethod(method) && !guardedMethod(method, options) {
 		return nil, fmt.Errorf("the command %q is not supported by the adapter", method)
 	}
+	return c.invoke(ctx, method, args, options)
+}
+
+// invoke sends a command that one of the two doors - the ordinary call or
+// the deliberate provisioning step - has already admitted. It exists so
+// that the admission is a decision of its own: a command reaches the
+// directory through a named list, and there is no path that takes a method
+// nobody vouched for.
+func (c *Client) invoke(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
 	if options == nil {
 		options = map[string]any{}
 	}
@@ -567,6 +576,11 @@ var allowedMethods = map[string]bool{
 	"dnsrecord_del":  true,
 }
 
+// allowedMethod says whether an ordinary operation may run the command. The
+// commands that change the directory's own configuration are not here and
+// never will be: they live in provisioningMethods, behind a step somebody
+// runs deliberately, so that carrying out a user's operation can never
+// widen the connector's own permissions on the way.
 func allowedMethod(method string) bool { return allowedMethods[method] }
 
 // guardedMethods are the commands the adapter runs only with a fixed

@@ -93,6 +93,64 @@ func hostLayeredNetwork(t *testing.T, h *harness, hostID string) layeredNetworkV
 	return state
 }
 
+// hostThatBuildsLayers finds a host whose write mechanism can build a
+// bond, a bridge or a VLAN. NetworkManager on its own cannot: this module
+// drives it by changing the profile an interface already has, and a
+// half-built bond there has no way back through the rescue plan.
+func hostThatBuildsLayers(t *testing.T, h *harness) (hostView, layeredNetworkView) {
+	t.Helper()
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		state := hostLayeredNetwork(t, h, host.ID)
+		switch state.WriteAdapter {
+		case "nmstate", "netplan":
+			if state.ManagementInterface == "" {
+				continue
+			}
+			return host, state
+		}
+	}
+	t.Skip("no connected host of the laboratory configures its network through nmstate or netplan")
+	return hostView{}, layeredNetworkView{}
+}
+
+// TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism is the other
+// side of the same question: a host driven by NetworkManager alone says so
+// by name instead of leaving the operator with a half-built bond.
+func TestALayerOnAHostThatCannotBuildOneIsRefusedByMechanism(t *testing.T) {
+	h := newHarness(t)
+	var chosen *hostView
+	for _, host := range h.hosts() {
+		if host.ConnectionState != "online" {
+			continue
+		}
+		if hostLayeredNetwork(t, h, host.ID).WriteAdapter == "networkmanager" {
+			candidate := host
+			chosen = &candidate
+			break
+		}
+	}
+	if chosen == nil {
+		t.Skip("no connected host of the laboratory is driven by NetworkManager alone")
+	}
+	plan := networkPlanOf(t, h, chosen.ID, map[string]any{
+		"interface": "flotestbond",
+		"link": map[string]any{
+			"name": "flotestbond", "kind": "bond", "mode": "active-backup",
+			"miimon_ms": 100, "members": []string{"lo", "dummy0"},
+		},
+	})
+	code, reason := planRefusal(plan)
+	if code != "link_mechanism_unsupported" {
+		t.Errorf("refusal code = %q (%s), wanted link_mechanism_unsupported", code, reason)
+	}
+	if !strings.Contains(reason, "nmstate") && !strings.Contains(reason, "netplan") {
+		t.Errorf("the refusal does not say what such a host would need: %s", reason)
+	}
+}
+
 // networkPlanOf orders a plan and returns the plan the host computed. The
 // plan is a read: it walks the host, works out the difference and writes
 // nothing, so it is safe to ask about a change that must never be applied.
@@ -189,11 +247,11 @@ func TestLayeringIsReportedFromTheHost(t *testing.T) {
 // would happen, and the answer is the point.
 func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 	h := newHarness(t)
-	host := h.hostByFamily("rhel")
-	state := hostLayeredNetwork(t, h, host.ID)
-	if state.WriteAdapter == "" {
-		t.Skip("the host has no mechanism to write the network configuration")
-	}
+	// The host has to have a mechanism that builds layers at all: on a
+	// machine driven by NetworkManager alone every one of these orders is
+	// refused for the mechanism before any relation is looked at, which is
+	// its own test below.
+	host, state := hostThatBuildsLayers(t, h)
 	management := state.ManagementInterface
 	if management == "" {
 		t.Skip("the host did not point at the management interface")

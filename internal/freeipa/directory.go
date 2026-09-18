@@ -396,6 +396,38 @@ func (c *Client) find(ctx context.Context, method string, raw bool) ([]map[strin
 }
 
 func (c *Client) findOptions(ctx context.Context, method string, raw bool, extra map[string]any) ([]map[string]any, error) {
+	records, truncated, err := c.search(ctx, method, raw, extra)
+	if err != nil {
+		return nil, err
+	}
+	if truncated {
+		// A truncated result is worse than an error: it would look like a
+		// complete list.
+		return nil, fmt.Errorf("the directory truncated the result of %s; paging is required", method)
+	}
+	return records, nil
+}
+
+// findProbe asks a bounded question - "is there at least one of these" -
+// and reads the directory's truncation flag as the expected answer rather
+// than as a failure.
+//
+// The preflight is the reason this exists. A search with a size limit of
+// one comes back marked truncated the moment the directory holds a second
+// matching entry, and findOptions refuses such an answer because a
+// truncated list taken for a complete one is the worse mistake. Here the
+// limit is the question, so the flag says nothing was hidden that the
+// caller wanted: the caller asked for one record and got one. Reading it as
+// an error is what turned a directory with preserved accounts in it into a
+// directory that appeared to have no container for them.
+func (c *Client) findProbe(ctx context.Context, method string, extra map[string]any) ([]map[string]any, error) {
+	records, _, err := c.search(ctx, method, false, extra)
+	return records, err
+}
+
+// search runs a search command and reports the records with the
+// directory's own statement about whether it cut the list short.
+func (c *Client) search(ctx context.Context, method string, raw bool, extra map[string]any) ([]map[string]any, bool, error) {
 	options := map[string]any{
 		"all": true,
 		// Zero means no limit on the server's side; the test directory is
@@ -410,7 +442,7 @@ func (c *Client) findOptions(ctx context.Context, method string, raw bool, extra
 	}
 	result, err := c.call(ctx, method, []string{}, options)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var decoded struct {
 		Result    []map[string]any `json:"result"`
@@ -418,14 +450,9 @@ func (c *Client) findOptions(ctx context.Context, method string, raw bool, extra
 		Truncated bool             `json:"truncated"`
 	}
 	if err := json.Unmarshal(result, &decoded); err != nil {
-		return nil, fmt.Errorf("the %s response: %w", method, err)
+		return nil, false, fmt.Errorf("the %s response: %w", method, err)
 	}
-	if decoded.Truncated {
-		// A truncated result is worse than an error: it would look like a
-		// complete list.
-		return nil, fmt.Errorf("the directory truncated the result of %s; paging is required", method)
-	}
-	return decoded.Result, nil
+	return decoded.Result, decoded.Truncated, nil
 }
 
 // hostGroupsFromDNs takes the names of host groups out of full DNs. In raw

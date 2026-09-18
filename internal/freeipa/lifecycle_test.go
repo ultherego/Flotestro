@@ -2,6 +2,7 @@ package freeipa
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -54,6 +55,60 @@ func TestPreserveUserSendsTheGuardedUserDel(t *testing.T) {
 	}
 	if err := client.PreserveUser(context.Background(), "../root"); err == nil {
 		t.Fatal("an invalid account name was accepted")
+	}
+}
+
+// The adapter is the last place before the directory, so it binds the move
+// to the entry itself: every value the plan carries is read again and
+// compared, and a plan the world moved under orders nothing at all.
+func TestPreserveUserAtChecksEveryValueThePlanCarries(t *testing.T) {
+	planned := EntryReference{
+		DN:        "uid=jane,cn=users,cn=accounts,dc=test",
+		EntryUUID: "0b1d4c8e-0000-0000-0000-000000000001",
+	}
+	entry := func(uuid, timestamp string) func(rpcCall) (any, *rpcError) {
+		record := map[string]any{"dn": planned.DN, "ipauniqueid": []any{uuid}}
+		if timestamp != "" {
+			record["modifytimestamp"] = []any{timestamp}
+		}
+		return answerWith(record)
+	}
+
+	fake, client := newFakeDirectory(t)
+	// The directory of the laboratory reports no modify timestamp; the
+	// plan bound to the two values it does report, and those agree.
+	fake.answers["user_show"] = entry(planned.EntryUUID, "")
+	if err := client.PreserveUserAt(context.Background(), "jane", planned); err != nil {
+		t.Fatalf("a plan bound to the entry it named was refused: %v", err)
+	}
+	if fake.count("user_del") != 1 {
+		t.Fatalf("the move was ordered %d times", fake.count("user_del"))
+	}
+
+	// Another entry under the same name: the identifier says so, and
+	// nothing is ordered.
+	reused, client := newFakeDirectory(t)
+	reused.answers["user_show"] = entry("0b1d4c8e-0000-0000-0000-000000000002", "")
+	err := client.PreserveUserAt(context.Background(), "jane", planned)
+	if !errors.Is(err, ErrEntryMoved) {
+		t.Fatalf("a different entry under the same name was preserved: %v", err)
+	}
+	if !strings.Contains(err.Error(), "the unique identifier") {
+		t.Errorf("the refusal does not say what the plan was bound to: %v", err)
+	}
+	if reused.count("user_del") != 0 {
+		t.Fatal("the move was ordered although the entry was not the one the plan named")
+	}
+
+	// A plan that names no entry binds to nothing and is refused rather
+	// than carried out on whatever is there now.
+	empty, client := newFakeDirectory(t)
+	empty.answers["user_show"] = entry(planned.EntryUUID, "")
+	if err := client.PreserveUserAt(context.Background(), "jane", EntryReference{}); !errors.Is(err, ErrEntryMoved) {
+		t.Fatalf("a plan bound to nothing was carried out: %v", err)
+	}
+	if empty.count("user_del") != 0 || empty.count("user_show") != 0 {
+		t.Fatal("a plan bound to nothing reached the directory")
 	}
 }
 

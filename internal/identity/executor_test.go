@@ -189,16 +189,19 @@ func newPreserveHarness(t *testing.T) *preserveHarness {
 	}
 	harness.executor = &Executor{
 		sessions: &fakeSessions{live: map[string]int64{}},
-		capabilities: func(context.Context) (freeipa.DirectoryCapabilities, error) {
-			harness.order = append(harness.order, "capabilities")
+		capabilities: func(_ context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
+			// The question is about this account's entry: the order records
+			// which one it was asked about, so a preserve that asked about
+			// somebody else would be visible here.
+			harness.order = append(harness.order, "capabilities:"+uid)
 			return harness.capabilities, nil
 		},
 		entryOf: func(_ context.Context, uid string) (freeipa.EntryReference, error) {
 			harness.order = append(harness.order, "entry:"+uid)
 			return harness.entry, harness.entryErr
 		},
-		preserve: func(_ context.Context, uid string) error {
-			harness.order = append(harness.order, "preserve:"+uid)
+		preserve: func(_ context.Context, uid string, planned freeipa.EntryReference) error {
+			harness.order = append(harness.order, "preserve:"+uid+"@"+planned.DN)
 			return harness.preserveErr
 		},
 		localDeny: func(_ context.Context, subject, _ string, denied bool) (int64, error) {
@@ -219,9 +222,13 @@ func preserveChange(entry freeipa.EntryReference) Change {
 }
 
 // did says whether the recorded order contains the step.
+// did says whether a step happened. The steps carry what they were asked
+// about - which account, which entry - so the match is by prefix: a test
+// asks "was the account preserved", not "was it preserved against exactly
+// this distinguished name", which its own assertions check separately.
 func (h *preserveHarness) did(step string) bool {
 	for _, done := range h.order {
-		if done == step {
+		if done == step || strings.HasPrefix(done, step+"@") {
 			return true
 		}
 	}
@@ -273,7 +280,8 @@ func TestAPreserveAsksTheDirectoryBeforeItTouchesTheLocalAccount(t *testing.T) {
 	phases, revoked := harness.executor.preserveUser(context.Background(),
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
-	want := []string{"capabilities", "entry:alice", "preserve:alice", "deny:alice:true"}
+	want := []string{"capabilities:alice", "entry:alice",
+		"preserve:alice@" + harness.entry.DN, "deny:alice:true"}
 	if len(harness.order) != len(want) {
 		t.Fatalf("the steps were %v, expected %v", harness.order, want)
 	}
@@ -354,7 +362,7 @@ func TestADirectoryThatCannotMoveAnEntryBlocksThePreserveBeforeItStarts(t *testi
 	phases, _ := harness.executor.preserveUser(context.Background(),
 		preserveChange(harness.entry), &ReferencePayload{UID: "alice"})
 
-	if len(harness.order) != 1 || harness.order[0] != "capabilities" {
+	if len(harness.order) != 1 || harness.order[0] != "capabilities:alice" {
 		t.Fatalf("the steps were %v, expected the preflight alone", harness.order)
 	}
 	last := phases[len(phases)-1]

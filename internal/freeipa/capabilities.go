@@ -55,6 +55,18 @@ type DirectoryCapabilities struct {
 	DNSRecordWrite bool      `json:"dns_record_write"`
 	CheckedAt      time.Time `json:"checked_at"`
 	ReasonCodes    []string  `json:"reason_codes"`
+	// Subject is the account whose entry the rights were read on. A
+	// preflight that runs for an operation names that operation's account:
+	// the rights of a service account come from a permission rather than
+	// from the person, but an ACI can be written against a container or a
+	// filter, and then the only conclusive answer is the one about the
+	// entry the operation is actually about. Empty means the preflight ran
+	// at startup and asked about a sample.
+	Subject string `json:"subject,omitempty"`
+	// Instruction is what an operator does about the first reason that
+	// matters. It travels with the answer because the refusal the panel
+	// shows has to say what lifts it, and a reason code alone does not.
+	Instruction string `json:"instruction,omitempty"`
 }
 
 // Has says whether the preflight recorded the given reason.
@@ -92,23 +104,48 @@ func (c DirectoryCapabilities) PreserveBlocked() (string, bool) {
 
 // Capabilities asks the directory what it can do before anything is ordered.
 //
+// It reads the rights on a sample account, because it has no operation to
+// ask about: this is the preflight of a connector starting up and of the
+// identity screen. An operation that has an account of its own asks
+// CapabilitiesFor instead, and gets an answer about that entry.
+func (c *Client) Capabilities(ctx context.Context) (DirectoryCapabilities, error) {
+	return c.CapabilitiesFor(ctx, "")
+}
+
+// CapabilitiesFor asks the directory what it can do to one account's entry.
+//
 // Nothing here changes the directory: the preflight reads the answer to a
 // ping, reads the container of preserved accounts, and reads the effective
-// rights the directory reports on an existing account. Provisioning the ACI
-// a service account needs is a separate, deliberate step of the installation
-// - an ordinary user operation must never widen its own permissions on the
-// way to carrying itself out.
-func (c *Client) Capabilities(ctx context.Context) (DirectoryCapabilities, error) {
-	capabilities := DirectoryCapabilities{CheckedAt: time.Now().UTC(), ReasonCodes: []string{}}
+// rights the directory reports on the entry the operation is about.
+// Provisioning the ACI a service account needs is a separate, deliberate
+// step - ProvisionPreserveRights - because an ordinary user operation must
+// never widen its own permissions on the way to carrying itself out.
+//
+// The entry matters. An ACI is written against a container, a filter or a
+// group as often as against the whole subtree, so the rights on an
+// arbitrary account answer a different question from the rights on this
+// one. Asking about the account the preserve names is what makes the
+// answer conclusive where it can be: an empty directory and a directory
+// that says nothing are then the only unknowns left, and both are reported
+// as unknowns rather than passed off as permission.
+func (c *Client) CapabilitiesFor(ctx context.Context, uid string) (DirectoryCapabilities, error) {
+	capabilities := DirectoryCapabilities{
+		CheckedAt:   time.Now().UTC(),
+		ReasonCodes: []string{},
+		Subject:     uid,
+	}
 	if _, err := c.Ping(ctx); err != nil {
 		capabilities.ReasonCodes = append(capabilities.ReasonCodes, ReasonDirectoryUnreachable)
+		capabilities.Instruction = instructionFor(ReasonDirectoryUnreachable)
 		return capabilities, fmt.Errorf("the directory did not answer the preflight: %w", err)
 	}
 
 	// The container of preserved accounts answers for itself: a directory
 	// that lists it has it, and one that refuses the search has nowhere to
-	// move an entry to.
-	if _, err := c.findWith(ctx, "user_find",
+	// move an entry to. The question is bounded on purpose and the answer is
+	// read as bounded: a directory that already holds preserved accounts
+	// marks such a search truncated, which says the container is there.
+	if _, err := c.findProbe(ctx, "user_find",
 		map[string]any{"preserved": true, "sizelimit": 1}); err != nil {
 		capabilities.ReasonCodes = append(capabilities.ReasonCodes, ReasonPreserveContainerMissing)
 	}
@@ -119,9 +156,10 @@ func (c *Client) Capabilities(ctx context.Context) (DirectoryCapabilities, error
 		capabilities.DNSRecordWrite = true
 	}
 
-	rights, err := c.entryRights(ctx)
+	rights, err := c.entryRights(ctx, uid)
 	if err != nil {
 		capabilities.ReasonCodes = append(capabilities.ReasonCodes, ReasonNoEntryToCheck)
+		capabilities.Instruction = instructionFor(ReasonNoEntryToCheck)
 		return capabilities, nil
 	}
 	capabilities.UserCreate = strings.Contains(rights.entry, "a")
@@ -138,7 +176,50 @@ func (c *Client) Capabilities(ctx context.Context) (DirectoryCapabilities, error
 	default:
 		capabilities.ReasonCodes = append(capabilities.ReasonCodes, ReasonModDNNotPermitted)
 	}
+	capabilities.Instruction = capabilities.instruction()
 	return capabilities, nil
+}
+
+// instruction picks the one thing an operator would do about this answer:
+// what blocks comes first, then what is merely unproven.
+func (c DirectoryCapabilities) instruction() string {
+	if reason, blocked := c.PreserveBlocked(); blocked {
+		return instructionFor(reason)
+	}
+	for _, reason := range []string{ReasonModDNRightsUnknown, ReasonNoEntryToCheck, ReasonDNSUnreadable} {
+		if c.Has(reason) {
+			return instructionFor(reason)
+		}
+	}
+	return ""
+}
+
+// instructionFor says what lifts a reason. Every refusal the panel shows
+// carries one of these, because a code an operator cannot act on is only
+// half an answer.
+func instructionFor(reason string) string {
+	switch reason {
+	case ReasonModDNNotPermitted:
+		return "the directory reports that the connector's service account may not move an entry: " +
+			ProvisioningInstruction()
+	case ReasonModDNRightsUnknown:
+		return "the directory does not report entry level rights, so the move is neither proven nor refused. " +
+			"The preserve asks the directory first and touches nothing locally until it confirms; " +
+			"if the directory refuses the move, " + ProvisioningInstruction()
+	case ReasonPreserveContainerMissing:
+		return "the container of preserved accounts could not be read. Check that the directory has " +
+			"cn=deleted users,cn=accounts,cn=provisioning under its base and that the connector may search it."
+	case ReasonDirectoryUnreachable:
+		return "the directory did not answer. Check the connector on the identity screen - " +
+			"the keytab, the KDC and the directory itself - before ordering anything."
+	case ReasonNoEntryToCheck:
+		return "there was no entry to read the rights on, so nothing about the move was proven either way. " +
+			"It answers itself once the directory holds the account the operation names."
+	case ReasonDNSUnreadable:
+		return "the DNS zones could not be listed; the connector's service account may not read them."
+	default:
+		return ""
+	}
 }
 
 // effectiveRights is what the directory reports about what the connector may
@@ -153,21 +234,25 @@ func (r effectiveRights) attribute(name string) string {
 	return r.attributes[strings.ToLower(name)]
 }
 
-// entryRights reads the effective rights of the connector on one existing
-// account. The account is only a sample: the rights of a service account are
-// granted by permission and role rather than per person, so any entry of the
-// kind answers the question.
-func (c *Client) entryRights(ctx context.Context) (effectiveRights, error) {
-	records, err := c.findOptions(ctx, "user_find", false, map[string]any{"sizelimit": 1})
-	if err != nil {
-		return effectiveRights{}, err
-	}
-	if len(records) == 0 {
-		return effectiveRights{}, errors.New("the directory holds no account to read the rights on")
-	}
-	uid := first(records[0], "uid")
+// entryRights reads the effective rights of the connector on one account.
+//
+// A named account is read as it stands: that is the entry the operation
+// will move, and the directory's answer about it is the answer that
+// decides. Without a name the preflight takes a sample - the rights of a
+// service account come from a permission and a role rather than from the
+// person, so a sample answers the general question a startup check asks -
+// and a directory that holds no account at all leaves the question open
+// rather than answered.
+func (c *Client) entryRights(ctx context.Context, uid string) (effectiveRights, error) {
 	if uid == "" {
-		return effectiveRights{}, errors.New("the directory returned an account without a name")
+		sample, err := c.sampleAccount(ctx)
+		if err != nil {
+			return effectiveRights{}, err
+		}
+		uid = sample
+	}
+	if !userNamePattern.MatchString(uid) {
+		return effectiveRights{}, fmt.Errorf("invalid account name %q", uid)
 	}
 	result, err := c.call(ctx, "user_show", []string{uid},
 		map[string]any{"all": true, "rights": true})
@@ -181,6 +266,26 @@ func (c *Client) entryRights(ctx context.Context) (effectiveRights, error) {
 		return effectiveRights{}, err
 	}
 	return readRights(decoded.Result), nil
+}
+
+// sampleAccount names one account of the directory, for a preflight that
+// has no operation to ask about. The search is deliberately bounded and the
+// directory's truncation flag is the expected answer to it, not a failure:
+// asking for one account and being told the list was cut short is the
+// directory saying there is at least one.
+func (c *Client) sampleAccount(ctx context.Context) (string, error) {
+	records, err := c.findProbe(ctx, "user_find", map[string]any{"sizelimit": 1})
+	if err != nil {
+		return "", err
+	}
+	if len(records) == 0 {
+		return "", errors.New("the directory holds no account to read the rights on")
+	}
+	uid := first(records[0], "uid")
+	if uid == "" {
+		return "", errors.New("the directory returned an account without a name")
+	}
+	return uid, nil
 }
 
 // readRights pulls the rights out of the directory's answer.
@@ -230,6 +335,78 @@ type EntryReference struct {
 // Complete says whether the reference names the entry well enough to be
 // bound to. A reference without a DN names nothing.
 func (e EntryReference) Complete() bool { return e.DN != "" }
+
+// The three values a plan can bind to, spelled for a person reading a plan
+// or a refusal.
+const (
+	bindingDN        = "the distinguished name"
+	bindingUUID      = "the unique identifier"
+	bindingTimestamp = "the modify timestamp"
+)
+
+// BoundTo names the values the plan recorded and the execution will check,
+// in the order they are checked.
+func (e EntryReference) BoundTo() []string {
+	var bound []string
+	if e.DN != "" {
+		bound = append(bound, bindingDN)
+	}
+	if e.EntryUUID != "" {
+		bound = append(bound, bindingUUID)
+	}
+	if e.ModifyTimestamp != "" {
+		bound = append(bound, bindingTimestamp)
+	}
+	return bound
+}
+
+// Unbound names the values this plan has nothing to check, because the
+// directory did not report them when the plan was made.
+func (e EntryReference) Unbound() []string {
+	var missing []string
+	if e.DN == "" {
+		missing = append(missing, bindingDN)
+	}
+	if e.EntryUUID == "" {
+		missing = append(missing, bindingUUID)
+	}
+	if e.ModifyTimestamp == "" {
+		missing = append(missing, bindingTimestamp)
+	}
+	return missing
+}
+
+// Binding is the sentence the plan and the phase carry: which of the three
+// values this plan is bound to, and which the directory does not report.
+//
+// It is said out loud rather than left to be inferred, because the strength
+// of the check differs between deployments: a directory that reports no
+// modify timestamp cannot tell an entry somebody edited between the plan
+// and the approval from one nobody touched, and an operator approving the
+// change is entitled to know that. What is not reported is not invented.
+func (e EntryReference) Binding() string {
+	bound := e.BoundTo()
+	if len(bound) == 0 {
+		return "the plan names no value of the entry to bind to"
+	}
+	sentence := "bound to " + joinNames(bound)
+	if missing := e.Unbound(); len(missing) > 0 {
+		sentence += "; the directory does not report " + joinNames(missing)
+	}
+	return sentence
+}
+
+// joinNames writes a list the way a sentence does.
+func joinNames(names []string) string {
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return names[0]
+	default:
+		return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+	}
+}
 
 // Moved compares the reference the plan recorded with the entry as the
 // directory holds it now and names the first value that differs.

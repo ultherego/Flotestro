@@ -312,8 +312,14 @@ func TestTheHostRefusesAnArrayItDoesNotHave(t *testing.T) {
 	if len(attempts) == 0 {
 		t.Fatal("the job produced no attempt")
 	}
-	if code := attempts[len(attempts)-1].ErrorCode; code != "array_unknown" {
-		t.Errorf("refusal = %q (%s), want array_unknown", code, lastMessage(attempts))
+	// A host with mdadm answers that it has no such array; a host without
+	// the tool answers that it cannot manage arrays at all. Both are the
+	// refusal this test is about - the order does not reach a disk - and
+	// each says which of the two it is, which is the point of typing them.
+	switch code := attempts[len(attempts)-1].ErrorCode; code {
+	case "array_unknown", "unsupported":
+	default:
+		t.Errorf("refusal = %q (%s), want array_unknown or unsupported", code, lastMessage(attempts))
 	}
 }
 

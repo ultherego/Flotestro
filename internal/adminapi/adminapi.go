@@ -543,6 +543,10 @@ func (s *Server) Routes() http.Handler {
 
 	// Directory changes: plan, approval and execution phase by phase.
 	s.route(mux, "GET /api/v1/identity/changes", s.handleListDirectoryChanges)
+	// The one route that changes the directory's own configuration: it
+	// gives the connector the right to preserve an account and nothing
+	// else, and it is run on purpose rather than by an operation.
+	s.route(mux, "POST /api/v1/identity/directory/provision-preserve", s.handleProvisionPreserveRights)
 	s.route(mux, "POST /api/v1/identity/changes", s.handleCreateDirectoryChange)
 	s.route(mux, "GET /api/v1/identity/changes/{id}", s.handleGetDirectoryChange)
 	s.route(mux, "POST /api/v1/identity/changes/{id}/approve", s.handleApproveDirectoryChange)
