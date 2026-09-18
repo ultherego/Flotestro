@@ -936,6 +936,11 @@ function LayerBuild({
   const chosen = members.split(",").map((element) => element.trim()).filter(Boolean);
   const seconds = Number(window) || 0;
   const byName = new Map<string, Interface>(interfaces.map((iface) => [iface.name, iface]));
+  // The lower interfaces are the host's own: an interface is called
+  // whatever the host calls it - enp2s0, ens192, eno1np0 - so the form
+  // offers the names this host reports rather than an example that would
+  // be wrong on most machines.
+  const lower = interfaces.filter((iface) => iface.name !== "lo").map((iface) => iface.name);
 
   // The refusals, in the order the questions come: is the name free, is the
   // lower interface there, is the layer worth building, and would it take
@@ -1009,7 +1014,7 @@ function LayerBuild({
       <Form>
         <Fields>
           <Field label={t("Name")} narrow>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="bond0" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder={`${kind}0`} />
           </Field>
           <Field label={t("Kind")} narrow>
             <select value={kind} onChange={(e) => setKind(e.target.value as "bond" | "bridge" | "vlan")}>
@@ -1026,7 +1031,10 @@ function LayerBuild({
         {kind === "vlan" ? (
           <Fields>
             <Field label={t("Parent")}>
-              <input value={parent} onChange={(e) => setParent(e.target.value)} placeholder="enp0s8" />
+              <select value={parent} onChange={(e) => setParent(e.target.value)}>
+                <option value="">{t("Pick the interface the host reports")}</option>
+                {lower.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
             </Field>
             <Field label={t("VLAN identifier")} narrow>
               <input value={vlanID} onChange={(e) => setVlanID(e.target.value)} placeholder="100" />
@@ -1038,8 +1046,12 @@ function LayerBuild({
               <input
                 value={members}
                 onChange={(e) => setMembers(e.target.value)}
-                placeholder={t("Interfaces, e.g. enp0s8, enp0s9")}
+                list="layer-members"
+                placeholder={t("Interfaces of this host, separated by commas")}
               />
+              <datalist id="layer-members">
+                {lower.map((option) => <option key={option} value={option} />)}
+              </datalist>
             </Field>
           </Fields>
         )}
@@ -1056,7 +1068,10 @@ function LayerBuild({
               <input value={monitoring} onChange={(e) => setMonitoring(e.target.value)} />
             </Field>
             <Field label={t("Primary member")}>
-              <input value={primary} onChange={(e) => setPrimary(e.target.value)} />
+              <select value={primary} onChange={(e) => setPrimary(e.target.value)}>
+                <option value="">{t("The driver's own choice")}</option>
+                {chosen.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
             </Field>
             <Field label={t("LACP rate")} narrow>
               <select value={lacpRate} onChange={(e) => setLacpRate(e.target.value)}>

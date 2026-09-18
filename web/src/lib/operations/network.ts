@@ -22,8 +22,11 @@ const interfaceField: OperationField = {
   name: "interface",
   label: "Interface",
   kind: "text",
-  hint: "The name the host knows the link by, e.g. eth0 or ens192. The panel finds the profile behind it itself.",
-  placeholder: "eth0",
+  // No example name here on purpose: an interface is called whatever the
+  // host calls it - enp2s0, ens192, eno1np0 - and a name borrowed from an
+  // example is a name the host does not have. The host page lists the
+  // interfaces this host really reports.
+  hint: "The name the host itself reports for the link, copied exactly; the host's network page lists them. The panel finds the profile behind it.",
 };
 
 const rollbackField: OperationField = {
@@ -147,8 +150,8 @@ const layerFields: OperationField[] = [
     hint: "What the layer is. A bond joins links for redundancy, a bridge puts them on one segment, a VLAN rides tagged on one of them.",
   },
   {
-    name: "members", label: "Members", kind: "list", wide: true, placeholder: "enp0s8",
-    hint: "One interface per line, for a bond or a bridge. A VLAN has no members: it names its parent instead. An interface another layer already owns is refused.",
+    name: "members", label: "Members", kind: "list", wide: true,
+    hint: "One interface per line, named as the host reports them, for a bond or a bridge. A VLAN has no members: it names its parent instead. An interface another layer already owns is refused.",
   },
   {
     name: "mode", label: "Bond mode", kind: "select",
@@ -169,7 +172,7 @@ const layerFields: OperationField[] = [
     hint: "How often the bond checks its members, in milliseconds. Zero switches the monitoring off, and a bond that does not watch its members keeps sending into a dead one.",
   },
   {
-    name: "primary", label: "Primary member", kind: "text", placeholder: "enp0s8",
+    name: "primary", label: "Primary member", kind: "text",
     hint: "The member that carries the traffic while it is up. It has to be one of the members above.",
   },
   {
@@ -190,8 +193,8 @@ const layerFields: OperationField[] = [
     hint: "Separates VLANs inside the bridge. Neither nmstate nor netplan writes it through this panel, so it is refused by name rather than dropped.",
   },
   {
-    name: "parent", label: "VLAN parent", kind: "text", placeholder: "enp0s8",
-    hint: "The interface the tagged traffic runs on. A parent the host does not report is refused before anything is written.",
+    name: "parent", label: "VLAN parent", kind: "text",
+    hint: "The interface the tagged traffic runs on, named as the host reports it. A parent the host does not report is refused before anything is written.",
   },
   {
     name: "vlan_id", label: "VLAN identifier", kind: "number", min: 1, max: 4094,

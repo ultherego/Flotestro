@@ -21,6 +21,15 @@ import (
 // template that carries certificate material cannot be valid as it stands -
 // TemplateNeedsMaterial names those, and the server refuses them until the
 // placeholder is replaced with real PEM.
+// placeholderInterface stands where an interface name goes in a template.
+// It is deliberately not a name any host has: a link is called whatever
+// its host calls it - enp2s0, ens192, eno1np0 - so an example name like
+// eth0 would be wrong on most machines and, on the few where it is right,
+// would be applied to a real interface by a hasty click.
+// A Linux interface name is at most fifteen characters, and a VLAN
+// template puts ".100" after this one, so it stays short.
+const placeholderInterface = "the-link"
+
 func PayloadTemplate(action ActionType) (Payload, bool) {
 	unit := func() Payload { return Payload{Unit: &UnitPayload{Unit: "example.service"}} }
 	pkgs := func(hold bool) Payload {
@@ -173,25 +182,26 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Storage: &StoragePayload{Device: "/dev/vg0/data", Size: "+1G"}}, true
 
 	case ActionNetworkProfileApply:
-		return Payload{Network: &NetworkPayload{Interface: "eth1", Method: "manual",
+		return Payload{Network: &NetworkPayload{Interface: placeholderInterface, Method: "manual",
 			Addresses: []string{"192.0.2.10/24"}, Gateway: "192.0.2.1", RollbackSeconds: 120}}, true
 	case ActionNetworkRouteEnsure:
-		return Payload{Network: &NetworkPayload{Interface: "eth1",
+		return Payload{Network: &NetworkPayload{Interface: placeholderInterface,
 			Routes: []string{"198.51.100.0/24 192.0.2.1"}, RollbackSeconds: 120}}, true
 	case ActionNetworkLinkApply:
 		// A VLAN is the example: it is the one layer that needs no second
 		// interface to be a sensible placeholder, and it names both of the
 		// fields a layered order is about - what it stands on and what tag
 		// it carries.
-		return Payload{Network: &NetworkPayload{Interface: "eth1.100",
-			Link:            &network.LinkSpec{Name: "eth1.100", Kind: "vlan", Parent: "eth1", VLANID: 100},
+		return Payload{Network: &NetworkPayload{Interface: placeholderInterface + ".100",
+			Link: &network.LinkSpec{Name: placeholderInterface + ".100", Kind: "vlan",
+				Parent: placeholderInterface, VLANID: 100},
 			RollbackSeconds: 120}}, true
 	case ActionNetworkLinkRemove:
-		return Payload{Network: &NetworkPayload{Interface: "eth1.100", RollbackSeconds: 120}}, true
+		return Payload{Network: &NetworkPayload{Interface: placeholderInterface + ".100", RollbackSeconds: 120}}, true
 	case ActionNetworkMTUSet:
-		return Payload{Network: &NetworkPayload{Interface: "eth1", MTU: "1500", RollbackSeconds: 120}}, true
+		return Payload{Network: &NetworkPayload{Interface: placeholderInterface, MTU: "1500", RollbackSeconds: 120}}, true
 	case ActionDNSHostApply:
-		return Payload{DNS: &DNSPayload{Interface: "eth1", Servers: []string{"192.0.2.53"},
+		return Payload{DNS: &DNSPayload{Interface: placeholderInterface, Servers: []string{"192.0.2.53"},
 			SearchDomains: []string{"example.test"}, IgnoreAutoDNS: true, RollbackSeconds: 120}}, true
 
 	case ActionFirewallRuleEnsure:

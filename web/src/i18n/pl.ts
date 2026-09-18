@@ -5376,4 +5376,10 @@ export const pl: Record<string, string> = {
   "The container matches the description and runs; it would be stopped.": "Kontener odpowiada opisowi i działa; zostałby zatrzymany.",
   "The object is on the host and would be removed.": "Obiekt jest na hoście i zostałby usunięty.",
   "The object is not on the host, so a removal has nothing to do.": "Obiektu nie ma na hoście, więc usuwanie nie ma czego robić.",
+  "The name the host itself reports for the link, copied exactly; the host's network page lists them. The panel finds the profile behind it.": "Nazwa interfejsu dokładnie tak, jak raportuje ją host; lista jest na zakładce sieci hosta. Panel sam znajduje odpowiadający jej profil.",
+  "One interface per line, named as the host reports them, for a bond or a bridge. A VLAN has no members: it names its parent instead. An interface another layer already owns is refused.": "Jeden interfejs na linię, nazwany tak, jak raportuje go host - dla bonda albo mostka. VLAN nie ma członków: zamiast nich podaje rodzica. Interfejs należący już do innej warstwy zostanie odrzucony.",
+  "The interface the tagged traffic runs on, named as the host reports it. A parent the host does not report is refused before anything is written.": "Interfejs, po którym idzie ruch tagowany, nazwany tak, jak raportuje go host. Rodzic, którego host nie raportuje, zostanie odrzucony, zanim cokolwiek zostanie zapisane.",
+  "Pick the interface the host reports": "Wybierz interfejs raportowany przez hosta",
+  "Interfaces of this host, separated by commas": "Interfejsy tego hosta, oddzielone przecinkami",
+  "The driver's own choice": "Wybór samego sterownika",
 };
