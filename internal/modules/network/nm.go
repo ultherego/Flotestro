@@ -50,6 +50,22 @@ type Profile struct {
 	DNSSearch     []string `json:"dns_search,omitempty"`
 	IgnoreAutoDNS bool     `json:"ignore_auto_dns,omitempty"`
 	Routes        []string `json:"routes,omitempty"`
+	// The second family. It is kept apart from the first on purpose: an
+	// interface can take its IPv4 address from DHCP and hold a static IPv6
+	// one at the same time, and a single set of fields could not say that.
+	// An empty method means the mechanism reported nothing here, which is
+	// not the same as "disabled".
+	Method6    string   `json:"method6,omitempty"`
+	Addresses6 []string `json:"addresses6,omitempty"`
+	Gateway6   string   `json:"gateway6,omitempty"`
+	Routes6    []string `json:"routes6,omitempty"`
+	// AcceptRA and Privacy are the router advertisement and the privacy
+	// extensions in the panel's own words (off, on, on-forwarding;
+	// off, prefer-public, prefer-temporary). Not every mechanism expresses
+	// them; the ones that do not refuse the setting rather than approximate
+	// it.
+	AcceptRA string `json:"accept_ra,omitempty"`
+	Privacy  string `json:"privacy,omitempty"`
 	// MTU is text, because "auto" is an equal value here.
 	MTU string `json:"mtu,omitempty"`
 }
@@ -59,6 +75,11 @@ var ProfileFields = []string{
 	"connection.id", "connection.interface-name", "ipv4.method",
 	"ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv4.dns-search",
 	"ipv4.ignore-auto-dns", "ipv4.routes", "802-3-ethernet.mtu",
+	// The second family is asked for by name as well. Leaving it out of the
+	// question is how a profile with a static IPv6 address came back
+	// looking like one with none.
+	"ipv6.method", "ipv6.addresses", "ipv6.gateway", "ipv6.routes",
+	"ipv6.ip6-privacy",
 }
 
 // ParseConnections reads the output of "nmcli -t -f NAME,UUID,DEVICE,TYPE,STATE con show".
@@ -126,11 +147,49 @@ func ParseProfile(output string) Profile {
 			profile.IgnoreAutoDNS = value == "yes"
 		case "ipv4.routes":
 			profile.Routes = valueList(value)
+		case "ipv6.method":
+			profile.Method6 = value
+		case "ipv6.addresses":
+			profile.Addresses6 = valueList(value)
+		case "ipv6.gateway":
+			profile.Gateway6 = value
+		case "ipv6.routes":
+			profile.Routes6 = valueList(value)
+		case "ipv6.ip6-privacy":
+			profile.Privacy = nmPrivacyWord(value)
 		case "802-3-ethernet.mtu":
 			profile.MTU = value
 		}
 	}
 	return profile
+}
+
+// nmPrivacyWord turns the NetworkManager value of ipv6.ip6-privacy into
+// the panel's word. NetworkManager reports -1 for "use the global default",
+// which says nothing about what the interface does; that stays empty.
+func nmPrivacyWord(value string) string {
+	switch strings.TrimSpace(value) {
+	case "0", "disabled":
+		return PrivacyOff
+	case "1", "enabled (prefer public IP)":
+		return PrivacyPreferPublic
+	case "2", "enabled (prefer temporary IP)":
+		return PrivacyPreferTemporary
+	}
+	return ""
+}
+
+// nmPrivacyValue is the other direction: the value nmcli takes.
+func nmPrivacyValue(word string) (string, error) {
+	switch word {
+	case PrivacyOff:
+		return "0", nil
+	case PrivacyPreferPublic:
+		return "1", nil
+	case PrivacyPreferTemporary:
+		return "2", nil
+	}
+	return "", fmt.Errorf("unsupported IPv6 privacy setting %q", word)
 }
 
 func valueList(value string) []string {
@@ -162,19 +221,24 @@ func MTUArguments(connection, mtu string) ([][]string, error) {
 	}, nil
 }
 
-// RouteArguments writes the full route list of a profile.
+// RouteArguments writes the full route list of a profile, one family at a
+// time.
 //
 // The list is the desired state, not an addition: the operator saw a
 // specific set of routes in the plan and that is what is to stay on the
-// host.
-func RouteArguments(connection string, routes []string) ([][]string, error) {
-	for _, route := range routes {
+// host. The two families go into two settings: NetworkManager drops a v6
+// route written into ipv4.routes without a word, and the operator would
+// read a success for a route the host never got.
+func RouteArguments(connection string, routes, routes6 []string) ([][]string, error) {
+	for _, route := range append(append([]string(nil), routes...), routes6...) {
 		if err := ValidateRoute(route); err != nil {
 			return nil, err
 		}
 	}
 	return [][]string{
-		{NmcliPath, "connection", "modify", connection, "ipv4.routes", strings.Join(routes, ",")},
+		{NmcliPath, "connection", "modify", connection,
+			"ipv4.routes", strings.Join(routes, ","),
+			"ipv6.routes", strings.Join(routes6, ",")},
 		{NmcliPath, "connection", "up", connection},
 	}, nil
 }
@@ -214,39 +278,17 @@ func DNSArguments(connection string, servers, domains []string, ignoreAuto bool)
 
 // ProfileArguments assembles the write of the whole address profile.
 func ProfileArguments(profile Profile) ([][]string, error) {
+	if err := ValidateProfile(profile); err != nil {
+		return nil, err
+	}
 	if profile.Connection == "" {
 		return nil, fmt.Errorf("profile without a connection name")
 	}
-	switch profile.Method {
-	case "auto", "manual", "disabled", "link-local", "shared":
-	default:
-		return nil, fmt.Errorf("unsupported method %q", profile.Method)
-	}
-	// The manual method without an address would leave the interface
-	// without an address, and so cut the host off - that is not a
-	// configuration, it is a mistake.
-	if profile.Method == "manual" && len(profile.Addresses) == 0 {
-		return nil, fmt.Errorf("the manual method requires at least one address")
-	}
-	for _, address := range profile.Addresses {
-		if err := ValidateAddress(address); err != nil {
-			return nil, err
-		}
-	}
-	if profile.Gateway != "" {
-		if err := ValidateIPAddress(profile.Gateway); err != nil {
-			return nil, fmt.Errorf("gateway: %w", err)
-		}
-	}
-	for _, server := range profile.DNS {
-		if err := ValidateIPAddress(server); err != nil {
-			return nil, fmt.Errorf("DNS server: %w", err)
-		}
-	}
-	for _, route := range profile.Routes {
-		if err := ValidateRoute(route); err != nil {
-			return nil, err
-		}
+	// What NetworkManager in particular cannot express. It is checked here
+	// and not in ValidateProfile, because a host driven by netplan does
+	// express it and must not be refused for a limit it does not have.
+	if profile.AcceptRA != "" {
+		return nil, fmt.Errorf("NetworkManager has no separate setting for router advertisements; they follow from the IPv6 method, where auto is the method that listens to them")
 	}
 
 	ignore := "no"
@@ -261,10 +303,107 @@ func ProfileArguments(profile Profile) ([][]string, error) {
 		"ipv4.dns-search", strings.Join(profile.DNSSearch, ","),
 		"ipv4.ignore-auto-dns", ignore,
 		"ipv4.routes", strings.Join(profile.Routes, ",")}
+	// The second family is written only when the profile says something
+	// about it. A profile read from a mechanism that reports no IPv6 must
+	// not have the family silently set to anything here.
+	if profile.Method6 != "" {
+		modification = append(modification,
+			"ipv6.method", profile.Method6,
+			"ipv6.addresses", strings.Join(profile.Addresses6, ","),
+			"ipv6.gateway", profile.Gateway6,
+			"ipv6.routes", strings.Join(profile.Routes6, ","))
+	}
+	if profile.Privacy != "" {
+		value, err := nmPrivacyValue(profile.Privacy)
+		if err != nil {
+			return nil, err
+		}
+		modification = append(modification, "ipv6.ip6-privacy", value)
+	}
 	if profile.MTU != "" {
 		modification = append(modification, "802-3-ethernet.mtu", profile.MTU)
 	}
 	return [][]string{modification, {NmcliPath, "connection", "up", profile.Connection}}, nil
+}
+
+// ValidateProfile checks what any mechanism has to be able to express: a
+// method it knows, addresses with their mask or prefix length, a gateway of
+// the right family, and routes that say where they go.
+//
+// It is deliberately free of any one mechanism's limits. The plan is
+// computed with it on every host, whatever writes the configuration there,
+// and a check that carried NetworkManager's limits would refuse on a
+// netplan host a setting netplan writes perfectly well.
+func ValidateProfile(profile Profile) error {
+	switch profile.Method {
+	case "auto", "manual", "disabled", "link-local", "shared":
+	default:
+		return fmt.Errorf("unsupported method %q", profile.Method)
+	}
+	// The manual method without an address would leave the interface
+	// without an address, and so cut the host off - that is not a
+	// configuration, it is a mistake.
+	if profile.Method == "manual" && len(profile.Addresses) == 0 {
+		return fmt.Errorf("the manual method requires at least one address")
+	}
+	for _, address := range profile.Addresses {
+		if err := ValidateAddress(address); err != nil {
+			return err
+		}
+	}
+	if profile.Gateway != "" {
+		if err := ValidateIPAddress(profile.Gateway); err != nil {
+			return fmt.Errorf("gateway: %w", err)
+		}
+	}
+	for _, server := range profile.DNS {
+		if err := ValidateIPAddress(server); err != nil {
+			return fmt.Errorf("DNS server: %w", err)
+		}
+	}
+	for _, route := range profile.Routes {
+		if err := ValidateRoute(route); err != nil {
+			return err
+		}
+	}
+	return validateIPv6Profile(profile)
+}
+
+// validateIPv6Profile checks the second family of a profile to the same
+// standard as the first, and no further: which mechanism can express which
+// of its settings is the mechanism's own answer, given where the document
+// is written.
+func validateIPv6Profile(profile Profile) error {
+	switch profile.Method6 {
+	case "", "auto", "dhcp", "manual", "disabled", "ignore", "link-local", "shared":
+	default:
+		return fmt.Errorf("unsupported IPv6 method %q", profile.Method6)
+	}
+	if profile.Method6 == "manual" && len(profile.Addresses6) == 0 {
+		return fmt.Errorf("the manual IPv6 method requires at least one address")
+	}
+	for _, address := range profile.Addresses6 {
+		if err := ValidateIPv6Address(address); err != nil {
+			return err
+		}
+	}
+	if profile.Gateway6 != "" {
+		if err := ValidateIPv6Gateway(profile.Gateway6); err != nil {
+			return fmt.Errorf("IPv6 gateway: %w", err)
+		}
+	}
+	for _, route := range profile.Routes6 {
+		if err := ValidateRoute(route); err != nil {
+			return err
+		}
+	}
+	if !ValidAcceptRA(profile.AcceptRA) {
+		return fmt.Errorf("unsupported router advertisement setting %q", profile.AcceptRA)
+	}
+	if !ValidPrivacy(profile.Privacy) {
+		return fmt.Errorf("unsupported IPv6 privacy setting %q", profile.Privacy)
+	}
+	return nil
 }
 
 // interfaceName is what the kernel accepts as an interface name: up to 15
@@ -311,6 +450,35 @@ func ValidateAddress(address string) error {
 func ValidateIPAddress(address string) error {
 	if net.ParseIP(address) == nil {
 		return fmt.Errorf("%q is not an IP address", address)
+	}
+	return nil
+}
+
+// ValidateIPv6Address checks an address of the second family with its
+// prefix length. It is separate from ValidateAddress so that an IPv4
+// address slipped into the IPv6 list is refused rather than written into a
+// setting that will drop it.
+func ValidateIPv6Address(address string) error {
+	ip, _, err := net.ParseCIDR(address)
+	if err != nil {
+		return fmt.Errorf("the address %q is not an address with a prefix length", address)
+	}
+	if ip.To4() != nil {
+		return fmt.Errorf("the address %q belongs to IPv4 and cannot be an IPv6 address of the interface", address)
+	}
+	return nil
+}
+
+// ValidateIPv6Gateway checks the default gateway of the second family.
+//
+// A link-local gateway (fe80::/10) is the normal case on IPv6: routers
+// announce themselves by their link-local address and the default route
+// goes through it. Refusing it - as a check written for IPv4 would - is
+// refusing the ordinary IPv6 network.
+func ValidateIPv6Gateway(gateway string) error {
+	address := net.ParseIP(gateway)
+	if address == nil || address.To4() != nil {
+		return fmt.Errorf("%q is not an IPv6 address", gateway)
 	}
 	return nil
 }

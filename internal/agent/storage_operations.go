@@ -13,13 +13,52 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// ProbeLVM reads the LVM groups and volumes through the helper.
+// ProbeLVM reads the volume manager and the software arrays through the
+// helper.
+//
+// Both need root and both belong to the same picture: a logical volume is a
+// device, a group and a UUID, and an array member is a device the array
+// knows under a slot. They are two calls because they are two reads on the
+// host - a host with LVM and no md driver answers the first and says why
+// there is no answer to the second, and an empty list from either would be
+// a zero nobody measured.
 func (e *TaskExecutor) ProbeLVM(ctx context.Context) (storage.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
 		Action: &helperv1.HelperRequest_Storage{
 			Storage: &helperv1.StorageRequest{
 				Operation: helperv1.StorageRequest_OPERATION_READ_LVM,
+			},
+		},
+	}, time.Minute)
+	if err != nil {
+		return storage.Snapshot{}, err
+	}
+	snapshot, err := decodeStorage(response.GetStorageResult().GetSnapshot())
+	if err != nil {
+		return storage.Snapshot{}, err
+	}
+	arrays, err := e.probeRAID(ctx)
+	if err != nil {
+		// The volume manager was read and the arrays were not. That is a
+		// reason on the arrays, not a failure of the whole read: the panel
+		// shows the groups it has and says why it has no arrays.
+		snapshot.RAIDUnavailableReason = "helper: " + err.Error()
+		return snapshot, nil
+	}
+	snapshot.Arrays = arrays.Arrays
+	snapshot.RAIDUnavailableReason = arrays.RAIDUnavailableReason
+	return snapshot, nil
+}
+
+// probeRAID reads the software arrays through the helper: the superblock
+// needs root, and the UUID in it is the only name an operation binds to.
+func (e *TaskExecutor) probeRAID(ctx context.Context) (storage.Snapshot, error) {
+	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+		TimeoutSeconds: 60,
+		Action: &helperv1.HelperRequest_Storage{
+			Storage: &helperv1.StorageRequest{
+				Operation: helperv1.StorageRequest_OPERATION_READ_RAID,
 			},
 		},
 	}, time.Minute)
@@ -81,6 +120,22 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 		operation = helperv1.StorageRequest_OPERATION_FS_CREATE
 	case opspec.ActionDiskWipe:
 		operation = helperv1.StorageRequest_OPERATION_DISK_WIPE
+	case opspec.ActionRAIDMemberFail:
+		operation = helperv1.StorageRequest_OPERATION_RAID_MEMBER_FAIL
+	case opspec.ActionRAIDMemberRemove:
+		operation = helperv1.StorageRequest_OPERATION_RAID_MEMBER_REMOVE
+	case opspec.ActionRAIDMemberAdd:
+		operation = helperv1.StorageRequest_OPERATION_RAID_MEMBER_ADD
+	case opspec.ActionLVMVolumeCreate:
+		operation = helperv1.StorageRequest_OPERATION_LVM_LV_CREATE
+	case opspec.ActionLVMVolumeRemove:
+		operation = helperv1.StorageRequest_OPERATION_LVM_LV_REMOVE
+	case opspec.ActionLVMGroupExtend:
+		operation = helperv1.StorageRequest_OPERATION_LVM_VG_EXTEND
+	case opspec.ActionLVMSnapshotCreate:
+		operation = helperv1.StorageRequest_OPERATION_LVM_SNAPSHOT_CREATE
+	case opspec.ActionLVMSnapshotRemove:
+		operation = helperv1.StorageRequest_OPERATION_LVM_SNAPSHOT_REMOVE
 	}
 
 	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
@@ -108,6 +163,16 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 				Plan:              payload.Plan,
 				PlanHash:          payload.PlanHash,
 				Label:             payload.Label,
+				// The identities of the layers above a bare disk. Every one
+				// of them travels, because every one of them is compared on
+				// the host right before the change: a name alone would carry
+				// the operator's consent to whatever holds the name now.
+				Array:              payload.Array,
+				ExpectedArrayUuid:  payload.ExpectedArrayUUID,
+				Group:              payload.Group,
+				ExpectedGroupUuid:  payload.ExpectedGroupUUID,
+				Volume:             payload.Volume,
+				ExpectedVolumeUuid: payload.ExpectedVolumeUUID,
 			},
 		},
 	}, timeout)
@@ -157,6 +222,11 @@ func decodeStorage(data []byte) (storage.Snapshot, error) {
 }
 
 // storageSummary describes the result of the read in one sentence.
+//
+// A degraded array belongs in that sentence: it is the one fact on this
+// page that is worth reading before the disk that is still good goes too,
+// and a job result that said only how many devices there are would bury
+// it.
 func storageSummary(snapshot storage.Snapshot) string {
 	mounted := 0
 	for _, mount := range snapshot.Mounts {
@@ -164,8 +234,16 @@ func storageSummary(snapshot storage.Snapshot) string {
 			mounted++
 		}
 	}
-	return "devices: " + strconv.Itoa(len(snapshot.Devices)) +
+	summary := "devices: " + strconv.Itoa(len(snapshot.Devices)) +
 		", mounted filesystems: " + strconv.Itoa(mounted)
+	if degraded := snapshot.DegradedArrays(); len(degraded) > 0 {
+		names := make([]string, 0, len(degraded))
+		for _, array := range degraded {
+			names = append(names, array.Path)
+		}
+		summary += ", degraded arrays: " + strings.Join(names, ", ")
+	}
+	return summary
 }
 
 // readSmart asks the helper about the SMART state of one device.

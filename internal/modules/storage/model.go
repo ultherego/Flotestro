@@ -7,7 +7,10 @@
 // somebody opens this tab at all.
 package storage
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Block device kinds the module distinguishes.
 const (
@@ -113,19 +116,62 @@ type Mount struct {
 
 // VolumeGroup is an LVM volume group.
 type VolumeGroup struct {
-	Name      string `json:"name"`
+	Name string `json:"name"`
+	// UUID is the identity of the group. A group can be renamed and a name
+	// can be given to another group tomorrow, so an operation that creates
+	// or extends inside a group binds to the UUID, not to the name.
+	UUID      string `json:"uuid,omitempty"`
 	SizeBytes uint64 `json:"size_bytes"`
 	FreeBytes uint64 `json:"free_bytes"`
-	PVCount   int    `json:"pv_count"`
-	LVCount   int    `json:"lv_count"`
+	// ExtentSizeBytes is the grain the group allocates in: a volume is
+	// always a whole number of extents, so a request that is not one is
+	// rounded up by LVM and the plan says so beforehand.
+	ExtentSizeBytes uint64 `json:"extent_size_bytes,omitempty"`
+	PVCount         int    `json:"pv_count"`
+	LVCount         int    `json:"lv_count"`
 }
 
 // LogicalVolume is an LVM logical volume.
 type LogicalVolume struct {
-	Name      string `json:"name"`
-	Group     string `json:"group"`
-	Path      string `json:"path"`
+	Name  string `json:"name"`
+	Group string `json:"group"`
+	Path  string `json:"path"`
+	// UUID is the identity of the volume; the path is a name that another
+	// volume can carry after a rename.
+	UUID      string `json:"uuid,omitempty"`
 	SizeBytes uint64 `json:"size_bytes"`
+	// Attributes is lv_attr as LVM prints it. Its first letter says what
+	// the volume is: "s" a snapshot, "o" an origin, "-" an ordinary
+	// volume. The panel keeps the original, because LVM adds letters.
+	Attributes string `json:"attributes,omitempty"`
+	// Origin names the volume this one is a snapshot of; empty on an
+	// ordinary volume.
+	Origin string `json:"origin,omitempty"`
+	// DataPercent is how full a snapshot's copy-on-write space is. A
+	// snapshot that fills up is dropped by the kernel, so this is the
+	// number that decides whether it is still usable. No value means the
+	// volume has none - not a snapshot at zero.
+	DataPercent *float64 `json:"data_percent,omitempty"`
+}
+
+// IsSnapshot says whether the volume is a snapshot of another one.
+func (l LogicalVolume) IsSnapshot() bool {
+	if l.Origin != "" {
+		return true
+	}
+	// lv_attr: "s" a snapshot, "S" an invalid snapshot, "m" a merging one.
+	return len(l.Attributes) > 0 && strings.ContainsRune("sS", rune(l.Attributes[0]))
+}
+
+// PhysicalVolume is one disk or partition an LVM group is built out of.
+type PhysicalVolume struct {
+	Path string `json:"path"`
+	// Group is empty on a physical volume that belongs to no group yet:
+	// that is a disk prepared for LVM and not used, not a broken one.
+	Group     string `json:"group,omitempty"`
+	UUID      string `json:"uuid,omitempty"`
+	SizeBytes uint64 `json:"size_bytes"`
+	FreeBytes uint64 `json:"free_bytes"`
 }
 
 // Snapshot is the picture of the host disk space.
@@ -140,12 +186,76 @@ type Snapshot struct {
 	// Groups and Volumes are empty on a host without LVM. The
 	// unavailability reason is carried by LVMUnavailableReason: no groups
 	// and no LVM are two different answers.
-	Groups                []VolumeGroup   `json:"groups,omitempty"`
-	Volumes               []LogicalVolume `json:"volumes,omitempty"`
-	LVMUnavailableReason  string          `json:"lvm_unavailable_reason,omitempty"`
-	RAIDUnavailableReason string          `json:"raid_unavailable_reason,omitempty"`
-	ObservedAt            time.Time       `json:"observed_at"`
-	UnavailableReason     string          `json:"unavailable_reason,omitempty"`
+	Groups               []VolumeGroup    `json:"groups,omitempty"`
+	Volumes              []LogicalVolume  `json:"volumes,omitempty"`
+	PhysicalVolumes      []PhysicalVolume `json:"physical_volumes,omitempty"`
+	LVMUnavailableReason string           `json:"lvm_unavailable_reason,omitempty"`
+	// Arrays are the software RAID arrays of the host. An empty list with an
+	// empty reason means a host that has the md driver and no array
+	// assembled; RAIDUnavailableReason carries the other answer - no md
+	// driver, or a read that failed. The two are not the same thing and the
+	// panel shows them differently.
+	Arrays                []RAIDArray `json:"arrays,omitempty"`
+	RAIDUnavailableReason string      `json:"raid_unavailable_reason,omitempty"`
+	ObservedAt            time.Time   `json:"observed_at"`
+	UnavailableReason     string      `json:"unavailable_reason,omitempty"`
+}
+
+// DegradedArrays lists the arrays that have lost a member or their
+// redundancy. It is what the panel judges the host's storage health on: a
+// degraded array is a fact the host reports and the panel acts on.
+func (s Snapshot) DegradedArrays() []RAIDArray {
+	var degraded []RAIDArray
+	for _, array := range s.Arrays {
+		if array.Degraded || array.FailedDevices > 0 {
+			degraded = append(degraded, array)
+		}
+	}
+	return degraded
+}
+
+// GroupAt returns the volume group with the given name or nil.
+func (s Snapshot) GroupAt(name string) *VolumeGroup {
+	for i := range s.Groups {
+		if s.Groups[i].Name == name {
+			return &s.Groups[i]
+		}
+	}
+	return nil
+}
+
+// VolumeAt resolves a path to a logical volume, whichever of its two names
+// the order used.
+func (s Snapshot) VolumeAt(path string) *LogicalVolume {
+	for i := range s.Volumes {
+		if MatchesVolume(s.Volumes[i], path) {
+			return &s.Volumes[i]
+		}
+	}
+	return nil
+}
+
+// DeviceForVolume finds the block device the kernel has for a logical
+// volume. lvs prints /dev/<group>/<volume> and lsblk prints
+// /dev/mapper/<group>-<volume>: the same device under two names, and a
+// plan that compared the strings would miss it.
+func (s Snapshot) DeviceForVolume(volume LogicalVolume) *Device {
+	for i := range s.Devices {
+		if MatchesVolume(volume, s.Devices[i].Path) {
+			return &s.Devices[i]
+		}
+	}
+	return nil
+}
+
+// PhysicalVolumeAt returns the physical volume at the path or nil.
+func (s Snapshot) PhysicalVolumeAt(path string) *PhysicalVolume {
+	for i := range s.PhysicalVolumes {
+		if s.PhysicalVolumes[i].Path == path {
+			return &s.PhysicalVolumes[i]
+		}
+	}
+	return nil
 }
 
 // DeviceAt returns the device with the given path or nil.

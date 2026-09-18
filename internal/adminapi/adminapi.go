@@ -97,6 +97,9 @@ type Server struct {
 	webRoot                string
 	// stepUp describes the conditions of the highest-impact operations.
 	stepUp stepUpPolicy
+	// previewMode is how strictly a campaign order is held to the preview
+	// it was placed from.
+	previewMode campaigns.PreviewMode
 	// metrics exposes the panel state to monitoring.
 	metrics *metrics.Collector
 	// contract records every registered route for the OpenAPI document.
@@ -171,6 +174,11 @@ type Options struct {
 	// StepUpRefuseTokens denies the highest-impact operations to API
 	// tokens; by default they are allowed and recorded as such.
 	StepUpRefuseTokens bool
+	// CampaignPreview is the stage of the preview-binding rollout: observe
+	// records what the binding would have decided, prefer refuses an order
+	// that does not match the preview it names, and enforce additionally
+	// refuses an order placed without a preview. Empty means prefer.
+	CampaignPreview campaigns.PreviewMode
 	// Metrics exposes the panel state; nil disables the endpoint.
 	Metrics *metrics.Collector
 	// Trust is the set of fleet CAs; nil disables PKI management.
@@ -202,8 +210,9 @@ func NewServer(pool *pgxpool.Pool, hostStore *hosts.Store, inventoryStore *inven
 		productionEnvironments: production,
 		sessionLimits:          limits, publicURL: options.PublicURL,
 		webRoot: options.WebRoot, directoryWrite: options.DirectoryWrite,
-		stepUp:  stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR, RefuseTokens: options.StepUpRefuseTokens},
-		metrics: options.Metrics, trust: options.Trust}
+		stepUp:      stepUpPolicy{MaxAge: options.StepUpMaxAge, ACR: options.StepUpACR, RefuseTokens: options.StepUpRefuseTokens},
+		previewMode: options.CampaignPreview,
+		metrics:     options.Metrics, trust: options.Trust}
 	// The handshake needs the sessions of this gateway and the same stores
 	// as the panel, so it is built here rather than handed in.
 	server.decommissioner = gateway.NewDecommissioner(pool, hostStore, jobStore, recorder, registry, log)

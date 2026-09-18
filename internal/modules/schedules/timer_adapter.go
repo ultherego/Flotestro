@@ -9,9 +9,10 @@ import (
 //
 // Timers and cron are two mechanisms of the same thing: the operator wants
 // to see one table of recurring jobs, not two lists to merge in their head.
-// The panel does not create timers - managed entries go to cron, because
-// there one entry is one file, while a timer needs two units and their
-// mutual consistency.
+// What this function reads is what systemd knows; the entries the panel
+// wrote itself are recognised by their marker and merged in afterwards by
+// MergeManagedTimers, because their files say more than systemd's lists
+// do.
 func ReadTimers(timerList, unitList, calendars string) []Schedule {
 	next := parseTimerList(timerList)
 	states := parseUnitStates(unitList)
@@ -29,6 +30,9 @@ func ReadTimers(timerList, unitList, calendars string) []Schedule {
 			// (OnBootSec, OnUnitActiveSec). Its expression is unknown, so it
 			// is left empty instead of writing anything.
 			Expression: expressions[name],
+			// A timer found on the host is described in systemd's own
+			// language, so the two expressions are the same text.
+			Calendar: expressions[name],
 			// A timer does not run a command, only a unit. It is the unit
 			// that has the ExecStart, which this module does not read.
 			CommandLine: strings.TrimSuffix(name, ".timer") + ".service",

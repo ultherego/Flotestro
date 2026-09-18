@@ -4,15 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"sort"
 	"strconv"
 	"strings"
 
+	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/modules/accounts"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
+	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
 	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/modules/schedules"
+	"github.com/ultherego/flotestro/internal/modules/storage"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/packages"
 )
@@ -221,6 +225,18 @@ func verifyScheduleEntry(ctx context.Context, readers *hostReaders, in verifyInp
 		return unverified(expected, "runs on "+collapsed(found.Expression),
 			"the entry "+payload.ID+" runs on "+collapsed(found.Expression)+
 				" and not on "+collapsed(payload.Expression))
+	}
+	// An order that named the mechanism is verified against it: an entry
+	// written as a cron line where a timer was ordered runs the command,
+	// but it is not what the operator asked the host for, and the next
+	// order would write the timer beside it. An order that left the choice
+	// to the host accepts whichever it made.
+	if in.action == opspec.ActionScheduleEnsure &&
+		(payload.Kind == opspec.ScheduleKindCron || payload.Kind == opspec.ScheduleKindTimer) &&
+		found.Kind != payload.Kind {
+		return unverified(expected+" as a "+payload.Kind, "a "+found.Kind+" entry",
+			"the entry "+payload.ID+" is on the host as a "+found.Kind+
+				" entry and not as a "+payload.Kind)
 	}
 	return verified(expected, observed)
 }
@@ -634,16 +650,61 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 }
 
 // verifyStorageLayout reads the device after the change: a volume or a
-// filesystem that grew, a device that carries the filesystem ordered, or a
-// device that carries no signature after a wipe.
+// filesystem that grew, a device that carries the filesystem ordered, a
+// device that carries no signature after a wipe, an array that knows its
+// member under the role ordered, or a volume the group really holds.
+//
+// Every one of these is a read of the host afterwards. None of them is the
+// exit code of the tool: mdadm exits zero on a member it accepted and on
+// one it had already forgotten, lvcreate rounds a size up to whole extents
+// without saying so, and fsck answers in a bit field that means two
+// different things.
 func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Storage
-	if payload == nil || payload.Device == "" {
+	if payload == nil {
+		return unreadable("a device state", "the order carries no storage payload")
+	}
+	switch in.action {
+	case opspec.ActionRAIDMemberFail, opspec.ActionRAIDMemberRemove, opspec.ActionRAIDMemberAdd:
+		return verifyArrayMember(ctx, readers, in.action, payload)
+	case opspec.ActionLVMVolumeCreate, opspec.ActionLVMSnapshotCreate,
+		opspec.ActionLVMVolumeRemove, opspec.ActionLVMSnapshotRemove,
+		opspec.ActionLVMGroupExtend:
+		return verifyVolumeLayer(ctx, readers, in.action, payload)
+	}
+	if payload.Device == "" {
 		return unreadable("a device state", "the order names no device")
 	}
 	device := payload.Device
 
 	switch in.action {
+	case opspec.ActionFilesystemCheck:
+		// A check that ran is confirmed by the filesystem still being there
+		// and still being the one that was checked. A repair can end with a
+		// filesystem the host no longer recognises, and that is the outcome
+		// this read is for; whether errors were left behind is decided on
+		// the host by a second, read-only pass.
+		expected := "the filesystem on " + device + " is still there after the check"
+		snapshot, reason := storageLayers(ctx, readers)
+		if reason != "" {
+			return unreadable(expected, reason)
+		}
+		found := snapshot.DeviceAt(device)
+		if found == nil {
+			return unverified(expected, "no such device",
+				"the host no longer reports the device "+device+" after the check")
+		}
+		if found.FSType == "" {
+			return unverified(expected, device+" carries no filesystem",
+				"the check left "+device+" without a filesystem the host recognises")
+		}
+		observed := device + " carries " + found.FSType
+		if payload.ExpectedUUID != "" && found.UUID != "" && found.UUID != payload.ExpectedUUID {
+			return unverified(expected, observed+" with the UUID "+found.UUID,
+				"the filesystem on "+device+" is not the one that was checked")
+		}
+		return verified(expected, observed)
+
 	case opspec.ActionFilesystemCreate:
 		expected := device + " carries " + firstNonEmpty(payload.FSType, "a filesystem")
 		if readers.storage == nil {
@@ -757,6 +818,220 @@ func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInp
 		return verified(expected, observed)
 	}
 	return unverified(expected, observed, "the size of "+target+" did not grow: "+observed)
+}
+
+// storageLayers reads the whole picture of the host's disks: the block
+// devices, the volume manager and the software arrays.
+//
+// A volume is a device, a group and a UUID at once, and an array member is
+// a device the array knows under a slot, so all three layers are read
+// together or the answer means nothing. The reason of a read that failed
+// is carried back rather than an empty snapshot: an array nobody could ask
+// about is not a host without arrays.
+func storageLayers(ctx context.Context, readers *hostReaders) (storage.Snapshot, string) {
+	if readers.storage != nil {
+		snapshot := readers.storage(ctx)
+		if snapshot.UnavailableReason == "" {
+			return snapshot, ""
+		}
+		if readers.volumes == nil {
+			return snapshot, snapshot.UnavailableReason
+		}
+	}
+	if readers.volumes == nil {
+		return storage.Snapshot{}, noReader("the disk space of the host")
+	}
+	snapshot, err := readers.volumes(ctx)
+	if err != nil {
+		return storage.Snapshot{}, err.Error()
+	}
+	return snapshot, ""
+}
+
+// verifyArrayMember reads the array back after a member change.
+//
+// mdadm exits zero on a member it has accepted and on one the array had
+// already forgotten. What settles the change is the array's own list: the
+// role the member has now, and how many slots of the array are filled.
+func verifyArrayMember(ctx context.Context, readers *hostReaders,
+	action opspec.ActionType, payload *opspec.StoragePayload) observation {
+	member, arrayPath := payload.Device, payload.Array
+	expected := member + " a member of " + arrayPath
+	switch action {
+	case opspec.ActionRAIDMemberFail:
+		expected = member + " marked failed in " + arrayPath
+	case opspec.ActionRAIDMemberRemove:
+		expected = member + " out of " + arrayPath
+	}
+	if member == "" || arrayPath == "" {
+		return unreadable(expected, "the order names no array or no member")
+	}
+	snapshot, reason := storageLayers(ctx, readers)
+	if reason != "" {
+		return unreadable(expected, reason)
+	}
+	if snapshot.RAIDUnavailableReason != "" {
+		return unreadable(expected, snapshot.RAIDUnavailableReason)
+	}
+	array := snapshot.ArrayAt(arrayPath)
+	if array == nil {
+		return unverified(expected, "no such array",
+			"the host no longer reports the array "+arrayPath)
+	}
+	// The array under the path has to be the one the order was bound to:
+	// /dev/md0 is whichever array the kernel assembled first this boot.
+	if wanted := payload.ExpectedArrayUUID; wanted != "" && array.UUID != wanted {
+		return unverified(expected, arrayPath+" carries the UUID "+firstNonEmpty(array.UUID, "none"),
+			"the array under "+arrayPath+" is not the one the change was bound to")
+	}
+	state := arrayState(*array)
+	found := array.MemberAt(member)
+	switch action {
+	case opspec.ActionRAIDMemberFail:
+		switch {
+		case found == nil:
+			// The array dropped the member altogether. It has stopped
+			// reading from it, which is what failing it was for.
+			return verified(expected, member+" is no longer a member of "+arrayPath+"; "+state)
+		case found.Failed():
+			return verified(expected, member+" is failed; "+state)
+		default:
+			return unverified(expected, member+" is "+firstNonEmpty(found.Role, "of a role the host did not name")+"; "+state,
+				"the array still uses "+member+" after the change")
+		}
+	case opspec.ActionRAIDMemberRemove:
+		if found == nil || found.Role == storage.MemberRemoved {
+			return verified(expected, member+" is out of "+arrayPath+"; "+state)
+		}
+		return unverified(expected, member+" is still "+firstNonEmpty(found.Role, "listed")+"; "+state,
+			"the array still lists "+member+" after the removal")
+	}
+	if found == nil {
+		return unverified(expected, arrayPath+" does not list "+member+"; "+state,
+			"the array did not take "+member+" in")
+	}
+	observed := member + " is " + firstNonEmpty(found.Role, "listed") + "; " + state
+	return verified(expected, observed)
+}
+
+// arrayState sums the array up in the numbers an operator reads first.
+func arrayState(array storage.RAIDArray) string {
+	state := strconv.Itoa(array.ActiveDevices) + " of " + strconv.Itoa(array.RaidDevices) + " slots filled"
+	if array.Degraded {
+		state += ", degraded"
+	}
+	if array.SyncAction != "" {
+		state += ", " + array.SyncAction + " running"
+	}
+	return state
+}
+
+// verifyVolumeLayer reads the volume manager back after a change.
+//
+// lvcreate rounds a request up to whole extents and says nothing about it,
+// and lvremove exits zero on a volume it has already dropped. The group's
+// own list is what settles the change, and the size read back is the size
+// the host really gave.
+func verifyVolumeLayer(ctx context.Context, readers *hostReaders,
+	action opspec.ActionType, payload *opspec.StoragePayload) observation {
+	snapshot, reason := storageLayers(ctx, readers)
+	switch action {
+	case opspec.ActionLVMVolumeRemove, opspec.ActionLVMSnapshotRemove:
+		expected := payload.Device + " is gone"
+		if reason != "" {
+			return unreadable(expected, reason)
+		}
+		if snapshot.LVMUnavailableReason != "" {
+			return unreadable(expected, snapshot.LVMUnavailableReason)
+		}
+		if volume := snapshot.VolumeAt(payload.Device); volume != nil {
+			return unverified(expected, payload.Device+" is still there ("+
+				strconv.FormatUint(volume.SizeBytes>>20, 10)+" MiB)",
+				"LVM still lists "+payload.Device+" after the removal")
+		}
+		observed := payload.Device + " is gone"
+		if group := snapshot.GroupAt(payload.Group); group != nil {
+			observed += "; " + group.Name + " has " +
+				strconv.FormatUint(group.FreeBytes>>20, 10) + " MiB free"
+		}
+		return verified(expected, observed)
+
+	case opspec.ActionLVMGroupExtend:
+		expected := payload.Device + " a physical volume of " + payload.Group
+		if reason != "" {
+			return unreadable(expected, reason)
+		}
+		if snapshot.LVMUnavailableReason != "" {
+			return unreadable(expected, snapshot.LVMUnavailableReason)
+		}
+		physical := snapshot.PhysicalVolumeAt(payload.Device)
+		if physical == nil {
+			return unverified(expected, payload.Device+" is not a physical volume",
+				"LVM does not list "+payload.Device+" as a physical volume after the change")
+		}
+		if physical.Group != payload.Group {
+			return unverified(expected,
+				payload.Device+" belongs to "+firstNonEmpty(physical.Group, "no group"),
+				"the disk carries an LVM label and did not join "+payload.Group)
+		}
+		observed := payload.Device + " belongs to " + payload.Group
+		if group := snapshot.GroupAt(payload.Group); group != nil {
+			observed += ", which now holds " + strconv.FormatUint(group.SizeBytes>>20, 10) +
+				" MiB with " + strconv.FormatUint(group.FreeBytes>>20, 10) + " MiB free"
+		}
+		return verified(expected, observed)
+	}
+
+	// What is left is a volume or a snapshot that was to be created.
+	name := payload.Volume
+	expected := "a volume named " + name
+	if action == opspec.ActionLVMSnapshotCreate {
+		expected = "a snapshot named " + name + " of " + payload.Device
+	}
+	if name == "" {
+		return unreadable(expected, "the order names no volume")
+	}
+	if reason != "" {
+		return unreadable(expected, reason)
+	}
+	if snapshot.LVMUnavailableReason != "" {
+		return unreadable(expected, snapshot.LVMUnavailableReason)
+	}
+	group := payload.Group
+	if group == "" && action == opspec.ActionLVMSnapshotCreate {
+		// A snapshot order names its origin, not the group: the group is
+		// the origin's, whatever it is called on this host.
+		if origin := snapshot.VolumeAt(payload.Device); origin != nil {
+			group = origin.Group
+		}
+	}
+	var created *storage.LogicalVolume
+	for i := range snapshot.Volumes {
+		if snapshot.Volumes[i].Name == name && (group == "" || snapshot.Volumes[i].Group == group) {
+			created = &snapshot.Volumes[i]
+			break
+		}
+	}
+	if created == nil {
+		return unverified(expected, firstNonEmpty(group, "the host")+" holds no volume named "+name,
+			"the tool reported no error and LVM does not list "+name)
+	}
+	observed := created.Path + ", " + strconv.FormatUint(created.SizeBytes>>20, 10) + " MiB"
+	if action == opspec.ActionLVMSnapshotCreate {
+		if !created.IsSnapshot() {
+			return unverified(expected, observed+" and it is not a snapshot",
+				"LVM created "+name+" as an ordinary volume, not as a snapshot")
+		}
+		observed += ", a snapshot of " + firstNonEmpty(created.Origin, "a volume the host did not name")
+	}
+	// The size asked for is a floor, not a promise of the exact number: LVM
+	// allocates whole extents and rounds up. A volume smaller than the order
+	// is the failure worth catching.
+	if wanted, absolute := storage.SizeInBytes(payload.Size); absolute && created.SizeBytes < wanted {
+		return unverified(expected+" of at least "+strconv.FormatUint(wanted>>20, 10)+" MiB", observed,
+			"LVM gave "+name+" less space than the order asked for")
+	}
+	return verified(expected, observed)
 }
 
 // verifyHostname reads the kernel's host name. It needs no context: the
@@ -1147,17 +1422,35 @@ func verifyTimezone(ctx context.Context, readers *hostReaders, in verifyInput) o
 // addresses ordered, and the ordered routes in the table.
 func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Network
-	if payload == nil || payload.Interface == "" {
+	if payload == nil {
 		return unreadable("an interface state", "the order names no interface")
 	}
-	expected := "the interface " + payload.Interface + " up"
+	// A layered order names the layer, not the interface field: a bond
+	// being built is what the verifier has to find afterwards.
+	subject := payload.Interface
+	if payload.Link != nil && payload.Link.Name != "" {
+		subject = payload.Link.Name
+	}
+	if subject == "" {
+		return unreadable("an interface state", "the order names no interface")
+	}
+	expected := "the interface " + subject + " up"
 	switch {
 	case in.action == opspec.ActionNetworkMTUSet && payload.MTU != "":
 		expected = payload.Interface + " mtu " + payload.MTU
 	case in.action == opspec.ActionNetworkRouteEnsure:
 		expected = strconv.Itoa(len(payload.Routes)) + " routes on " + payload.Interface
-	case len(payload.Addresses) > 0:
-		expected = payload.Interface + " " + listOf(payload.Addresses)
+	case in.action == opspec.ActionNetworkLinkRemove:
+		expected = "no interface " + subject
+	case in.action == opspec.ActionNetworkLinkApply && payload.Link != nil:
+		expected = payload.Link.Kind + " " + subject + " from " + listOf(payload.Link.Members)
+		if payload.Link.Kind == network.LinkVLAN {
+			expected = "vlan " + subject + " with the tag " +
+				strconv.Itoa(payload.Link.VLANID) + " on " + payload.Link.Parent
+		}
+	case len(payload.Addresses) > 0 || len(payload.Addresses6) > 0:
+		expected = subject + " " + listOf(append(append([]string(nil),
+			payload.Addresses...), payload.Addresses6...))
 	}
 	if readers.network == nil {
 		return unreadable(expected, noReader("the network of the host"))
@@ -1166,10 +1459,44 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 	if snapshot.UnavailableReason != "" {
 		return unreadable(expected, snapshot.UnavailableReason)
 	}
-	link := snapshot.InterfaceByName(payload.Interface)
+	// A removal is the one order whose success is an interface that is not
+	// there. It is answered before the interface is looked up, because the
+	// lookup failing is exactly what it wants.
+	if in.action == opspec.ActionNetworkLinkRemove {
+		if gone := snapshot.InterfaceByName(subject); gone != nil {
+			return unverified(expected, "the interface "+subject+" is still there",
+				"the host still reports "+subject+" after the removal")
+		}
+		return verified(expected, "the host no longer reports "+subject)
+	}
+
+	link := snapshot.InterfaceByName(subject)
 	if link == nil {
 		return unverified(expected, "no such interface",
-			"the host does not report the interface "+payload.Interface+" after the change")
+			"the host does not report the interface "+subject+" after the change")
+	}
+
+	if in.action == opspec.ActionNetworkLinkApply && payload.Link != nil {
+		return verifyNetworkLayer(expected, snapshot, *link, *payload.Link)
+	}
+
+	// An order that carries anything about the second family is verified
+	// against a host that has it. A host with IPv6 switched off would let
+	// every address be written and report none of them back, and "no such
+	// address" would be the wrong answer to give the operator.
+	if payload.Method6 != "" || len(payload.Addresses6) > 0 || payload.Gateway6 != "" ||
+		payload.AcceptRA != "" || payload.Privacy != "" {
+		if link.IPv6 != nil && link.IPv6.Off() {
+			return unverified(expected, subject+" has IPv6 switched off",
+				"the second family is disabled on "+subject+", so nothing written there takes effect")
+		}
+		if snapshot.IPv6Disabled != nil && *snapshot.IPv6Disabled {
+			return unverified(expected, "the host has IPv6 switched off",
+				"this host has the second family disabled for every interface")
+		}
+		if failed := verifyIPv6Switches(expected, subject, payload, link.IPv6); failed != nil {
+			return *failed
+		}
 	}
 
 	if in.action == opspec.ActionNetworkMTUSet && payload.MTU != "" && payload.MTU != "auto" {
@@ -1196,35 +1523,136 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 			"the routing table does not carry "+listOf(missing)+" on "+payload.Interface)
 	}
 
-	if len(payload.Addresses) > 0 {
+	// Both families are read back, because both were ordered: an IPv6
+	// address that never landed is as much a failed change as an IPv4 one,
+	// and a verifier that looked only at the first family would call it a
+	// success.
+	if ordered := append(append([]string(nil), payload.Addresses...),
+		payload.Addresses6...); len(ordered) > 0 {
 		have := make([]string, 0, len(link.Addresses))
 		for _, address := range link.Addresses {
 			have = append(have, address.Address)
 		}
 		var missing []string
-		for _, address := range payload.Addresses {
+		for _, address := range ordered {
 			if !contains(have, address) {
 				missing = append(missing, address)
 			}
 		}
-		observed := payload.Interface + " " + listOf(have)
+		observed := subject + " " + listOf(have)
 		if len(missing) == 0 {
 			return verified(expected, observed)
 		}
 		return unverified(expected, observed,
-			"the interface "+payload.Interface+" does not carry "+listOf(missing)+" after the change")
+			"the interface "+subject+" does not carry "+listOf(missing)+" after the change")
 	}
 
 	// A profile applied by DHCP and a rollback promise no single value: what
 	// they promise is an interface that is up and addressed.
-	observed := payload.Interface + " " + firstNonEmpty(link.OperState, "unknown") + ", " +
+	observed := subject + " " + firstNonEmpty(link.OperState, "unknown") + ", " +
 		strconv.Itoa(len(link.Addresses)) + " addresses"
 	if link.OperState == "down" {
-		return unverified(expected, observed, "the interface "+payload.Interface+" is down after the change")
+		return unverified(expected, observed, "the interface "+subject+" is down after the change")
 	}
 	if len(link.Addresses) == 0 {
 		return unverified(expected, observed,
-			"the interface "+payload.Interface+" carries no address after the change")
+			"the interface "+subject+" carries no address after the change")
+	}
+	return verified(expected, observed)
+}
+
+// verifyIPv6Switches reads the two switches of the second family back from
+// the kernel after they were ordered, and returns a failed observation when
+// the host does not have what was asked for.
+//
+// A switch the kernel did not report stays unread rather than failing: the
+// order may have gone to a mechanism whose write is still settling, and
+// "unknown" is not "wrong". The two ways of saying yes to router
+// advertisements are one answer here: the mechanisms write a single flag,
+// and whether the host also forwards is a different question from whether
+// it listens.
+func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload,
+	settings *network.IPv6Settings) *observation {
+	if settings == nil {
+		return nil
+	}
+	if payload.AcceptRA != "" && settings.AcceptRA != nil {
+		word := network.AcceptRAWord(*settings.AcceptRA)
+		wanted := payload.AcceptRA == word ||
+			(payload.AcceptRA != network.AcceptRAOff && word != network.AcceptRAOff)
+		if !wanted {
+			failed := unverified(expected, subject+" accept_ra "+word,
+				"the host takes router advertisements on "+subject+" as "+word+
+					" and not as "+payload.AcceptRA)
+			return &failed
+		}
+	}
+	if payload.Privacy != "" && settings.Privacy != nil {
+		word := network.PrivacyWord(*settings.Privacy)
+		if word != payload.Privacy {
+			failed := unverified(expected, subject+" privacy "+word,
+				"the privacy extensions on "+subject+" are "+word+" and not "+payload.Privacy)
+			return &failed
+		}
+	}
+	return nil
+}
+
+// verifyNetworkLayer reads the layering back after a layered change.
+//
+// A layer that came up is not yet the layer that was ordered: a bond whose
+// second member never joined carries traffic and has no redundancy, and a
+// VLAN that landed on another parent carries somebody else's traffic. So
+// the verifier compares what the host reports against what the operator
+// approved, member by member, rather than settling for the interface being
+// there.
+func verifyNetworkLayer(expected string, snapshot network.Snapshot,
+	link network.Interface, spec network.LinkSpec) observation {
+	state := network.LinkStateOf(snapshot, spec.Name)
+	observed := firstNonEmpty(state.Kind, "a plain interface") + " " + spec.Name
+	if len(state.Members) > 0 {
+		observed += " from " + listOf(state.Members)
+	}
+	if state.Kind != spec.Kind {
+		return unverified(expected, observed,
+			"the host reports "+spec.Name+" as "+firstNonEmpty(state.Kind, "a plain interface")+
+				" and not as a "+spec.Kind)
+	}
+	switch spec.Kind {
+	case network.LinkVLAN:
+		if state.Parent != spec.Parent {
+			return unverified(expected, observed+" on "+firstNonEmpty(state.Parent, "nothing"),
+				"the VLAN "+spec.Name+" runs on "+firstNonEmpty(state.Parent, "nothing")+
+					" and not on "+spec.Parent)
+		}
+		if state.VLANID != spec.VLANID {
+			return unverified(expected, observed+" with the tag "+strconv.Itoa(state.VLANID),
+				"the VLAN "+spec.Name+" carries the tag "+strconv.Itoa(state.VLANID)+
+					" and not "+strconv.Itoa(spec.VLANID))
+		}
+	default:
+		var missing []string
+		for _, member := range spec.Members {
+			if !contains(state.Members, member) {
+				missing = append(missing, member)
+			}
+		}
+		if len(missing) > 0 {
+			return unverified(expected, observed,
+				"the "+spec.Kind+" "+spec.Name+" does not hold "+listOf(missing)+" after the change")
+		}
+	}
+	if spec.Kind == network.LinkBond && spec.Mode != "" && state.Mode != spec.Mode {
+		return unverified(expected, observed+" in the mode "+firstNonEmpty(state.Mode, "unknown"),
+			"the bond "+spec.Name+" runs in the mode "+firstNonEmpty(state.Mode, "unknown")+
+				" and not in "+spec.Mode)
+	}
+	// A layer with members that is down carries nothing, whatever it is
+	// made of. A bridge built with no members yet is another matter: the
+	// virtual machines are attached to it afterwards, and until then it is
+	// down because it has nothing to carry.
+	if link.OperState == "down" && len(state.Members) > 0 {
+		return unverified(expected, observed+", down", "the "+spec.Kind+" "+spec.Name+" is down after the change")
 	}
 	return verified(expected, observed)
 }
@@ -1902,6 +2330,230 @@ func verifyComposeServices(ctx context.Context, readers *hostReaders, in verifyI
 	}
 	return unverified(expected, observed,
 		"the services "+listOf(other)+" run from another image than the digest the plan bound")
+}
+
+// verifyContainerSpec reads the container of a declaration back.
+//
+// A container that carries the digest of the description it was created
+// from is the container that was declared; one that carries another digest,
+// or none, is a container somebody else's order put there. That is the
+// whole point of this verifier: the identity here is the name, and a name
+// alone proves nothing about what stands under it.
+func verifyContainerSpec(ctx context.Context, readers *hostReaders, in verifyInput) observation {
+	payload := in.payload.DockerEnsure
+	if payload == nil || payload.Container == nil {
+		return unreadable("a declared container", "the order carries no container description")
+	}
+	name := payload.Container.Name
+	spec, err := payload.SpecWithSecrets()
+	if err != nil {
+		return unreadable("the container "+name+" as declared", err.Error())
+	}
+	// The digest of the image is what the plan bound on the host, not what
+	// the order wrote: the order names a tag, the plan says what that tag
+	// meant at that moment, and the container was created from that.
+	outcome := declarationOutcome(in.result)
+	if outcome.Plan.ImageDigest == "" {
+		// Without the digest the plan bound there is nothing to compare
+		// the container's mark against, and a comparison against a
+		// description with no image would read as a mismatch that is not
+		// one. Unknown is said as unknown.
+		return unreadable("the container "+name+" as declared",
+			"the host sent back no plan, so the image the container was to run is not known here")
+	}
+	spec.ImageDigest = outcome.Plan.ImageDigest
+	wanted := docker.SpecDigest(spec)
+
+	expected := "the container " + name + " running as declared"
+	if spec.Stopped {
+		expected = "the container " + name + " stopped as declared"
+	}
+	if readers.docker == nil {
+		return unreadable(expected, noReader("the container engine"))
+	}
+	snapshot, err := readers.docker(ctx)
+	if err != nil {
+		return unreadable(expected, err.Error())
+	}
+	if snapshot.Summary.UnavailableReason != "" {
+		return unreadable(expected, snapshot.Summary.UnavailableReason)
+	}
+
+	var found *docker.Container
+	for i := range snapshot.Containers {
+		if snapshot.Containers[i].Name == name {
+			found = &snapshot.Containers[i]
+			break
+		}
+	}
+	if found == nil {
+		return unverified(expected, "absent",
+			"the engine does not list a container called "+name+" after the change")
+	}
+	if recorded := found.Labels[docker.LabelSpecDigest]; recorded != wanted {
+		return unverified(expected, "container "+shortDigest(found.ID)+", description "+
+			firstNonEmpty(shortDigest(recorded), "not declared here"),
+			"the container "+name+" was not created from the description that was approved")
+	}
+	running := found.State == "running" || found.State == "restarting"
+	observed := "the container " + name + " " + firstNonEmpty(found.State, "unknown")
+	if running == !spec.Stopped {
+		return verified(expected, observed)
+	}
+	return unverified(expected, observed,
+		"the container "+name+" is "+firstNonEmpty(found.State, "unknown")+" after the change")
+}
+
+// verifyDockerNetwork reads the declared network back: it stands with the
+// driver and the address range declared, or it is gone after a removal.
+func verifyDockerNetwork(ctx context.Context, readers *hostReaders, in verifyInput) observation {
+	payload := in.payload.DockerEnsure
+	name := payload.ObjectName()
+	if name == "" {
+		return unreadable("a declared network", "the order names no network")
+	}
+	removal := in.action == opspec.ActionDockerNetworkRemove
+	expected := "the network " + name + " as declared"
+	if removal {
+		expected = "the network " + name + " gone"
+	}
+	snapshot, problem := readEngine(ctx, readers, expected)
+	if problem != nil {
+		return *problem
+	}
+
+	var found *docker.Network
+	for i := range snapshot.Networks {
+		if snapshot.Networks[i].Name == name {
+			found = &snapshot.Networks[i]
+			break
+		}
+	}
+	if removal {
+		if found == nil {
+			return verified(expected, "gone")
+		}
+		return unverified(expected, "still on the host",
+			"the engine still lists the network "+name+" after the removal")
+	}
+	if found == nil {
+		return unverified(expected, "absent",
+			"the engine does not list the network "+name+" after the change")
+	}
+	declared := payload.Network
+	if declared == nil {
+		return verified(expected, "on the host, "+shortDigest(found.ID))
+	}
+	wanted := declared.Normalized()
+	observed := found.Driver + ", " + firstNonEmpty(strings.Join(found.Subnets, " "), "no range of its own")
+	if found.Driver != wanted.Driver {
+		return unverified(expected, observed,
+			"the network "+name+" has the driver "+found.Driver+" and not "+wanted.Driver)
+	}
+	if wanted.Subnet != "" && !containsText(found.Subnets, wanted.Subnet) {
+		return unverified(expected, observed,
+			"the network "+name+" does not carry the address range "+wanted.Subnet)
+	}
+	if wanted.IPv6Subnet != "" && !containsText(found.Subnets, wanted.IPv6Subnet) {
+		return unverified(expected, observed,
+			"the network "+name+" does not carry the address range "+wanted.IPv6Subnet)
+	}
+	return verified(expected, observed)
+}
+
+// verifyDockerVolume reads the declared volume back: it stands with the
+// driver declared, or it is gone after a removal.
+func verifyDockerVolume(ctx context.Context, readers *hostReaders, in verifyInput) observation {
+	payload := in.payload.DockerEnsure
+	name := payload.ObjectName()
+	if name == "" {
+		return unreadable("a declared volume", "the order names no volume")
+	}
+	removal := in.action == opspec.ActionDockerVolumeRemove
+	expected := "the volume " + name + " as declared"
+	if removal {
+		expected = "the volume " + name + " gone"
+	}
+	snapshot, problem := readEngine(ctx, readers, expected)
+	if problem != nil {
+		return *problem
+	}
+
+	var found *docker.Volume
+	for i := range snapshot.Volumes {
+		if snapshot.Volumes[i].Name == name {
+			found = &snapshot.Volumes[i]
+			break
+		}
+	}
+	if removal {
+		if found == nil {
+			return verified(expected, "gone")
+		}
+		return unverified(expected, "still on the host",
+			"the engine still lists the volume "+name+" after the removal")
+	}
+	if found == nil {
+		return unverified(expected, "absent",
+			"the engine does not list the volume "+name+" after the change")
+	}
+	declared := payload.Volume
+	if declared == nil {
+		return verified(expected, "on the host")
+	}
+	wanted := declared.Normalized()
+	if found.Driver != wanted.Driver {
+		return unverified(expected, found.Driver,
+			"the volume "+name+" has the driver "+found.Driver+" and not "+wanted.Driver)
+	}
+	return verified(expected, found.Driver)
+}
+
+// readEngine reads the engine state for a verifier, or says why it could
+// not. An engine that does not answer leaves the state unknown, and
+// unknown is never a pass.
+func readEngine(ctx context.Context, readers *hostReaders, expected string) (docker.Snapshot, *observation) {
+	if readers.docker == nil {
+		problem := unreadable(expected, noReader("the container engine"))
+		return docker.Snapshot{}, &problem
+	}
+	snapshot, err := readers.docker(ctx)
+	if err != nil {
+		problem := unreadable(expected, err.Error())
+		return docker.Snapshot{}, &problem
+	}
+	if snapshot.Summary.UnavailableReason != "" {
+		problem := unreadable(expected, snapshot.Summary.UnavailableReason)
+		return docker.Snapshot{}, &problem
+	}
+	return snapshot, nil
+}
+
+// declarationOutcome reads what the host reported about the change. An
+// answer that cannot be read leaves an empty outcome: the verifier then
+// compares against a description without a bound image digest and says so
+// by not matching, which is the honest answer.
+func declarationOutcome(result *agentv1.TaskResult) docker.EnsureResult {
+	outcome := docker.EnsureResult{}
+	raw := result.GetDockerEnsureResult().GetPayload()
+	if len(raw) == 0 {
+		return outcome
+	}
+	if err := json.Unmarshal(raw, &outcome); err != nil {
+		return docker.EnsureResult{}
+	}
+	return outcome
+}
+
+// containsText says whether a list carries a value. The engine reports the
+// address ranges of a network as a list, and a network may have several.
+func containsText(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // verifyBackupRun reads the repository after the run: it has to list a

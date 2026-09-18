@@ -40,10 +40,13 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const steps = page.locator(".bulk-steps");
   const targetsStep = steps.getByRole("button", { name: /Targets/ });
   await expect(targetsStep).toBeDisabled();
-  await expect(targetsStep).toContainText("pick an operation, name the campaign and give it a valid payload");
+  // The first step says the first thing that is missing, in order: the
+  // operation, then the name, then whatever the operation's own form
+  // still wants. An empty wizard is missing the operation.
+  await expect(targetsStep).toContainText("pick an operation and name the campaign");
   const next = (title: string) => page.getByRole("button", { name: `Next: ${title}`, exact: true });
   await expect(next("Targets")).toBeDisabled();
-  await expect(page.getByText("Before going on: pick an operation, name the campaign and give it a valid payload.")).toBeVisible();
+  await expect(page.getByText("Before going on: pick an operation and name the campaign.")).toBeVisible();
 
   await page.getByPlaceholder("campaign name").fill("e2e preview only");
   // The select is found through its field: a wrapping label lends the

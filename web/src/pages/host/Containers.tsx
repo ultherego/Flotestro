@@ -11,6 +11,8 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { OperationForm } from "../../components/OperationForm";
+import { operationForm, startingForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
 
 type Summary = {
@@ -144,6 +146,8 @@ type EventsResult = {
 const CONTAINER_CHANGES = [
   "docker.container.start", "docker.container.stop", "docker.container.restart", "docker.container.remove",
   "docker.image.pull", "docker.prune",
+  "docker.container.ensure", "docker.network.ensure", "docker.network.remove",
+  "docker.volume.ensure", "docker.volume.remove",
 ];
 
 export function Containers() {
@@ -352,6 +356,7 @@ export function Containers() {
               }
             />
             {logsOf && <ContainerLogs key={logsOf.id} container={logsOf} onClose={() => setLogsOf(null)} />}
+            <Declaration kind="container" />
           </>
         )}
         {view === "images" && (
@@ -376,22 +381,28 @@ export function Containers() {
           </>
         )}
         {view === "networks" && (
-          <NetworkTable
-            hostID={host.id}
-            networks={lists?.networks}
-            read={read}
-            remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
-          />
+          <>
+            <NetworkTable
+              hostID={host.id}
+              networks={lists?.networks}
+              read={read}
+              remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
+            />
+            <Declaration kind="network" />
+          </>
         )}
         {view === "volumes" && (
-          <VolumeTable
-            hostID={host.id}
-            volumes={lists?.volumes}
-            read={read}
-            remove={(volume) =>
-              setPending({ kind: "remove-volume", id: volume.name, name: volume.name })
-            }
-          />
+          <>
+            <VolumeTable
+              hostID={host.id}
+              volumes={lists?.volumes}
+              read={read}
+              remove={(volume) =>
+                setPending({ kind: "remove-volume", id: volume.name, name: volume.name })
+              }
+            />
+            <Declaration kind="volume" />
+          </>
         )}
 
         {view === "events" && <Events />}
@@ -419,6 +430,297 @@ export function Containers() {
       )}
     </ModulePage>
   );
+}
+
+/**
+ * Declaring a container, a network or a volume.
+ *
+ * Nothing is ordered from this panel without a plan. The operator writes
+ * the description, the host computes what would change, and only that plan
+ * - with its digest - can be carried out. The digest binds the two: a host
+ * somebody else changed in between gets no change that was approved for
+ * another state, and the operator never approves a word like "replace"
+ * without the list of settings behind it.
+ *
+ * A container that differs is replaced rather than edited. That is the
+ * engine's doing - it can change a handful of a running container's
+ * settings and refuses the rest - and it is why the plan says so before
+ * anybody agrees to it.
+ */
+function Declaration({ kind }: { kind: "container" | "network" | "volume" }) {
+  const t = useT();
+  const host = useHost();
+  const queryClient = useQueryClient();
+  const choices = DECLARATION_ACTIONS[kind];
+  const [action, setAction] = useState(choices[0]);
+  const entry = operationForm(action);
+  const [form, setForm] = useState<FormValue>(() => startingForm(choices[0]));
+  const [payloadText, setPayloadText] = useState("");
+  const [confirming, setConfirming] = useState(false);
+  const [ordered, setOrdered] = useState<Job | null>(null);
+  const [message, setMessage] = useState("");
+  // The description the plan on the screen was computed for. A plan
+  // belongs to one description: anything typed afterwards makes it
+  // somebody else's plan, and it must not authorise this change.
+  const [plannedFor, setPlannedFor] = useState("");
+  const plan = useReadOperation<DeclarationResult>(host);
+
+  // A form filled for one operation says nothing about another: the
+  // description of a network is not the name of a volume.
+  function choose(next: string) {
+    setAction(next);
+    setForm(startingForm(next));
+    setPayloadText("");
+    setOrdered(null);
+    plan.reset();
+  }
+
+  const payload = payloadText !== ""
+    ? safePayload(payloadText)
+    : entry ? entry.toPayload(form) : null;
+  const section = payload ? (payload.docker_ensure as Record<string, unknown> | undefined) : undefined;
+  const problems = entry && payloadText === "" ? entry.validate(form) : [];
+  const computed = plan.attempt?.detail?.payload;
+  const stale = computed !== undefined && plannedFor !== JSON.stringify(section ?? null);
+
+  const apply = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      setOrdered(job);
+      setMessage("");
+      setConfirming(false);
+      plan.reset();
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  function order(reason?: string, confirmation?: string) {
+    if (!section || !computed) return;
+    apply.mutate({
+      action,
+      ...(reason ? { reason } : {}),
+      ...(confirmation ? { target_confirmation: confirmation } : {}),
+      payload: { docker_ensure: { ...section, plan_digest: computed.digest } },
+    });
+  }
+
+  if (!entry) return null;
+  const destructive = action.endsWith(".remove");
+  const target = entry.summary(payload ?? {}) || t("this object");
+
+  return (
+    <div className="hm-section-body">
+      <Form>
+        {choices.length > 1 && (
+          <Fields>
+            <Field label={t("What to declare")}>
+              <select value={action} onChange={(event) => choose(event.target.value)}>
+                {choices.map((candidate) => (
+                  <option key={candidate} value={candidate}>
+                    {t(operationForm(candidate)?.title ?? candidate)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </Fields>
+        )}
+        {/* The fields come from the operation registry, so this panel and
+            the Bulk wizard ask for the same things in the same words. */}
+        <OperationForm
+          key={action}
+          entry={entry}
+          value={form}
+          onChange={(next) => { setForm(next); setOrdered(null); }}
+          json={payloadText}
+          onJson={(next) => { setPayloadText(next); setOrdered(null); }}
+        />
+        <FormActions>
+          {/* The plan is a read and stands behind the read permission; the
+              change behind its own. An operator who may look but not change
+              sees the plan and no button to carry it out. */}
+          <ActionGuard action="docker.plan" host={host.id}>
+            <button
+              className="secondary"
+              disabled={!section || problems.length > 0 || plan.busy}
+              onClick={() => {
+                setOrdered(null);
+                setPlannedFor(JSON.stringify(section ?? null));
+                plan.order({ action: "docker.plan", payload: { docker_ensure: section } });
+              }}
+            >
+              {plan.busy ? t("Requesting…") : t("Compute the plan")}
+            </button>
+          </ActionGuard>
+          <ActionGuard action={action} host={host.id}>
+            <button
+              className={destructive ? "hm-danger" : undefined}
+              disabled={!computed || stale || !computed.digest || apply.isPending ||
+                computed.action === "no_change" || computed.action === "absent"}
+              onClick={() => (destructive ? setConfirming(true) : order())}
+            >
+              {t("Carry the plan out")}
+            </button>
+          </ActionGuard>
+        </FormActions>
+        <FormNote>
+          {t("The change carries the digest of this plan. The host computes the plan once more right before it and refuses when the host moved in the meantime.")}
+        </FormNote>
+      </Form>
+      <Message text={message || plan.message} error />
+      {plan.attempt && !computed && (
+        <Message
+          text={plan.attempt.message || plan.attempt.error_code || t("The host sent no plan back.")}
+          error
+        />
+      )}
+      {computed && <PlanView plan={computed} stale={stale} />}
+      {ordered && <JobNotice job={ordered} hostID={host.id} />}
+      {confirming && (
+        <TargetConfirmation
+          host={host}
+          danger
+          label={t("Remove {name}", { name: target })}
+          description={t("What is stored in it goes with it, and the removal cannot be undone.")}
+          busy={apply.isPending}
+          onConfirm={(reason, confirmation) => order(reason, confirmation)}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * The declarative operations offered per kind of object.
+ *
+ * Removing a container is deliberately absent: a container is declared,
+ * and a container that is not to run any more is declared away by
+ * lifecycle operations that name it by identifier - the one thing a
+ * declaration never does.
+ */
+export const DECLARATION_ACTIONS: Record<string, string[]> = {
+  container: ["docker.container.ensure"],
+  network: ["docker.network.ensure", "docker.network.remove"],
+  volume: ["docker.volume.ensure", "docker.volume.remove"],
+};
+
+/** One difference the plan found between the host and the description. */
+type PlanChange = { field: string; current: string; desired: string };
+
+/** The plan as the host computes it; the change carries its digest back. */
+type ComputedPlan = {
+  kind?: string;
+  name?: string;
+  action?: string;
+  exists?: boolean;
+  changes?: PlanChange[];
+  warnings?: string[];
+  image_digest?: string;
+  digest_source?: string;
+  pinned_image?: string;
+  digest?: string;
+  current_id?: string;
+  detaches?: string[];
+  unavailable_reason?: string;
+};
+
+type DeclarationResult = {
+  kind?: string;
+  payload?: ComputedPlan;
+  unavailable_reason?: string;
+};
+
+/**
+ * What the plan says would happen.
+ *
+ * The verdict alone is not an approval: a replacement without the list of
+ * settings behind it asks the operator to agree to a word. So the changes
+ * are the body of this view, and the verdict only its heading.
+ */
+function PlanView({ plan, stale }: { plan: ComputedPlan; stale: boolean }) {
+  const t = useT();
+  if (plan.unavailable_reason) {
+    return <Message text={plan.unavailable_reason} error />;
+  }
+  return (
+    <div className="hm-section-body" data-testid="declaration-plan">
+      <p className="widget-subhead">{t(planVerdict(plan.action))}</p>
+      {stale && (
+        <Message
+          text={t("The description changed since this plan was computed; compute it again before carrying it out.")}
+          error
+        />
+      )}
+      {plan.pinned_image && (
+        <p className="source" style={{ margin: 0 }}>
+          {t("The image is bound to {digest} ({source}).", {
+            digest: plan.pinned_image, source: plan.digest_source ?? "",
+          })}
+        </p>
+      )}
+      {plan.changes?.length ? (
+        <Table>
+          <thead><tr><th>{t("Setting")}</th><th>{t("On the host")}</th><th>{t("Declared")}</th></tr></thead>
+          <tbody>
+            {plan.changes.map((change) => (
+              <tr key={change.field}>
+                <td className="hm-mono hm-primary">{change.field}</td>
+                <td className="hm-mono">{change.current || "—"}</td>
+                <td className="hm-mono">{change.desired || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      ) : (
+        <p className="source" style={{ margin: 0 }}>{t("No setting differs.")}</p>
+      )}
+      {plan.detaches?.length ? (
+        <p className="source" style={{ margin: 0 }}>
+          {t("These containers lose the network and are not reattached: {names}", {
+            names: plan.detaches.join(", "),
+          })}
+        </p>
+      ) : null}
+      {plan.warnings?.map((warning) => (
+        <p key={warning} className="source" style={{ margin: 0 }}>{warning}</p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The verdict of a plan, as a sentence rather than a word.
+ *
+ * "replace" tells an operator nothing about what it costs them; the
+ * sentence does, and the change list below it says which settings brought
+ * it about. A verdict this panel does not know is not translated into a
+ * guess - it is named as it came.
+ */
+export function planVerdict(action: string | undefined): string {
+  return PLAN_VERDICTS[action ?? ""] ?? "What the plan would do";
+}
+
+const PLAN_VERDICTS: Record<string, string> = {
+  no_change: "The host already matches the description; nothing would change.",
+  create: "The object is not on the host and would be created.",
+  replace: "The object is on the host and differs, so it would be removed and created again.",
+  start: "The container matches the description and is not running; it would be started.",
+  stop: "The container matches the description and runs; it would be stopped.",
+  remove: "The object is on the host and would be removed.",
+  absent: "The object is not on the host, so a removal has nothing to do.",
+};
+
+/** A payload typed by hand, or null when it is not one. */
+export function safePayload(raw: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
 }
 
 /**

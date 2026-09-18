@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
 	"time"
 
@@ -259,6 +260,192 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 		return response
 	}
 	return &helperv1.HelperResponse{Accepted: true, DockerActionResult: actionResult}
+}
+
+// ensureDocker computes the plan of a declared object or carries it out.
+//
+// The description arrives as the module's own JSON and is read with the
+// module's own code, which refuses exactly what the panel refuses: the
+// helper runs as root and cannot take a name, a path or an address at its
+// word because the panel already looked at it. Every change computes its
+// plan again here, under the guard, and compares the digest with the one
+// the operator approved - a host that moved on since the approval gets no
+// change.
+func (s *Server) ensureDocker(ctx context.Context, request *helperv1.HelperRequest,
+	action *helperv1.DockerEnsureRequest) *helperv1.HelperResponse {
+	client, err := docker.New()
+	if err != nil {
+		return &helperv1.HelperResponse{
+			Accepted:           true,
+			DockerEnsureResult: &helperv1.DockerEnsureResult{UnavailableReason: err.Error()},
+		}
+	}
+
+	// A change of a declared object shares the resource with every other
+	// container operation: a replacement and a restart of the same
+	// container at once give an unpredictable result. A plan only reads,
+	// and a read that waited behind a long pull would tell the operator
+	// nothing sooner.
+	if action.GetOperation() != helperv1.DockerEnsureRequest_OPERATION_PLAN {
+		release, busy := s.hold(GuardContainers, request)
+		if busy != nil {
+			return busy
+		}
+		defer release()
+	}
+
+	actionCtx, cancel := deadline(ctx, request, 5*time.Minute, time.Hour)
+	defer cancel()
+
+	result, err := runDockerDeclaration(actionCtx, client, action)
+	if err != nil {
+		if errors.Is(err, docker.ErrUnavailable) {
+			return &helperv1.HelperResponse{
+				Accepted:           true,
+				DockerEnsureResult: &helperv1.DockerEnsureResult{UnavailableReason: err.Error()},
+			}
+		}
+		// What the change managed to do goes back on a refusal too:
+		// without it there is no telling whether the old container was
+		// already removed when the new one refused to start.
+		response := reject(declarationErrorCode(err), err.Error())
+		if encoded, marshalErr := json.Marshal(result); marshalErr == nil && result != nil {
+			response.DockerEnsureResult = &helperv1.DockerEnsureResult{Payload: encoded}
+		}
+		return response
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	return &helperv1.HelperResponse{
+		Accepted:           true,
+		DockerEnsureResult: &helperv1.DockerEnsureResult{Payload: encoded},
+	}
+}
+
+// runDockerDeclaration is the operation itself. It returns what the module
+// produced even when it failed, so a partial change is reported rather
+// than hidden behind the error alone.
+func runDockerDeclaration(ctx context.Context, client *docker.Client,
+	action *helperv1.DockerEnsureRequest) (any, error) {
+	switch action.GetOperation() {
+	case helperv1.DockerEnsureRequest_OPERATION_PLAN:
+		plan, err := planDockerDeclaration(ctx, client, action)
+		return plan, err
+
+	case helperv1.DockerEnsureRequest_OPERATION_CONTAINER_ENSURE:
+		spec, err := containerSpecOf(action)
+		if err != nil {
+			return nil, err
+		}
+		result, err := docker.EnsureContainer(ctx, client, spec,
+			action.GetEnvValues(), action.GetPlanDigest())
+		return result, err
+
+	case helperv1.DockerEnsureRequest_OPERATION_NETWORK_ENSURE:
+		var spec docker.NetworkSpec
+		if err := json.Unmarshal(action.GetSpec(), &spec); err != nil {
+			return nil, fmt.Errorf("the network description: %w", err)
+		}
+		result, err := docker.EnsureNetwork(ctx, client, spec,
+			action.GetForce(), action.GetPlanDigest())
+		return result, err
+
+	case helperv1.DockerEnsureRequest_OPERATION_NETWORK_REMOVE:
+		result, err := docker.RemoveNetworkPlanned(ctx, client, action.GetName(),
+			action.GetForce(), action.GetPlanDigest())
+		return result, err
+
+	case helperv1.DockerEnsureRequest_OPERATION_VOLUME_ENSURE:
+		var spec docker.VolumeSpec
+		if err := json.Unmarshal(action.GetSpec(), &spec); err != nil {
+			return nil, fmt.Errorf("the volume description: %w", err)
+		}
+		result, err := docker.EnsureVolume(ctx, client, spec,
+			action.GetForce(), action.GetPlanDigest())
+		return result, err
+
+	case helperv1.DockerEnsureRequest_OPERATION_VOLUME_REMOVE:
+		result, err := docker.RemoveVolumePlanned(ctx, client, action.GetName(),
+			action.GetForce(), action.GetPlanDigest())
+		return result, err
+	}
+	return nil, errUnknownDeclaration
+}
+
+// planDockerDeclaration computes the plan of whichever object the order is
+// about. A plan carrying a description is about that description; one
+// carrying only a name is the plan of a removal.
+func planDockerDeclaration(ctx context.Context, client *docker.Client,
+	action *helperv1.DockerEnsureRequest) (docker.Plan, error) {
+	described := len(action.GetSpec()) > 0
+	switch action.GetKind() {
+	case docker.KindContainer:
+		spec, err := containerSpecOf(action)
+		if err != nil {
+			return docker.Plan{}, err
+		}
+		return docker.PlanContainer(ctx, client, spec)
+	case docker.KindNetwork:
+		if !described {
+			return docker.PlanNetworkRemoval(ctx, client, action.GetName(), action.GetForce())
+		}
+		var spec docker.NetworkSpec
+		if err := json.Unmarshal(action.GetSpec(), &spec); err != nil {
+			return docker.Plan{}, fmt.Errorf("the network description: %w", err)
+		}
+		return docker.PlanNetwork(ctx, client, spec, action.GetForce())
+	case docker.KindVolume:
+		if !described {
+			return docker.PlanVolumeRemoval(ctx, client, action.GetName(), action.GetForce())
+		}
+		var spec docker.VolumeSpec
+		if err := json.Unmarshal(action.GetSpec(), &spec); err != nil {
+			return docker.Plan{}, fmt.Errorf("the volume description: %w", err)
+		}
+		return docker.PlanVolume(ctx, client, spec, action.GetForce())
+	}
+	return docker.Plan{}, errUnknownDeclaration
+}
+
+// containerSpecOf reads the container description back and names the
+// variables whose value came in beside it. The reference the panel bound
+// is not in the request - the values are - so the description carries the
+// variable names alone, which is what the specification digest needs.
+func containerSpecOf(action *helperv1.DockerEnsureRequest) (docker.ContainerSpec, error) {
+	var request docker.ContainerRequest
+	if err := json.Unmarshal(action.GetSpec(), &request); err != nil {
+		return docker.ContainerSpec{}, fmt.Errorf("the container description: %w", err)
+	}
+	return request.Spec(nil)
+}
+
+// errUnknownDeclaration refuses an order about a kind of object the module
+// does not declare. A guess would create something nobody asked for.
+var errUnknownDeclaration = errors.New("unknown kind of declared object")
+
+// errorDockerConflict: the object on the host differs in a setting the
+// engine cannot change in place, so bringing it to the description means
+// destroying it and making it again - and the order did not say it accepts
+// that.
+const errorDockerConflict = "docker_object_conflict"
+
+// declarationErrorCode names the refusal. A plan that moved since the
+// approval, an object something still holds and a tag nobody can resolve
+// are typed answers the panel acts on; the rest is a failed operation.
+func declarationErrorCode(err error) string {
+	switch {
+	case errors.Is(err, docker.ErrPlanMismatch):
+		return errorStalePlan
+	case errors.Is(err, docker.ErrDigestUnresolved):
+		return errorImageDigestUnresolved
+	case errors.Is(err, docker.ErrObjectConflict):
+		return errorDockerConflict
+	case errors.Is(err, errUnknownDeclaration):
+		return ErrorUnknownAction
+	}
+	return dockerErrorCode(err)
 }
 
 // checkCleanupList repeats the validation of the panel for cleanup objects.

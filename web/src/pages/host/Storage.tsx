@@ -11,6 +11,8 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { OperationForm } from "../../components/OperationForm";
+import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
 
 export type Device = {
@@ -57,11 +59,96 @@ type Mount = {
   avail_bytes?: number;
 };
 
+/** One volume group, with the identity an order inside it binds to. */
+type VolumeGroup = {
+  name: string;
+  uuid?: string;
+  size_bytes: number;
+  free_bytes: number;
+  extent_size_bytes?: number;
+  lv_count: number;
+};
+
+/**
+ * One logical volume. `attributes` is lv_attr as LVM prints it and
+ * `data_percent` is how full a snapshot's copy-on-write space is - absent
+ * on an ordinary volume, which has none, rather than zero.
+ */
+type LogicalVolume = {
+  name: string;
+  group: string;
+  path: string;
+  uuid?: string;
+  size_bytes: number;
+  attributes?: string;
+  origin?: string;
+  data_percent?: number;
+};
+
+/** One disk or partition a group is built out of. */
+type PhysicalVolume = {
+  path: string;
+  group?: string;
+  uuid?: string;
+  size_bytes: number;
+  free_bytes: number;
+};
+
+/**
+ * One member of a software array. The role is what the array thinks the
+ * device is now; the by-id link is what an order binds to, and a member
+ * without one says why instead of showing an empty cell.
+ */
+type RAIDMember = {
+  path: string;
+  kernel_name?: string;
+  slot?: number;
+  number?: number;
+  role: string;
+  state?: string;
+  by_id?: string;
+  wwn?: string;
+  serial?: string;
+  identity_unavailable_reason?: string;
+  size_bytes?: number;
+};
+
+/**
+ * One software array. `sync_percent` is absent when nothing is being
+ * rebuilt - not a rebuild standing at zero - and
+ * `detail_unavailable_reason` says why an array carries no UUID, which is
+ * the same as saying no order can bind to it.
+ */
+type RAIDArray = {
+  name: string;
+  path: string;
+  uuid?: string;
+  level?: string;
+  state?: string;
+  metadata?: string;
+  size_bytes?: number;
+  raid_devices: number;
+  active_devices: number;
+  working_devices: number;
+  failed_devices: number;
+  spare_devices: number;
+  degraded: boolean;
+  redundant: boolean;
+  sync_action?: string;
+  sync_percent?: number;
+  sync_finish?: string;
+  sync_speed?: string;
+  members?: RAIDMember[];
+  detail_unavailable_reason?: string;
+};
+
 type Snapshot = {
   devices?: Device[];
   mounts?: Mount[];
-  groups?: { name: string; size_bytes: number; free_bytes: number; lv_count: number }[];
-  volumes?: { name: string; group: string; path: string; size_bytes: number }[];
+  groups?: VolumeGroup[];
+  volumes?: LogicalVolume[];
+  physical_volumes?: PhysicalVolume[];
+  arrays?: RAIDArray[];
   lvm_unavailable_reason?: string;
   raid_unavailable_reason?: string;
   observed_at?: string;
@@ -202,7 +289,63 @@ export function destructiveRefusal(device: Device, devices: Device[]): { code: s
 /** The changes this page offers; when every one is refused, the page says so once. */
 const STORAGE_CHANGES = [
   "mount.ensure", "mount.remove", "filesystem.check", "filesystem.resize", "filesystem.create", "disk.wipe", "lvm.extend",
+  "raid.member.fail", "raid.member.remove", "raid.member.add",
+  "lvm.volume.create", "lvm.volume.remove", "lvm.group.extend",
+  "lvm.snapshot.create", "lvm.snapshot.remove",
 ];
+
+/**
+ * Why the panel will not fail or remove this member, in the host's own
+ * codes, or nothing when the order may be given. The host checks again
+ * before the change; this is the same answer, given before the operator
+ * clicks.
+ */
+export function memberRefusal(array: RAIDArray, member: RAIDMember, losingData: boolean):
+  { code: string; reason: string } | null {
+  if (!array.uuid) {
+    return {
+      code: "array_unknown",
+      reason: array.detail_unavailable_reason || "the array reports no UUID to bind the change to",
+    };
+  }
+  if (!member.by_id) {
+    return {
+      code: "stable_identity_required",
+      reason: member.identity_unavailable_reason || `no /dev/disk/by-id link names ${member.path}`,
+    };
+  }
+  if (!losingData) return null;
+  if (!array.redundant) {
+    return { code: "array_redundancy_lost", reason: `${array.level || "this level"} keeps no copy of the data` };
+  }
+  if (array.sync_action) {
+    return { code: "array_rebuilding", reason: `the array is ${array.sync_action}` };
+  }
+  if (array.degraded) {
+    return { code: "array_redundancy_lost", reason: "the array is already degraded" };
+  }
+  return null;
+}
+
+/** Whether losing this member now costs the array a copy of the data. */
+export function carriesData(member: RAIDMember): boolean {
+  return member.role === "active" || member.role === "write_mostly" || member.role === "rebuilding";
+}
+
+/** Whether the volume is a snapshot of another one. */
+export function isSnapshot(volume: LogicalVolume): boolean {
+  if (volume.origin) return true;
+  const first = (volume.attributes ?? "").charAt(0);
+  return first === "s" || first === "S";
+}
+
+/**
+ * The sentence the panel gives when somebody looks for a button that
+ * builds or tears down an array. The boundary is drawn on purpose, and a
+ * boundary that says nothing reads as a missing feature.
+ */
+const ARRAY_LIFECYCLE_REFUSAL =
+  "The panel manages the members of an array that exists. Creating an array and destroying one are decisions about a machine's whole disk layout, taken on the machine when it is built, not operations run over a running fleet.";
 
 export function Storage() {
   const t = useT();
@@ -216,6 +359,10 @@ export function Storage() {
   const [smartOf, setSmartOf] = useState<Device | null>(null);
   const [message, setMessage] = useState("");
   const [wizard, setWizard] = useState(false);
+  // The order being composed in a form of the operation registry: the
+  // volume and group operations need values typed in, and they are drawn
+  // from the same registry the Bulk wizard draws from.
+  const [layer, setLayer] = useState<{ action: string; seed: FormValue } | null>(null);
   const unknown = <span className="badge unknown">{t("unknown")}</span>;
 
   const request = useMutation({
@@ -229,6 +376,7 @@ export function Storage() {
       );
       setIntent(null);
       setWizard(false);
+      setLayer(null);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
       refresh(job);
     },
@@ -316,11 +464,28 @@ export function Storage() {
             }))}
           />
         )}
-        {snapshot?.raid_unavailable_reason && (
-          <>
-            <p className="widget-subhead">{t("Software RAID")}</p>
-            <p className="source" style={{ margin: 0 }}>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
-          </>
+        {/* The arrays have a section of their own below, with the members
+            and the rebuild; this card says only how many there are. */}
+        <p className="widget-subhead">{t("Software RAID")}</p>
+        {snapshot?.raid_unavailable_reason ? (
+          <p className="source" style={{ margin: 0 }}>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</p>
+        ) : !snapshot?.arrays?.length ? (
+          <p className="source" style={{ margin: 0 }}>{t("This kernel has software RAID and no array assembled.")}</p>
+        ) : (
+          <Breakdown
+            items={snapshot.arrays.map((array) => ({
+              // The bar is the slots the array has filled against the slots
+              // it has: a shorter bar is an array that has lost a member.
+              label: (
+                <span className="hm-mono">
+                  {array.name} {array.level || ""}
+                  {array.degraded && <span className="badge error"> {t("degraded")}</span>}
+                </span>
+              ),
+              value: array.active_devices,
+              tone: array.degraded ? "error" : "ok",
+            }))}
+          />
         )}
       </Section>
 
@@ -575,6 +740,34 @@ export function Storage() {
 
       {smartOf && <SmartReport key={smartOf.path} device={smartOf} onClose={() => setSmartOf(null)} />}
 
+      {/* Software RAID. An array the host cannot be asked about is not a
+          host without arrays, and a degraded array is a fact this page
+          exists to show. */}
+      <Section
+        title={t("Software RAID")}
+        count={snapshot?.raid_unavailable_reason ? undefined : snapshot?.arrays?.length}
+        span={12}
+        description={t("The arrays of the host: the level, the members, and what each array is left with.")}
+        flush
+      >
+        <p className="source hm-section-body">{t(ARRAY_LIFECYCLE_REFUSAL)}</p>
+        {snapshot?.raid_unavailable_reason ? (
+          <Empty>{t("No software RAID here: {reason}", { reason: snapshot.raid_unavailable_reason })}</Empty>
+        ) : !snapshot?.arrays?.length ? (
+          <Empty>{t("This kernel has software RAID and no array assembled.")}</Empty>
+        ) : (
+          snapshot.arrays.map((array) => (
+            <ArrayCard
+              key={array.path}
+              array={array}
+              hostID={host.id}
+              onIntent={setIntent}
+              onAdd={(seed) => setLayer({ action: "raid.member.add", seed })}
+            />
+          ))
+        )}
+      </Section>
+
       {/* The two LVM tables are narrow; side by side they fill the row. A
           host without LVM tools has no table to show: the devices card
           above says so, and an empty section would say it twice. */}
@@ -584,11 +777,17 @@ export function Storage() {
           <Empty>{t("This host has LVM but no volume groups.")}</Empty>
         ) : (
           <Table>
-            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Allocated")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th></tr></thead>
+            <thead><tr><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Allocated")}</th><th className="hm-num">{t("Free")}</th><th className="hm-num">{t("Volumes")}</th><th>{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.groups.map((group) => (
                 <tr key={group.name}>
-                  <td className="hm-mono hm-primary">{group.name}</td>
+                  <td className="hm-mono hm-primary">
+                    {group.name}
+                    {/* A group without a UUID is a group no order binds to,
+                        and the row says so rather than offering a button the
+                        host would refuse. */}
+                    {!group.uuid && <div><span className="badge unknown">{t("no UUID")}</span></div>}
+                  </td>
                   <td className="hm-num">{bytes(group.size_bytes)}</td>
                   <td>
                     <Meter
@@ -602,6 +801,34 @@ export function Storage() {
                       - and it is a number, not an absence. */}
                   <td className="hm-num">{bytes(group.free_bytes)}</td>
                   <td className="hm-num">{group.lv_count}</td>
+                  <td>
+                    {group.uuid && (
+                      <div className="operations">
+                        <ActionGuard action="lvm.volume.create" host={host.id}>
+                          <button
+                            className="secondary"
+                            onClick={() => setLayer({
+                              action: "lvm.volume.create",
+                              seed: { group: group.name, expected_group_uuid: group.uuid ?? "" },
+                            })}
+                          >
+                            {t("New volume")}
+                          </button>
+                        </ActionGuard>
+                        <ActionGuard action="lvm.group.extend" host={host.id}>
+                          <button
+                            className="hm-danger"
+                            onClick={() => setLayer({
+                              action: "lvm.group.extend",
+                              seed: { group: group.name, expected_group_uuid: group.uuid ?? "" },
+                            })}
+                          >
+                            {t("Add a disk")}
+                          </button>
+                        </ActionGuard>
+                      </div>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -610,35 +837,158 @@ export function Storage() {
       </Section>
       )}
 
+      {/* The disks the groups are built out of. A physical volume in no
+          group is a disk prepared for LVM and unused - a fact of its own,
+          not a broken one. */}
+      {snapshot?.physical_volumes?.length ? (
+        <Section title={t("Physical volumes")} count={snapshot.physical_volumes.length} span={12} flush>
+          <Table>
+            <thead><tr><th>{t("Device")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th className="hm-num">{t("Free")}</th></tr></thead>
+            <tbody>
+              {snapshot.physical_volumes.map((physical) => (
+                <tr key={physical.path}>
+                  <td className="hm-mono hm-primary">{physical.path}</td>
+                  <td className="hm-mono">
+                    {physical.group || <span className="badge unknown">{t("in no group")}</span>}
+                  </td>
+                  <td className="hm-num">{bytes(physical.size_bytes)}</td>
+                  <td className="hm-num">{bytes(physical.free_bytes)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Section>
+      ) : null}
+
       {snapshot?.volumes?.length ? (
         <Section title={t("Volumes")} count={snapshot.volumes.length} span={6} flush>
           <Table>
-            <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Actions")}</th></tr></thead>
+            <thead><tr><th>{t("Logical volume")}</th><th>{t("Group")}</th><th className="hm-num">{t("Size")}</th><th>{t("Kind")}</th><th>{t("Actions")}</th></tr></thead>
             <tbody>
               {snapshot.volumes.map((volume) => (
                 <tr key={volume.path}>
-                  <td className="hm-mono hm-primary">{volume.path}</td>
+                  <td className="hm-mono hm-primary">
+                    {volume.path}
+                    {!volume.uuid && <div><span className="badge unknown">{t("no UUID")}</span></div>}
+                  </td>
                   <td className="hm-mono">{volume.group}</td>
                   <td className="hm-num">{bytes(volume.size_bytes)}</td>
+                  {/* A snapshot that fills its copy-on-write space is dropped
+                      by the kernel, so the fill is the number that decides
+                      whether it is still usable. An ordinary volume has no
+                      such space at all - that is not a snapshot at zero. */}
                   <td>
-                    {/* We extend upwards only and together with the
-                        filesystem: a volume bigger than its filesystem gives
-                        not a single byte. */}
-                    <ActionGuard action="lvm.extend" host={host.id}>
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          setIntent({
-                            action: "lvm.extend",
-                            label: t("Extend volume"),
-                            description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
-                            payload: { storage: { device: volume.path, size: "+512M" } },
-                          })
+                    {isSnapshot(volume) ? (
+                      <>
+                        <span className="badge">{t("snapshot of {origin}", { origin: volume.origin || "—" })}</span>
+                        {volume.data_percent !== undefined && (
+                          <Meter
+                            value={volume.data_percent}
+                            max={100}
+                            tone={usageTone(volume.data_percent, 100)}
+                            text={`${volume.data_percent.toFixed(1)}%`}
+                          />
+                        )}
+                      </>
+                    ) : (
+                      t("volume")
+                    )}
+                  </td>
+                  <td>
+                    <div className="operations">
+                      {/* We extend upwards only and together with the
+                          filesystem: a volume bigger than its filesystem gives
+                          not a single byte. */}
+                      <ActionGuard action="lvm.extend" host={host.id}>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            setIntent({
+                              action: "lvm.extend",
+                              label: t("Extend volume"),
+                              description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
+                              payload: { storage: { device: volume.path, size: "+512M" } },
+                            })
+                          }
+                        >
+                          {t("Extend by 512M")}
+                        </button>
+                      </ActionGuard>
+                      {volume.uuid && !isSnapshot(volume) && (
+                        <ActionGuard action="lvm.snapshot.create" host={host.id}>
+                          <button
+                            className="secondary"
+                            onClick={() => setLayer({
+                              action: "lvm.snapshot.create",
+                              seed: { device: volume.path, expected_volume_uuid: volume.uuid ?? "" },
+                            })}
+                          >
+                            {t("Snapshot")}
+                          </button>
+                        </ActionGuard>
+                      )}
+                      {volume.uuid && isSnapshot(volume) && (
+                        <ActionGuard action="lvm.snapshot.remove" host={host.id}>
+                          <button
+                            className="hm-danger"
+                            onClick={() =>
+                              setIntent({
+                                action: "lvm.snapshot.remove",
+                                label: t("Drop snapshot"),
+                                description: t("The snapshot {volume} will be dropped and its {size} go back to {group}.", {
+                                  volume: volume.path, size: bytes(volume.size_bytes), group: volume.group,
+                                }),
+                                payload: { storage: { device: volume.path, expected_volume_uuid: volume.uuid } },
+                              })
+                            }
+                          >
+                            {t("Drop")}
+                          </button>
+                        </ActionGuard>
+                      )}
+                      {/* Deleting a volume is the same loss as a format, so
+                          it carries the volume's UUID and the by-id link of
+                          the device the kernel publishes for it. A volume
+                          the host gave neither is not offered. */}
+                      {volume.uuid && !isSnapshot(volume) && (() => {
+                        const device = devices.find((candidate) => candidate.path === volume.path
+                          || candidate.path === `/dev/mapper/${volume.group.replace(/-/g, "--")}-${volume.name.replace(/-/g, "--")}`);
+                        if (!device?.by_id) {
+                          return (
+                            <span className="badge unknown" title={device?.identity_unavailable_reason}>
+                              {t("delete refused: {code}", { code: "stable_identity_required" })}
+                            </span>
+                          );
                         }
-                      >
-                        {t("Extend by 512M")}
-                      </button>
-                    </ActionGuard>
+                        return (
+                          <ActionGuard action="lvm.volume.remove" host={host.id}>
+                            <button
+                              className="hm-danger"
+                              onClick={() =>
+                                setIntent({
+                                  action: "lvm.volume.remove",
+                                  label: t("Delete volume"),
+                                  description: t("Everything on {volume} ({size}) will be destroyed and its extents go back to {group}. This needs two approvals.", {
+                                    volume: volume.path, size: bytes(volume.size_bytes), group: volume.group,
+                                  }),
+                                  payload: {
+                                    storage: {
+                                      device: volume.path,
+                                      expected_volume_uuid: volume.uuid,
+                                      expected_by_id: device.by_id,
+                                      expected_wwn: device.wwn ?? "",
+                                      expected_serial: device.serial ?? "",
+                                    },
+                                  },
+                                })
+                              }
+                            >
+                              {t("Delete")}
+                            </button>
+                          </ActionGuard>
+                        );
+                      })()}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -647,6 +997,15 @@ export function Storage() {
         </Section>
       ) : null}
       </Widgets>
+
+      {layer && (
+        <LayerWizard
+          action={layer.action}
+          seed={layer.seed}
+          onIntent={setIntent}
+          onClose={() => setLayer(null)}
+        />
+      )}
 
       {snapshot?.observed_at && (
         <p className="hm-freshness">
@@ -675,6 +1034,235 @@ export function Storage() {
         />
       )}
     </ModulePage>
+  );
+}
+
+/**
+ * One software array: what it is, what it is left with, and what may be
+ * done to its members.
+ *
+ * The numbers the operator came for are the slot count and the rebuild:
+ * "2 of 3 slots filled" is an array that still answers every read and has
+ * lost its redundancy, and that is worth knowing before the second disk
+ * goes. A level that keeps no copy is said outright, because such an array
+ * is never "healthy with a spare to lose".
+ */
+function ArrayCard({ array, hostID, onIntent, onAdd }: {
+  array: RAIDArray;
+  hostID: string;
+  onIntent: (intent: Intent) => void;
+  onAdd: (seed: FormValue) => void;
+}) {
+  const t = useT();
+  const unknown = <span className="badge unknown">{t("unknown")}</span>;
+  const members = array.members ?? [];
+  // The order a member operation carries: the array by the UUID out of its
+  // superblock, the member by the link that still means the same disk
+  // after a reboot. The panel has already refused what has neither.
+  const memberOrder = (member: RAIDMember) => ({
+    array: array.path,
+    device: member.path,
+    expected_array_uuid: array.uuid ?? "",
+    expected_by_id: member.by_id ?? "",
+    expected_wwn: member.wwn ?? "",
+    expected_serial: member.serial ?? "",
+  });
+
+  return (
+    <div className="hm-section-body">
+      <Facts>
+        <Fact label={t("Array")}><span className="hm-mono">{array.path}</span></Fact>
+        <Fact label={t("Level")}>
+          {array.level || unknown}
+          {array.level && !array.redundant && (
+            <span className="badge warn"> {t("keeps no copy")}</span>
+          )}
+        </Fact>
+        <Fact label={t("State")}>
+          {array.degraded
+            ? <span className="badge error">{t("degraded")}</span>
+            : <span className="badge ok">{array.state || t("assembled")}</span>}
+        </Fact>
+        <Fact label={t("Slots filled")}>
+          {array.raid_devices > 0 ? `${array.active_devices} / ${array.raid_devices}` : unknown}
+        </Fact>
+        <Fact label={t("Spares")}>{array.spare_devices}</Fact>
+        <Fact label={t("Failed")}>
+          {array.failed_devices > 0
+            ? <span className="badge error">{array.failed_devices}</span>
+            : <span className="badge ok">0</span>}
+        </Fact>
+        <Fact label={t("Size")}>{array.size_bytes ? bytes(array.size_bytes) : unknown}</Fact>
+        {/* No percentage means no rebuild is running - not a rebuild
+            standing at zero. */}
+        <Fact label={t("Rebuild")}>
+          {array.sync_action === undefined || array.sync_percent === undefined ? (
+            t("none running")
+          ) : (
+            <Meter
+              value={array.sync_percent}
+              max={100}
+              tone="warn"
+              text={`${array.sync_action} ${array.sync_percent.toFixed(1)}%${array.sync_finish ? ` · ${array.sync_finish}` : ""}`}
+            />
+          )}
+        </Fact>
+        <Fact label={t("Identity")}>
+          {array.uuid
+            ? <span className="hm-mono">{array.uuid}</span>
+            : <span className="badge unknown" title={array.detail_unavailable_reason}>{t("no UUID")}</span>}
+        </Fact>
+      </Facts>
+
+      {array.detail_unavailable_reason && (
+        <p className="warning">
+          <span>{t("This array carries no superblock detail: {reason}. No member operation binds to it.", { reason: array.detail_unavailable_reason })}</span>
+        </p>
+      )}
+
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("Member")}</th><th className="hm-num">{t("Slot")}</th><th>{t("Role")}</th>
+            <th>{t("Identity")}</th><th>{t("Actions")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {members.map((member, index) => {
+            const refusal = memberRefusal(array, member, carriesData(member));
+            return (
+              <tr key={member.path || `slot-${member.slot ?? index}`}>
+                <td className="hm-mono hm-primary">{member.path || t("empty slot")}</td>
+                <td className="hm-num">{member.slot === undefined ? "—" : member.slot}</td>
+                <td>
+                  {member.role === "faulty" && <span className="badge error">{t("failed")}</span>}
+                  {member.role === "removed" && <span className="badge unknown">{t("empty slot")}</span>}
+                  {member.role === "spare" && <span className="badge">{t("spare")}</span>}
+                  {member.role === "rebuilding" && <span className="badge warn">{t("rebuilding")}</span>}
+                  {member.role === "active" && <span className="badge ok">{t("active")}</span>}
+                  {member.role === "write_mostly" && <span className="badge ok">{t("write-mostly")}</span>}
+                  {member.role === "journal" && <span className="badge">{t("journal")}</span>}
+                  {member.role === "" && unknown}
+                  {member.state ? <div className="source">{member.state}</div> : null}
+                </td>
+                <td className="source hm-mono" title={member.identity_unavailable_reason}>
+                  {member.by_id
+                    ? member.by_id.replace(/^\/dev\/disk\/by-id\//, "")
+                    : <span className="badge unknown">{t("no stable identity")}</span>}
+                </td>
+                <td>
+                  {!member.path ? null : refusal ? (
+                    <span className="badge error" title={refusal.reason}>
+                      {t("refused: {code}", { code: refusal.code })}
+                    </span>
+                  ) : (
+                    <div className="operations">
+                      {member.role !== "faulty" && (
+                        <ActionGuard action="raid.member.fail" host={hostID}>
+                          <button
+                            className="hm-danger"
+                            onClick={() => onIntent({
+                              action: "raid.member.fail",
+                              label: t("Fail member"),
+                              description: t("{member} will be marked failed and {array} will stop reading from it. This spends the redundancy of the array and needs two approvals.", {
+                                member: member.path, array: array.path,
+                              }),
+                              payload: { storage: memberOrder(member) },
+                            })}
+                          >
+                            {t("Fail")}
+                          </button>
+                        </ActionGuard>
+                      )}
+                      {!carriesData(member) && (
+                        <ActionGuard action="raid.member.remove" host={hostID}>
+                          <button
+                            className="hm-danger"
+                            onClick={() => onIntent({
+                              action: "raid.member.remove",
+                              label: t("Remove member"),
+                              description: t("{member} will be taken out of {array}.", {
+                                member: member.path, array: array.path,
+                              }),
+                              payload: { storage: memberOrder(member) },
+                            })}
+                          >
+                            {t("Remove")}
+                          </button>
+                        </ActionGuard>
+                      )}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+
+      {array.uuid && (
+        <FormActions>
+          <ActionGuard action="raid.member.add" host={hostID}>
+            <button
+              className="secondary"
+              onClick={() => onAdd({ array: array.path, expected_array_uuid: array.uuid ?? "" })}
+            >
+              {t("Add a member")}
+            </button>
+          </ActionGuard>
+        </FormActions>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The form of one volume or array operation, drawn from the operation
+ * registry.
+ *
+ * The screen does not know the shape of these orders: it hands the
+ * registry the identity read off the row - the group's UUID, the volume's
+ * UUID, the array's UUID - and the registry draws the fields, refuses what
+ * the server would refuse and builds the payload. One description of an
+ * operation, used by this page and by the Bulk wizard alike.
+ */
+function LayerWizard({ action, seed, onIntent, onClose }: {
+  action: string;
+  seed: FormValue;
+  onIntent: (intent: Intent) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const entry = operationForm(action);
+  const [value, setValue] = useState<FormValue>(() => (entry ? { ...emptyForm(entry), ...seed } : seed));
+  const [json, setJson] = useState("");
+  if (!entry) return null;
+  const problems = entry.validate(value);
+  const ready = problems.length === 0 && json === "";
+
+  return (
+    <Section
+      title={t(entry.title)}
+      description={entry.note ? t(entry.note) : undefined}
+      tools={<button className="secondary" onClick={onClose}>{t("Cancel")}</button>}
+    >
+      <Form>
+        <OperationForm entry={entry} value={value} onChange={setValue} json={json} onJson={setJson} />
+        <FormActions>
+          <button
+            disabled={!ready}
+            onClick={() => onIntent({
+              action,
+              label: t(entry.title),
+              description: t("{operation} on {target}.", { operation: entry.title, target: entry.summary(entry.toPayload(value)) }),
+              payload: entry.toPayload(value),
+            })}
+          >
+            {t("Order")}
+          </button>
+        </FormActions>
+      </Form>
+    </Section>
   );
 }
 

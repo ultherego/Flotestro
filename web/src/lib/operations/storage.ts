@@ -39,6 +39,318 @@ function deviceCheck(form: FormValue): FormProblem[] {
   return problems;
 }
 
+/**
+ * A size LVM takes for something being created: absolute, or a share of
+ * what is free. An increment starting with "+" belongs to a growth, where
+ * there is already something to add to.
+ */
+const LVM_ABSOLUTE_SIZE = /^\d{1,9}[KMGTkmgt]$|^\d{1,3}%(FREE|VG|PVS|ORIGIN)$/;
+
+/** An LVM name: what LVM itself accepts, without a leading hyphen. */
+const LVM_NAME = /^[A-Za-z0-9+_.][A-Za-z0-9+_.-]{0,62}$/;
+
+const ARRAY_PATH = /^\/dev\/md[0-9]{1,4}$|^\/dev\/md\/[A-Za-z0-9._-]{1,64}$/;
+
+const ARRAY_NOTE =
+  "The panel manages the members of an array that exists. Creating an array and destroying one are decisions about a machine's whole disk layout, taken on the machine when it is built, and the panel refuses them by name.";
+
+const arrayField: OperationField = {
+  name: "array",
+  label: "Array",
+  kind: "text",
+  placeholder: "/dev/md0",
+  hint: "The array as the kernel names it. The order also carries the UUID out of its superblock, because /dev/md0 is whichever array the kernel assembled first this boot.",
+};
+
+const arrayIdentityField: OperationField = {
+  name: "expected_array_uuid",
+  label: "Only if the array is this one",
+  kind: "text",
+  placeholder: "The UUID from the array's row",
+  hint: "The identity out of the superblock. Without it the order names a path, and a path is not an array.",
+};
+
+const memberField: OperationField = {
+  name: "device",
+  label: "Member",
+  kind: "text",
+  placeholder: "/dev/sdb1",
+  hint: "The device inside the array.",
+};
+
+const memberIdentityField: OperationField = {
+  name: "expected_by_id",
+  label: "Only if the member is this disk",
+  kind: "text",
+  placeholder: "/dev/disk/by-id/…",
+  hint: "The by-id link of the member. A path in /dev points at another disk after a reboot, which in an array is the difference between the dying disk and the healthy one.",
+};
+
+/** What every array order has to name before the host is asked. */
+function memberCheck(form: FormValue): FormProblem[] {
+  const problems: FormProblem[] = [];
+  if (required(problems, form, "array", "Name the array this acts on.")) {
+    if (!ARRAY_PATH.test(text(form, "array"))) {
+      problems.push({ field: "array", message: "An array is a path such as /dev/md0 or /dev/md/data." });
+    }
+  }
+  if (required(problems, form, "device", "Name the member this acts on.")) {
+    if (!DEVICE_PATH.test(text(form, "device"))) {
+      problems.push({ field: "device", message: "A member is a path in /dev, e.g. /dev/sdb1." });
+    }
+  }
+  required(problems, form, "expected_array_uuid",
+    "Give the UUID of the array; a path alone names whichever array the kernel assembled first.");
+  required(problems, form, "expected_by_id",
+    "Give the by-id link of the member; a path in /dev points at another disk after a reboot.");
+  return problems;
+}
+
+/**
+ * Software RAID: the members of an array that exists.
+ *
+ * Failing a member is how a dying disk leaves the array before it takes the
+ * array with it - and it is also the move that spends the array's
+ * redundancy, which is why the plan says what the array is left with and
+ * the host refuses on an array that has nothing left to lose.
+ */
+const arrays: OperationEntry[] = [
+  define({
+    action: "raid.member.fail",
+    title: "Mark an array member failed",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: `${ARRAY_NOTE} Failing a member spends the redundancy of the array: the host refuses on a level that keeps no copy, on an array already degraded, on one that is rebuilding, and on the last member carrying data.`,
+    fields: [arrayField, memberField, arrayIdentityField, memberIdentityField],
+    check: memberCheck,
+    target: (form) => `${text(form, "array")} ${text(form, "device")}`,
+  }),
+
+  define({
+    action: "raid.member.remove",
+    title: "Take a member out of an array",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "A member that still carries data is not removed: mark it failed first, then take it out. Two orders, because they are two decisions.",
+    fields: [arrayField, memberField, arrayIdentityField, memberIdentityField],
+    check: memberCheck,
+    target: (form) => `${text(form, "array")} ${text(form, "device")}`,
+  }),
+
+  define({
+    action: "raid.member.add",
+    title: "Add a member to an array",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "The device joins as a spare and a degraded array starts rebuilding onto it at once. Whatever the device carried is overwritten with an array superblock, so it is bound to the same stable identity a format is.",
+    fields: [arrayField, memberField, arrayIdentityField, memberIdentityField],
+    check: memberCheck,
+    target: (form) => `${text(form, "array")} ${text(form, "device")}`,
+  }),
+];
+
+const groupField: OperationField = {
+  name: "group",
+  label: "Volume group",
+  kind: "text",
+  placeholder: "vg0",
+  hint: "The group the operation acts in. The order also carries the group's UUID: a name can be given to another group after a rename.",
+};
+
+const groupIdentityField: OperationField = {
+  name: "expected_group_uuid",
+  label: "Only if the group is this one",
+  kind: "text",
+  placeholder: "The UUID from the group's row",
+  hint: "The group's LVM UUID.",
+};
+
+const volumeIdentityField: OperationField = {
+  name: "expected_volume_uuid",
+  label: "Only if the volume is this one",
+  kind: "text",
+  placeholder: "The UUID from the volume's row",
+  hint: "The volume's LVM UUID. A path is a name another volume can carry tomorrow.",
+};
+
+/**
+ * LVM beyond growing a volume.
+ *
+ * The group is never created here: which disks a machine gives to LVM is
+ * decided when the machine is built. What these orders do is work inside a
+ * group that exists - and every one of them names the group or the volume
+ * by its UUID, because that is what makes the consent mean one thing.
+ */
+const volumes: OperationEntry[] = [
+  define({
+    action: "lvm.volume.create",
+    title: "Create a logical volume",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "The volume is created in a group that exists. A group without room for it is a refusal in the plan, and the size is read back afterwards: LVM allocates whole extents and rounds a request up.",
+    fields: [
+      groupField,
+      { name: "volume", label: "Name", kind: "text", placeholder: "logs", hint: "The name of the new volume inside the group." },
+      {
+        name: "size", label: "Size", kind: "text", placeholder: "10G",
+        hint: "An absolute size such as 10G, or a share of what is free such as 100%FREE.",
+      },
+      groupIdentityField,
+    ],
+    check: (form) => {
+      const problems: FormProblem[] = [];
+      if (required(problems, form, "group", "Name the group to create it in.")) {
+        if (!LVM_NAME.test(text(form, "group"))) {
+          problems.push({ field: "group", message: "A group name starts with a letter, a digit, a dot or an underscore." });
+        }
+      }
+      if (required(problems, form, "volume", "Name the volume.")) {
+        if (!LVM_NAME.test(text(form, "volume"))) {
+          problems.push({ field: "volume", message: "A volume name starts with a letter, a digit, a dot or an underscore." });
+        }
+      }
+      if (required(problems, form, "size", "Say how big it is to be.")) {
+        if (!LVM_ABSOLUTE_SIZE.test(text(form, "size"))) {
+          problems.push({ field: "size", message: "The size is absolute, e.g. 10G, or a share of what is free, e.g. 100%FREE." });
+        }
+      }
+      required(problems, form, "expected_group_uuid",
+        "Give the UUID of the group; a group name is a label another group can carry.");
+      return problems;
+    },
+    target: (form) => `${text(form, "group")}/${text(form, "volume")}`,
+  }),
+
+  define({
+    action: "lvm.group.extend",
+    title: "Add a disk to a volume group",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "The disk is given an LVM label, which overwrites whatever it carried, and then joins the group. That is the same loss as a format, so it takes two approvals, the target typed out and the by-id link of the disk.",
+    fields: [
+      groupField,
+      { ...deviceField, label: "Disk", hint: "The disk or partition to hand to the group. Everything on it is overwritten." },
+      groupIdentityField,
+      {
+        name: "expected_by_id", label: "Only if the disk is this one", kind: "text",
+        placeholder: "/dev/disk/by-id/…",
+        hint: "The by-id link of the disk. The size is a description and is never taken as an identity.",
+      },
+    ],
+    check: (form) => {
+      const problems: FormProblem[] = deviceCheck(form);
+      if (required(problems, form, "group", "Name the group to extend.")) {
+        if (!LVM_NAME.test(text(form, "group"))) {
+          problems.push({ field: "group", message: "A group name starts with a letter, a digit, a dot or an underscore." });
+        }
+      }
+      required(problems, form, "expected_group_uuid", "Give the UUID of the group.");
+      required(problems, form, "expected_by_id",
+        "Give the by-id link of the disk; a path in /dev points at another disk after a reboot.");
+      return problems;
+    },
+    target: (form) => `${text(form, "group")} ← ${text(form, "device")}`,
+  }),
+
+  define({
+    action: "lvm.volume.remove",
+    title: "Delete a logical volume",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "The extents go back to the group and the filesystem on them is gone. Like formatting, it takes two approvals, the target typed out and the stable identity of the volume; a volume with snapshots on it is refused until they are gone.",
+    fields: [
+      { ...deviceField, label: "Volume", hint: "The logical volume as a path in /dev, e.g. /dev/vg0/logs." },
+      volumeIdentityField,
+      {
+        name: "expected_by_id", label: "Only if the volume is this device", kind: "text",
+        placeholder: "/dev/disk/by-id/dm-uuid-…",
+        hint: "The by-id link the kernel publishes for the volume.",
+      },
+    ],
+    check: (form) => {
+      const problems: FormProblem[] = [];
+      if (required(problems, form, "device", "Name the volume to delete.")) {
+        if (!DEVICE_PATH.test(text(form, "device"))) {
+          problems.push({ field: "device", message: "A logical volume is a path in /dev, e.g. /dev/vg0/logs." });
+        }
+      }
+      required(problems, form, "expected_volume_uuid", "Give the UUID of the volume.");
+      required(problems, form, "expected_by_id", "Give the by-id link of the volume.");
+      return problems;
+    },
+    target: (form) => text(form, "device"),
+  }),
+
+  define({
+    action: "lvm.snapshot.create",
+    title: "Take a snapshot of a volume",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "A snapshot needs room in the group for its copy-on-write space, and a snapshot that fills up is dropped by the kernel. It is taken of a volume, never of another snapshot.",
+    fields: [
+      { ...deviceField, label: "Origin volume", hint: "The volume to snapshot, as a path in /dev." },
+      { name: "volume", label: "Snapshot name", kind: "text", placeholder: "logs-before-upgrade" },
+      {
+        name: "size", label: "Copy-on-write space", kind: "text", placeholder: "2G",
+        hint: "An absolute size such as 2G, or a share of the origin such as 20%ORIGIN.",
+      },
+      volumeIdentityField,
+    ],
+    check: (form) => {
+      const problems: FormProblem[] = [];
+      if (required(problems, form, "device", "Name the volume to snapshot.")) {
+        if (!DEVICE_PATH.test(text(form, "device"))) {
+          problems.push({ field: "device", message: "A logical volume is a path in /dev, e.g. /dev/vg0/logs." });
+        }
+      }
+      if (required(problems, form, "volume", "Name the snapshot.")) {
+        if (!LVM_NAME.test(text(form, "volume"))) {
+          problems.push({ field: "volume", message: "A snapshot name starts with a letter, a digit, a dot or an underscore." });
+        }
+      }
+      if (required(problems, form, "size", "Say how much copy-on-write space it gets.")) {
+        if (!LVM_ABSOLUTE_SIZE.test(text(form, "size"))) {
+          problems.push({ field: "size", message: "The size is absolute, e.g. 2G, or a share of the origin, e.g. 20%ORIGIN." });
+        }
+      }
+      required(problems, form, "expected_volume_uuid", "Give the UUID of the origin volume.");
+      return problems;
+    },
+    target: (form) => `${text(form, "volume")} ← ${text(form, "device")}`,
+  }),
+
+  define({
+    action: "lvm.snapshot.remove",
+    title: "Drop a snapshot",
+    group: GROUP,
+    key: "storage",
+    plan: PLAN_NOTE,
+    note: "Only a snapshot: the same command on an ordinary volume deletes somebody's filesystem, which is a separate operation with two approvals behind it.",
+    fields: [
+      { ...deviceField, label: "Snapshot", hint: "The snapshot as a path in /dev, e.g. /dev/vg0/logs-before-upgrade." },
+      volumeIdentityField,
+    ],
+    check: (form) => {
+      const problems: FormProblem[] = [];
+      if (required(problems, form, "device", "Name the snapshot to drop.")) {
+        if (!DEVICE_PATH.test(text(form, "device"))) {
+          problems.push({ field: "device", message: "A snapshot is a path in /dev, e.g. /dev/vg0/logs-before-upgrade." });
+        }
+      }
+      required(problems, form, "expected_volume_uuid", "Give the UUID of the snapshot.");
+      return problems;
+    },
+    target: (form) => text(form, "device"),
+  }),
+];
+
 export const storage: OperationEntry[] = [
   define({
     action: "mount.ensure",
@@ -190,4 +502,7 @@ export const storage: OperationEntry[] = [
     },
     target: (form) => text(form, "device"),
   }),
+
+  ...arrays,
+  ...volumes,
 ];

@@ -356,3 +356,184 @@ func TestAnUnknownVerifierIsNeverASuccess(t *testing.T) {
 	found := executor.observe(context.Background(), opspec.Verifier("something_new"), verifyInput{})
 	expectUnreadable(t, found)
 }
+
+// The layers above a bare disk are settled by a read of the host and never
+// by the exit code of a tool: mdadm exits zero on a member it accepted and
+// on one the array had already forgotten, and lvcreate rounds a size up to
+// whole extents without saying so.
+func TestVerifyingAnArrayMember(t *testing.T) {
+	array := storage.RAIDArray{
+		Path: "/dev/md0", Name: "md0", UUID: "array-uuid", Level: "raid1",
+		RaidDevices: 2, ActiveDevices: 2, Redundant: true,
+		Members: []storage.RAIDMember{
+			{Path: "/dev/sda1", Role: storage.MemberActive},
+			{Path: "/dev/sdb1", Role: storage.MemberActive},
+		},
+	}
+	host := func(snapshot storage.Snapshot) *hostReaders {
+		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}
+	}
+	payload := &opspec.StoragePayload{
+		Array: "/dev/md0", Device: "/dev/sda1", ExpectedArrayUUID: "array-uuid",
+	}
+
+	// The member is still active, so failing it did not land.
+	expectMismatch(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{Arrays: []storage.RAIDArray{array}}), opspec.ActionRAIDMemberFail, payload))
+
+	failed := array
+	failed.Members = []storage.RAIDMember{
+		{Path: "/dev/sda1", Role: storage.MemberFaulty},
+		{Path: "/dev/sdb1", Role: storage.MemberActive},
+	}
+	failed.ActiveDevices, failed.Degraded = 1, true
+	expectVerified(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{Arrays: []storage.RAIDArray{failed}}), opspec.ActionRAIDMemberFail, payload))
+
+	// A removal is settled by the array no longer listing the member.
+	expectMismatch(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{Arrays: []storage.RAIDArray{failed}}), opspec.ActionRAIDMemberRemove, payload))
+	gone := array
+	gone.Members = []storage.RAIDMember{{Path: "/dev/sdb1", Role: storage.MemberActive}}
+	gone.ActiveDevices, gone.Degraded = 1, true
+	expectVerified(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{Arrays: []storage.RAIDArray{gone}}), opspec.ActionRAIDMemberRemove, payload))
+
+	// An array under the path that is another array is not the array the
+	// change was bound to.
+	other := array
+	other.UUID = "somebody-else"
+	expectMismatch(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{Arrays: []storage.RAIDArray{other}}), opspec.ActionRAIDMemberFail, payload))
+
+	// A host that could not be asked about its arrays is unknown, never a
+	// pass: an empty list is not a host without arrays.
+	expectUnreadable(t, verifyArrayMember(context.Background(),
+		host(storage.Snapshot{RAIDUnavailableReason: "this host has no mdadm"}),
+		opspec.ActionRAIDMemberFail, payload))
+	expectUnreadable(t, verifyArrayMember(context.Background(), &hostReaders{},
+		opspec.ActionRAIDMemberFail, payload))
+}
+
+func TestVerifyingAVolumeThatWasCreated(t *testing.T) {
+	host := func(snapshot storage.Snapshot) *hostReaders {
+		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}
+	}
+	payload := &opspec.StoragePayload{Group: "vg0", Volume: "logs", Size: "1G",
+		ExpectedGroupUUID: "vg0-uuid"}
+
+	// The tool reported no error and LVM lists nothing: that is the false
+	// success this verifier exists for.
+	expectMismatch(t, verifyVolumeLayer(context.Background(),
+		host(storage.Snapshot{Groups: []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid"}}}),
+		opspec.ActionLVMVolumeCreate, payload))
+
+	created := storage.Snapshot{
+		Groups:  []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid"}},
+		Volumes: []storage.LogicalVolume{{Name: "logs", Group: "vg0", Path: "/dev/vg0/logs", SizeBytes: 1 << 30}},
+	}
+	expectVerified(t, verifyVolumeLayer(context.Background(), host(created),
+		opspec.ActionLVMVolumeCreate, payload))
+
+	// A volume smaller than the order asked for is the failure worth
+	// catching; LVM rounding up to whole extents is not.
+	small := created
+	small.Volumes = []storage.LogicalVolume{{Name: "logs", Group: "vg0", Path: "/dev/vg0/logs", SizeBytes: 1 << 20}}
+	expectMismatch(t, verifyVolumeLayer(context.Background(), host(small),
+		opspec.ActionLVMVolumeCreate, payload))
+
+	rounded := created
+	rounded.Volumes = []storage.LogicalVolume{{Name: "logs", Group: "vg0", Path: "/dev/vg0/logs", SizeBytes: (1 << 30) + (4 << 20)}}
+	expectVerified(t, verifyVolumeLayer(context.Background(), host(rounded),
+		opspec.ActionLVMVolumeCreate, payload))
+
+	expectUnreadable(t, verifyVolumeLayer(context.Background(),
+		host(storage.Snapshot{LVMUnavailableReason: "this host has no LVM tools"}),
+		opspec.ActionLVMVolumeCreate, payload))
+}
+
+func TestVerifyingASnapshotAndARemoval(t *testing.T) {
+	host := func(snapshot storage.Snapshot) *hostReaders {
+		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}
+	}
+	origin := storage.LogicalVolume{Name: "data", Group: "vg0", Path: "/dev/vg0/data",
+		UUID: "lv-data", SizeBytes: 4 << 30, Attributes: "-wi-ao----"}
+	taken := storage.Snapshot{
+		Groups: []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid", FreeBytes: 1 << 30}},
+		Volumes: []storage.LogicalVolume{origin, {Name: "before", Group: "vg0",
+			Path: "/dev/vg0/before", UUID: "lv-before", SizeBytes: 1 << 30,
+			Attributes: "swi-a-s---", Origin: "data"}},
+	}
+	snapshotOrder := &opspec.StoragePayload{Device: "/dev/vg0/data", Volume: "before",
+		Size: "1G", ExpectedVolumeUUID: "lv-data"}
+	expectVerified(t, verifyVolumeLayer(context.Background(), host(taken),
+		opspec.ActionLVMSnapshotCreate, snapshotOrder))
+
+	// LVM made an ordinary volume under that name: the order asked for a
+	// snapshot, so this is not the state the operator asked for.
+	ordinary := taken
+	ordinary.Volumes = []storage.LogicalVolume{origin, {Name: "before", Group: "vg0",
+		Path: "/dev/vg0/before", UUID: "lv-before", SizeBytes: 1 << 30, Attributes: "-wi-a-----"}}
+	expectMismatch(t, verifyVolumeLayer(context.Background(), host(ordinary),
+		opspec.ActionLVMSnapshotCreate, snapshotOrder))
+
+	removal := &opspec.StoragePayload{Device: "/dev/vg0/before", Group: "vg0",
+		ExpectedVolumeUUID: "lv-before"}
+	expectMismatch(t, verifyVolumeLayer(context.Background(), host(taken),
+		opspec.ActionLVMSnapshotRemove, removal))
+	dropped := storage.Snapshot{
+		Groups:  []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid", FreeBytes: 2 << 30}},
+		Volumes: []storage.LogicalVolume{origin},
+	}
+	expectVerified(t, verifyVolumeLayer(context.Background(), host(dropped),
+		opspec.ActionLVMSnapshotRemove, removal))
+}
+
+func TestVerifyingADiskTakenIntoAGroup(t *testing.T) {
+	host := func(snapshot storage.Snapshot) *hostReaders {
+		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}
+	}
+	payload := &opspec.StoragePayload{Group: "vg0", Device: "/dev/sdc",
+		ExpectedGroupUUID: "vg0-uuid", ExpectedByID: "/dev/disk/by-id/ata-VB3"}
+
+	expectMismatch(t, verifyVolumeLayer(context.Background(),
+		host(storage.Snapshot{Groups: []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid"}}}),
+		opspec.ActionLVMGroupExtend, payload))
+
+	// The label was written and the disk joined no group: a tool that
+	// exited zero half-way is not a success.
+	labelled := storage.Snapshot{
+		Groups:          []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid"}},
+		PhysicalVolumes: []storage.PhysicalVolume{{Path: "/dev/sdc", SizeBytes: 2 << 30}},
+	}
+	expectMismatch(t, verifyVolumeLayer(context.Background(), host(labelled),
+		opspec.ActionLVMGroupExtend, payload))
+
+	joined := storage.Snapshot{
+		Groups:          []storage.VolumeGroup{{Name: "vg0", UUID: "vg0-uuid", SizeBytes: 18 << 30, FreeBytes: 10 << 30}},
+		PhysicalVolumes: []storage.PhysicalVolume{{Path: "/dev/sdc", Group: "vg0", SizeBytes: 2 << 30}},
+	}
+	expectVerified(t, verifyVolumeLayer(context.Background(), host(joined),
+		opspec.ActionLVMGroupExtend, payload))
+}
+
+// A check that ran is confirmed by the filesystem still being there: the
+// outcome worth catching is a repair that ended with a filesystem the host
+// no longer recognises.
+func TestVerifyingAFilesystemCheck(t *testing.T) {
+	host := func(snapshot storage.Snapshot) *hostReaders {
+		return &hostReaders{storage: func(context.Context) storage.Snapshot { return snapshot }}
+	}
+	in := verifyInput{
+		action:  opspec.ActionFilesystemCheck,
+		payload: opspec.Payload{Storage: &opspec.StoragePayload{Device: "/dev/sdb1", ExpectedUUID: "6f0c"}},
+	}
+	expectVerified(t, verifyStorageLayout(context.Background(),
+		host(storage.Snapshot{Devices: []storage.Device{{Path: "/dev/sdb1", FSType: "ext4", UUID: "6f0c"}}}), in))
+	expectMismatch(t, verifyStorageLayout(context.Background(),
+		host(storage.Snapshot{Devices: []storage.Device{{Path: "/dev/sdb1"}}}), in))
+	expectMismatch(t, verifyStorageLayout(context.Background(),
+		host(storage.Snapshot{Devices: []storage.Device{{Path: "/dev/sdb1", FSType: "ext4", UUID: "other"}}}), in))
+	expectUnreadable(t, verifyStorageLayout(context.Background(),
+		host(storage.Snapshot{UnavailableReason: "the disk space was not read"}), in))
+}

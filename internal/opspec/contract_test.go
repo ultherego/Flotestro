@@ -59,8 +59,11 @@ func TestTheContractClassesAgree(t *testing.T) {
 		ActionFileEnsure: {CancelMode: CancelCheckpointOnly, RetryClass: RetryAfterReplan,
 			Rollback: RollbackExactRestore, Verification: VerifyPlanRecheck,
 			ResourceClaims: []ResourceClaim{{Class: ClaimFile, Mode: ClaimExclusive, Weight: 1}}},
+		// The wipe is verified: its own specification names a verifier that
+		// reads the device back, and a catalogue saying "not verified" told
+		// the operator less than the host actually does.
 		ActionDiskWipe: {CancelMode: CancelImpossibleAfterStart, RetryClass: RetryNever,
-			Rollback: RollbackNone, Verification: VerifyNone,
+			Rollback: RollbackNone, Verification: VerifyCustom,
 			ResourceClaims: []ResourceClaim{{Class: LockStorage, Mode: ClaimExclusive, Weight: 3}}},
 		ActionSystemReboot: {CancelMode: CancelImpossibleAfterStart, RetryClass: RetryReadState,
 			Rollback: RollbackNone, Verification: VerifyCustom,

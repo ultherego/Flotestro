@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
-  orderForm, orderTargets, parseUnits, prefilledOrder, reasonValid, REVERSE_OPERATION, reversePayload,
+  orderForm, orderTargets, parseUnits, prefilledOrder, previewTokenOf, reasonValid,
+  REVERSE_OPERATION, reversePayload,
   saveDraft, windowInstant, windowProblem, wizardOperations, type Operation,
 } from "./Bulk";
 
@@ -126,6 +127,27 @@ describe("campaignBody", () => {
     expect(body.reason).toBe("CHG-1234: cron leaks memory");
     expect(body.name).toBe("Restart cron");
     expect(body.payload).toEqual({ unit: { unit: "cron.service" } });
+  });
+
+  it("names the preview it was placed from, and nothing when there is none", () => {
+    const bound = campaignBody(order, { preview_id: "preview-1", preview_digest: "sha256:abc" });
+    expect(bound.preview_id).toBe("preview-1");
+    expect(bound.preview_digest).toBe("sha256:abc");
+    // A stored order - a schedule - is placed at a moment nobody previewed,
+    // so it carries no token and the server does not ask for one.
+    const unbound = campaignBody(order);
+    expect(unbound.preview_id).toBeUndefined();
+    expect(unbound.preview_digest).toBeUndefined();
+  });
+
+  it("takes the token only from an answer that carries both halves", () => {
+    expect(previewTokenOf(undefined)).toBeUndefined();
+    expect(previewTokenOf({ count: 3, limit: 10 })).toBeUndefined();
+    // Half a token is no token: the identifier alone says nothing about
+    // what was shown with it.
+    expect(previewTokenOf({ count: 3, limit: 10, preview_id: "preview-1" })).toBeUndefined();
+    expect(previewTokenOf({ count: 3, limit: 10, preview_id: "preview-1", preview_digest: "sha256:abc" }))
+      .toEqual({ preview_id: "preview-1", preview_digest: "sha256:abc" });
   });
 
   it("leaves the window, the units and the timeout out when the order says nothing about them", () => {

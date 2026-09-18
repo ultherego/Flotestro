@@ -63,6 +63,17 @@ export const schedules: OperationEntry[] = [
         hint: "The account the entry runs under. There is no default: an entry for root needs the right to schedule work as root on top of the right to write entries.",
         placeholder: "backup",
       },
+      {
+        name: "kind",
+        label: "Written as",
+        kind: "select",
+        hint: "A cron entry is one file in /etc/cron.d; a timer is a .timer and a .service unit under /etc/systemd/system. Left empty it is a cron entry, which is what an order meant before timers could be written; a host without the mechanism refuses the entry and says which one it has.",
+        options: [
+          { value: "", label: "A cron entry" },
+          { value: "timer", label: "A systemd timer" },
+          { value: "any", label: "Whichever the host has" },
+        ],
+      },
       { name: "comment", label: "Comment", kind: "text", hint: "What the entry is for; it is written next to it on the host.", wide: true },
       {
         name: "adopt",
@@ -81,6 +92,20 @@ export const schedules: OperationEntry[] = [
           field: "expression",
           message: "A cron expression has five fields, or is one of @hourly, @daily, @midnight, @weekly, @monthly, @yearly.",
         });
+      }
+      // Cron runs a job when the day of the month or the day of the week
+      // matches, systemd only when both do. An expression that restricts
+      // both means two different things on the two mechanisms, so it is
+      // not written as a timer at all - and the operator hears it here,
+      // not from a job that failed.
+      if (text(form, "kind") === "timer") {
+        const fields = expression.trim().split(/\s+/);
+        if (fields.length === 5 && fields[2] !== "*" && fields[4] !== "*") {
+          problems.push({
+            field: "expression",
+            message: "A timer runs when the day of the month and the day of the week both match; cron runs when either does. Restrict only one of them, or order the entry as a cron entry.",
+          });
+        }
       }
       const command = list(form, "command");
       if (command.length === 0) {

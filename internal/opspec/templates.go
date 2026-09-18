@@ -1,6 +1,14 @@
 package opspec
 
-import "github.com/ultherego/flotestro/internal/buildinfo"
+import (
+	"github.com/ultherego/flotestro/internal/buildinfo"
+	// Under a name of its own: the template of a container lifecycle
+	// operation is built by a local helper called docker, and a package
+	// under the same name would be out of reach exactly where the
+	// declarations need it.
+	dockermod "github.com/ultherego/flotestro/internal/modules/docker"
+	"github.com/ultherego/flotestro/internal/modules/network"
+)
 
 // PayloadTemplate gives an example payload for an operation: the shape the
 // wizard starts from when the operation has no form of its own. The panel
@@ -84,6 +92,28 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Compose: &ComposePayload{Project: "example",
 			Manifest: "services:\n  web:\n    image: docker.io/library/nginx:1.27\n"}}, true
 
+	// A declared object. The example is the shape of a description rather
+	// than something worth applying: a container of one image on one port,
+	// a network with a range of its own, a volume on the default driver.
+	case ActionDockerContainerEnsure:
+		return Payload{DockerEnsure: &DockerEnsurePayload{
+			Container: &dockermod.ContainerRequest{
+				Name: "example", Image: "docker.io/library/nginx:1.27",
+				Ports: []string{"8080:80/tcp"}, RestartPolicy: "unless-stopped",
+			},
+		}}, true
+	case ActionDockerNetworkEnsure:
+		return Payload{DockerEnsure: &DockerEnsurePayload{
+			Network: &dockermod.NetworkSpec{
+				Name: "example", Driver: "bridge",
+				Subnet: "10.244.0.0/24", Gateway: "10.244.0.1",
+			},
+		}}, true
+	case ActionDockerVolumeEnsure:
+		return Payload{DockerEnsure: &DockerEnsurePayload{
+			Volume: &dockermod.VolumeSpec{Name: "example", Driver: "local"},
+		}}, true
+
 	case ActionKernelModuleLoad:
 		return Payload{Kernel: &KernelPayload{Module: "example_module"}}, true
 	case ActionKernelModuleBlacklist:
@@ -148,6 +178,16 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 	case ActionNetworkRouteEnsure:
 		return Payload{Network: &NetworkPayload{Interface: "eth1",
 			Routes: []string{"198.51.100.0/24 192.0.2.1"}, RollbackSeconds: 120}}, true
+	case ActionNetworkLinkApply:
+		// A VLAN is the example: it is the one layer that needs no second
+		// interface to be a sensible placeholder, and it names both of the
+		// fields a layered order is about - what it stands on and what tag
+		// it carries.
+		return Payload{Network: &NetworkPayload{Interface: "eth1.100",
+			Link:            &network.LinkSpec{Name: "eth1.100", Kind: "vlan", Parent: "eth1", VLANID: 100},
+			RollbackSeconds: 120}}, true
+	case ActionNetworkLinkRemove:
+		return Payload{Network: &NetworkPayload{Interface: "eth1.100", RollbackSeconds: 120}}, true
 	case ActionNetworkMTUSet:
 		return Payload{Network: &NetworkPayload{Interface: "eth1", MTU: "1500", RollbackSeconds: 120}}, true
 	case ActionDNSHostApply:

@@ -15,6 +15,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/network"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
@@ -61,6 +62,10 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 		operation = helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES
 	case opspec.ActionNetworkRollback:
 		operation = helperv1.NetworkRequest_OPERATION_ROLLBACK
+	case opspec.ActionNetworkLinkApply:
+		operation = helperv1.NetworkRequest_OPERATION_APPLY_LINK
+	case opspec.ActionNetworkLinkRemove:
+		operation = helperv1.NetworkRequest_OPERATION_REMOVE_LINK
 	}
 
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
@@ -80,6 +85,19 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 				RollbackSeconds: payload.RollbackSeconds,
 				RollbackId:      payload.RollbackID,
 				PlanHash:        payload.PlanHash,
+				Method6:         payload.Method6,
+				Addresses6:      payload.Addresses6,
+				Gateway6:        payload.Gateway6,
+				AcceptRa:        payload.AcceptRA,
+				Privacy:         payload.Privacy,
+				Link:            networkLinkRequest(payload.Link),
+				LinkRemove:      payload.LinkRemove,
+				// The address the host reaches the panel from. The helper
+				// has no way to know it and must not guess: it is what
+				// marks the management interface, and a layer built over
+				// that interface takes the host off the network before it
+				// is finished.
+				ManagementAddress: panelAddress(panelAddressOf),
 			},
 		},
 	}, timeout)
@@ -382,4 +400,41 @@ func (e *TaskExecutor) NetworkProfiles(ctx context.Context) (json.RawMessage, er
 		return nil, fmt.Errorf("%s: %s", response.GetErrorCode(), response.GetMessage())
 	}
 	return response.GetNetworkResult().GetProfiles(), nil
+}
+
+// networkLinkRequest carries the layered order to the helper. A layer is
+// described field by field rather than as an opaque blob, because the
+// helper checks the shape again before it writes anything and an
+// unrecognised field would be a setting nobody verified.
+func networkLinkRequest(spec *network.LinkSpec) *helperv1.NetworkLink {
+	if spec == nil {
+		return nil
+	}
+	return &helperv1.NetworkLink{
+		Name: spec.Name, Kind: spec.Kind, Members: spec.Members,
+		Mode: spec.Mode, MiimonMs: uint32(spec.MIIMonMS),
+		Primary: spec.Primary, LacpRate: spec.LACPRate,
+		Stp: spec.STP, VlanFiltering: spec.VLANFiltering,
+		Parent: spec.Parent, VlanId: uint32(spec.VLANID),
+		Protocol: spec.Protocol, Mtu: spec.MTU,
+	}
+}
+
+// networkLinkPayload reads the layered order back out of the envelope.
+//
+// It is the exact mirror of what the panel put in. A field read back as
+// something else would give a payload digest the panel never signed, and
+// the host would refuse a change nobody had altered.
+func networkLinkPayload(link *agentv1.NetworkLink) *network.LinkSpec {
+	if link == nil {
+		return nil
+	}
+	return &network.LinkSpec{
+		Name: link.GetName(), Kind: link.GetKind(), Members: link.GetMembers(),
+		Mode: link.GetMode(), MIIMonMS: int(link.GetMiimonMs()),
+		Primary: link.GetPrimary(), LACPRate: link.GetLacpRate(),
+		STP: link.GetStp(), VLANFiltering: link.GetVlanFiltering(),
+		Parent: link.GetParent(), VLANID: int(link.GetVlanId()),
+		Protocol: link.GetProtocol(), MTU: link.GetMtu(),
+	}
 }

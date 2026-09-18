@@ -1796,6 +1796,21 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
+	// The plan of a declared object, or what the change did to it. It is a
+	// field of its own for the same reason: a refused change carries the
+	// plan the host computed instead, and that is what the operator needs
+	// in order to see why their approval no longer fits.
+	if declared := result.GetDockerEnsureResult(); declared != nil && len(declared.GetPayload()) > 0 {
+		encoded, err := json.Marshal(map[string]any{
+			"kind":               "docker_declaration",
+			"payload":            json.RawMessage(declared.GetPayload()),
+			"unavailable_reason": declared.GetUnavailableReason(),
+		})
+		if err == nil {
+			return encoded
+		}
+	}
+
 	// The result of a name resolution test belongs to the job rather than to
 	// the inventory: it is the answer to one question asked at one moment
 	// rather than the state of the host.
@@ -2466,6 +2481,13 @@ func schedulePreviewJSON(preview []byte) map[string]any {
 		Timezone   string   `json:"timezone"`
 		NextRuns   []string `json:"next_runs"`
 		Error      string   `json:"error"`
+		// The plan of a timer: what systemd would be told and the two unit
+		// files that would be written. A cron preview has neither.
+		Calendar string `json:"calendar"`
+		Units    []struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		} `json:"units"`
 	}
 	if err := json.Unmarshal(preview, &parsed); err != nil {
 		return map[string]any{
@@ -2476,13 +2498,24 @@ func schedulePreviewJSON(preview []byte) map[string]any {
 			"raw":      string(preview),
 		}
 	}
-	return map[string]any{
+	detail := map[string]any{
 		"kind":       "schedule_preview",
 		"expression": parsed.Expression,
 		"runs":       stringList(parsed.NextRuns),
 		"timezone":   parsed.Timezone,
 		"error":      parsed.Error,
 	}
+	if parsed.Calendar != "" {
+		detail["calendar"] = parsed.Calendar
+	}
+	if len(parsed.Units) > 0 {
+		units := make([]map[string]any, 0, len(parsed.Units))
+		for _, unit := range parsed.Units {
+			units = append(units, map[string]any{"path": unit.Path, "content": unit.Content})
+		}
+		detail["units"] = units
+	}
+	return detail
 }
 
 // rawJSON carries an encoded state without re-encoding it. Empty stays

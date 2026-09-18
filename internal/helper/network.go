@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -84,6 +85,10 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 		helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES,
 		helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
 		return s.changeNetwork(actionCtx, adapter, action)
+
+	case helperv1.NetworkRequest_OPERATION_APPLY_LINK,
+		helperv1.NetworkRequest_OPERATION_REMOVE_LINK:
+		return s.changeNetworkLink(actionCtx, adapter, action)
 	}
 	return reject(ErrorUnknownAction, "unknown network operation")
 }
@@ -105,6 +110,18 @@ func networkGuard(operation helperv1.NetworkRequest_Operation) string {
 func (s *Server) planNetwork(ctx context.Context, adapter string,
 	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
 	profiles := s.adapterProfiles(ctx, adapter)
+	// A layered plan is computed against the whole host and not against one
+	// profile: every one of its refusals is about a relation to something
+	// else - a member another layer owns, a parent that is not there, the
+	// interface the panel itself talks over - and a profile shows none of
+	// them.
+	if kind := networkChangeKind(action); kind == network.PlanLink || kind == network.PlanLinkRemove {
+		snapshot, err := s.networkSnapshot(ctx, action.GetManagementAddress())
+		if err != nil {
+			return networkPlanResponse(profiles, network.RefusedPlan(action.GetInterface(), kind, err.Error()))
+		}
+		return networkPlanResponse(profiles, s.adapterLinkPlan(ctx, adapter, action, snapshot))
+	}
 	_, profile, err := s.adapterProfile(ctx, adapter, action.GetInterface())
 	if err != nil {
 		return networkPlanResponse(profiles, network.RefusedPlan(action.GetInterface(),
@@ -120,7 +137,14 @@ func (s *Server) planNetwork(ctx context.Context, adapter string,
 // two fingerprints compare the same thing.
 func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helperv1.NetworkRequest,
 	profile network.Profile) network.Plan {
-	plan := networkPlan(action, profile)
+	// The second family's switches come from the kernel, not from the
+	// profile: a mechanism will happily write an IPv6 address onto an
+	// interface whose disable_ipv6 is set, and the address then exists
+	// nowhere the verifier can find it.
+	ipv6 := network.CombineIPv6(
+		network.ReadIPv6Settings(network.IPv6ConfDir, "all"),
+		network.ReadIPv6Settings(network.IPv6ConfDir, action.GetInterface()))
+	plan := networkPlan(action, profile, ipv6)
 	if plan.Refusal != "" || plan.Desired == nil {
 		plan.Attach(adapter, "")
 		return plan
@@ -128,6 +152,16 @@ func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helper
 	var document string
 	var err error
 	switch adapter {
+	case network.AdapterNetworkManager:
+		// NetworkManager takes arguments rather than a document, so there
+		// is nothing to show; what it cannot express is still its answer,
+		// and the operator is to read it in the plan rather than in a
+		// failed job. Only an address profile is asked: the other changes
+		// go through settings of their own and would be judged here against
+		// a profile the order never touched.
+		if plan.Operation == network.PlanProfile {
+			_, err = network.ProfileArguments(*plan.Desired)
+		}
 	case network.AdapterNmstate:
 		document, err = network.NmstateDocument(plan.Operation, *plan.Current, *plan.Desired)
 	case network.AdapterNetplan:
@@ -152,15 +186,40 @@ func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helper
 
 // networkPlan computes the plan for the change described by the order against
 // the profile found.
-func networkPlan(action *helperv1.NetworkRequest, profile network.Profile) network.Plan {
+func networkPlan(action *helperv1.NetworkRequest, profile network.Profile,
+	ipv6 network.IPv6Settings) network.Plan {
 	switch networkChangeKind(action) {
 	case network.PlanProfile:
-		return network.ComputeProfile(action.GetInterface(), profile, action.GetMethod(),
-			action.GetAddresses(), action.GetGateway(), action.GetDns())
+		return network.ComputeProfile(action.GetInterface(), profile, network.ProfileRequest{
+			Method:     action.GetMethod(),
+			Addresses:  action.GetAddresses(),
+			Gateway:    action.GetGateway(),
+			DNS:        action.GetDns(),
+			Method6:    action.GetMethod6(),
+			Addresses6: action.GetAddresses6(),
+			Gateway6:   action.GetGateway6(),
+			AcceptRA:   action.GetAcceptRa(),
+			Privacy:    action.GetPrivacy(),
+		}, ipv6)
 	case network.PlanRoutes:
 		return network.ComputeRoutes(action.GetInterface(), profile, action.GetRoutes())
 	default:
 		return network.ComputeMTU(action.GetInterface(), profile, action.GetMtu())
+	}
+}
+
+// linkSpecOf turns the layered order into the description the module plans
+// against. It is a plain copy: the shape was checked by the panel and is
+// checked again by ValidateLinkSpec inside the plan, so nothing is filled
+// in here that the operator did not say.
+func linkSpecOf(link *helperv1.NetworkLink) network.LinkSpec {
+	return network.LinkSpec{
+		Name: link.GetName(), Kind: link.GetKind(), Members: link.GetMembers(),
+		Mode: link.GetMode(), MIIMonMS: int(link.GetMiimonMs()),
+		Primary: link.GetPrimary(), LACPRate: link.GetLacpRate(),
+		STP: link.GetStp(), VLANFiltering: link.GetVlanFiltering(),
+		Parent: link.GetParent(), VLANID: int(link.GetVlanId()),
+		Protocol: link.GetProtocol(), MTU: link.GetMtu(),
 	}
 }
 
@@ -175,9 +234,18 @@ func networkChangeKind(action *helperv1.NetworkRequest) string {
 		return network.PlanRoutes
 	case helperv1.NetworkRequest_OPERATION_SET_MTU:
 		return network.PlanMTU
+	case helperv1.NetworkRequest_OPERATION_APPLY_LINK:
+		return network.PlanLink
+	case helperv1.NetworkRequest_OPERATION_REMOVE_LINK:
+		return network.PlanLinkRemove
 	}
 	switch {
-	case action.GetMethod() != "":
+	case action.GetLink() != nil:
+		return network.PlanLink
+	case action.GetLinkRemove():
+		return network.PlanLinkRemove
+	case action.GetMethod() != "" || action.GetMethod6() != "" ||
+		action.GetAcceptRa() != "" || action.GetPrivacy() != "":
 		return network.PlanProfile
 	case action.Routes != nil:
 		return network.PlanRoutes
@@ -191,13 +259,19 @@ func networkPlanResponse(profiles []network.Profile, plan network.Plan) *helperv
 	if err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
+	// A layered plan speaks about an interface, not about a profile: there
+	// may be no profile at all behind a bond that does not exist yet.
+	subject := "the profile " + plan.Connection
+	if plan.CurrentLink != nil {
+		subject = "the interface " + plan.Interface
+	}
 	message := "the change will not enter this host: " + plan.Refusal
 	switch {
 	case plan.Refusal != "":
 	case plan.Action == network.PlanNoChange:
-		message = "the profile " + plan.Connection + " is already in the desired state"
+		message = subject + " is already in the desired state"
 	default:
-		message = "the profile " + plan.Connection + ": " + strings.Join(plan.Changes, "; ")
+		message = subject + ": " + strings.Join(plan.Changes, "; ")
 	}
 	response := networkResponse(profiles, message, nil)
 	if response.GetNetworkResult() != nil {
@@ -289,21 +363,49 @@ func changeSteps(action *helperv1.NetworkRequest, connection string,
 	case helperv1.NetworkRequest_OPERATION_SET_MTU:
 		return network.MTUArguments(connection, action.GetMtu())
 	case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
-		return network.RouteArguments(connection, action.GetRoutes())
+		// The order carries one list and the two families are written into
+		// two settings: NetworkManager drops an IPv6 route put into
+		// ipv4.routes without a word.
+		routes, routes6 := network.SplitRouteFamilies(action.GetRoutes())
+		return network.RouteArguments(connection, routes, routes6)
 	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
+		// Routes, MTU and the rest of the resolver stay as they were: the
+		// address profile is a separate operation and must not silently
+		// erase settings the operator was never asked about. The same holds
+		// for a whole family the order left out.
 		desired := network.Profile{
-			Connection: connection,
-			Method:     action.GetMethod(),
-			Addresses:  action.GetAddresses(),
-			Gateway:    action.GetGateway(),
-			DNS:        action.GetDns(),
-			// Routes, MTU and the rest of the resolver stay as they were: the
-			// address profile is a separate operation and must not silently
-			// erase settings the operator was never asked about.
+			Connection:    connection,
+			Method:        current.Method,
+			Addresses:     current.Addresses,
+			Gateway:       current.Gateway,
+			DNS:           current.DNS,
 			DNSSearch:     current.DNSSearch,
 			IgnoreAutoDNS: current.IgnoreAutoDNS,
 			Routes:        current.Routes,
 			MTU:           current.MTU,
+			Method6:       current.Method6,
+			Addresses6:    current.Addresses6,
+			Gateway6:      current.Gateway6,
+			Routes6:       current.Routes6,
+			AcceptRA:      current.AcceptRA,
+			Privacy:       current.Privacy,
+		}
+		if action.GetMethod() != "" {
+			desired.Method = action.GetMethod()
+			desired.Addresses = action.GetAddresses()
+			desired.Gateway = action.GetGateway()
+			desired.DNS = action.GetDns()
+		}
+		if action.GetMethod6() != "" {
+			desired.Method6 = action.GetMethod6()
+			desired.Addresses6 = action.GetAddresses6()
+			desired.Gateway6 = action.GetGateway6()
+		}
+		if action.GetAcceptRa() != "" {
+			desired.AcceptRA = action.GetAcceptRa()
+		}
+		if action.GetPrivacy() != "" {
+			desired.Privacy = action.GetPrivacy()
 		}
 		return network.ProfileArguments(desired)
 	}
@@ -716,15 +818,15 @@ func (s *Server) changeNmstate(ctx context.Context, action *helperv1.NetworkRequ
 	}
 	// The way back is the same function the other way round: the document
 	// carrying the interface from the desired state to the current one.
-	previous, err := network.NmstateDocument(change.Operation, *change.Desired, *change.Current)
+	previous, err := nmstatePreviousDocument(change)
 	if err != nil {
 		return reject(ErrorUnsupported, "the rollback cannot be assembled: "+err.Error())
 	}
 
 	plan := network.RollbackPlan{
 		ID:        rollbackIdentifier(),
-		Profile:   *change.Current,
-		Interface: action.GetInterface(),
+		Profile:   rollbackProfile(change),
+		Interface: changedInterface(action, change),
 		CreatedAt: time.Now().UTC(),
 		Reason:    action.GetReason(),
 		Adapter:   network.AdapterNmstate,
@@ -933,8 +1035,8 @@ func (s *Server) changeNetplan(ctx context.Context, action *helperv1.NetworkRequ
 
 	plan := network.RollbackPlan{
 		ID:             rollbackIdentifier(),
-		Profile:        *change.Current,
-		Interface:      action.GetInterface(),
+		Profile:        rollbackProfile(change),
+		Interface:      changedInterface(action, change),
 		CreatedAt:      time.Now().UTC(),
 		Reason:         action.GetReason(),
 		Adapter:        network.AdapterNetplan,
@@ -1264,4 +1366,183 @@ func restoreNetplanFile(ctx context.Context, plan network.RollbackPlan, apply bo
 		}
 	}
 	return nil
+}
+
+// The layered path: a bond, a bridge or a VLAN.
+//
+// A layered change is planned against the whole host rather than against
+// one profile, because every refusal it can give is about a relation to
+// something else on that host. Once planned, it travels the same road as an
+// address change: the same rescue plan armed before anything is written,
+// the same disarming only after the agent proved the host still talks to
+// the panel. The only mechanisms that carry it are the ones that describe a
+// whole interface; one that would have to be driven profile by profile says
+// so instead of writing half a bond.
+
+// networkSnapshot reads the state a layered plan is computed against: the
+// interfaces, their layering and the channel the panel comes through.
+//
+// The management address comes from the agent, which is the only side that
+// knows it. Guessing it here would end with the host enslaving the very
+// interface the order arrived through.
+func (s *Server) networkSnapshot(ctx context.Context, managementAddress string) (network.Snapshot, error) {
+	binary := network.ToolPath(network.IPPaths, network.Exists)
+	if binary == "" {
+		return network.Snapshot{}, fmt.Errorf("this host has no iproute2 (ip) binary")
+	}
+	run := func(arguments []string) (string, error) {
+		return toolOutput(ctx, arguments[0], arguments[1:]...)
+	}
+	output, err := toolOutput(ctx, binary, "-j", "-d", "addr", "show")
+	if err != nil {
+		return network.Snapshot{}, fmt.Errorf("ip addr: %w", err)
+	}
+	interfaces, err := network.ParseInterfaces(output)
+	if err != nil {
+		return network.Snapshot{}, err
+	}
+	snapshot := network.Snapshot{Interfaces: interfaces, ObservedAt: time.Now().UTC()}
+	network.ReadLayering(&snapshot, run)
+	if snapshot.LayeringUnavailableReason != "" {
+		// Without the layering every refusal about a relation would be
+		// silence, and silence here reads as "nothing is in the way".
+		return network.Snapshot{}, fmt.Errorf("the layering of this host was not read: %s",
+			snapshot.LayeringUnavailableReason)
+	}
+	network.ReadIPv6(&snapshot)
+	network.MarkManagementChannel(&snapshot, managementAddress)
+	return snapshot, nil
+}
+
+// adapterLinkPlan computes the layered plan and attaches the document the
+// mechanism will apply, the way adapterPlan does for an address change. The
+// same function runs at planning and again before the change, so the two
+// fingerprints compare the same thing.
+func (s *Server) adapterLinkPlan(ctx context.Context, adapter string,
+	action *helperv1.NetworkRequest, snapshot network.Snapshot) network.Plan {
+	var plan network.Plan
+	if networkChangeKind(action) == network.PlanLinkRemove {
+		plan = network.ComputeLinkRemoval(snapshot, adapter, action.GetInterface())
+	} else {
+		plan = network.ComputeLink(snapshot, adapter, linkSpecOf(action.GetLink()))
+	}
+	if plan.Refusal != "" || plan.DesiredLink == nil || plan.Action == network.PlanNoChange {
+		plan.Attach(adapter, "")
+		return plan
+	}
+	var document string
+	var err error
+	switch adapter {
+	case network.AdapterNmstate:
+		document, err = network.NmstateLinkDocument(*plan.CurrentLink, *plan.DesiredLink)
+	case network.AdapterNetplan:
+		config, readErr := s.readNetplanConfig(ctx)
+		if readErr != nil {
+			plan.Refuse(readErr.Error())
+			plan.Attach(adapter, "")
+			return plan
+		}
+		managed, _ := network.LoadState(network.NetplanManagedFile)
+		document, err = network.NetplanManagedLinkDocument(managed, config, plan)
+	}
+	if err != nil {
+		// A layer the mechanism cannot express is a refusal the operator
+		// sees in the plan, and it keeps its own code where it has one.
+		var refusal *network.LinkRefusal
+		if errors.As(err, &refusal) {
+			plan.RefuseWith(refusal.Code, refusal.Reason)
+		} else {
+			plan.Refuse(err.Error())
+		}
+		plan.Attach(adapter, "")
+		return plan
+	}
+	plan.Attach(adapter, document)
+	return plan
+}
+
+// changeNetworkLink builds, changes or removes a layered interface.
+//
+// The order of the steps is the same as for an address change and is the
+// whole safety of it: the plan is computed again against the host, the
+// fingerprint is compared, the rescue plan is armed, and only then is
+// anything written. The agent disarms it afterwards, and only after the
+// panel has acknowledged a call the host made as itself.
+func (s *Server) changeNetworkLink(ctx context.Context, adapter string,
+	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
+	if action.GetOperation() == helperv1.NetworkRequest_OPERATION_APPLY_LINK &&
+		action.GetLink() == nil {
+		return reject(ErrorMalformed, "a layered change requires the description of the layer")
+	}
+	snapshot, err := s.networkSnapshot(ctx, action.GetManagementAddress())
+	if err != nil {
+		return reject(ErrorExecFailed, err.Error())
+	}
+	now := s.adapterLinkPlan(ctx, adapter, action, snapshot)
+	if expected := action.GetPlanHash(); expected != "" && now.PlanHash != expected {
+		return reject(ErrorPreconditionFailed,
+			"the layering of "+now.Interface+" changed since the planning; the change needs a new plan")
+	}
+	if now.Refusal != "" {
+		// A typed refusal keeps its own code: "malformed" would tell the
+		// operator nothing about which relation stood in the way.
+		code := now.RefusalCode
+		if code == "" {
+			code = ErrorMalformed
+		}
+		return reject(code, now.Refusal)
+	}
+	if now.Action == network.PlanNoChange {
+		return networkResponse(s.adapterProfiles(ctx, adapter),
+			"the interface "+now.Interface+" is already in the ordered state", nil)
+	}
+
+	switch adapter {
+	case network.AdapterNmstate:
+		return s.changeNmstate(ctx, action, now)
+	case network.AdapterNetplan:
+		return s.changeNetplan(ctx, action, now)
+	}
+	// The mechanism was already refused inside the plan; this is the case
+	// the plan itself could not reach, and it refuses rather than falling
+	// back to a profile-by-profile write.
+	refusal := network.LayerAdapterRefusal(adapter)
+	if refusal == nil {
+		return reject(ErrorUnsupported, "this host has no mechanism that writes layered interfaces")
+	}
+	return reject(refusal.Code, refusal.Reason)
+}
+
+// nmstatePreviousDocument assembles the document that carries the host back
+// to the state from before the change: the same function the change used,
+// with the two states swapped. A layered change swaps link states, an
+// address change swaps profiles.
+func nmstatePreviousDocument(change network.Plan) (string, error) {
+	if change.CurrentLink != nil && change.DesiredLink != nil {
+		return network.NmstateLinkDocument(*change.DesiredLink, *change.CurrentLink)
+	}
+	if change.Current == nil || change.Desired == nil {
+		return "", fmt.Errorf("a change without the states to go back to")
+	}
+	return network.NmstateDocument(change.Operation, *change.Desired, *change.Current)
+}
+
+// rollbackProfile is the profile a rollback plan carries. A layered change
+// has none: what it changes is what an interface is made of, and the way
+// back for it is the state document kept next to the plan.
+func rollbackProfile(change network.Plan) network.Profile {
+	if change.Current == nil {
+		return network.Profile{}
+	}
+	return *change.Current
+}
+
+// changedInterface names the interface a rollback plan is about. A layered
+// order names it in the layer being built, which is not always the
+// interface field of the request.
+func changedInterface(action *helperv1.NetworkRequest, change network.Plan) string {
+	if change.Interface != "" {
+		return change.Interface
+	}
+	return action.GetInterface()
 }

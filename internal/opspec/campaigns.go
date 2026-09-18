@@ -103,15 +103,33 @@ var campaignModes = map[ActionType]CampaignMode{
 	ActionNetworkProfileApply:    CampaignPerHostPlan,
 	ActionNetworkRouteEnsure:     CampaignPerHostPlan,
 	ActionNetworkMTUSet:          CampaignPerHostPlan,
-	ActionDNSHostApply:           CampaignPerHostPlan,
-	ActionFirewallRuleEnsure:     CampaignPerHostPlan,
-	ActionFirewallRuleRemove:     CampaignPerHostPlan,
-	ActionFirewallZonePort:       CampaignPerHostPlan,
-	ActionFirewallZoneService:    CampaignPerHostPlan,
-	ActionSSHConfigApply:         CampaignPerHostPlan,
-	ActionTimeConfigApply:        CampaignPerHostPlan,
-	ActionComposeDeploy:          CampaignPerHostPlan,
-	ActionKernelModuleBlacklist:  CampaignPerHostPlan,
+	// A layered change is planned per host for the same reason an address
+	// change is, and for one more: the refusals are about relations on that
+	// particular host - which interface another bond already owns, which
+	// one the panel talks over - and only the host knows them.
+	ActionNetworkLinkApply:      CampaignPerHostPlan,
+	ActionNetworkLinkRemove:     CampaignPerHostPlan,
+	ActionDNSHostApply:          CampaignPerHostPlan,
+	ActionFirewallRuleEnsure:    CampaignPerHostPlan,
+	ActionFirewallRuleRemove:    CampaignPerHostPlan,
+	ActionFirewallZonePort:      CampaignPerHostPlan,
+	ActionFirewallZoneService:   CampaignPerHostPlan,
+	ActionSSHConfigApply:        CampaignPerHostPlan,
+	ActionTimeConfigApply:       CampaignPerHostPlan,
+	ActionComposeDeploy:         CampaignPerHostPlan,
+	ActionKernelModuleBlacklist: CampaignPerHostPlan,
+	// Declared containers, networks and volumes. The description is the
+	// same everywhere - that is the point of declaring it - but what it
+	// means on a host is a different diff on every one of them: one host
+	// already runs it, one runs an older image, one has nothing. So the
+	// plan is computed per host and the approval covers the set of plans.
+	// The two removals are deliberately absent: both are irreversible and
+	// both therefore ask the operator to type the name of the host they
+	// are aimed at, which is a decision taken one host at a time and not
+	// over a fleet.
+	ActionDockerContainerEnsure: CampaignPerHostPlan,
+	ActionDockerNetworkEnsure:   CampaignPerHostPlan,
+	ActionDockerVolumeEnsure:    CampaignPerHostPlan,
 	// A rename is a per-host plan of the other kind: the diff is not read
 	// from the host but comes with the order, as a mapping of host to new
 	// name, and the panel splits it host by host (HostnameMapping,
@@ -196,7 +214,8 @@ func PlanningAction(action ActionType) ActionType {
 	// digest, and the host computes the plan once more: a profile changed
 	// after planning stops the change. The resolver goes the same way
 	// through its own dns.plan operation.
-	case ActionNetworkProfileApply, ActionNetworkRouteEnsure, ActionNetworkMTUSet:
+	case ActionNetworkProfileApply, ActionNetworkRouteEnsure, ActionNetworkMTUSet,
+		ActionNetworkLinkApply, ActionNetworkLinkRemove:
 		return ActionNetworkPlan
 	case ActionDNSHostApply:
 		return ActionDNSPlan
@@ -249,6 +268,16 @@ func PlanningAction(action ActionType) ActionType {
 
 	case ActionComposeDeploy:
 		return ActionComposePlan
+
+	// A declared object: the plan compares the description with what stands
+	// on the host, binds the image tag to a digest and says whether the
+	// container would be replaced. Its digest comes back with the change,
+	// and the host computes the plan once more - a container somebody else
+	// replaced in the meantime does not get the change approved for
+	// another base.
+	case ActionDockerContainerEnsure, ActionDockerNetworkEnsure, ActionDockerVolumeEnsure,
+		ActionDockerNetworkRemove, ActionDockerVolumeRemove:
+		return ActionDockerPlan
 	}
 	// A family without a planner refuses and names the reason: a campaign
 	// without a per-host plan would approve a change whose diff nobody
@@ -403,6 +432,30 @@ func CampaignExclusionReason(action ActionType) string {
 		return "a fleet remediation is ordered from the security view, where the " +
 			"per-host plans are computed from the findings; a generic campaign order " +
 			"has nothing to plan them from"
+
+	// The layers above a bare disk. Every one of these operations is bound
+	// to an identity only one host has - the UUID in an array's superblock,
+	// the UUID of a group or a volume - and that binding is the whole of
+	// what makes it safe. A shared payload would either carry one host's
+	// UUID to five hundred hosts, which every one of them refuses, or carry
+	// a name, which is consent to whatever holds the name at execution
+	// time. The way to a fleet-wide version is the per-host plan the
+	// campaign planner already computes for a mount: it would have to put
+	// each host's own UUID into that host's order, and it does not yet.
+	case ActionRAIDMemberFail, ActionRAIDMemberRemove, ActionRAIDMemberAdd:
+		return "an array member is one disk in one machine: the order binds to the " +
+			"UUID of that array and to the by-id link of that disk, and neither means " +
+			"anything on the next host. A fleet-wide version would have to name a " +
+			"different array and a different disk per host, which is a list, not a campaign"
+	case ActionLVMVolumeCreate, ActionLVMSnapshotCreate, ActionLVMSnapshotRemove:
+		return "a volume operation binds to the UUID of the group and of the volume on " +
+			"that host; a campaign would need the per-host plan to carry each host's own " +
+			"UUID into its order, and the planner does not do that yet. Until it does, the " +
+			"panel does not ask for consent it cannot bind"
+	case ActionLVMVolumeRemove, ActionLVMGroupExtend:
+		return "deleting a volume and taking a disk into a group destroy what is on them; " +
+			"like formatting and wiping, they are ordered on one host, with the target " +
+			"typed out and two people behind it"
 	}
 	return ""
 }
@@ -532,6 +585,11 @@ func withPlanPlaceholder(payload Payload) Payload {
 		copied := *payload.Compose
 		copied.PlanDigest = PendingPlanDigest
 		payload.Compose = &copied
+	}
+	if payload.DockerEnsure != nil && payload.DockerEnsure.PlanDigest == "" {
+		copied := *payload.DockerEnsure
+		copied.PlanDigest = PendingPlanDigest
+		payload.DockerEnsure = &copied
 	}
 	return payload
 }

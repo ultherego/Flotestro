@@ -406,6 +406,9 @@ func (s *Server) perform(ctx context.Context, request *helperv1.HelperRequest,
 	case *helperv1.HelperRequest_DockerLogs:
 		return s.readDockerLogs(ctx, request, action.DockerLogs)
 
+	case *helperv1.HelperRequest_DockerEnsure:
+		return s.ensureDocker(ctx, request, action.DockerEnsure)
+
 	case *helperv1.HelperRequest_Hostname:
 		return s.applyHostname(ctx, request, action.Hostname)
 

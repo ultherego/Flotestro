@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -180,6 +181,134 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 		Status:             agentv1.TaskResult_STATUS_SUCCEEDED,
 		DockerActionResult: details,
 	}
+}
+
+// applyDockerEnsure computes the plan of a declared object, or carries it
+// out, through the helper.
+//
+// The description is handed on as the module's own JSON: the agent does
+// not disassemble what the operator approved. The values of the variables
+// the description names as secrets are fetched right here, right before the
+// call - they live for the moment of the request in the memory of the agent
+// and of the helper, and they are in neither the task envelope, nor the
+// journal, nor the result.
+func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.TaskEnvelope,
+	action opspec.ActionType, payload *opspec.DockerEnsurePayload) *agentv1.TaskResult {
+	if payload == nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest,
+			"the declaration payload is missing")
+	}
+	timeout := timeoutOf(task, action)
+	callCtx, cancel := context.WithTimeout(ctx, timeout+time.Minute)
+	defer cancel()
+
+	request := &helperv1.DockerEnsureRequest{
+		Operation:  helperDockerEnsureOperation(action),
+		Kind:       payload.ObjectKind(),
+		Name:       payload.ObjectName(),
+		PlanDigest: payload.PlanDigest,
+		Force:      payload.Force,
+	}
+	// The description is written out of the payload the payload hash was
+	// checked against, not copied out of the envelope: what the helper
+	// reads is then exactly what this agent accepted, field for field.
+	spec, err := declaredObject(payload)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
+	}
+	request.Spec = spec
+	if len(payload.EnvSecrets) > 0 {
+		request.EnvValues = map[string][]byte{}
+		for name, reference := range payload.EnvSecrets {
+			value, refusal := e.fetchSecret(callCtx, task, reference)
+			if refusal != nil {
+				return refusal
+			}
+			request.EnvValues[name] = value
+		}
+	}
+
+	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action:         &helperv1.HelperRequest_DockerEnsure{DockerEnsure: request},
+	}, timeout+time.Minute)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+
+	// The plan or the outcome travels back on a refusal as well: a
+	// replacement that was refused because the plan moved is worth nothing
+	// to the operator without the plan the host computed instead.
+	details := &agentv1.DockerEnsureResult{
+		Payload:           response.GetDockerEnsureResult().GetPayload(),
+		UnavailableReason: response.GetDockerEnsureResult().GetUnavailableReason(),
+	}
+	if !response.GetAccepted() {
+		refused := rejected(agentv1.TaskResult_STATUS_FAILED,
+			response.GetErrorCode(), response.GetMessage())
+		refused.TaskId = task.GetTaskId()
+		refused.DockerEnsureResult = details
+		return refused
+	}
+	return &agentv1.TaskResult{
+		TaskId:             task.GetTaskId(),
+		Status:             agentv1.TaskResult_STATUS_SUCCEEDED,
+		DockerEnsureResult: details,
+	}
+}
+
+// declaredObject writes the description out of the payload. A removal
+// describes nothing and gets nothing: an object that is to be gone has a
+// name and no description.
+func declaredObject(payload *opspec.DockerEnsurePayload) ([]byte, error) {
+	var described any
+	switch {
+	case payload.Container != nil:
+		// The references are written into the description here, on the way
+		// to the host: the order keeps them typed beside it, and the host
+		// needs them inside, because the digest of the description is what
+		// turns a rotated secret into a replacement.
+		order := *payload.Container
+		order.EnvSecrets = nil
+		if len(payload.EnvSecrets) > 0 {
+			order.EnvSecrets = make(map[string]string, len(payload.EnvSecrets))
+			for name, reference := range payload.EnvSecrets {
+				order.EnvSecrets[name] = reference.String()
+			}
+		}
+		described = &order
+	case payload.Network != nil:
+		described = payload.Network
+	case payload.Volume != nil:
+		described = payload.Volume
+	default:
+		return nil, nil
+	}
+	encoded, err := json.Marshal(described)
+	if err != nil {
+		return nil, fmt.Errorf("the description of %s: %w", payload.ObjectName(), err)
+	}
+	return encoded, nil
+}
+
+func helperDockerEnsureOperation(action opspec.ActionType) helperv1.DockerEnsureRequest_Operation {
+	switch action {
+	case opspec.ActionDockerPlan:
+		return helperv1.DockerEnsureRequest_OPERATION_PLAN
+	case opspec.ActionDockerContainerEnsure:
+		return helperv1.DockerEnsureRequest_OPERATION_CONTAINER_ENSURE
+	case opspec.ActionDockerNetworkEnsure:
+		return helperv1.DockerEnsureRequest_OPERATION_NETWORK_ENSURE
+	case opspec.ActionDockerNetworkRemove:
+		return helperv1.DockerEnsureRequest_OPERATION_NETWORK_REMOVE
+	case opspec.ActionDockerVolumeEnsure:
+		return helperv1.DockerEnsureRequest_OPERATION_VOLUME_ENSURE
+	case opspec.ActionDockerVolumeRemove:
+		return helperv1.DockerEnsureRequest_OPERATION_VOLUME_REMOVE
+	}
+	return helperv1.DockerEnsureRequest_OPERATION_UNSPECIFIED
 }
 
 func helperDockerOperation(operation agentv1.DockerAction_Operation) helperv1.DockerActionRequest_Operation {

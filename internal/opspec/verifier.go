@@ -110,6 +110,21 @@ const (
 	// VerifierComposeServices: every service of the project runs from the
 	// image digest the plan bound.
 	VerifierComposeServices Verifier = "compose_services"
+	// VerifierContainerSpec: the container of the declaration stands on the
+	// host, carries the digest of the description it was created from and
+	// runs, or stands and does not run where the description asked for
+	// that. It is not VerifierContainerState: that one is about a
+	// container an operator started or stopped by identifier, and here the
+	// identity is the name and the question is whether what stands there
+	// is what was declared.
+	VerifierContainerSpec Verifier = "container_spec"
+	// VerifierDockerNetwork: the engine lists the network with the driver
+	// and the address range declared, or no longer lists it after a
+	// removal.
+	VerifierDockerNetwork Verifier = "docker_network"
+	// VerifierDockerVolume: the engine lists the volume with the driver
+	// declared, or no longer lists it after a removal.
+	VerifierDockerVolume Verifier = "docker_volume"
 	// VerifierBackupRun: the repository lists the snapshot the run reported.
 	VerifierBackupRun Verifier = "backup_run"
 	// VerifierRestoreTarget: the restore target holds files after the
@@ -163,6 +178,7 @@ func KnownVerifier(verifier Verifier) bool {
 		VerifierTimeSource, VerifierTimezone, VerifierNetworkState, VerifierFirewallRuleset,
 		VerifierMACMode, VerifierAuditRules, VerifierTrustAnchor, VerifierCertificate,
 		VerifierLocalAccount, VerifierContainerState, VerifierImagePresent, VerifierComposeServices,
+		VerifierContainerSpec, VerifierDockerNetwork, VerifierDockerVolume,
 		VerifierBackupRun, VerifierRestoreTarget, VerifierDomainMembership, VerifierKeytab,
 		VerifierReboot, VerifierAgentVersion:
 		return true

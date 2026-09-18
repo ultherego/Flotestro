@@ -31,6 +31,12 @@ const (
 	// partitions or is a member of a volume group, an array or an
 	// encrypted container.
 	CodeDiskInUse = "disk_in_use"
+	// CodeFilesystemErrorsRemain: a repair ran and the filesystem still has
+	// errors. fsck answers in a bit field and exits non-zero for both a
+	// successful repair and a failed one; this code is the difference, and
+	// it is settled by a second, read-only pass rather than by the code of
+	// the pass that wrote.
+	CodeFilesystemErrorsRemain = "filesystem_errors_remain"
 )
 
 // Refusal is a refusal with a typed code. The helper answers with the code,

@@ -3,9 +3,11 @@ package agent
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"os/exec"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -96,7 +98,10 @@ func (e *TaskExecutor) followJournal(ctx context.Context, task *agentv1.TaskEnve
 		defer e.cancels.register(task.GetTaskId(), cancel)()
 	}
 
-	args := previewArguments(payload)
+	args, err := previewArguments(payload)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
+	}
 	cmd := exec.CommandContext(followCtx, journalctlPath, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -111,18 +116,49 @@ func (e *TaskExecutor) followJournal(ctx context.Context, task *agentv1.TaskEnve
 
 	// The end of the preview is a success: the stream was meant to end. The
 	// result says how many lines went through and how many were dropped, because
-	// a silent loss would make the operator believe they saw everything.
+	// a silent loss would make the operator believe they saw everything. The
+	// same two numbers travel as a document on stdout, so a panel reading the
+	// job afterwards finds them where every other counted answer is.
+	summary, err := json.Marshal(followSummary{
+		Kind:         "journal_follow",
+		LinesSent:    uint32(sent),
+		LinesDropped: uint32(dropped),
+		Seconds:      uint32(duration.Seconds()),
+	})
+	if err != nil {
+		summary = nil
+	}
 	return &agentv1.TaskResult{
 		TaskId:  task.GetTaskId(),
 		Status:  agentv1.TaskResult_STATUS_SUCCEEDED,
 		Message: previewSummary(sent, dropped),
+		Stdout:  summary,
 	}
 }
 
+// followSummary is what a live view leaves behind once it has ended: how
+// much of the journal reached the panel and how much the view could not
+// carry. The count is part of the answer, not a note in a message: a gap
+// nobody names reads as a quiet host.
+type followSummary struct {
+	Kind         string `json:"kind"`
+	LinesSent    uint32 `json:"lines_sent"`
+	LinesDropped uint32 `json:"lines_dropped"`
+	Seconds      uint32 `json:"follow_seconds"`
+}
+
 // forwardLines reads the output and sends it in batches at a limited rate.
+//
+// Two things take a line away: the reader outrunning the sender, which
+// fills the channel, and the rate limit. Both are counted and both travel
+// in the batch they belong to, so the operator sees the gap while they are
+// watching and not only in the result. The reader counts in an atomic: it
+// runs in a goroutine of its own and its number is read here while it is
+// still reading.
 func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 	output interface{ Read([]byte) (int, error) }) (sent, dropped int) {
 	lines := make(chan string, 256)
+	var overflow atomic.Uint64
 	go func() {
 		defer close(lines)
 		scanner := bufio.NewScanner(output)
@@ -134,7 +170,7 @@ func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 				// A full channel means the host produces faster than we manage
 				// to send. The line is lost, but the number of lost ones travels
 				// on.
-				dropped++
+				overflow.Add(1)
 			}
 		}
 	}()
@@ -148,6 +184,10 @@ func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 	droppedInBatch := 0
 
 	flush := func() {
+		// The lines the reader lost since the last batch belong to this one:
+		// a number that waits for the end of the view is a gap the operator
+		// reads as a quiet host.
+		droppedInBatch += int(overflow.Swap(0))
 		if len(batch) == 0 && droppedInBatch == 0 {
 			return
 		}
@@ -157,6 +197,7 @@ func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 			Dropped: uint32(droppedInBatch),
 		})
 		sent += len(batch)
+		dropped += droppedInBatch
 		batch = batch[:0]
 		size = 0
 		droppedInBatch = 0
@@ -166,16 +207,15 @@ func (e *TaskExecutor) forwardLines(ctx context.Context, taskID string,
 		select {
 		case <-ctx.Done():
 			flush()
-			return sent, dropped + droppedInBatch
+			return sent, dropped
 		case <-ticker.C:
 			flush()
 		case line, open := <-lines:
 			if !open {
 				flush()
-				return sent, dropped + droppedInBatch
+				return sent, dropped
 			}
 			if !rate.allows(len(line) + 1) {
-				dropped++
 				droppedInBatch++
 				continue
 			}
@@ -216,20 +256,24 @@ func (b *rateBudget) allows(bytes int) bool {
 
 // previewArguments assembles the invocation from typed fields, never from a
 // concatenated string.
-func previewArguments(payload *opspec.JournalPayload) []string {
+//
+// The backlog and the "--follow" belong to a live view alone; everything
+// that narrows it - the unit, the priority, the start of the range, the
+// cursor, the boot - is the narrowing of a read, built by one function for
+// both, because watching a unit and reading it are the same question asked
+// twice.
+func previewArguments(payload *opspec.JournalPayload) ([]string, error) {
 	args := []string{"--follow", "--no-pager", "--output=short-iso"}
 	backlog := payload.Lines
 	if backlog == 0 || backlog > 500 {
 		backlog = 50
 	}
 	args = append(args, "--lines", number(backlog))
-	if payload.Unit != "" {
-		args = append(args, "--unit", payload.Unit)
+	filters, err := journalFilters(payload)
+	if err != nil {
+		return nil, err
 	}
-	if payload.MaxPriority != nil {
-		args = append(args, "--priority", number(*payload.MaxPriority))
-	}
-	return args
+	return append(args, filters...), nil
 }
 
 func previewSummary(sent, dropped int) string {
@@ -237,7 +281,7 @@ func previewSummary(sent, dropped int) string {
 		return "the preview ended, lines: " + number(uint32(sent))
 	}
 	return "the preview ended, lines: " + number(uint32(sent)) +
-		", dropped by the rate limit: " + number(uint32(dropped))
+		", lines the view could not carry: " + number(uint32(dropped))
 }
 
 // number turns a counter into the text of an argument.

@@ -331,6 +331,11 @@ func planNoChange(plan json.RawMessage) bool {
 		Plan struct {
 			Action string `json:"action"`
 		} `json:"plan"`
+		// The plan of a declared object says its verdict one level down,
+		// under the payload the host sent back.
+		Payload struct {
+			Action string `json:"action"`
+		} `json:"payload"`
 		Changes json.RawMessage `json:"changes"`
 		Blocked json.RawMessage `json:"blocked"`
 	}
@@ -340,6 +345,16 @@ func planNoChange(plan json.RawMessage) bool {
 	switch parsed.Plan.Action {
 	case "no_change", "remove_absent":
 		return true
+	}
+	if parsed.Kind == "docker_declaration" {
+		// A host that already matches the description, and one that has
+		// nothing to remove, are both done: ordering the change there
+		// would be a step record and no change.
+		switch parsed.Payload.Action {
+		case "no_change", "absent":
+			return true
+		}
+		return false
 	}
 	if parsed.Kind == "package_plan" {
 		return jsonListEmpty(parsed.Changes) && jsonListEmpty(parsed.Blocked)
@@ -446,7 +461,7 @@ func hostFingerprint(detail json.RawMessage) string {
 	if parsed.PlanHash != "" {
 		return parsed.PlanHash
 	}
-	if parsed.Kind == "compose" {
+	if parsed.Kind == "compose" || parsed.Kind == "docker_declaration" {
 		return parsed.Payload.Digest
 	}
 	return ""
@@ -822,6 +837,19 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 			manifest.PlanDigest = hash
 			manifest.ImageDigests = composeDigests(plan)
 			payload.Compose = &manifest
+		}
+
+	case opspec.ActionDockerContainerEnsure, opspec.ActionDockerNetworkEnsure,
+		opspec.ActionDockerVolumeEnsure:
+		// A declared object binds by the digest of the plan computed on
+		// this host. The description is the same everywhere; what it means
+		// is not, and the digest is what says so - a host that already
+		// runs the description and one that runs an older image get
+		// different digests for the same order.
+		if payload.DockerEnsure != nil {
+			declaration := *payload.DockerEnsure
+			declaration.PlanDigest = hash
+			payload.DockerEnsure = &declaration
 		}
 
 	case opspec.ActionSystemHostnameSet:

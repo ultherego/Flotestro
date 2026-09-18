@@ -130,6 +130,52 @@ export function bootFilterSupport(
   return { supported: true };
 }
 
+/** How long a live view lasts and how much of the past it opens with. */
+export const FOLLOW_SECONDS = 300;
+export const FOLLOW_BACKLOG = 50;
+
+/**
+ * The journal payload of a live view.
+ *
+ * The view takes the narrowing a read takes - the unit, the severity, the
+ * start of the range, the cursor, the boot of the host - because watching a
+ * unit and reading it are the same question asked twice. It takes no end
+ * date: a view ends by its own time limit, and an end already in the past
+ * would close it before the first line.
+ */
+export function followPayload(filters: {
+  unit?: string;
+  priority?: string;
+  since?: string;
+  cursor?: string;
+  boot?: string;
+}): Record<string, unknown> {
+  return {
+    unit: filters.unit || undefined,
+    lines: FOLLOW_BACKLOG,
+    max_priority: filters.priority ? Number(filters.priority) : undefined,
+    follow_seconds: FOLLOW_SECONDS,
+    since: filters.since || undefined,
+    after_cursor: filters.cursor || undefined,
+    boot_id: filters.boot || undefined,
+  };
+}
+
+/**
+ * What the panel says about the lines a live view could not carry.
+ *
+ * The host counts them - the reader outrunning the sender, the rate limit -
+ * and the number travels with every batch and again in the result. Saying
+ * nothing would leave a gap the operator reads as a quiet host.
+ */
+export function droppedNotice(
+  dropped: number,
+  t: (text: string, params?: Record<string, string | number>) => string,
+): string {
+  if (!dropped || dropped <= 0) return "";
+  return t("{n} lines were dropped while you watched; the host wrote them faster than the view could carry.", { n: dropped });
+}
+
 /**
  * A boot identifier as the address carries it: the bare lowercase form
  * the journal uses, or empty for a value that is not one. The Power tab
@@ -167,6 +213,10 @@ export function Logs() {
   // after the operator has stopped watching.
   const [previewJob, setPreviewJob] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
+  // What the last live view could not carry. The count outlives the view:
+  // closing the screen on the gap would leave the operator believing they
+  // saw everything.
+  const [watched, setWatched] = useState<number | null>(null);
   // The unit detail on the Services tab hands over the unit and the cursor
   // of its last journal line, so the read here starts where that ended.
   const [params, setParams] = useSearchParams();
@@ -223,13 +273,17 @@ export function Logs() {
     mutationFn: async () => {
       const job = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
         action: "journal.follow",
+        // The same narrowing the read above takes, without the end of the
+        // range: the window of a job is a closed range and belongs to a
+        // read, a live view ends by its own time limit.
         payload: {
-          journal: {
-            unit: unit || undefined,
-            lines: 50,
-            max_priority: priority ? Number(priority) : undefined,
-            follow_seconds: 300,
-          },
+          journal: followPayload({
+            unit: windowUnit,
+            priority,
+            since,
+            cursor,
+            boot: boot && bootFilter.supported ? boot : "",
+          }),
         },
       });
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
@@ -239,6 +293,7 @@ export function Logs() {
       setErrorMessage("");
       setLines(null);
       setPaused(false);
+      setWatched(null);
       setPreviewJob(job.id);
       setPreview(`/api/v1/jobs/${job.id}/events`);
     },
@@ -256,6 +311,7 @@ export function Logs() {
     onSettled: () => {
       setPreview(null);
       setPreviewJob(null);
+      setWatched(stream.dropped);
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
     },
   });
@@ -370,6 +426,10 @@ export function Logs() {
         description={t("The journal and log files, read from the host on request and always bounded.")}
       />
       <Message text={errorMessage} error />
+      {/* A view that has ended still says what it could not carry: the gap
+          belongs to the lines that came back, not to the moment they
+          stopped arriving. */}
+      {!preview && watched !== null && watched > 0 && <Message text={droppedNotice(watched, t)} />}
 
       <Widgets>
       {/* What the lines on screen say of themselves, by the words in them:
@@ -629,7 +689,7 @@ export function Logs() {
             <>
               {t("Streaming for up to 5 minutes, capped at 32 KiB/s.")}
               {paused && ` ${t("Paused — the host keeps sending, the screen does not.")}`}
-              {stream.dropped > 0 && ` ${t("{n} lines dropped by the rate limit.", { n: stream.dropped })}`}
+              {stream.dropped > 0 && ` ${droppedNotice(stream.dropped, t)}`}
             </>
           }
         >

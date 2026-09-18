@@ -242,9 +242,10 @@ func DetectCapabilities() Capabilities {
 	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
 	// The module reads cron and the systemd timers; either makes it worth
-	// having. The managed entries go to /etc/cron.d, so without that
-	// directory a write is refused on the host, with the reason, while the
-	// timers still read.
+	// having. A managed entry goes to /etc/cron.d or, where the order asks
+	// for it, to a pair of units under /etc/systemd/system: a host without
+	// the mechanism it was ordered with refuses the write, with the reason,
+	// while both still read.
 	cronD := isDir("/etc/cron.d")
 	schedules := cronD || systemd
 	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
@@ -505,8 +506,13 @@ func DetectCapabilities() Capabilities {
 			Name:      CapSchedules,
 			Version:   adapterVersion,
 			Available: schedules,
-			Features:  map[string]bool{"cron": cronD, "timers": systemd},
-			Reason:    reason(schedules, "this host has neither /etc/cron.d nor systemd timers"),
+			// managed_timers says this agent writes a managed entry as a pair
+			// of systemd units, not merely that the host has timers to read.
+			// An agent from before the feature is silent about it and would
+			// write a cron entry under the name of a timer, so the panel
+			// refuses such an order before dispatch.
+			Features: map[string]bool{"cron": cronD, "timers": systemd, "managed_timers": systemd},
+			Reason:   reason(schedules, "this host has neither /etc/cron.d nor systemd timers"),
 		},
 		{
 			Name:      CapJournald,

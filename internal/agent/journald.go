@@ -13,6 +13,48 @@ import (
 
 const journalctlPath = "/usr/bin/journalctl"
 
+// journalFilters assembles the narrowing of a journal view from typed
+// fields, never from a concatenated string.
+//
+// A read and a live view take the same filters, because they are the same
+// question asked twice: an operator who narrowed a read to a unit, a
+// priority and one boot of the host expects the stream to show exactly
+// that. Only the ends of the range differ - a read has an end date, a
+// stream has a line budget and a time limit - and those the callers add
+// themselves.
+//
+// The boot identifier is checked once more here, on the machine: the panel
+// checks it too, but the argument goes to journalctl from this process, and
+// a value that is not a boot must not become "every boot" on the way. This
+// agent announces the filter as a feature of its journald adapter; an agent
+// without the feature never sees the field, because the panel refuses the
+// view before dispatch.
+func journalFilters(payload *opspec.JournalPayload) ([]string, error) {
+	var args []string
+	if payload.Unit != "" {
+		args = append(args, "--unit="+payload.Unit)
+	}
+	if payload.MaxPriority != nil {
+		args = append(args, "--priority="+strconv.FormatUint(uint64(*payload.MaxPriority), 10))
+	}
+	if payload.Since != "" {
+		args = append(args, "--since="+payload.Since)
+	}
+	// A cursor continues a view the unit detail began: the lines start
+	// right after the position the cursor names.
+	if payload.AfterCursor != "" {
+		args = append(args, "--after-cursor="+payload.AfterCursor)
+	}
+	if payload.BootID != "" {
+		bootID, err := logs.NormalizeBootID(payload.BootID)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "--boot="+bootID)
+	}
+	return args, nil
+}
+
 // readJournal reads the journal locally and returns a bounded result. The host
 // does no work when nobody is looking at the logs: the read happens only on
 // request, without a permanent shipper.
@@ -25,36 +67,15 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 	// The arguments are built from typed fields, never from a concatenated
 	// string.
 	args := []string{"--no-pager", "--output=short-iso", "--lines=" + strconv.FormatUint(uint64(payload.Lines), 10)}
-	if payload.Unit != "" {
-		args = append(args, "--unit="+payload.Unit)
+	filters, err := journalFilters(payload)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
 	}
-	if payload.MaxPriority != nil {
-		args = append(args, "--priority="+strconv.FormatUint(uint64(*payload.MaxPriority), 10))
-	}
-	if payload.Since != "" {
-		args = append(args, "--since="+payload.Since)
-	}
+	args = append(args, filters...)
+	// The end of the range belongs to a read alone: a live view ends by its
+	// own time limit, and the panel refuses an "until" there.
 	if payload.Until != "" {
 		args = append(args, "--until="+payload.Until)
-	}
-	// A cursor continues a read the unit detail began: the lines start right
-	// after the position the cursor names, still bounded by the line count.
-	if payload.AfterCursor != "" {
-		args = append(args, "--after-cursor="+payload.AfterCursor)
-	}
-	// A boot narrows the read to one boot of the host. The identifier is
-	// checked once more here, on the machine: the panel checks it too, but
-	// the argument goes to journalctl from this process, and a value that
-	// is not a boot must not become "every boot" on the way. This agent
-	// announces the filter as a feature of its journald adapter; an agent
-	// without the feature never sees the field, because the panel refuses
-	// the read before dispatch.
-	if payload.BootID != "" {
-		bootID, err := logs.NormalizeBootID(payload.BootID)
-		if err != nil {
-			return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
-		}
-		args = append(args, "--boot="+bootID)
 	}
 
 	timeout := timeoutOf(task, opspec.ActionReadJournal)

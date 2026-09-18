@@ -41,6 +41,17 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 	network.SupplementFromSys("/sys/class/net", interfaces)
 	snapshot.Interfaces = interfaces
 
+	// The layering is read on top of the addresses: "ip addr" names an
+	// interface a bond and says nothing about what it is made of, and the
+	// operator asking about a bond is asking exactly that. The second
+	// family is read from the kernel's own switches next to it, because an
+	// interface without an IPv6 address and an interface with IPv6 switched
+	// off are not the same host.
+	network.ReadLayering(&snapshot, func(arguments []string) (string, error) {
+		return ipOutput(ctx, arguments[0], arguments[1:]...)
+	})
+	network.ReadIPv6(&snapshot)
+
 	// Both families are read separately, because "ip route show" shows only
 	// IPv4 by default. Silence about the IPv6 routes would look like their
 	// absence.

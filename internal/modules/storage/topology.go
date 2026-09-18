@@ -13,6 +13,17 @@ const (
 	LsblkPath = "/usr/bin/lsblk"
 	VGSPath   = "/usr/sbin/vgs"
 	LVSPath   = "/usr/sbin/lvs"
+	PVSPath   = "/usr/sbin/pvs"
+)
+
+// The fields the LVM tools are asked for. They are named here rather than
+// at the call site, because the parser and the query have to agree: a
+// field missing from the query comes back as an empty string, and an empty
+// string read as a size is a zero nobody measured.
+const (
+	VGSFields = "vg_name,vg_uuid,vg_size,vg_free,vg_extent_size,pv_count,lv_count"
+	LVSFields = "lv_name,vg_name,lv_size,lv_path,lv_uuid,lv_attr,origin,data_percent"
+	PVSFields = "pv_name,vg_name,pv_uuid,pv_size,pv_free"
 )
 
 // LsblkColumns lists the fields lsblk is asked for. A full "-O" returns
@@ -157,18 +168,31 @@ func value(pointer *string) string {
 type lvmReport struct {
 	Report []struct {
 		VG []struct {
-			Name    string `json:"vg_name"`
-			Size    string `json:"vg_size"`
-			Free    string `json:"vg_free"`
-			PVCount string `json:"pv_count"`
-			LVCount string `json:"lv_count"`
+			Name       string `json:"vg_name"`
+			UUID       string `json:"vg_uuid"`
+			Size       string `json:"vg_size"`
+			Free       string `json:"vg_free"`
+			ExtentSize string `json:"vg_extent_size"`
+			PVCount    string `json:"pv_count"`
+			LVCount    string `json:"lv_count"`
 		} `json:"vg"`
 		LV []struct {
-			Name  string `json:"lv_name"`
-			Group string `json:"vg_name"`
-			Size  string `json:"lv_size"`
-			Path  string `json:"lv_path"`
+			Name        string `json:"lv_name"`
+			Group       string `json:"vg_name"`
+			Size        string `json:"lv_size"`
+			Path        string `json:"lv_path"`
+			UUID        string `json:"lv_uuid"`
+			Attributes  string `json:"lv_attr"`
+			Origin      string `json:"origin"`
+			DataPercent string `json:"data_percent"`
 		} `json:"lv"`
+		PV []struct {
+			Name  string `json:"pv_name"`
+			Group string `json:"vg_name"`
+			UUID  string `json:"pv_uuid"`
+			Size  string `json:"pv_size"`
+			Free  string `json:"pv_free"`
+		} `json:"pv"`
 	} `json:"report"`
 }
 
@@ -182,11 +206,13 @@ func ParseGroups(output string) ([]VolumeGroup, error) {
 	for _, section := range report.Report {
 		for _, entry := range section.VG {
 			groups = append(groups, VolumeGroup{
-				Name:      entry.Name,
-				SizeBytes: bytes(entry.Size),
-				FreeBytes: bytes(entry.Free),
-				PVCount:   number(entry.PVCount),
-				LVCount:   number(entry.LVCount),
+				Name:            entry.Name,
+				UUID:            entry.UUID,
+				SizeBytes:       bytes(entry.Size),
+				FreeBytes:       bytes(entry.Free),
+				ExtentSizeBytes: bytes(entry.ExtentSize),
+				PVCount:         number(entry.PVCount),
+				LVCount:         number(entry.LVCount),
 			})
 		}
 	}
@@ -202,11 +228,50 @@ func ParseVolumes(output string) ([]LogicalVolume, error) {
 	var volumes []LogicalVolume
 	for _, section := range report.Report {
 		for _, entry := range section.LV {
-			volumes = append(volumes, LogicalVolume{
-				Name:      entry.Name,
+			volume := LogicalVolume{
+				Name:       entry.Name,
+				Group:      entry.Group,
+				Path:       entry.Path,
+				UUID:       entry.UUID,
+				SizeBytes:  bytes(entry.Size),
+				Attributes: entry.Attributes,
+				Origin:     entry.Origin,
+			}
+			// LVM prints the fill of a snapshot's copy-on-write space as a
+			// number with a decimal point, and an empty string on a volume
+			// that has none. An empty string is not a zero here: an ordinary
+			// volume has no such space at all.
+			if text := strings.TrimSpace(entry.DataPercent); text != "" {
+				if value, err := strconv.ParseFloat(text, 64); err == nil {
+					volume.DataPercent = &value
+				}
+			}
+			volumes = append(volumes, volume)
+		}
+	}
+	return volumes, nil
+}
+
+// ParsePhysicalVolumes reads the output of "pvs --reportformat json
+// --units b".
+//
+// The physical volumes are what a group is extended with, and the read is
+// how the panel confirms afterwards that the new disk really joined the
+// group rather than that the tool exited zero.
+func ParsePhysicalVolumes(output string) ([]PhysicalVolume, error) {
+	var report lvmReport
+	if err := json.Unmarshal([]byte(output), &report); err != nil {
+		return nil, fmt.Errorf("reading the physical volumes: %w", err)
+	}
+	var volumes []PhysicalVolume
+	for _, section := range report.Report {
+		for _, entry := range section.PV {
+			volumes = append(volumes, PhysicalVolume{
+				Path:      entry.Name,
 				Group:     entry.Group,
-				Path:      entry.Path,
+				UUID:      entry.UUID,
 				SizeBytes: bytes(entry.Size),
+				FreeBytes: bytes(entry.Free),
 			})
 		}
 	}

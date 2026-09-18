@@ -135,6 +135,11 @@ const (
 	// returns to a state the operator may no longer remember.
 	PermNetworkMTUWrite Permission = "network.mtu.write"
 	PermNetworkRollback Permission = "network.rollback"
+	// Building a layer moves the addressing of every member onto the layer
+	// above, and removing one gives it back: two decisions of their own,
+	// separate from rewriting an address on a single interface.
+	PermNetworkLinkWrite  Permission = "network.link.write"
+	PermNetworkLinkRemove Permission = "network.link.remove"
 	// The host's DNS is separated from the records in the directory: an entry
 	// in a zone is seen by every client of the domain, and the host's
 	// resolver - only by that host.
@@ -174,6 +179,17 @@ const (
 	PermStorageFilesystemWrite Permission = "storage.filesystem.write"
 	PermStorageDestructive     Permission = "storage.destructive"
 	PermStorageWipe            Permission = "storage.wipe"
+	// The layers above a bare disk. Each is its own decision: failing a
+	// member spends an array's redundancy, adding one overwrites a disk,
+	// and deleting a volume destroys what stood on it.
+	PermStorageRAIDFail          Permission = "storage.raid.fail"
+	PermStorageRAIDRemove        Permission = "storage.raid.remove"
+	PermStorageRAIDAdd           Permission = "storage.raid.add"
+	PermStorageLVMVolumeCreate   Permission = "storage.lvm.volume.create"
+	PermStorageLVMVolumeRemove   Permission = "storage.lvm.volume.remove"
+	PermStorageLVMGroupExtend    Permission = "storage.lvm.group.extend"
+	PermStorageLVMSnapshotCreate Permission = "storage.lvm.snapshot.create"
+	PermStorageLVMSnapshotRemove Permission = "storage.lvm.snapshot.remove"
 	// The sshd server. A bad configuration cuts off administration of the
 	// host, and replacing the key changes the identity every client sees.
 	PermSSHRead          Permission = "ssh.read"
@@ -290,6 +306,16 @@ const (
 	PermDockerRemove  Permission = "docker.container.remove"
 	PermDockerPull    Permission = "docker.image.pull"
 	PermDockerPrune   Permission = "docker.prune"
+	// A declared object is its own decision, separate from starting a
+	// container or pruning what nobody uses: a declaration replaces what
+	// stands on the host when it differs, and the plan that says what
+	// differs is read with the plan permission before any of it.
+	PermDockerPlan            Permission = "docker.plan"
+	PermDockerContainerEnsure Permission = "docker.container.ensure"
+	PermDockerNetworkEnsure   Permission = "docker.network.ensure"
+	PermDockerNetworkRemove   Permission = "docker.network.remove"
+	PermDockerVolumeEnsure    Permission = "docker.volume.ensure"
+	PermDockerVolumeRemove    Permission = "docker.volume.remove"
 	// Deploying a project starts the images the operator named on the host,
 	// so it is separated from the rest of the container operations.
 	PermComposePlan   Permission = "docker.compose.plan"
@@ -487,8 +513,9 @@ var rolePermissions = map[Role][]Permission{
 		// a container is diagnostics, like the journal.
 		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
-		// The operator plans project deployments but does not carry them out.
-		PermComposePlan,
+		// The operator plans project deployments and declarations but does
+		// not carry them out: a plan is a read of the difference.
+		PermComposePlan, PermDockerPlan,
 		// The operator plans upgrades but does not carry them out: a package
 		// transaction is an operation of the highest risk and requires a
 		// separate right.
@@ -570,6 +597,9 @@ var rolePermissions = map[Role][]Permission{
 		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart,
 		PermDockerPull, PermDockerRemove, PermDockerPrune,
+		PermDockerPlan, PermDockerContainerEnsure,
+		PermDockerNetworkEnsure, PermDockerNetworkRemove,
+		PermDockerVolumeEnsure, PermDockerVolumeRemove,
 		PermComposePlan, PermComposeDeploy,
 		PermUnitStatus, PermUnitEnableWrite, PermUnitMaskWrite,
 		PermJournalFollow, PermLogFileRead, PermProcessRead, PermProcessSignal,
@@ -579,12 +609,16 @@ var rolePermissions = map[Role][]Permission{
 		PermSchedulePreview, PermScheduleRootExec, PermFileWriteUnvalidated,
 		PermNetworkRead, PermNetworkWrite, PermNetworkRouteWrite,
 		PermNetworkMTUWrite, PermNetworkRollback,
+		PermNetworkLinkWrite, PermNetworkLinkRemove,
 		PermDNSRead, PermDNSPlan, PermDNSHostWrite,
 		PermFirewallRead, PermFirewallWrite, PermFirewallRuleRemove,
 		PermFirewallZoneWrite, PermFirewallServiceWrite, PermFirewallRestore,
 		PermStorageRead, PermStorageSmartRead, PermStorageMountWrite, PermStorageMountRemove, PermStorageFsck,
 		PermStorageLVMWrite, PermStorageFilesystemWrite,
 		PermStorageDestructive, PermStorageWipe,
+		PermStorageRAIDFail, PermStorageRAIDRemove, PermStorageRAIDAdd,
+		PermStorageLVMVolumeCreate, PermStorageLVMVolumeRemove, PermStorageLVMGroupExtend,
+		PermStorageLVMSnapshotCreate, PermStorageLVMSnapshotRemove,
 		PermSSHRead, PermSSHConfigWrite, PermSSHHostKeyRotate,
 		PermKernelRead, PermKernelModulePlan, PermKernelSysctlWrite,
 		PermKernelModuleWrite, PermKernelModuleBlacklist,

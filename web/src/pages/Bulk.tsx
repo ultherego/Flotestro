@@ -229,6 +229,7 @@ export function Bulk() {
                 change={change}
                 targets={eligible}
                 compensates={preview.data?.compensates}
+                token={previewTokenOf(preview.data)}
                 campaignID={campaignID}
                 onCreated={(id) => {
                   // The order is placed: the draft would only reopen an order
@@ -489,7 +490,7 @@ export function windowInstant(value: string): string | undefined {
  * its default is not sent, so an order that said nothing about it reads
  * like one on the server as well.
  */
-export function campaignBody(order: Order): Record<string, unknown> {
+export function campaignBody(order: Order, token?: PreviewToken): Record<string, unknown> {
   const expression = expressionOf(order);
   const units = parseUnits(order.healthCheckUnits);
   return {
@@ -530,6 +531,10 @@ export function campaignBody(order: Order): Record<string, unknown> {
     // client says, and the body says the same thing.
     requires_approval: true,
     compensates_campaign_id: order.compensates || undefined,
+    // The order says which preview it was placed from. A stored order - a
+    // schedule - carries none: it is placed at a moment nobody previewed.
+    preview_id: token?.preview_id,
+    preview_digest: token?.preview_digest,
   };
 }
 
@@ -953,7 +958,28 @@ type Preview = {
   // The campaign the order would undo, as the server checked it, with the
   // number of hosts it changed - the only hosts the order may name.
   compensates?: { id: string; name: string; state: string; changed: number };
+  // The binding between this answer and the order placed from it: the
+  // server records what it showed, the order names it, and the creation
+  // refuses when the fleet or the operator's rights moved in between. An
+  // answer without an operation carries none, because no order follows
+  // from it.
+  preview_id?: string;
+  preview_digest?: string;
+  expires_at?: string;
 };
+
+/** What the order carries back from the preview it was placed from. */
+export type PreviewToken = { preview_id: string; preview_digest: string };
+
+/**
+ * The token of a preview, when it has one. A preview taken without an
+ * operation - the count of a selector - has none, and an order is not
+ * placed from it.
+ */
+export function previewTokenOf(preview?: Preview): PreviewToken | undefined {
+  if (!preview?.preview_id || !preview.preview_digest) return undefined;
+  return { preview_id: preview.preview_id, preview_digest: preview.preview_digest };
+}
 
 /**
  * The steps go in the order the system really works in.
@@ -1990,6 +2016,7 @@ function CreateStep({
   change,
   targets,
   compensates,
+  token,
   campaignID,
   onCreated,
   nav,
@@ -1998,6 +2025,9 @@ function CreateStep({
   change: (delta: Partial<Order>) => void;
   targets: number;
   compensates?: Preview["compensates"];
+  // The preview this order is placed from; absent while the wizard has no
+  // answer yet, and then the server decides what an unbound order means.
+  token?: PreviewToken;
   campaignID: string;
   onCreated: (id: string) => void;
   nav: ReactNode;
@@ -2008,12 +2038,18 @@ function CreateStep({
   const reasonOK = reasonValid(order.reason);
 
   const create = useMutation({
-    mutationFn: () => api.post<Campaign>("/api/v1/campaigns", campaignBody(order)),
+    mutationFn: () => api.post<Campaign>("/api/v1/campaigns", campaignBody(order, token)),
     onSuccess: (campaign) => {
       queryClient.invalidateQueries({ queryKey: ["campaigns"] });
       onCreated(campaign.id);
     },
-    onError: (error) => setErrorMessage(error instanceof Error ? error.message : String(error)),
+    onError: (error) => {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+      // A refused order has spent its preview, whatever the reason: the
+      // next attempt is placed from a fresh one, so the operator is not
+      // told twice that the fleet moved.
+      queryClient.invalidateQueries({ queryKey: ["campaign-preview"] });
+    },
   });
   // A scheduled order creates no campaign now: the schedule is the
   // record, and the wizard ends here with a link to it.

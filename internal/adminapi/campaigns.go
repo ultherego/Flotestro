@@ -67,6 +67,14 @@ type createCampaignRequest struct {
 	// IdempotencyKey lets a caller that lost the answer ask again without a
 	// second campaign; the Idempotency-Key header does the same.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// PreviewID names the preview this order was placed from, and
+	// PreviewDigest is the fingerprint the preview answered with. Together
+	// they bind the order to the picture of the fleet the operator read:
+	// the creation resolves the fleet itself and refuses when what it
+	// resolved is not what was shown. An order without them is allowed
+	// while the installation runs the rollout in observe or prefer.
+	PreviewID     string `json:"preview_id,omitempty"`
+	PreviewDigest string `json:"preview_digest,omitempty"`
 	// CompensatesCampaignID names a finished campaign this one undoes. The
 	// operation has to be the declared reverse of that campaign's, and the
 	// targets have to be hosts it changed; an empty selector takes exactly
@@ -113,7 +121,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
 		return
 	}
-	s.orderCampaign(w, r, request, "")
+	s.orderCampaign(w, r, request, "", false)
 }
 
 // orderCampaign carries an order through every check to the record: the
@@ -121,7 +129,8 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 // permissions, the fresh authentication and the audit event. A retry
 // walks the same way with the campaign it retries named, so a retried
 // order is refused exactly where a fresh one would be.
-func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request createCampaignRequest, retriesID string) {
+func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request createCampaignRequest,
+	retriesID string, unattended bool) {
 	action := opspec.ActionType(request.Action)
 	if !action.Known() || !action.Mutating() {
 		problem(w, http.StatusBadRequest, "unknown_action",
@@ -299,6 +308,15 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		}
 	}
 
+	// The order is held to the preview it was placed from: the hosts just
+	// resolved have to be the hosts the operator was shown, under the
+	// rights they had then. What differs is named in the refusal, and the
+	// preview is taken again.
+	if !s.checkPreviewToken(w, r, request, principal, orderPermission(action), action,
+		chosen, assessment.Ready, unattended) {
+		return
+	}
+
 	// A campaign must not be a way around the single-host gate. The same
 	// operation ordered by hand requires fresh authentication, so ordered on
 	// the whole fleet it requires it all the more.
@@ -398,6 +416,16 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		s.fail(w, err)
 		return
 	}
+	// The spent preview names the campaign it created. The order is done
+	// either way - the preview was consumed before the campaign existed,
+	// because two orders must not share one approved picture of the fleet -
+	// so a failure to write the link is recorded and not raised.
+	if request.PreviewID != "" && s.campaigns != nil {
+		if err := s.campaigns.AttachPreview(r.Context(), request.PreviewID, campaign.ID); err != nil {
+			s.log.Warn("the preview of a campaign was not linked to it",
+				"preview_id", request.PreviewID, "campaign_id", campaign.ID, "error", err)
+		}
+	}
 	writeJSON(w, http.StatusCreated, campaign)
 }
 
@@ -458,7 +486,11 @@ func (s *Server) handleRetryCampaign(w http.ResponseWriter, r *http.Request) {
 	for _, target := range picked {
 		hostIDs = append(hostIDs, target.HostID)
 	}
-	s.orderCampaign(w, r, retryOrder(*original, hostIDs, request.Reason), original.ID)
+	// A retry is not placed from a preview: the hosts are the ones the
+	// original campaign settled, read from its own record, and nobody is
+	// looking at a fresh count of the fleet. The binding has nothing to
+	// bind here, so it is not asked for.
+	s.orderCampaign(w, r, retryOrder(*original, hostIDs, request.Reason), original.ID, true)
 }
 
 // retryOrder is the original's order written out again for the hosts
@@ -1046,6 +1078,17 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	// ineligible before anything is created.
 	if opspec.PanelPlanned(action) {
 		response["hosts"] = hostEntries(assessment.Ready)
+	}
+	// What was shown is recorded, so the order placed from this answer can
+	// be held to it. The token is part of the answer rather than a second
+	// call: an operator who previews has it, and one who orders without
+	// previewing is the case the mode decides.
+	token, ok := s.issuePreviewToken(w, r, principal, permission, action, chosen, assessment.Ready)
+	if !ok {
+		return
+	}
+	for key, value := range token {
+		response[key] = value
 	}
 	writeJSON(w, http.StatusOK, response)
 }

@@ -17,6 +17,7 @@ import (
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/helpercap"
+	"github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/systemd"
 )
@@ -678,6 +679,10 @@ func (e *TaskExecutor) perform(ctx context.Context, task *agentv1.TaskEnvelope,
 		return e.applyDocker(ctx, task, task.GetDockerAction())
 	case opspec.ActionComposePlan, opspec.ActionComposeDeploy:
 		return e.applyCompose(ctx, task, task.GetCompose())
+	case opspec.ActionDockerPlan, opspec.ActionDockerContainerEnsure,
+		opspec.ActionDockerNetworkEnsure, opspec.ActionDockerNetworkRemove,
+		opspec.ActionDockerVolumeEnsure, opspec.ActionDockerVolumeRemove:
+		return e.applyDockerEnsure(ctx, task, action, payload.DockerEnsure)
 	case opspec.ActionUnitEnableSet, opspec.ActionUnitMaskSet:
 		return e.applyUnitToggle(ctx, task, action, task.GetUnitToggle())
 	case opspec.ActionReadLogFile:
@@ -719,7 +724,11 @@ func (e *TaskExecutor) perform(ctx context.Context, task *agentv1.TaskEnvelope,
 	case opspec.ActionStoragePlan, opspec.ActionMountEnsure,
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
-		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe:
+		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe,
+		opspec.ActionRAIDMemberFail, opspec.ActionRAIDMemberRemove,
+		opspec.ActionRAIDMemberAdd, opspec.ActionLVMVolumeCreate,
+		opspec.ActionLVMVolumeRemove, opspec.ActionLVMGroupExtend,
+		opspec.ActionLVMSnapshotCreate, opspec.ActionLVMSnapshotRemove:
 		return e.applyStorage(ctx, task, action, payload.Storage)
 	case opspec.ActionFirewallPlan, opspec.ActionFirewallRuleEnsure,
 		opspec.ActionFirewallRuleRemove, opspec.ActionFirewallZonePort,
@@ -729,7 +738,8 @@ func (e *TaskExecutor) perform(ctx context.Context, task *agentv1.TaskEnvelope,
 		return e.applyDNS(ctx, task, action, payload.DNS)
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
-		opspec.ActionNetworkRollback:
+		opspec.ActionNetworkRollback,
+		opspec.ActionNetworkLinkApply, opspec.ActionNetworkLinkRemove:
 		return e.applyNetwork(ctx, task, action, payload.Network)
 	case opspec.ActionScheduleEnsure, opspec.ActionScheduleDisable,
 		opspec.ActionScheduleRemove, opspec.ActionScheduleRunNow:
@@ -1272,6 +1282,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_DockerAction:
 		return dockerAction(action.DockerAction)
 
+	case *agentv1.TaskEnvelope_DockerEnsure:
+		return dockerDeclaration(action.DockerEnsure)
+
 	case *agentv1.TaskEnvelope_Compose:
 		kind := opspec.ActionComposePlan
 		if action.Compose.GetOperation() == agentv1.ComposeAction_OPERATION_DEPLOY {
@@ -1552,15 +1565,15 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Storage:
-		przestrzen := action.Storage
+		disks := action.Storage
 		kind := opspec.ActionMountEnsure
-		switch przestrzen.GetOperation() {
+		switch disks.GetOperation() {
 		case agentv1.StorageAction_OPERATION_READ, agentv1.StorageAction_OPERATION_MOUNT_PLAN,
 			agentv1.StorageAction_OPERATION_DEVICE_PLAN:
 			// The read and the plan are the same operation of the panel; they are
-			// told apart by the presence of a target. The type is one, because the
-			// hash of the payload is computed from the type on both
-			// stronach.
+			// told apart by the presence of a target. The type is one, because
+			// the hash of the payload is computed from the type on both
+			// sides.
 			kind = opspec.ActionStoragePlan
 		case agentv1.StorageAction_OPERATION_MOUNT_REMOVE:
 			kind = opspec.ActionMountRemove
@@ -1576,24 +1589,50 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionDiskWipe
 		case agentv1.StorageAction_OPERATION_SMART_READ:
 			kind = opspec.ActionStorageSmartRead
+		case agentv1.StorageAction_OPERATION_RAID_MEMBER_FAIL:
+			kind = opspec.ActionRAIDMemberFail
+		case agentv1.StorageAction_OPERATION_RAID_MEMBER_REMOVE:
+			kind = opspec.ActionRAIDMemberRemove
+		case agentv1.StorageAction_OPERATION_RAID_MEMBER_ADD:
+			kind = opspec.ActionRAIDMemberAdd
+		case agentv1.StorageAction_OPERATION_LVM_LV_CREATE:
+			kind = opspec.ActionLVMVolumeCreate
+		case agentv1.StorageAction_OPERATION_LVM_LV_REMOVE:
+			kind = opspec.ActionLVMVolumeRemove
+		case agentv1.StorageAction_OPERATION_LVM_VG_EXTEND:
+			kind = opspec.ActionLVMGroupExtend
+		case agentv1.StorageAction_OPERATION_LVM_SNAPSHOT_CREATE:
+			kind = opspec.ActionLVMSnapshotCreate
+		case agentv1.StorageAction_OPERATION_LVM_SNAPSHOT_REMOVE:
+			kind = opspec.ActionLVMSnapshotRemove
 		}
 		return kind, opspec.Payload{Storage: &opspec.StoragePayload{
-			Source:            przestrzen.GetSource(),
-			Target:            przestrzen.GetTarget(),
-			FSType:            przestrzen.GetFsType(),
-			Options:           przestrzen.GetOptions(),
-			Persist:           przestrzen.GetPersist(),
-			Device:            przestrzen.GetDevice(),
-			ExpectedUUID:      przestrzen.GetExpectedUuid(),
-			Repair:            przestrzen.GetRepair(),
-			ExpectedSerial:    przestrzen.GetExpectedSerial(),
-			ExpectedSizeBytes: przestrzen.GetExpectedSizeBytes(),
-			ExpectedByID:      przestrzen.GetExpectedById(),
-			ExpectedWWN:       przestrzen.GetExpectedWwn(),
-			Size:              przestrzen.GetSize(),
-			Label:             przestrzen.GetLabel(),
-			Plan:              przestrzen.GetPlan(),
-			PlanHash:          przestrzen.GetPlanHash(),
+			Source:            disks.GetSource(),
+			Target:            disks.GetTarget(),
+			FSType:            disks.GetFsType(),
+			Options:           disks.GetOptions(),
+			Persist:           disks.GetPersist(),
+			Device:            disks.GetDevice(),
+			ExpectedUUID:      disks.GetExpectedUuid(),
+			Repair:            disks.GetRepair(),
+			ExpectedSerial:    disks.GetExpectedSerial(),
+			ExpectedSizeBytes: disks.GetExpectedSizeBytes(),
+			ExpectedByID:      disks.GetExpectedById(),
+			ExpectedWWN:       disks.GetExpectedWwn(),
+			Size:              disks.GetSize(),
+			Label:             disks.GetLabel(),
+			Plan:              disks.GetPlan(),
+			PlanHash:          disks.GetPlanHash(),
+			// The identities of the layers above a bare disk. They are read
+			// back here because the payload hash is computed from the
+			// reconstructed payload: a field the envelope carried and this
+			// side dropped would give two different hashes for one order.
+			Array:              disks.GetArray(),
+			ExpectedArrayUUID:  disks.GetExpectedArrayUuid(),
+			Group:              disks.GetGroup(),
+			ExpectedGroupUUID:  disks.GetExpectedGroupUuid(),
+			Volume:             disks.GetVolume(),
+			ExpectedVolumeUUID: disks.GetExpectedVolumeUuid(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Firewall:
@@ -1664,6 +1703,10 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			kind = opspec.ActionNetworkRouteEnsure
 		case agentv1.NetworkAction_OPERATION_ROLLBACK:
 			kind = opspec.ActionNetworkRollback
+		case agentv1.NetworkAction_OPERATION_APPLY_LINK:
+			kind = opspec.ActionNetworkLinkApply
+		case agentv1.NetworkAction_OPERATION_REMOVE_LINK:
+			kind = opspec.ActionNetworkLinkRemove
 		}
 		return kind, opspec.Payload{Network: &opspec.NetworkPayload{
 			Interface:       network.GetInterface(),
@@ -1676,6 +1719,16 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			PlanHash:        network.GetPlanHash(),
 			RollbackSeconds: network.GetRollbackSeconds(),
 			RollbackID:      network.GetRollbackId(),
+			// The second family and the layering are read back exactly as
+			// they were built, so that the digest the host computes over
+			// the payload is the digest the panel signed.
+			Method6:    network.GetMethod6(),
+			Addresses6: network.GetAddresses6(),
+			Gateway6:   network.GetGateway6(),
+			AcceptRA:   network.GetAcceptRa(),
+			Privacy:    network.GetPrivacy(),
+			Link:       networkLinkPayload(network.GetLink()),
+			LinkRemove: network.GetLinkRemove(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Schedule:
@@ -1699,6 +1752,7 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Comment:    schedule.GetComment(),
 			Enabled:    schedule.GetEnabled(),
 			Adopt:      schedule.GetAdopt(),
+			Kind:       schedule.GetKind(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ListProcesses:
@@ -1722,6 +1776,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			Lines:         follow.GetBacklogLines(),
 			MaxPriority:   follow.MaxPriority,
 			FollowSeconds: follow.GetFollowSeconds(),
+			Since:         follow.GetSince(),
+			AfterCursor:   follow.GetAfterCursor(),
+			BootID:        follow.GetBootId(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_ReadLogFile:
@@ -1868,6 +1925,69 @@ func dockerAction(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 		}, nil
 	}
 	return "", opspec.Payload{}, fmt.Errorf("unknown container operation")
+}
+
+// dockerDeclaration reads a declared object back out of the envelope.
+//
+// The description arrives as the JSON the panel wrote, and it is read back
+// into the payload rather than kept as bytes: the payload hash is computed
+// over the payload, so a description that did not survive the journey
+// unchanged is caught here and not carried out.
+func dockerDeclaration(action *agentv1.DockerEnsureAction) (opspec.ActionType, opspec.Payload, error) {
+	declaration := &opspec.DockerEnsurePayload{
+		Kind:       action.GetKind(),
+		Name:       action.GetName(),
+		PlanDigest: action.GetPlanDigest(),
+		Force:      action.GetForce(),
+	}
+	if references := action.GetEnvSecrets(); len(references) > 0 {
+		declaration.EnvSecrets = make(map[string]opspec.SecretRef, len(references))
+		for name, reference := range references {
+			declaration.EnvSecrets[name] = opspec.SecretRef{
+				Name: reference.GetName(), Version: int(reference.GetVersion()),
+			}
+		}
+	}
+
+	if spec := action.GetSpec(); len(spec) > 0 {
+		switch action.GetKind() {
+		case opspec.DockerKindContainer:
+			declaration.Container = &docker.ContainerRequest{}
+			if err := json.Unmarshal(spec, declaration.Container); err != nil {
+				return "", opspec.Payload{}, fmt.Errorf("the container description: %w", err)
+			}
+		case opspec.DockerKindNetwork:
+			declaration.Network = &docker.NetworkSpec{}
+			if err := json.Unmarshal(spec, declaration.Network); err != nil {
+				return "", opspec.Payload{}, fmt.Errorf("the network description: %w", err)
+			}
+		case opspec.DockerKindVolume:
+			declaration.Volume = &docker.VolumeSpec{}
+			if err := json.Unmarshal(spec, declaration.Volume); err != nil {
+				return "", opspec.Payload{}, fmt.Errorf("the volume description: %w", err)
+			}
+		default:
+			return "", opspec.Payload{}, fmt.Errorf("a description of an object of unknown kind %q",
+				action.GetKind())
+		}
+	}
+
+	payload := opspec.Payload{DockerEnsure: declaration}
+	switch action.GetOperation() {
+	case agentv1.DockerEnsureAction_OPERATION_PLAN:
+		return opspec.ActionDockerPlan, payload, nil
+	case agentv1.DockerEnsureAction_OPERATION_CONTAINER_ENSURE:
+		return opspec.ActionDockerContainerEnsure, payload, nil
+	case agentv1.DockerEnsureAction_OPERATION_NETWORK_ENSURE:
+		return opspec.ActionDockerNetworkEnsure, payload, nil
+	case agentv1.DockerEnsureAction_OPERATION_NETWORK_REMOVE:
+		return opspec.ActionDockerNetworkRemove, payload, nil
+	case agentv1.DockerEnsureAction_OPERATION_VOLUME_ENSURE:
+		return opspec.ActionDockerVolumeEnsure, payload, nil
+	case agentv1.DockerEnsureAction_OPERATION_VOLUME_REMOVE:
+		return opspec.ActionDockerVolumeRemove, payload, nil
+	}
+	return "", opspec.Payload{}, fmt.Errorf("unknown declared object operation")
 }
 
 // listUnits returns the full list of the units of the host.

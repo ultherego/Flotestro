@@ -182,6 +182,16 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			"the agent of this host does not filter the journal by boot; read without the boot filter or upgrade the agent")
 		return
 	}
+	// A managed timer is written only by an agent that says it writes one.
+	// An older agent ignores the kind and would write a cron entry under the
+	// name of a timer; silence is exactly what such an agent says, so silence
+	// refuses the order.
+	if payload.Schedule != nil && payload.Schedule.Kind == opspec.ScheduleKindTimer &&
+		!host.Capabilities.Feature(hosts.CapSchedules, "managed_timers") {
+		problem(w, http.StatusConflict, "managed_timers_unsupported",
+			"the agent of this host does not write managed timers; order the entry as a cron entry or upgrade the agent")
+		return
+	}
 
 	// A highest-risk operation requires fresh authentication: one that can
 	// cut off access to the host or wipe data must not go from an hour-old

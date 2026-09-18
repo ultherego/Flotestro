@@ -6,6 +6,7 @@ import { Time, Empty } from "../../components/ui";
 import { bytes } from "../../lib/format";
 import { Breakdown, Meter } from "../../components/widgets";
 import { ColumnChooser, Td, Th, useColumns, type ColumnDef } from "../../components/SortableTable";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import {
   Foot, Message, ModuleFreshness, ModuleHeader, ModulePage, Section, Summary, Table, Widgets, countWhere,
   useHost, useModule, useModuleRefresh,
@@ -186,6 +187,7 @@ export function Processes() {
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={["process.signal"]} />
       <Message text={message} />
 
       <Widgets>
@@ -336,11 +338,13 @@ export function Processes() {
                           {t("no signal")}
                         </span>
                       ) : (
-                        <div className="operations" title={agentProcess(process) ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.") : undefined}>
-                          <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
-                          <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
-                          <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
-                        </div>
+                        <ActionGuard action="process.signal" host={host.id}>
+                          <div className="operations" title={agentProcess(process) ? t("This is the agent that carries out the order: the host goes offline until systemd restarts it.") : undefined}>
+                            <button onClick={() => setToSignal({ process, signal: "TERM" })}>{t("Term")}</button>
+                            <button onClick={() => setToSignal({ process, signal: "HUP" })}>HUP</button>
+                            <button className="hm-danger" onClick={() => setToSignal({ process, signal: "KILL" })}>{t("Kill")}</button>
+                          </div>
+                        </ActionGuard>
                       )}
                     </Td>
                   </tr>

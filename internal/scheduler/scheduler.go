@@ -1148,7 +1148,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		opspec.ActionMountRemove, opspec.ActionFilesystemCheck,
 		opspec.ActionLVMExtend, opspec.ActionFilesystemResize,
 		opspec.ActionFilesystemCreate, opspec.ActionDiskWipe,
-		opspec.ActionStorageSmartRead:
+		opspec.ActionStorageSmartRead,
+		opspec.ActionRAIDMemberFail, opspec.ActionRAIDMemberRemove,
+		opspec.ActionRAIDMemberAdd, opspec.ActionLVMVolumeCreate,
+		opspec.ActionLVMVolumeRemove, opspec.ActionLVMGroupExtend,
+		opspec.ActionLVMSnapshotCreate, opspec.ActionLVMSnapshotRemove:
 		operation := agentv1.StorageAction_OPERATION_MOUNT_ENSURE
 		switch action {
 		case opspec.ActionStorageSmartRead:
@@ -1178,6 +1182,22 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operation = agentv1.StorageAction_OPERATION_FS_CREATE
 		case opspec.ActionDiskWipe:
 			operation = agentv1.StorageAction_OPERATION_DISK_WIPE
+		case opspec.ActionRAIDMemberFail:
+			operation = agentv1.StorageAction_OPERATION_RAID_MEMBER_FAIL
+		case opspec.ActionRAIDMemberRemove:
+			operation = agentv1.StorageAction_OPERATION_RAID_MEMBER_REMOVE
+		case opspec.ActionRAIDMemberAdd:
+			operation = agentv1.StorageAction_OPERATION_RAID_MEMBER_ADD
+		case opspec.ActionLVMVolumeCreate:
+			operation = agentv1.StorageAction_OPERATION_LVM_LV_CREATE
+		case opspec.ActionLVMVolumeRemove:
+			operation = agentv1.StorageAction_OPERATION_LVM_LV_REMOVE
+		case opspec.ActionLVMGroupExtend:
+			operation = agentv1.StorageAction_OPERATION_LVM_VG_EXTEND
+		case opspec.ActionLVMSnapshotCreate:
+			operation = agentv1.StorageAction_OPERATION_LVM_SNAPSHOT_CREATE
+		case opspec.ActionLVMSnapshotRemove:
+			operation = agentv1.StorageAction_OPERATION_LVM_SNAPSHOT_REMOVE
 		}
 		storage := &agentv1.StorageAction{Operation: operation}
 		if payload.Storage != nil {
@@ -1197,6 +1217,16 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			storage.Label = payload.Storage.Label
 			storage.Plan = payload.Storage.Plan
 			storage.PlanHash = payload.Storage.PlanHash
+			// The identities of the layers above a bare disk: the array out
+			// of its superblock, the group and the volume out of LVM. Each
+			// one travels, and the host compares it before the change - a
+			// path is the order the kernel found things in, not a name.
+			storage.Array = payload.Storage.Array
+			storage.ExpectedArrayUuid = payload.Storage.ExpectedArrayUUID
+			storage.Group = payload.Storage.Group
+			storage.ExpectedGroupUuid = payload.Storage.ExpectedGroupUUID
+			storage.Volume = payload.Storage.Volume
+			storage.ExpectedVolumeUuid = payload.Storage.ExpectedVolumeUUID
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Storage{Storage: storage}
 
@@ -1265,7 +1295,8 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 
 	case opspec.ActionNetworkPlan, opspec.ActionNetworkMTUSet,
 		opspec.ActionNetworkRouteEnsure, opspec.ActionNetworkProfileApply,
-		opspec.ActionNetworkRollback:
+		opspec.ActionNetworkRollback,
+		opspec.ActionNetworkLinkApply, opspec.ActionNetworkLinkRemove:
 		operation := agentv1.NetworkAction_OPERATION_APPLY_PROFILE
 		switch action {
 		case opspec.ActionNetworkPlan:
@@ -1282,6 +1313,10 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			operation = agentv1.NetworkAction_OPERATION_ENSURE_ROUTES
 		case opspec.ActionNetworkRollback:
 			operation = agentv1.NetworkAction_OPERATION_ROLLBACK
+		case opspec.ActionNetworkLinkApply:
+			operation = agentv1.NetworkAction_OPERATION_APPLY_LINK
+		case opspec.ActionNetworkLinkRemove:
+			operation = agentv1.NetworkAction_OPERATION_REMOVE_LINK
 		}
 		network := &agentv1.NetworkAction{Operation: operation}
 		if payload.Network != nil {
@@ -1295,6 +1330,26 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			network.RollbackSeconds = payload.Network.RollbackSeconds
 			network.RollbackId = payload.Network.RollbackID
 			network.PlanHash = payload.Network.PlanHash
+			// The second family and the layering travel in the envelope as
+			// well: a field the envelope does not carry is a field the host
+			// would hash differently, and the change would be refused for a
+			// reason nobody could read.
+			network.Method6 = payload.Network.Method6
+			network.Addresses6 = payload.Network.Addresses6
+			network.Gateway6 = payload.Network.Gateway6
+			network.AcceptRa = payload.Network.AcceptRA
+			network.Privacy = payload.Network.Privacy
+			network.LinkRemove = payload.Network.LinkRemove
+			if link := payload.Network.Link; link != nil {
+				network.Link = &agentv1.NetworkLink{
+					Name: link.Name, Kind: link.Kind, Members: link.Members,
+					Mode: link.Mode, MiimonMs: uint32(link.MIIMonMS),
+					Primary: link.Primary, LacpRate: link.LACPRate,
+					Stp: link.STP, VlanFiltering: link.VLANFiltering,
+					Parent: link.Parent, VlanId: uint32(link.VLANID),
+					Protocol: link.Protocol, Mtu: link.MTU,
+				}
+			}
 		}
 		envelope.Action = &agentv1.TaskEnvelope_Network{Network: network}
 
@@ -1322,6 +1377,7 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				Comment:    payload.Schedule.Comment,
 				Enabled:    payload.Schedule.Enabled,
 				Adopt:      payload.Schedule.Adopt,
+				Kind:       payload.Schedule.Kind,
 			},
 		}
 
@@ -1350,6 +1406,11 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				MaxPriority:   payload.Journal.MaxPriority,
 				BacklogLines:  payload.Journal.Lines,
 				FollowSeconds: payload.Journal.FollowSeconds,
+				// The same narrowing a read carries: what the operator set
+				// on the screen applies to watching as well as to reading.
+				Since:       payload.Journal.Since,
+				AfterCursor: payload.Journal.AfterCursor,
+				BootId:      payload.Journal.BootID,
 			},
 		}
 
@@ -1388,6 +1449,15 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 				ImageDigests: payload.Compose.ImageDigests,
 			},
 		}
+
+	case opspec.ActionDockerPlan, opspec.ActionDockerContainerEnsure,
+		opspec.ActionDockerNetworkEnsure, opspec.ActionDockerNetworkRemove,
+		opspec.ActionDockerVolumeEnsure, opspec.ActionDockerVolumeRemove:
+		declaration, err := dockerEnsureEnvelope(action, payload.DockerEnsure)
+		if err != nil {
+			return nil, err
+		}
+		envelope.Action = &agentv1.TaskEnvelope_DockerEnsure{DockerEnsure: declaration}
 
 	case opspec.ActionDockerStart, opspec.ActionDockerStop, opspec.ActionDockerRestart,
 		opspec.ActionDockerRemove, opspec.ActionDockerPull, opspec.ActionDockerPrune:
@@ -1538,6 +1608,66 @@ func dockerEnvelope(action opspec.ActionType, payload opspec.Payload) *agentv1.D
 		envelope.Operation = agentv1.DockerAction_OPERATION_PRUNE
 	}
 	return envelope
+}
+
+// dockerEnsureEnvelope carries a declared object to the agent.
+//
+// The description travels as the JSON of the module's own shape, so what
+// the operator approved is what the host reads - the panel does not
+// disassemble it into fields the host would have to put together again,
+// and a field added to the description later travels without a change of
+// the contract. The secret references travel beside it; no value does.
+func dockerEnsureEnvelope(action opspec.ActionType,
+	payload *opspec.DockerEnsurePayload) (*agentv1.DockerEnsureAction, error) {
+	if payload == nil {
+		return nil, fmt.Errorf("the operation %s carries no declaration", action)
+	}
+	declaration := &agentv1.DockerEnsureAction{
+		Kind:       payload.ObjectKind(),
+		Name:       payload.ObjectName(),
+		PlanDigest: payload.PlanDigest,
+		Force:      payload.Force,
+	}
+	switch action {
+	case opspec.ActionDockerPlan:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_PLAN
+	case opspec.ActionDockerContainerEnsure:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_CONTAINER_ENSURE
+	case opspec.ActionDockerNetworkEnsure:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_NETWORK_ENSURE
+	case opspec.ActionDockerNetworkRemove:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_NETWORK_REMOVE
+	case opspec.ActionDockerVolumeEnsure:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_VOLUME_ENSURE
+	case opspec.ActionDockerVolumeRemove:
+		declaration.Operation = agentv1.DockerEnsureAction_OPERATION_VOLUME_REMOVE
+	}
+
+	var described any
+	switch {
+	case payload.Container != nil:
+		described = payload.Container
+	case payload.Network != nil:
+		described = payload.Network
+	case payload.Volume != nil:
+		described = payload.Volume
+	}
+	if described != nil {
+		encoded, err := json.Marshal(described)
+		if err != nil {
+			return nil, fmt.Errorf("the description of %s: %w", declaration.Name, err)
+		}
+		declaration.Spec = encoded
+	}
+	if len(payload.EnvSecrets) > 0 {
+		declaration.EnvSecrets = make(map[string]*agentv1.SecretRef, len(payload.EnvSecrets))
+		for name, reference := range payload.EnvSecrets {
+			declaration.EnvSecrets[name] = &agentv1.SecretRef{
+				Name: reference.Name, Version: uint32(reference.Version),
+			}
+		}
+	}
+	return declaration, nil
 }
 
 // planReferenceToProto carries the approved plan envelope reference of an

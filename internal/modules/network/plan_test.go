@@ -46,7 +46,8 @@ func TestRoutesPlanComparesAsSet(t *testing.T) {
 
 func TestProfilePlanLeavesRoutesAndMTU(t *testing.T) {
 	current := testProfile()
-	plan := ComputeProfile("eth1", current, "manual", []string{"192.168.56.61/24"}, "", nil)
+	plan := ComputeProfile("eth1", current, ProfileRequest{Method: "manual",
+		Addresses: []string{"192.168.56.61/24"}}, IPv6Settings{})
 	if plan.Action != PlanUpdate {
 		t.Fatalf("profile plan: %+v", plan)
 	}
@@ -58,7 +59,7 @@ func TestProfilePlanLeavesRoutesAndMTU(t *testing.T) {
 			t.Errorf("change outside the order: %s", change)
 		}
 	}
-	if refused := ComputeProfile("eth1", current, "manual", nil, "", nil); refused.Refusal == "" {
+	if refused := ComputeProfile("eth1", current, ProfileRequest{Method: "manual"}, IPv6Settings{}); refused.Refusal == "" {
 		t.Error("manual without an address passed without a refusal")
 	}
 }

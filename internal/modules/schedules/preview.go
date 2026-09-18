@@ -25,6 +25,15 @@ type Preview struct {
 	// Error says why there are no runs: an expression the host does not
 	// understand, or one that never matches a date.
 	Error string `json:"error,omitempty"`
+	// Kind names the mechanism the preview was asked for. Empty means the
+	// runs alone were asked for, as before timers could be written.
+	Kind string `json:"kind,omitempty"`
+	// Calendar is the OnCalendar expression a timer would run by, and
+	// Units are the files that would be written. Together they are the
+	// plan of a timer: what would land on the host, readable before
+	// anything is written.
+	Calendar string     `json:"calendar,omitempty"`
+	Units    []UnitFile `json:"units,omitempty"`
 }
 
 // PreviewExpression computes the coming runs of a cron expression after the

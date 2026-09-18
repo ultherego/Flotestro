@@ -9,6 +9,7 @@ package opspec
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -73,6 +74,14 @@ const (
 	ActionNetworkRouteEnsure  ActionType = "network.route.ensure"
 	ActionNetworkMTUSet       ActionType = "network.mtu.set"
 	ActionNetworkRollback     ActionType = "network.rollback"
+	// A layered interface: a bond, a bridge or a VLAN. It is a different
+	// change from an address - it says what an interface is made of, not
+	// what it carries - and it has refusals of its own: a member another
+	// layer owns, a bond of one member, a VLAN on a parent that is not
+	// there, a bridge that would swallow the interface the panel talks
+	// over.
+	ActionNetworkLinkApply  ActionType = "network.link.apply"
+	ActionNetworkLinkRemove ActionType = "network.link.remove"
 
 	ActionDNSResolveTest ActionType = "dns.resolve.test"
 	ActionDNSPlan        ActionType = "dns.plan"
@@ -97,6 +106,24 @@ const (
 	// device. A virtual disk reports unsupported with the tool's own
 	// message; no number is invented.
 	ActionStorageSmartRead ActionType = "storage.smart.read"
+
+	// Software RAID. The panel manages the members of an array that exists:
+	// marking one bad, taking it out and putting a new one in. Creating an
+	// array and destroying one are deliberately absent - that is a decision
+	// about a machine's whole disk layout, taken when the machine is built,
+	// not an operation run over a running fleet.
+	ActionRAIDMemberFail   ActionType = "raid.member.fail"
+	ActionRAIDMemberRemove ActionType = "raid.member.remove"
+	ActionRAIDMemberAdd    ActionType = "raid.member.add"
+
+	// LVM beyond growing a volume: a new volume in an existing group, a new
+	// disk under a group, a snapshot and its removal, and the removal of a
+	// volume, which deletes what was on it.
+	ActionLVMVolumeCreate   ActionType = "lvm.volume.create"
+	ActionLVMVolumeRemove   ActionType = "lvm.volume.remove"
+	ActionLVMGroupExtend    ActionType = "lvm.group.extend"
+	ActionLVMSnapshotCreate ActionType = "lvm.snapshot.create"
+	ActionLVMSnapshotRemove ActionType = "lvm.snapshot.remove"
 
 	ActionSSHConfigPlan    ActionType = "ssh.config.plan"
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
@@ -296,6 +323,26 @@ const (
 	// by a line count and by the same byte limit as a log file: a container
 	// that writes in a loop must not hand the panel its whole history.
 	ActionDockerLogs ActionType = "docker.container.logs"
+
+	// ActionDockerPlan computes the difference between what stands on the
+	// host and the description of a container, a network or a volume. It
+	// is one operation for all three, the way storage.plan is one for
+	// every kind of storage plan: the payload says what it is about, and a
+	// plan is a read whatever object it is about.
+	ActionDockerPlan ActionType = "docker.plan"
+	// ActionDockerContainerEnsure declares a container: the description of
+	// what is to run rather than the steps that would put it there. A
+	// container that differs is replaced and not mutated - the engine can
+	// change a handful of a running container's settings and refuses the
+	// rest - and the plan says so before anybody approves it.
+	ActionDockerContainerEnsure ActionType = "docker.container.ensure"
+	// Networks and volumes are declared the same way. Their removal is a
+	// separate operation, because removing the volume of a service is data
+	// loss and declaring one is not.
+	ActionDockerNetworkEnsure ActionType = "docker.network.ensure"
+	ActionDockerNetworkRemove ActionType = "docker.network.remove"
+	ActionDockerVolumeEnsure  ActionType = "docker.volume.ensure"
+	ActionDockerVolumeRemove  ActionType = "docker.volume.remove"
 
 	// The plan of a Compose project computes the difference between the
 	// host's state and the manifest.
@@ -530,7 +577,11 @@ var reverseActions = map[ActionType]ActionType{
 	// The network and the firewall keep a rollback plan on the host under
 	// the identifier the change reported; the rollback names it.
 	ActionNetworkProfileApply: ActionNetworkRollback,
-	ActionFirewallRuleEnsure:  ActionFirewallRulesetRestore,
+	// A layered change keeps the same kind of plan: the mechanism's
+	// document from before it, named by the identifier the change reported.
+	ActionNetworkLinkApply:   ActionNetworkRollback,
+	ActionNetworkLinkRemove:  ActionNetworkRollback,
+	ActionFirewallRuleEnsure: ActionFirewallRulesetRestore,
 }
 
 // ReverseAction returns the operation that undoes the given change, and
@@ -782,6 +833,19 @@ var actionSpecs = map[ActionType]actionSpec{
 	// it is itself a network change - and just as risky as the one it undoes.
 	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork, verifier: VerifierNetworkState},
+	// Building a layer moves the addressing of every member onto the layer
+	// above: the members lose theirs the moment they are enslaved. That is
+	// the same weight as rewriting an address and carries its own
+	// permission, because an operator trusted with an address on one
+	// interface is not thereby trusted to fold three of them into a bond.
+	ActionNetworkLinkApply: {mutating: true, capability: "network.write", permission: "network.link.write",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
+	// Taking a layer away gives the members back their own traffic and
+	// takes the layer's address with it. It has its own permission for the
+	// same reason a removal always does: it is the one direction that
+	// cannot be undone by ordering the opposite.
+	ActionNetworkLinkRemove: {mutating: true, capability: "network.write", permission: "network.link.remove",
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
 
 	// The name resolution test asks from the host, because the panel's answer
 	// says nothing about what the host will see. The query changes nothing.
@@ -829,8 +893,13 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
 	// A filesystem check takes long and requires that nobody is using it.
+	// The exit code of fsck is a bit field, not a verdict: 1 means it
+	// corrected something and 4 means it left errors behind. So the check
+	// settles on a second, read-only pass over the filesystem afterwards
+	// rather than on the code of the first - a repair that left errors is
+	// not a successful check.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
-		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierNone},
+		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	// The SMART read changes nothing and takes no lock: the tool asks the
 	// device for its own log. It has its own permission rather than the
 	// topology read's, because every operation has one.
@@ -850,6 +919,35 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
+
+	// Software RAID. Marking a member bad is how a dying disk leaves an
+	// array - and it is also the move that spends the array's redundancy,
+	// so it takes the treatment of a destructive operation: fresh
+	// authentication, the host name typed out and two people. Adding a
+	// device writes an array superblock over whatever it carried, which is
+	// the same loss for that device. Taking an already failed member out
+	// spends nothing and stays a high-risk change.
+	ActionRAIDMemberFail: {mutating: true, capability: "storage", permission: "storage.raid.fail",
+		timeoutSeconds: 300, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionRAIDMemberRemove: {mutating: true, capability: "storage", permission: "storage.raid.remove",
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionRAIDMemberAdd: {mutating: true, capability: "storage", permission: "storage.raid.add",
+		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
+
+	// LVM. Creating a volume or a snapshot takes space that was free and
+	// gives it a name; extending a group writes an LVM label over a disk,
+	// and removing a volume deletes what was on it. The last two are
+	// destructive in the same sense as a format and get the same treatment.
+	ActionLVMVolumeCreate: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.volume.create",
+		timeoutSeconds: 600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionLVMVolumeRemove: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.volume.remove",
+		timeoutSeconds: 600, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionLVMGroupExtend: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.group.extend",
+		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionLVMSnapshotCreate: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.snapshot.create",
+		timeoutSeconds: 600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
+	ActionLVMSnapshotRemove: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.snapshot.remove",
+		timeoutSeconds: 600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
 
 	// Reading the sshd configuration before a change. The plan does not touch
 	// the host.
@@ -1206,6 +1304,49 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDockerLogs: {mutating: false, capability: "docker", permission: "docker.container.logs",
 		timeoutSeconds: 60, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
+	// The plan of a declared object changes nothing, but it inspects the
+	// container and asks the registry what the image tag means today, so
+	// it carries the read permission of the module rather than none at
+	// all. Reading the state of the engine is what it is.
+	ActionDockerPlan: {mutating: false, capability: "docker", permission: "docker.plan",
+		timeoutSeconds: 300, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 1 << 20},
+	// Declaring a container replaces the container that is there when it
+	// differs, so the service goes down and comes back from another image.
+	// It is the furthest-reaching operation on a single container and must
+	// not be ordered without a plan a human approved. It carries a right of
+	// its own rather than the removal one: a replacement is a deployment,
+	// and an installation that lets somebody remove a container has not
+	// thereby let them put another in its place.
+	ActionDockerContainerEnsure: {mutating: true, capability: "docker",
+		permission: "docker.container.ensure", timeoutSeconds: 1800,
+		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20, verifier: VerifierContainerSpec},
+	// A network and a volume carry the permission that removes one: an
+	// ensure that finds an object differing from its description replaces
+	// it, and it is that removal the permission is about. Declaring one is
+	// reversible - it adds an object to the host - so it does not reach
+	// the risk of the removal.
+	// Every one of them is bound to a plan for the same reason the
+	// container is: an object that differs is destroyed and made again,
+	// and nobody agrees to that without the list of what differs.
+	// Each carries a permission of its own: a declaration is not a prune -
+	// it replaces an object somebody is using, rather than reclaiming one
+	// nobody is - and the registry gives no two operations one right.
+	ActionDockerNetworkEnsure: {mutating: true, capability: "docker", permission: "docker.network.ensure",
+		timeoutSeconds: 300, risk: RiskMedium, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20, verifier: VerifierDockerNetwork},
+	ActionDockerNetworkRemove: {mutating: true, capability: "docker", permission: "docker.network.remove",
+		timeoutSeconds: 300, risk: RiskDestructive, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20, verifier: VerifierDockerNetwork},
+	ActionDockerVolumeEnsure: {mutating: true, capability: "docker", permission: "docker.volume.ensure",
+		timeoutSeconds: 300, risk: RiskMedium, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20, verifier: VerifierDockerVolume},
+	// Removing a volume erases what is stored in it, so the operator types
+	// the target name before the operation starts.
+	ActionDockerVolumeRemove: {mutating: true, capability: "docker", permission: "docker.volume.remove",
+		timeoutSeconds: 300, risk: RiskDestructive, lockClass: LockContainers, requiresPlan: true,
+		maxOutputBytes: 1 << 20, verifier: VerifierDockerVolume},
+
 	// The plan changes nothing, but it runs compose on the host and fetches
 	// image metadata, so it has its own permission.
 	ActionComposePlan: {mutating: false, capability: "docker.compose",
@@ -1363,11 +1504,40 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 		}
 		return nil
 
+	case ActionNetworkLinkApply:
+		if change.Link == nil {
+			return fmt.Errorf("a layered change requires the description of the bond, the bridge or the VLAN")
+		}
+		// The shape is checked here so that an order the kernel would never
+		// take is refused before it is ever sent. Everything about the
+		// relations on the host - a member another layer owns, a parent
+		// that is not there - is the plan's answer, because only the host
+		// knows them.
+		if change.Link.Name != change.Interface && change.Interface != "" {
+			return fmt.Errorf("the layered order names the interface %q and the layer %q; they are the same interface",
+				change.Interface, change.Link.Name)
+		}
+		return network.ValidateLinkSpec(*change.Link)
+
+	case ActionNetworkLinkRemove:
+		if change.Link != nil {
+			return fmt.Errorf("a removal names the layer in the interface field; it does not describe what is about to disappear")
+		}
+		return network.ValidateInterfaceName(change.Interface)
+
 	case ActionNetworkProfileApply:
 		switch change.Method {
-		case "auto", "manual":
+		case "", "auto", "manual":
 		default:
 			return fmt.Errorf("unsupported method %q; the panel sets auto or manual", change.Method)
+		}
+		// An order that names neither family changes nothing and would
+		// still take the network lock and arm a rescue timer.
+		if change.Method == "" && change.Method6 == "" && change.AcceptRA == "" && change.Privacy == "" {
+			return fmt.Errorf("an address profile requires a method for at least one family")
+		}
+		if err := checkNetworkIPv6(change); err != nil {
+			return err
 		}
 		// The manual method without an address would leave the interface
 		// without one, and so cut the host off. That is not a configuration,
@@ -1391,6 +1561,39 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 			}
 		}
 		return nil
+	}
+	return nil
+}
+
+// checkNetworkIPv6 holds the second family to the first one's standard: a
+// method the mechanisms know, addresses with a prefix length, and a gateway
+// that may be link-local because that is how an IPv6 router announces
+// itself. Whether the host has the family at all is the plan's answer - the
+// panel cannot know it - and comes back as ipv6_disabled_on_host.
+func checkNetworkIPv6(change *NetworkPayload) error {
+	switch change.Method6 {
+	case "", "auto", "manual", "disabled":
+	default:
+		return fmt.Errorf("unsupported IPv6 method %q; the panel sets auto, manual or disabled", change.Method6)
+	}
+	if change.Method6 == "manual" && len(change.Addresses6) == 0 {
+		return fmt.Errorf("the manual IPv6 method requires at least one address")
+	}
+	for _, address := range change.Addresses6 {
+		if err := network.ValidateIPv6Address(address); err != nil {
+			return err
+		}
+	}
+	if change.Gateway6 != "" {
+		if err := network.ValidateIPv6Gateway(change.Gateway6); err != nil {
+			return fmt.Errorf("IPv6 gateway: %w", err)
+		}
+	}
+	if !network.ValidAcceptRA(change.AcceptRA) {
+		return fmt.Errorf("unsupported router advertisement setting %q; the panel sets off, on or on-forwarding", change.AcceptRA)
+	}
+	if !network.ValidPrivacy(change.Privacy) {
+		return fmt.Errorf("unsupported IPv6 privacy setting %q; the panel sets off, prefer-public or prefer-temporary", change.Privacy)
 	}
 	return nil
 }
@@ -1427,6 +1630,34 @@ func checkScheduleCommand(arguments []string) error {
 // a space or a newline ends the field early and runs the rest as root. The
 // same words as on the host, so the panel refuses what the host would; the
 // host still checks that the account exists, which only it can know.
+// checkScheduleKind judges the mechanism an entry is ordered as.
+//
+// A kind the panel does not know is refused rather than carried to a host
+// that would have to guess. An entry ordered as a timer is also checked
+// for a calendar form here: the host would refuse it anyway, and an
+// operator learns more from a refusal at ordering time than from a failed
+// job. An entry that leaves the choice to the host is not checked that
+// way - the host may well write it as cron, where the expression means
+// exactly what it says.
+func checkScheduleKind(payload *SchedulePayload) error {
+	switch payload.Kind {
+	case "", ScheduleKindCron, ScheduleKindAny:
+		return nil
+	case ScheduleKindTimer:
+		if payload.Expression == "" {
+			return nil
+		}
+		if _, err := schedules.CalendarFromCron(payload.Expression); err != nil {
+			if errors.Is(err, schedules.ErrCalendarUnsupported) {
+				return &RefusalError{Code: RefusalCalendarUnsupported, Err: err}
+			}
+			return fmt.Errorf("schedule expression: %w", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("unknown schedule kind %q: it is cron, timer, or any", payload.Kind)
+}
+
 func checkScheduleUser(name string) error {
 	if name == "" {
 		return fmt.Errorf("a schedule requires a user; root is not a default")
@@ -1632,6 +1863,127 @@ func checkPruneList(payload *DockerPrunePayload) error {
 	return nil
 }
 
+// checkDockerDeclaration checks an order about a declared object.
+//
+// The same module that reads the compact words on the host reads them
+// here, so the panel refuses exactly what the host would and names the
+// field rather than answering with a status from a daemon. What it cannot
+// decide is left to the host: whether the image exists, whether the port is
+// free, whether anything is attached to the network.
+func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) error {
+	if payload == nil {
+		return fmt.Errorf("the operation %s requires a docker_ensure payload", action)
+	}
+	described := 0
+	for _, present := range []bool{payload.Container != nil, payload.Network != nil, payload.Volume != nil} {
+		if present {
+			described++
+		}
+	}
+	if described > 1 {
+		return fmt.Errorf("an order describes one object; this one describes %d", described)
+	}
+
+	switch action {
+	case ActionDockerNetworkRemove, ActionDockerVolumeRemove:
+		// A removal names an object and describes none: there is nothing to
+		// declare about an object that is to be gone.
+		if described > 0 {
+			return fmt.Errorf("a removal names the object; it does not describe it")
+		}
+		kind := DockerKindNetwork
+		if action == ActionDockerVolumeRemove {
+			kind = DockerKindVolume
+		}
+		if payload.Kind != "" && payload.Kind != kind {
+			return fmt.Errorf("the operation %s is about a %s, not a %s", action, kind, payload.Kind)
+		}
+		if payload.Name == "" {
+			return fmt.Errorf("the operation %s names no object", action)
+		}
+	case ActionDockerContainerEnsure:
+		if payload.Container == nil {
+			return fmt.Errorf("the operation %s requires a container description", action)
+		}
+	case ActionDockerNetworkEnsure:
+		if payload.Network == nil {
+			return fmt.Errorf("the operation %s requires a network description", action)
+		}
+	case ActionDockerVolumeEnsure:
+		if payload.Volume == nil {
+			return fmt.Errorf("the operation %s requires a volume description", action)
+		}
+	case ActionDockerPlan:
+		// A plan is about a description or about a name: the plan of a
+		// removal has nothing but the name of what would go.
+		if described == 0 && payload.Name == "" {
+			return fmt.Errorf("a plan is about an object; this one names none")
+		}
+		if described == 0 && !validDockerKind(payload.Kind) {
+			return fmt.Errorf("a plan that only names an object has to say what kind it is: "+
+				"%s, %s or %s", DockerKindContainer, DockerKindNetwork, DockerKindVolume)
+		}
+	}
+
+	switch {
+	case payload.Container != nil:
+		// The references belong beside the description, where they are
+		// references and are checked as such. A description that carried
+		// them itself would be a second place to write them, and the two
+		// would disagree.
+		if len(payload.Container.EnvSecrets) > 0 {
+			return fmt.Errorf("the secrets of the variables travel beside the description, " +
+				"under env_secrets of the order")
+		}
+		for name, reference := range payload.EnvSecrets {
+			if !environmentVariable.MatchString(name) {
+				return fmt.Errorf("invalid environment variable name %q", name)
+			}
+			if err := reference.Validate(); err != nil {
+				return fmt.Errorf("the secret of %s: %w", name, err)
+			}
+		}
+		if _, err := payload.SpecWithSecrets(); err != nil {
+			return err
+		}
+	case payload.Network != nil:
+		if err := payload.Network.Validate(); err != nil {
+			return err
+		}
+	case payload.Volume != nil:
+		if err := payload.Volume.Validate(); err != nil {
+			return err
+		}
+	}
+	if len(payload.EnvSecrets) > 0 && payload.Container == nil {
+		return fmt.Errorf("only a container takes variables from the secret store")
+	}
+	// Every change here has to name the plan it was approved from. The
+	// host computes the plan once more and refuses when it moved: the
+	// operator approved one change from one base, not whatever the host
+	// happens to hold now. A plan itself carries no digest, because it is
+	// the thing that produces one.
+	if action != ActionDockerPlan && payload.PlanDigest == "" {
+		return fmt.Errorf("the operation %s requires the digest of an approved plan", action)
+	}
+	return nil
+}
+
+// validDockerKind says whether the payload names a kind of object the
+// module declares.
+func validDockerKind(kind string) bool {
+	switch kind {
+	case DockerKindContainer, DockerKindNetwork, DockerKindVolume:
+		return true
+	}
+	return false
+}
+
+// environmentVariable is a variable name a shell can carry. The module
+// checks it again on the description itself; this is for the references,
+// which live beside the description rather than in it.
+var environmentVariable = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
+
 // UnitPayload describes an operation on a systemd unit.
 type UnitPayload struct {
 	Unit string `json:"unit"`
@@ -1648,12 +2000,17 @@ type JournalPayload struct {
 	Since       string  `json:"since,omitempty"`
 	// Until ends the read, in the same forms as Since. The Logs page sets
 	// both to the window of a job, so the lines are the ones written while
-	// the operation ran and a little after; a live view ignores it.
+	// the operation ran and a little after. A live view has no end date -
+	// it ends by its own time limit - and the field is refused there
+	// rather than ignored.
 	Until string `json:"until,omitempty"`
-	// BootID narrows the read to one boot of the host, in either spelling
+	// BootID narrows the view to one boot of the host, in either spelling
 	// the kernel and the journal use; normalised before it travels. The
 	// panel sends it only to an agent whose journald adapter names the
-	// boot_filter feature, and refuses the read otherwise.
+	// boot_filter feature, and refuses the read otherwise. A live view
+	// takes it too: the running boot keeps the stream inside this life of
+	// the host, an earlier one shows its backlog and then nothing, which
+	// is the truth about a boot that has ended.
 	BootID string `json:"boot_id,omitempty"`
 	// FollowSeconds bounds the live view. Zero means the default limit; a
 	// stream without an upper bound would keep a process on the host
@@ -1662,7 +2019,7 @@ type JournalPayload struct {
 	// AfterCursor starts the read right after a journal position. The unit
 	// detail view hands over the cursor of its last line, so the Logs page
 	// continues where the detail ended instead of showing the same lines
-	// again.
+	// again. A live view starts there as well and keeps going from it.
 	AfterCursor string `json:"after_cursor,omitempty"`
 }
 
@@ -1843,6 +2200,7 @@ type Payload struct {
 	DockerPrune     *DockerPrunePayload     `json:"docker_prune,omitempty"`
 	DockerEvents    *DockerEventsPayload    `json:"docker_events,omitempty"`
 	DockerLogs      *DockerLogsPayload      `json:"docker_logs,omitempty"`
+	DockerEnsure    *DockerEnsurePayload    `json:"docker_ensure,omitempty"`
 	Compose         *ComposePayload         `json:"compose,omitempty"`
 	UnitToggle      *UnitToggle             `json:"unit_toggle,omitempty"`
 	LogFile         *LogFilePayload         `json:"logfile,omitempty"`
@@ -2292,6 +2650,26 @@ type StoragePayload struct {
 	// PlanHash binds the change to the plan computed on this host; the host
 	// computes the plan once more before the operation.
 	PlanHash string `json:"plan_hash,omitempty"`
+
+	// Array is the software array a member operation acts on, and
+	// ExpectedArrayUUID the identity out of its superblock. /dev/md0 is
+	// whichever array the kernel assembled first this boot; the UUID is the
+	// same array on every boot, so the host compares it before touching a
+	// member. The member itself travels in Device with the by-id link, the
+	// WWN and the serial above.
+	Array             string `json:"array,omitempty"`
+	ExpectedArrayUUID string `json:"expected_array_uuid,omitempty"`
+
+	// Group is the LVM volume group an operation acts in, and
+	// ExpectedGroupUUID its identity: a group name can be given to another
+	// group after a rename, a UUID cannot.
+	Group             string `json:"group,omitempty"`
+	ExpectedGroupUUID string `json:"expected_group_uuid,omitempty"`
+	// Volume is the name of the logical volume being created, and
+	// ExpectedVolumeUUID the identity of the volume an operation removes or
+	// takes a snapshot of.
+	Volume             string `json:"volume,omitempty"`
+	ExpectedVolumeUUID string `json:"expected_volume_uuid,omitempty"`
 }
 
 // FirewallPayload describes an operation on the host's firewall.
@@ -2371,13 +2749,52 @@ type NetworkPayload struct {
 	// the profile changed since planning and the change would enter a state
 	// other than the one reviewed.
 	PlanHash string `json:"plan_hash,omitempty"`
+	// The second family, ordered to the same standard as the first. It is
+	// kept apart from IPv4 on purpose: a host can take its v4 address from
+	// DHCP and hold a static v6 one at the same time, and an order that
+	// could name only one of them would leave the other to whatever was
+	// there before. An empty method leaves the family as the host has it.
+	Method6    string   `json:"method6,omitempty"`
+	Addresses6 []string `json:"addresses6,omitempty"`
+	// Gateway6 may be a link-local address: that is how an IPv6 router
+	// ordinarily announces itself, and a check written for IPv4 would
+	// refuse the normal case.
+	Gateway6 string `json:"gateway6,omitempty"`
+	// AcceptRA is off, on or on-forwarding; Privacy is off, prefer-public
+	// or prefer-temporary. A mechanism that cannot express one of them
+	// refuses the setting by name rather than approximating it.
+	AcceptRA string `json:"accept_ra,omitempty"`
+	Privacy  string `json:"privacy,omitempty"`
+	// Link is the layered interface ordered: a bond, a bridge or a VLAN
+	// with what it is made of. A removal does not use it - it names the
+	// layer in Interface - because a half-filled description of something
+	// about to disappear says nothing.
+	Link *network.LinkSpec `json:"link,omitempty"`
+	// LinkRemove marks a plan that is about a removal. The removal itself
+	// is its own operation; the plan needs the flag, because a removal is
+	// refused for the reverse of the reasons a creation is and the operator
+	// has to see those before approving.
+	LinkRemove bool `json:"link_remove,omitempty"`
 }
 
 // DescribesChange says whether the payload carries a change to plan: an MTU,
-// a list of routes or an address profile. A payload with an interface alone
-// is a question about state, not about a difference.
+// a list of routes, an address profile of either family, or a layer. A
+// payload with an interface alone is a question about state, not about a
+// difference.
 func (p NetworkPayload) DescribesChange() bool {
-	return p.Interface != "" && (p.MTU != "" || p.Routes != nil || p.Method != "")
+	if p.Link != nil || p.LinkRemove {
+		return true
+	}
+	return p.Interface != "" && (p.MTU != "" || p.Routes != nil || p.Method != "" ||
+		p.Method6 != "" || p.AcceptRA != "" || p.Privacy != "")
+}
+
+// DescribesLayer says whether the order is about the layering rather than
+// about what an interface carries. The two are planned against different
+// things - one against a profile, the other against the whole host - so the
+// question is asked before anything is read.
+func (p NetworkPayload) DescribesLayer() bool {
+	return p.Link != nil || p.LinkRemove
 }
 
 // SchedulePayload describes a scheduled job.
@@ -2404,7 +2821,30 @@ type SchedulePayload struct {
 	// Adopt allows taking over an entry found on the host. Without it the
 	// panel does not overwrite work nobody entered into the panel.
 	Adopt bool `json:"adopt,omitempty"`
+	// Kind names the mechanism a managed entry is written with: "cron" for
+	// a file in /etc/cron.d, "timer" for a pair of systemd units, "any" to
+	// leave the choice to the host, which takes cron where it has it.
+	// Empty means cron - exactly what an order carried before timers could
+	// be written, so a panel and an agent of different releases mean the
+	// same thing by the same payload.
+	Kind string `json:"kind,omitempty"`
 }
+
+// The mechanisms a managed entry can be ordered as. The names are the ones
+// the schedules module uses, so a payload and a snapshot speak one
+// vocabulary.
+const (
+	ScheduleKindCron  = "cron"
+	ScheduleKindTimer = "timer"
+	ScheduleKindAny   = "any"
+)
+
+// RefusalCalendarUnsupported refuses a cron expression that cannot be
+// written as a timer. Cron runs a job when the day of the month or the day
+// of the week matches, systemd only when both do: such an expression means
+// two different things on the two mechanisms, and the panel writes neither
+// by accident.
+const RefusalCalendarUnsupported = "timer_calendar_unsupported"
 
 // ProcessListPayload describes a snapshot of processes.
 type ProcessListPayload struct {
@@ -2474,6 +2914,104 @@ type DockerContainerPayload struct {
 type DockerImagePayload struct {
 	// Reference is the full image reference, e.g. "nginx:1.27".
 	Reference string `json:"reference"`
+}
+
+// The kinds of object a declaration is about. The plan carries the kind
+// where the payload names an object without describing it - a removal,
+// which has a name and nothing else.
+const (
+	DockerKindContainer = "container"
+	DockerKindNetwork   = "network"
+	DockerKindVolume    = "volume"
+)
+
+// DockerEnsurePayload carries the description of one declared object.
+//
+// The description travels in the order rather than as a reference to
+// something on the host: the operator approves the content they read, and
+// the payload hash binds the approval to exactly that. It is also why no
+// value of a secret is in it - the payload is stored with the job and
+// shown to whoever may read it. A variable whose value is a credential
+// names a secret of the store, and the host fetches it right before the
+// container is created.
+type DockerEnsurePayload struct {
+	// Container is the description in the words an operator writes it in -
+	// "8080:80/tcp", "volume:data:/var/lib/data:ro" - and not the engine's
+	// structures. What is approved and what is hashed is the text that was
+	// read; the module turns it into the description the engine takes, and
+	// the panel and the host do that with the same code.
+	Container *docker.ContainerRequest `json:"container,omitempty"`
+	Network   *docker.NetworkSpec      `json:"network,omitempty"`
+	Volume    *docker.VolumeSpec       `json:"volume,omitempty"`
+	// Kind and Name describe a removal, which names an object rather than
+	// describing one. A plan of a removal carries them too.
+	Kind string `json:"kind,omitempty"`
+	Name string `json:"name,omitempty"`
+	// EnvSecrets maps a container environment variable to the secret whose
+	// value it takes. The reference travels; the value never does.
+	EnvSecrets map[string]SecretRef `json:"env_secrets,omitempty"`
+	// PlanDigest binds the change to a plan. A change without it has no
+	// basis, and the registry says which operations may go without one.
+	PlanDigest string `json:"plan_digest,omitempty"`
+	// Force says the order accepts what the host would otherwise refuse:
+	// a network recreated under the containers attached to it, a volume
+	// recreated with everything in it, a removal of an object something
+	// still holds.
+	Force bool `json:"force,omitempty"`
+}
+
+// SpecWithSecrets returns the container description as it travels to the
+// host: the secret references written into it under the names of the
+// variables they feed.
+//
+// The references and not the values: the description is hashed into the
+// plan digest, recorded with the job and read back by the verifier. What
+// the reference gives is that a secret rotated to another version changes
+// the description, and a changed description is a replacement - which is
+// the only way a rotated credential ever reaches a running container.
+func (p *DockerEnsurePayload) SpecWithSecrets() (docker.ContainerSpec, error) {
+	if p == nil || p.Container == nil {
+		return docker.ContainerSpec{}, fmt.Errorf("the order carries no container description")
+	}
+	references := make(map[string]string, len(p.EnvSecrets))
+	for name, reference := range p.EnvSecrets {
+		references[name] = reference.String()
+	}
+	if len(references) == 0 {
+		references = nil
+	}
+	return p.Container.Spec(references)
+}
+
+// ObjectKind says which object the payload is about.
+func (p *DockerEnsurePayload) ObjectKind() string {
+	switch {
+	case p == nil:
+		return ""
+	case p.Container != nil:
+		return DockerKindContainer
+	case p.Network != nil:
+		return DockerKindNetwork
+	case p.Volume != nil:
+		return DockerKindVolume
+	}
+	return p.Kind
+}
+
+// ObjectName is the object the payload is about, whether it describes it
+// or only names it.
+func (p *DockerEnsurePayload) ObjectName() string {
+	switch {
+	case p == nil:
+		return ""
+	case p.Container != nil:
+		return p.Container.Name
+	case p.Network != nil:
+		return p.Network.Name
+	case p.Volume != nil:
+		return p.Volume.Name
+	}
+	return p.Name
 }
 
 // DockerPrunePayload lists the objects to remove.
@@ -2902,6 +3440,11 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
+	case ActionDockerPlan, ActionDockerContainerEnsure,
+		ActionDockerNetworkEnsure, ActionDockerVolumeEnsure,
+		ActionDockerNetworkRemove, ActionDockerVolumeRemove:
+		return checkDockerDeclaration(action, payload.DockerEnsure)
+
 	case ActionDockerPrune:
 		if payload.DockerPrune == nil {
 			return fmt.Errorf("the operation %s requires a docker_prune payload", action)
@@ -2923,7 +3466,9 @@ func Validate(action ActionType, payload Payload) error {
 		if _, err := schedules.ParseExpression(payload.Schedule.Expression); err != nil {
 			return fmt.Errorf("schedule expression: %w", err)
 		}
-		return nil
+		// A preview of a timer shows the units that would be written, so
+		// the expression has to have a calendar form at all.
+		return checkScheduleKind(payload.Schedule)
 
 	case ActionScheduleEnsure, ActionScheduleDisable, ActionScheduleRemove, ActionScheduleRunNow:
 		if payload.Schedule == nil {
@@ -2949,6 +3494,9 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("a schedule requires a command")
 		}
 		if err := checkScheduleCommand(payload.Schedule.Command); err != nil {
+			return err
+		}
+		if err := checkScheduleKind(payload.Schedule); err != nil {
 			return err
 		}
 		return checkScheduleUser(payload.Schedule.User)
@@ -3366,6 +3914,23 @@ func Validate(action ActionType, payload Payload) error {
 		return fmt.Errorf("the panel replaces ed25519, rsa or ecdsa keys, not %q", payload.SSH.KeyType)
 
 	case ActionStoragePlan:
+		// A plan is a read and needs nothing but a kind the host knows. A
+		// kind nobody wrote would travel to the host and come back as a
+		// refusal from the far end of a job; refused here, it is refused
+		// where somebody can still change it.
+		if payload.Storage != nil && payload.Storage.Plan != "" {
+			// Building or tearing down an array is outside the panel on
+			// purpose, so it is answered with that sentence and its own
+			// code rather than with "no such plan": a boundary drawn
+			// deliberately reads in the interface like a missing feature
+			// unless it says why.
+			if refusal := storage.ArrayLifecycleRefusalFor(payload.Storage.Plan); refusal != nil {
+				return &RefusalError{Code: refusal.Code, Err: refusal}
+			}
+			if !storage.KnownPlanKind(payload.Storage.Plan) {
+				return fmt.Errorf("the panel computes no plan called %q", payload.Storage.Plan)
+			}
+		}
 		return nil
 
 	case ActionStorageSmartRead:
@@ -3437,6 +4002,96 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		_, err := storage.WipeArguments(payload.Storage.Device)
 		return err
+
+	case ActionRAIDMemberFail, ActionRAIDMemberRemove, ActionRAIDMemberAdd:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		verb := storage.RAIDFail
+		switch action {
+		case ActionRAIDMemberRemove:
+			verb = storage.RAIDRemove
+		case ActionRAIDMemberAdd:
+			verb = storage.RAIDAdd
+		}
+		if _, err := storage.RAIDMemberArguments(payload.Storage.Array,
+			payload.Storage.Device, verb); err != nil {
+			return err
+		}
+		// An array is named by the UUID of its superblock. Without it the
+		// order names whichever array the kernel assembled under that path
+		// this boot, and that is not the array anybody looked at.
+		if payload.Storage.ExpectedArrayUUID == "" {
+			return &RefusalError{Code: storage.CodeArrayUnknown,
+				Err: fmt.Errorf("an array operation requires the UUID of the array; the path /dev/mdN is the order the kernel assembled them in")}
+		}
+		if payload.Storage.ExpectedByID == "" {
+			return &RefusalError{Code: "stable_identity_required",
+				Err: fmt.Errorf("an array member is named by its /dev/disk/by-id link; a path in /dev points at another device after a reboot")}
+		}
+		return nil
+
+	case ActionLVMVolumeCreate:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		if _, err := storage.LVCreateArguments(payload.Storage.Group,
+			payload.Storage.Volume, payload.Storage.Size); err != nil {
+			return err
+		}
+		return requireGroupUUID(payload.Storage)
+
+	case ActionLVMSnapshotCreate:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		if _, err := storage.SnapshotArguments(payload.Storage.Device,
+			payload.Storage.Volume, payload.Storage.Size); err != nil {
+			return err
+		}
+		return requireVolumeUUID(payload.Storage)
+
+	case ActionLVMSnapshotRemove:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		if _, err := storage.LVRemoveArguments(payload.Storage.Device); err != nil {
+			return err
+		}
+		return requireVolumeUUID(payload.Storage)
+
+	case ActionLVMVolumeRemove:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		if _, err := storage.LVRemoveArguments(payload.Storage.Device); err != nil {
+			return err
+		}
+		// Deleting a volume destroys what was on it, so it binds to the same
+		// two identities a format does: the volume's own UUID and the
+		// device-mapper link the kernel publishes for it.
+		if payload.Storage.ExpectedByID == "" {
+			return &RefusalError{Code: "stable_identity_required",
+				Err: fmt.Errorf("deleting a volume requires its stable identity (its /dev/disk/by-id link); a volume path is a name another volume can carry tomorrow")}
+		}
+		return requireVolumeUUID(payload.Storage)
+
+	case ActionLVMGroupExtend:
+		if payload.Storage == nil {
+			return fmt.Errorf("the operation %s requires a storage payload", action)
+		}
+		if _, err := storage.VGExtendArguments(payload.Storage.Group,
+			payload.Storage.Device); err != nil {
+			return err
+		}
+		// Adding a disk to a group writes an LVM label over it: the same
+		// loss as a format for whatever the disk carried, and the same
+		// requirement of a stable identity.
+		if payload.Storage.ExpectedByID == "" {
+			return &RefusalError{Code: "stable_identity_required",
+				Err: fmt.Errorf("adding a disk to a group requires the stable identity of the disk (its /dev/disk/by-id link); the size is not an identity")}
+		}
+		return requireGroupUUID(payload.Storage)
 
 	case ActionFirewallPlan:
 		return nil
@@ -3525,6 +4180,15 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionNetworkPlan:
+		// A plan of a layered change is checked for shape here as well: the
+		// panel refuses a VLAN identifier of 5000 rather than sending the
+		// whole fleet on a walk to find out.
+		if payload.Network != nil && payload.Network.Link != nil {
+			return network.ValidateLinkSpec(*payload.Network.Link)
+		}
+		if payload.Network != nil && payload.Network.LinkRemove {
+			return network.ValidateInterfaceName(payload.Network.Interface)
+		}
 		return nil
 
 	case ActionNetworkRollback:
@@ -3533,12 +4197,22 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return nil
 
-	case ActionNetworkMTUSet, ActionNetworkRouteEnsure, ActionNetworkProfileApply:
+	case ActionNetworkMTUSet, ActionNetworkRouteEnsure, ActionNetworkProfileApply,
+		ActionNetworkLinkRemove:
 		if payload.Network == nil {
 			return fmt.Errorf("the operation %s requires a network payload", action)
 		}
 		if !interfaceName.MatchString(payload.Network.Interface) {
 			return fmt.Errorf("invalid interface name %q", payload.Network.Interface)
+		}
+		return checkNetworkChange(action, payload.Network)
+
+	// A layered order names the layer in the description, and the interface
+	// field repeats it: the panel shows the operator one name and the host
+	// writes one name.
+	case ActionNetworkLinkApply:
+		if payload.Network == nil || payload.Network.Link == nil {
+			return fmt.Errorf("the operation %s requires the description of the layer", action)
 		}
 		return checkNetworkChange(action, payload.Network)
 
@@ -3676,8 +4350,12 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Journal.FollowSeconds > maxFollowSeconds {
 			return fmt.Errorf("a live view must not last longer than %d s", maxFollowSeconds)
 		}
-		if payload.Journal.BootID != "" {
-			return fmt.Errorf("a live view has one boot, the current one; boot_id is a filter of journal.read")
+		// A live view takes the narrowing a read takes, so watching a unit
+		// and reading it are the same question asked twice. Only the end of
+		// the range has no meaning here: a stream ends by its own limit,
+		// and an "until" in the past would close it before the first line.
+		if payload.Journal.Until != "" {
+			return fmt.Errorf("a live view has no end date; it ends by its own time limit, so until belongs to journal.read")
 		}
 		return validateJournalPayload(payload.Journal)
 
@@ -3722,6 +4400,28 @@ var protectedAccounts = map[string]bool{
 
 func protectedAccount(name string) bool {
 	return protectedAccounts[name]
+}
+
+// requireGroupUUID insists that an order acting inside a volume group
+// names the group by its UUID. A group name is a label: after a rename it
+// belongs to another group, and the consent the operator gave would travel
+// to it.
+func requireGroupUUID(payload *StoragePayload) error {
+	if payload.ExpectedGroupUUID == "" {
+		return &RefusalError{Code: storage.CodeVolumeUnknown,
+			Err: fmt.Errorf("an operation inside a volume group requires the UUID of the group; the name alone is a label")}
+	}
+	return nil
+}
+
+// requireVolumeUUID insists that an order acting on a logical volume names
+// it by its UUID, for the same reason.
+func requireVolumeUUID(payload *StoragePayload) error {
+	if payload.ExpectedVolumeUUID == "" {
+		return &RefusalError{Code: storage.CodeVolumeUnknown,
+			Err: fmt.Errorf("an operation on a logical volume requires the UUID of the volume; the path is a name another volume can carry tomorrow")}
+	}
+	return nil
 }
 
 // validateExpiryDate accepts a calendar date the way chage takes it. A date

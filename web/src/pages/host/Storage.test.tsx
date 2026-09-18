@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { byIdName, destructiveRefusal, deviceInUse, hasStableIdentity, identity, mountRows, mountpointWords } from "./Storage";
+import {
+  byIdName, carriesData, destructiveRefusal, deviceInUse, hasStableIdentity, identity, isSnapshot,
+  memberRefusal, mountRows, mountpointWords,
+} from "./Storage";
 
 /* The table folds a filesystem mounted twice at one point into one row,
    a disk whose partitions are in use is not offered for formatting, and a
@@ -76,5 +79,71 @@ describe("destructiveRefusal", () => {
       device: "/dev/sdb", expected_by_id: "/dev/disk/by-id/ata-VBOX_HARDDISK_VB1", expected_wwn: "", expected_serial: "VB1", expected_uuid: "",
     });
     expect(payload).not.toHaveProperty("expected_size_bytes");
+  });
+});
+
+/* The array rows: what the panel offers on a member and what it refuses
+   before the host is asked. The rule is the host's own - an array without
+   a UUID binds nothing, a member without a by-id link binds nothing, and a
+   member that still carries data is not taken out of an array that has
+   nothing left to lose. */
+
+const healthy = {
+  name: "md0", path: "/dev/md0", uuid: "aaaa:bbbb:cccc:dddd", level: "raid1", state: "clean",
+  raid_devices: 2, active_devices: 2, working_devices: 2, failed_devices: 0, spare_devices: 0,
+  degraded: false, redundant: true,
+};
+const member = { path: "/dev/sdb1", role: "active", by_id: "/dev/disk/by-id/ata-VB1", slot: 0 };
+
+describe("memberRefusal", () => {
+  it("offers a member of a healthy redundant array", () => {
+    expect(memberRefusal(healthy, member, true)).toBeNull();
+  });
+
+  it("refuses an array the host gave no UUID", () => {
+    const nameless = { ...healthy, uuid: undefined, detail_unavailable_reason: "this host has no mdadm" };
+    expect(memberRefusal(nameless, member, true)).toEqual({
+      code: "array_unknown", reason: "this host has no mdadm",
+    });
+  });
+
+  it("refuses a member without a stable identity", () => {
+    const nameless = { ...member, by_id: undefined, identity_unavailable_reason: "no link" };
+    expect(memberRefusal(healthy, nameless, true)).toEqual({
+      code: "stable_identity_required", reason: "no link",
+    });
+  });
+
+  it("refuses to spend the last copy of the data", () => {
+    expect(memberRefusal({ ...healthy, level: "raid0", redundant: false }, member, true)?.code)
+      .toBe("array_redundancy_lost");
+    expect(memberRefusal({ ...healthy, degraded: true, active_devices: 1 }, member, true)?.code)
+      .toBe("array_redundancy_lost");
+    expect(memberRefusal({ ...healthy, sync_action: "recovery" }, member, true)?.code)
+      .toBe("array_rebuilding");
+  });
+
+  it("lets a spare go from an array that has nothing to lose by it", () => {
+    const spare = { ...member, role: "spare" };
+    expect(carriesData(spare)).toBe(false);
+    expect(memberRefusal({ ...healthy, degraded: true }, spare, carriesData(spare))).toBeNull();
+  });
+});
+
+describe("carriesData", () => {
+  it("counts the roles that hold a copy and no others", () => {
+    expect(carriesData({ path: "/dev/sdb1", role: "active" })).toBe(true);
+    expect(carriesData({ path: "/dev/sdb1", role: "rebuilding" })).toBe(true);
+    expect(carriesData({ path: "/dev/sdb1", role: "faulty" })).toBe(false);
+    expect(carriesData({ path: "", role: "removed" })).toBe(false);
+  });
+});
+
+describe("isSnapshot", () => {
+  it("reads the origin and the first letter of lv_attr", () => {
+    expect(isSnapshot({ name: "snap", group: "vg0", path: "/dev/vg0/snap", size_bytes: 1, origin: "data" })).toBe(true);
+    expect(isSnapshot({ name: "snap", group: "vg0", path: "/dev/vg0/snap", size_bytes: 1, attributes: "swi-a-s---" })).toBe(true);
+    expect(isSnapshot({ name: "data", group: "vg0", path: "/dev/vg0/data", size_bytes: 1, attributes: "-wi-ao----" })).toBe(false);
+    expect(isSnapshot({ name: "data", group: "vg0", path: "/dev/vg0/data", size_bytes: 1 })).toBe(false);
   });
 });

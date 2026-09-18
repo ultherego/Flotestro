@@ -842,7 +842,62 @@ message TaskEnvelope {
     HostnameSet hostname_set = 58;
     DomainLeave domain_leave = 59;
     KeytabRenew keytab_renew = 60;
+    // A declared container, network or volume: the plan of one, or the
+    // change that brings the host to it.
+    DockerEnsureAction docker_ensure = 61;
   }
+}
+
+// DockerEnsureAction orders the plan of a declared object or the change
+// that brings the host to it.
+//
+// The description travels as the order's own JSON rather than as the
+// engine's request body: the panel wrote it, the operator approved it and
+// the payload hash covers it, so the agent hands on exactly what was
+// approved instead of assembling something else out of fields. The module
+// of the containers owns that shape; the agent contract does not repeat
+// it.
+message DockerEnsureAction {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    // The plan alone: what stands on the host, what is to stand there and
+    // what the change would do. It touches nothing.
+    OPERATION_PLAN = 1;
+    OPERATION_CONTAINER_ENSURE = 2;
+    OPERATION_NETWORK_ENSURE = 3;
+    OPERATION_NETWORK_REMOVE = 4;
+    OPERATION_VOLUME_ENSURE = 5;
+    OPERATION_VOLUME_REMOVE = 6;
+  }
+  Operation operation = 1;
+  // Kind is container, network or volume; name is the object a removal or
+  // a plan of one is about. A description carries its own name, and this
+  // pair is what an order without a description has instead.
+  string kind = 2;
+  string name = 3;
+  // The description of the object, in the words of the containers module.
+  // Empty for a removal, which names an object and describes none.
+  bytes spec = 4;
+  // The digest of the approved plan. The host computes the plan again
+  // right before the change and refuses with stale_plan when it moved.
+  string plan_digest = 5;
+  // Force says the order accepts what the host would otherwise refuse: a
+  // network recreated under the containers attached to it, a volume
+  // recreated with everything in it, a removal of an object something
+  // still holds.
+  bool force = 6;
+  // The variables whose value comes from the panel's secret store, by
+  // variable name. The reference travels; the value is fetched by the
+  // agent right before the container is created and is in no record.
+  map<string, SecretRef> env_secrets = 7;
+}
+
+// DockerEnsureResult carries the plan or the outcome in JSON form. The
+// structure belongs to the containers module; the agent contract does not
+// repeat it.
+message DockerEnsureResult {
+  bytes payload = 1;
+  string unavailable_reason = 2;
 }
 
 // RefreshInventory orders a fresh read of the inventory.
@@ -1371,6 +1426,7 @@ message TaskResult {
   // was found. Absent on a read, on a refusal and on a result from an
   // agent from before the field.
   Verification verification = 54;
+  DockerEnsureResult docker_ensure_result = 55;
 }
 
 // Verification is the read of the host after a change, compared with what
@@ -1711,6 +1767,11 @@ message ScheduleAction {
   string comment = 6;
   bool enabled = 7;
   bool adopt = 8;
+  // Kind names the mechanism a managed entry is written with: "cron" for a
+  // file in /etc/cron.d, "timer" for a pair of systemd units, "any" to let
+  // the host pick the one it has. Empty means cron, which is what the
+  // panels from before the timers ordered.
+  string kind = 9;
 }
 
 message ScheduleResult {
@@ -1736,6 +1797,11 @@ message NetworkAction {
     // The change plan computed on the host without touching the
     // configuration.
     OPERATION_PLAN = 7;
+    // A layered interface built or changed, and one taken away: a bond, a
+    // bridge or a VLAN. The host refuses a layer its mechanism cannot
+    // express rather than writing half of one.
+    OPERATION_APPLY_LINK = 8;
+    OPERATION_REMOVE_LINK = 9;
   }
   Operation operation = 1;
   string interface = 2;
@@ -1750,6 +1816,44 @@ message NetworkAction {
   // The fingerprint of the plan approved by the operator; the host computes
   // it once more.
   string plan_hash = 11;
+  // The second family, ordered to the same standard as the first: its own
+  // method, addresses with their prefix length, a default gateway that may
+  // be link-local, and the router advertisement and privacy switches. An
+  // empty method leaves the family as the host has it.
+  string method6 = 12;
+  repeated string addresses6 = 13;
+  string gateway6 = 14;
+  string accept_ra = 15;
+  string privacy = 16;
+  // The layering ordered by OPERATION_APPLY_LINK, and by OPERATION_PLAN
+  // when the plan is about a layer.
+  NetworkLink link = 17;
+  // LinkRemove marks the plan of a removal; the removal itself names the
+  // interface in the interface field.
+  bool link_remove = 18;
+}
+
+// NetworkLink describes a layered interface: a bond, a bridge or a VLAN.
+// It is the target state of one link, never the steps to reach it.
+message NetworkLink {
+  string name = 1;
+  // Kind is bond, bridge or vlan.
+  string kind = 2;
+  repeated string members = 3;
+  // The bond settings. MiimonMs zero switches the link monitoring off,
+  // which is a decision and not a missing value.
+  string mode = 4;
+  uint32 miimon_ms = 5;
+  string primary = 6;
+  string lacp_rate = 7;
+  // The bridge settings.
+  bool stp = 8;
+  bool vlan_filtering = 9;
+  // The VLAN settings.
+  string parent = 10;
+  uint32 vlan_id = 11;
+  string protocol = 12;
+  string mtu = 13;
 }
 
 message NetworkResult {
@@ -1864,6 +1968,26 @@ message StorageAction {
     // The SMART health and attributes of one device. A read; it changes
     // nothing and takes no lock.
     OPERATION_SMART_READ = 11;
+    // 12 is the helper's own read of the arrays, which the panel never
+    // orders directly: the agent assembles the picture and sends it with
+    // every storage read. The numbers are kept parallel with the helper's
+    // enum so the two tables read against each other.
+    reserved 12;
+    // The member operations of a software array that exists. Creating an
+    // array and destroying one are deliberately absent: that is a decision
+    // about a machine's whole disk layout, taken when the machine is built,
+    // not an operation run over a running fleet.
+    OPERATION_RAID_MEMBER_FAIL = 13;
+    OPERATION_RAID_MEMBER_REMOVE = 14;
+    OPERATION_RAID_MEMBER_ADD = 15;
+    // LVM beyond growing a volume: a new volume in an existing group, a new
+    // disk under a group, a snapshot and its removal, and the removal of a
+    // volume, which deletes what stood on it.
+    OPERATION_LVM_LV_CREATE = 16;
+    OPERATION_LVM_LV_REMOVE = 17;
+    OPERATION_LVM_VG_EXTEND = 18;
+    OPERATION_LVM_SNAPSHOT_CREATE = 19;
+    OPERATION_LVM_SNAPSHOT_REMOVE = 20;
   }
   Operation operation = 1;
   string source = 2;
@@ -1892,6 +2016,19 @@ message StorageAction {
   // description, never an identity.
   string expected_by_id = 16;
   string expected_wwn = 17;
+  // The software array a member operation acts on, and the identity out of
+  // its superblock: the one name of an array that means the same array
+  // after a reboot. The member itself travels in device.
+  string array = 18;
+  string expected_array_uuid = 19;
+  // The LVM volume group an operation acts in, and its identity. A group
+  // name is a label another group can carry after a rename.
+  string group = 20;
+  string expected_group_uuid = 21;
+  // The name of the logical volume being created, and the identity of the
+  // volume an operation removes or takes a snapshot of.
+  string volume = 22;
+  string expected_volume_uuid = 23;
 }
 
 message StorageResult {
@@ -2372,6 +2509,15 @@ message FollowJournal {
   // begins.
   uint32 backlog_lines = 3;
   uint32 follow_seconds = 4;
+  // The narrowing a read has, so that watching a unit and reading it are
+  // the same question asked twice. Since moves the start of the backlog,
+  // after_cursor continues a read from the position it ended at, and
+  // boot_id keeps the view inside one boot of the host - the running one
+  // while the host is up, an earlier one showing its backlog and nothing
+  // after it. There is no "until": a live view ends by its own limit.
+  string since = 5;
+  string after_cursor = 6;
+  string boot_id = 7;
 }
 
 // ReadLogFile reads a log file from the host allowlist.

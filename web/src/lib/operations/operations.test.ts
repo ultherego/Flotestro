@@ -38,8 +38,10 @@ const CAMPAIGN_ACTIONS = [
   "certificate.deploy", "certificate.renew", "certificate.trust.ensure", "certificate.trust.remove",
   "mount.ensure", "mount.remove", "filesystem.check", "filesystem.resize", "lvm.extend",
   "network.profile.apply", "network.route.ensure", "network.mtu.set", "dns.host.apply",
+  "network.link.apply", "network.link.remove",
   "firewall.rule.ensure", "firewall.rule.remove", "firewall.zone.port", "firewall.zone.service",
   "ssh.config.apply", "time.config.apply", "docker.compose.deploy", "kernel.module.blacklist",
+  "docker.container.ensure", "docker.network.ensure", "docker.volume.ensure",
   "system.hostname.set",
   // their own state machine
   "system.reboot", "identity.host.enroll", "packages.repair",

@@ -211,6 +211,10 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 			return mutating("network.profile", opspec.ActionNetworkProfileApply)
 		case helperv1.NetworkRequest_OPERATION_ROLLBACK:
 			return mutating("network.rollback", opspec.ActionNetworkRollback)
+		case helperv1.NetworkRequest_OPERATION_APPLY_LINK:
+			return mutating("network.link", opspec.ActionNetworkLinkApply)
+		case helperv1.NetworkRequest_OPERATION_REMOVE_LINK:
+			return mutating("network.link.remove", opspec.ActionNetworkLinkRemove)
 		}
 		return mutating("network.unknown")
 	case *helperv1.HelperRequest_Dns:
@@ -239,7 +243,8 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	case *helperv1.HelperRequest_Storage:
 		switch action.Storage.GetOperation() {
 		case helperv1.StorageRequest_OPERATION_READ_LVM, helperv1.StorageRequest_OPERATION_MOUNT_PLAN,
-			helperv1.StorageRequest_OPERATION_DEVICE_PLAN, helperv1.StorageRequest_OPERATION_SMART_READ:
+			helperv1.StorageRequest_OPERATION_DEVICE_PLAN, helperv1.StorageRequest_OPERATION_SMART_READ,
+			helperv1.StorageRequest_OPERATION_READ_RAID:
 			return read("storage.read")
 		case helperv1.StorageRequest_OPERATION_MOUNT_ENSURE:
 			return mutating("mount.ensure", opspec.ActionMountEnsure)
@@ -255,6 +260,22 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 			return mutating("filesystem.create", opspec.ActionFilesystemCreate)
 		case helperv1.StorageRequest_OPERATION_DISK_WIPE:
 			return mutating("disk.wipe", opspec.ActionDiskWipe)
+		case helperv1.StorageRequest_OPERATION_RAID_MEMBER_FAIL:
+			return mutating("raid.member.fail", opspec.ActionRAIDMemberFail)
+		case helperv1.StorageRequest_OPERATION_RAID_MEMBER_REMOVE:
+			return mutating("raid.member.remove", opspec.ActionRAIDMemberRemove)
+		case helperv1.StorageRequest_OPERATION_RAID_MEMBER_ADD:
+			return mutating("raid.member.add", opspec.ActionRAIDMemberAdd)
+		case helperv1.StorageRequest_OPERATION_LVM_LV_CREATE:
+			return mutating("lvm.volume.create", opspec.ActionLVMVolumeCreate)
+		case helperv1.StorageRequest_OPERATION_LVM_LV_REMOVE:
+			return mutating("lvm.volume.remove", opspec.ActionLVMVolumeRemove)
+		case helperv1.StorageRequest_OPERATION_LVM_VG_EXTEND:
+			return mutating("lvm.group.extend", opspec.ActionLVMGroupExtend)
+		case helperv1.StorageRequest_OPERATION_LVM_SNAPSHOT_CREATE:
+			return mutating("lvm.snapshot.create", opspec.ActionLVMSnapshotCreate)
+		case helperv1.StorageRequest_OPERATION_LVM_SNAPSHOT_REMOVE:
+			return mutating("lvm.snapshot.remove", opspec.ActionLVMSnapshotRemove)
 		}
 		return mutating("storage.unknown")
 	case *helperv1.HelperRequest_Ssh:

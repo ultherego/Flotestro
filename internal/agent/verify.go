@@ -563,6 +563,12 @@ func (e *TaskExecutor) observe(ctx context.Context, verifier opspec.Verifier, in
 		return verifyImagePresent(ctx, readers, in)
 	case opspec.VerifierComposeServices:
 		return verifyComposeServices(ctx, readers, in)
+	case opspec.VerifierContainerSpec:
+		return verifyContainerSpec(ctx, readers, in)
+	case opspec.VerifierDockerNetwork:
+		return verifyDockerNetwork(ctx, readers, in)
+	case opspec.VerifierDockerVolume:
+		return verifyDockerVolume(ctx, readers, in)
 	case opspec.VerifierBackupRun:
 		return verifyBackupRun(ctx, readers, in)
 	case opspec.VerifierRestoreTarget:

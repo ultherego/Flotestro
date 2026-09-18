@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
-import type { Job } from "../../lib/types";
+import type { Capabilities, Job } from "../../lib/types";
 import { Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
 import {
@@ -18,6 +18,10 @@ type Schedule = {
   source: string;
   enabled: boolean;
   expression: string;
+  // The OnCalendar expression a timer really runs by. A timer the panel
+  // wrote keeps the cron expression it was ordered with above; this is
+  // what systemd was told, so both are visible at once.
+  calendar?: string;
   command?: string[];
   command_line?: string;
   user?: string;
@@ -32,31 +36,88 @@ type Schedule = {
   comment?: string;
 };
 
+/** One unit file of a timer's plan: where it goes and what is in it. */
+export type UnitFile = { path: string; content: string };
+
 /** The answer of schedule.preview: the next runs computed on the host. */
-type Preview = {
+export type Preview = {
   expression?: string;
   timezone?: string;
   next_runs?: string[];
   error?: string;
+  // The plan of a timer: the calendar expression the cron line becomes and
+  // the two units that would be written. Absent for a cron entry, which is
+  // one line in one file and needs no plan to be readable.
+  calendar?: string;
+  units?: UnitFile[];
 };
 
 /** The preview as the panel types it from the result of the agent. */
-type PreviewDetail = { kind?: string; expression?: string; timezone?: string; runs?: string[]; error?: string };
+export type PreviewDetail = {
+  kind?: string;
+  expression?: string;
+  timezone?: string;
+  runs?: string[];
+  error?: string;
+  calendar?: string;
+  units?: UnitFile[];
+};
 
-type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string; detail?: PreviewDetail };
+export type Attempt = { status?: string; error_code?: string; message?: string; stdout?: string; detail?: PreviewDetail };
 
 /**
  * The preview of an attempt: typed from the result when the panel has read
  * it, otherwise the document the agent prints on stdout. An agent from
  * before the typed result prints only stdout, so it stays the fallback for
  * one release; drop it together with the support for those agents.
+ *
+ * The plan of a timer is taken from the document where the typed result
+ * does not carry it yet: a panel newer than the control plane it talks to
+ * still shows the operator what would be written.
  */
-function previewOf(attempt: Attempt): Preview {
+export function previewOf(attempt: Attempt): Preview {
+  const printed = readDocument(attempt.stdout);
   const detail = attempt.detail;
   if (detail?.kind === "schedule_preview") {
-    return { expression: detail.expression, timezone: detail.timezone, next_runs: detail.runs, error: detail.error };
+    return {
+      expression: detail.expression,
+      timezone: detail.timezone,
+      next_runs: detail.runs,
+      error: detail.error,
+      calendar: detail.calendar ?? printed.calendar,
+      units: detail.units ?? printed.units,
+    };
   }
-  return JSON.parse(attempt.stdout ?? "{}") as Preview;
+  return printed;
+}
+
+/** The preview document of the agent, or nothing readable. */
+function readDocument(stdout?: string): Preview {
+  try {
+    return JSON.parse(stdout ?? "{}") as Preview;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The mechanisms this host can carry a managed entry with.
+ *
+ * Cron and systemd timers are two mechanisms of one thing, and the host
+ * says in its schedules adapter which of them it has. A timer is offered
+ * only where the adapter names managed_timers: an agent from before the
+ * feature reads the host's timers but writes none, and it would ignore the
+ * kind and write a cron entry under the name of a timer. Silence is what
+ * such an agent says, so silence means cron - which is what every order
+ * meant then.
+ */
+export function scheduleKinds(capabilities: Capabilities | undefined): string[] {
+  const adapter = (capabilities ?? []).find((capability) => capability.name === "schedules");
+  if (!adapter?.available) return [];
+  const kinds: string[] = [];
+  if (adapter.features?.cron !== false) kinds.push("cron");
+  if (adapter.features?.managed_timers === true) kinds.push("timer");
+  return kinds;
 }
 
 type Snapshot = {
@@ -173,6 +234,7 @@ export function Schedules() {
           <NewEntry
             hostId={host.id}
             online={host.connection_state === "online"}
+            kinds={scheduleKinds(host.capabilities)}
             onRequest={(payload) =>
               request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
             }
@@ -208,8 +270,16 @@ export function Schedules() {
                       </span>
                     )}
                   </td>
+                  {/* A timer the panel wrote shows both: the expression the
+                      operator typed and what systemd was told, which are
+                      the same schedule in two languages. */}
                   <td className="hm-mono">
                     {entry.expression || <span className="badge unknown">{t("event-based")}</span>}
+                    {entry.calendar && entry.calendar !== entry.expression && (
+                      <span className="source" title={t("The calendar expression systemd runs it by")}>
+                        {" "}· {entry.calendar}
+                      </span>
+                    )}
                     {entry.timezone && <span className="source"> · {entry.timezone}</span>}
                   </td>
                   {/* The next run, and the two after it: the rhythm of the
@@ -336,16 +406,31 @@ function command(entry: Schedule): string {
   return entry.command_line || (entry.command ?? []).join(" ");
 }
 
+/** What a mechanism is called on screen. */
+export function kindLabel(kind: string, t: (text: string) => string): string {
+  switch (kind) {
+    case "cron":
+      return t("a cron entry");
+    case "timer":
+      return t("a systemd timer");
+    case "any":
+      return t("whichever the host has");
+  }
+  return kind;
+}
+
 /**
  * The new entry form. The command is an argument list, not a shell line: we
  * split it on whitespace and show the operator what really lands on the
  * host.
  */
 function NewEntry({
-  hostId, online, onRequest,
+  hostId, online, kinds, onRequest,
 }: {
   hostId: string;
   online: boolean;
+  /** The mechanisms this host can carry an entry with, the first preferred. */
+  kinds: string[];
   onRequest: (payload: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -354,17 +439,24 @@ function NewEntry({
   const [commandLine, setCommandLine] = useState("");
   const [user, setUser] = useState("root");
   const [comment, setComment] = useState("");
+  // The mechanism is a decision of the order and it stays visible: the
+  // host's preferred one to begin with, "any" only where there is a choice
+  // to leave to the host.
+  const choices = kinds.length > 1 ? [...kinds, "any"] : kinds;
+  const [kind, setKind] = useState(kinds[0] ?? "cron");
   const [previewError, setPreviewError] = useState("");
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
 
   // The next runs come from the host, not from the browser: the browser
   // knows neither the host's zone nor its clock, and a preview in the
-  // wrong zone would show the entry running at the wrong hour.
+  // wrong zone would show the entry running at the wrong hour. The order
+  // travels with it, so a timer's plan comes back as well: the operator
+  // reads the two units before they are on the host.
   const preview = useMutation({
     mutationFn: async (spec: string) => {
       const job = await api.post<Job>(`/api/v1/hosts/${hostId}/operations`, {
         action: "schedule.preview",
-        payload: { schedule: { expression: spec } },
+        payload: { schedule: { expression: spec, kind, id, user, command: args } },
       });
       for (let attempt = 0; attempt < 20; attempt++) {
         await new Promise((done) => setTimeout(done, 1500));
@@ -393,6 +485,22 @@ function NewEntry({
           </Field>
           <Field label={t("Cron expression")} narrow>
             <input placeholder={t("Cron expression")} value={expression} onChange={(e) => setExpression(e.target.value)} />
+          </Field>
+          {/* One expression, two mechanisms: the operator writes cron and
+              the host writes it as a cron entry or as the pair of units of
+              a timer. Which one it was stays visible in the entry. */}
+          <Field
+            label={t("Written as")}
+            narrow
+            help={t("A cron entry is one file in /etc/cron.d; a timer is a .timer and a .service unit under /etc/systemd/system. The expression is the same either way.")}
+          >
+            <select value={kind} onChange={(e) => setKind(e.target.value)}>
+              {choices.map((choice) => (
+                <option key={choice} value={choice}>
+                  {kindLabel(choice, t)}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label={t("Run as user")} narrow>
             <input placeholder={t("Run as user")} value={user} onChange={(e) => setUser(e.target.value)} />
@@ -426,6 +534,20 @@ function NewEntry({
             )}
           </FormNote>
         )}
+        {/* The plan of a timer: what systemd is told, and the two files
+            that would land on the host. Nothing is written until the
+            operator asks for it, and they read it first. */}
+        {shown?.calendar && (
+          <FormNote>
+            {t("As a timer it runs on {calendar}.", { calendar: shown.calendar })}
+          </FormNote>
+        )}
+        {(shown?.units ?? []).map((unit) => (
+          <FormNote key={unit.path}>
+            <span className="hm-mono">{unit.path}</span>
+            <pre className="hm-mono">{unit.content}</pre>
+          </FormNote>
+        ))}
         <FormActions>
           <ActionGuard action="schedule.preview" host={hostId} explain>
             <button
@@ -440,6 +562,7 @@ function NewEntry({
             onClick={() =>
               onRequest({
                 id,
+                kind,
                 expression,
                 command: args,
                 user,

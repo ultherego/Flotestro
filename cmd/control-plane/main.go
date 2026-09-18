@@ -278,6 +278,13 @@ func run() error {
 	relayIdentityValue := flag.String("relay-identity",
 		config.Env("FLOTESTRO_RELAY_IDENTITY", ""),
 		"a relayed session without the host's certificate: observe, prefer (the default) or enforce")
+	// How strictly a campaign order is held to the preview it was placed
+	// from: observe records the difference, prefer refuses an order whose
+	// preview no longer describes what the order resolves, enforce also
+	// refuses an order placed without a preview at all.
+	campaignPreviewValue := flag.String("campaign-preview",
+		config.Env("FLOTESTRO_CAMPAIGN_PREVIEW", ""),
+		"how a campaign order is held to its preview: observe, prefer (the default) or enforce")
 	stepUpTokens := flag.String("stepup-tokens",
 		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
@@ -615,6 +622,14 @@ func run() error {
 	agentService.SetRelayIdentityMode(relayIdentity)
 	log.Info("a relayed session without the host's certificate is handled by mode",
 		"relay_identity", string(relayIdentity))
+	// A word other than the three is a misconfiguration: an installation
+	// that meant to enforce the binding must not start observing it.
+	campaignPreview, err := campaigns.ParsePreviewMode(*campaignPreviewValue)
+	if err != nil {
+		return fmt.Errorf("FLOTESTRO_CAMPAIGN_PREVIEW: %w", err)
+	}
+	log.Info("a campaign order is held to its preview by mode",
+		"campaign_preview", string(campaignPreview))
 
 	// The key that signs the root helper's capabilities lies in the state
 	// directory next to the CA key and the secret store key, and nowhere
@@ -795,6 +810,7 @@ func run() error {
 			StepUpMaxAge:           *stepUpMaxAge,
 			StepUpACR:              *stepUpACR,
 			StepUpRefuseTokens:     *stepUpTokens == "refuse",
+			CampaignPreview:        campaignPreview,
 			// The metric of the validity of the CA is to show the signing CA,
 			// after an exchange as well, so it reads the whole trust set.
 			// The relay buffers come from the heartbeats the registry keeps in
@@ -997,6 +1013,16 @@ func run() error {
 		// A host whose owner stopped renewing - an instance that died
 		// without releasing it - is forgotten by its row on the same
 		// clock; the token stays, so the dead instance's writes stay refused.
+		// A preview nobody ordered from is of no use to anybody once it has
+		// been expired long enough that the refusal "already used" no
+		// longer helps: a day after it stopped standing.
+		Also("campaign previews", func(ctx context.Context) error {
+			swept, err := campaignStore.SweepPreviews(ctx, time.Now().Add(-24*time.Hour))
+			if swept > 0 {
+				log.Info("spent campaign previews were removed", "previews", swept)
+			}
+			return err
+		}).
 		Also("session owners", func(ctx context.Context) error {
 			swept, err := jobStore.SweepExpiredOwners(ctx)
 			if swept > 0 {

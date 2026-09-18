@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { bootFilterSupport, bootParam, findMatches, jobWindow, logFileName, splitMatches, utcStamp } from "./Logs";
+import {
+  bootFilterSupport, bootParam, droppedNotice, findMatches, followPayload, jobWindow,
+  logFileName, splitMatches, utcStamp,
+} from "./Logs";
 import type { Attempt, Capabilities, Job } from "../../lib/types";
 
 /* The window of a job is what the journal read is bounded to; it is
@@ -135,5 +138,47 @@ describe("bootParam", () => {
     expect(bootParam("yesterday")).toBe("");
     expect(bootParam("")).toBe("");
     expect(bootParam(null)).toBe("");
+  });
+});
+
+/* A live view is the same question as a read, asked in the present: it
+   takes the same narrowing and no end date. What it could not carry is
+   counted and said out loud. */
+
+describe("followPayload", () => {
+  it("carries the unit, the severity, the start of the range, the cursor and the boot", () => {
+    expect(
+      followPayload({
+        unit: "sshd.service", priority: "4", since: "2026-09-15 10:00:00 UTC",
+        cursor: "s=abc;i=1", boot: "2cd1131243654fe6b49ee4d704ea2c5a",
+      }),
+    ).toEqual({
+      unit: "sshd.service",
+      lines: 50,
+      max_priority: 4,
+      follow_seconds: 300,
+      since: "2026-09-15 10:00:00 UTC",
+      after_cursor: "s=abc;i=1",
+      boot_id: "2cd1131243654fe6b49ee4d704ea2c5a",
+    });
+  });
+
+  it("leaves out what was not narrowed, and never carries an end date", () => {
+    const payload = followPayload({});
+    expect(payload).toEqual({
+      unit: undefined, lines: 50, max_priority: undefined, follow_seconds: 300,
+      since: undefined, after_cursor: undefined, boot_id: undefined,
+    });
+    expect(payload).not.toHaveProperty("until");
+  });
+});
+
+describe("droppedNotice", () => {
+  it("says how many lines the view could not carry", () => {
+    expect(droppedNotice(12, t)).toContain("{n} lines were dropped while you watched");
+  });
+
+  it("says nothing when nothing was lost", () => {
+    expect(droppedNotice(0, t)).toBe("");
   });
 });

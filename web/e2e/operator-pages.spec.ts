@@ -447,7 +447,9 @@ test.describe("notifications", () => {
     } else {
       await expect(newChannel).toHaveCount(0);
     }
-    await expect(card(page, "Delivery log")).toBeVisible();
+    // The log became a queue: a delivery is a durable row with a state,
+    // and the card says so.
+    await expect(card(page, "Delivery queue")).toBeVisible();
     await expectHealthy(page, errors);
   });
 });

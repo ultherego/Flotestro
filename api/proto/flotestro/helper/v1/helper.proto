@@ -89,6 +89,11 @@ message HelperRequest {
     // an empty keyring is taken on trust at enrollment; every later one
     // has to be signed by a key the helper already trusts.
     HelperTrustUpdateRequest trust_update = 55;
+    // A declared container, network or volume: the plan of one, or the
+    // change that brings the host to it. Separate from DockerActionRequest,
+    // whose operations name one object and do one thing to it; this one
+    // carries a description and computes the difference itself.
+    DockerEnsureRequest docker_ensure = 56;
   }
   // Progress of a long operation. A client that does not ask for it gets
   // one answer as before - an older agent must not take a progress message
@@ -450,6 +455,47 @@ message HelperResponse {
   // The capability the helper verified for this answer; empty for a
   // request that carried none.
   string capability_id = 45;
+  DockerEnsureResult docker_ensure_result = 46;
+}
+
+// DockerEnsureRequest carries the description of one declared object and
+// what is to happen to it.
+//
+// The description comes in the body as the containers module writes it,
+// not as a ready Engine API request: the helper runs as root and reads the
+// description with the module's own code, which refuses what the panel
+// refuses. The secret values come in beside it and are in no record.
+message DockerEnsureRequest {
+  enum Operation {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_PLAN = 1;
+    OPERATION_CONTAINER_ENSURE = 2;
+    OPERATION_NETWORK_ENSURE = 3;
+    OPERATION_NETWORK_REMOVE = 4;
+    OPERATION_VOLUME_ENSURE = 5;
+    OPERATION_VOLUME_REMOVE = 6;
+  }
+  Operation operation = 1;
+  // Kind is container, network or volume; name is the object a removal or
+  // a plan of one is about.
+  string kind = 2;
+  string name = 3;
+  bytes spec = 4;
+  // The hash of the approved plan. The helper computes the plan again
+  // under its own lock and refuses with stale_plan when it moved.
+  string plan_digest = 5;
+  bool force = 6;
+  // The values of the variables the description names as secrets, by
+  // variable name. They live for the moment of the call and reach neither
+  // the journal nor the result.
+  map<string, bytes> env_values = 7;
+}
+
+message DockerEnsureResult {
+  // The plan or the outcome in JSON form. The structure belongs to the
+  // containers module; the helper contract does not repeat it.
+  bytes payload = 1;
+  string unavailable_reason = 2;
 }
 
 // SystemRequest names the facts of the system module the helper is to
@@ -546,6 +592,11 @@ message ScheduleRequest {
   // Taking over an entry found on the host. Without it the panel does not
   // overwrite work nobody brought into the panel.
   bool adopt = 8;
+  // Kind names the mechanism a managed entry is written with: "cron" for a
+  // file in /etc/cron.d, "timer" for a pair of systemd units, "any" to let
+  // the host pick the one it has. Empty means cron, so a panel from before
+  // the timers orders exactly what it ordered before.
+  string kind = 9;
 }
 
 message ScheduleResult {
@@ -576,8 +627,16 @@ message NetworkRequest {
     // The change plan without touching the host: the difference between the
     // found and the requested profile. The helper recognises the kind of
     // change by the fields: method names an address profile, routes the
-    // routes, mtu the MTU alone.
+    // routes, mtu the MTU alone, link the layering.
     OPERATION_PLAN = 7;
+    // A layered interface: a bond, a bridge or a VLAN built or changed,
+    // and one taken away. They are separate from a profile change because
+    // the mechanisms write them differently - one adds an interface to the
+    // document, the other takes an entry out of it - and because a
+    // mechanism that cannot express a bond has to refuse rather than write
+    // half of one.
+    OPERATION_APPLY_LINK = 8;
+    OPERATION_REMOVE_LINK = 9;
   }
   Operation operation = 1;
   // The interface the change concerns. The helper finds the NetworkManager
@@ -601,6 +660,61 @@ message NetworkRequest {
   // fingerprint means the host changed since planning and the change would
   // enter a state other than the one looked at.
   string plan_hash = 12;
+  // The second family, held to the same standard as the first: a method of
+  // its own, addresses with their prefix length, a default gateway that
+  // may be link-local, and the two switches the mechanisms expose. An
+  // empty method leaves the family as the host has it.
+  string method6 = 13;
+  repeated string addresses6 = 14;
+  string gateway6 = 15;
+  // AcceptRa is off, on or on-forwarding; privacy is off, prefer-public or
+  // prefer-temporary. A mechanism that cannot express one of them refuses
+  // the setting by name instead of quietly leaving it out.
+  string accept_ra = 16;
+  string privacy = 17;
+  // The layering ordered by OPERATION_APPLY_LINK, and by OPERATION_PLAN
+  // when the plan is about a layer.
+  NetworkLink link = 18;
+  // LinkRemove marks the plan of a removal. The removal itself is its own
+  // operation and names the interface in the interface field; the plan
+  // needs the flag, because a removal is refused for the reverse of the
+  // reasons a creation is and the operator has to see those first.
+  bool link_remove = 19;
+  // The address the host reaches the panel from, as the agent knows it.
+  // The helper marks the management interface from it and refuses a layer
+  // that would swallow it. The helper does not guess this: a wrong guess
+  // here ends with the host enslaving the interface the order arrived
+  // through.
+  string management_address = 20;
+}
+
+// NetworkLink describes a layered interface: a bond, a bridge or a VLAN.
+//
+// It is the target state of one link, never the commands to reach it: the
+// same description is what the plan compares against, what the mechanism
+// writes and what the verifier reads back.
+message NetworkLink {
+  string name = 1;
+  // Kind is bond, bridge or vlan.
+  string kind = 2;
+  // The interfaces the bond or the bridge is built from. A VLAN has none:
+  // its one lower interface is the parent.
+  repeated string members = 3;
+  // The bond settings. MiimonMs zero means the link monitoring is off,
+  // which is a decision and not a missing value.
+  string mode = 4;
+  uint32 miimon_ms = 5;
+  string primary = 6;
+  string lacp_rate = 7;
+  // The bridge settings.
+  bool stp = 8;
+  bool vlan_filtering = 9;
+  // The VLAN settings.
+  string parent = 10;
+  uint32 vlan_id = 11;
+  string protocol = 12;
+  // Mtu is text, because auto is an equal value here.
+  string mtu = 13;
 }
 
 message NetworkResult {
@@ -749,6 +863,26 @@ message StorageRequest {
     // The SMART health and attributes of the named device. A read that
     // takes no guard.
     OPERATION_SMART_READ = 11;
+    // The software arrays of the host: the kernel's own list out of
+    // /proc/mdstat completed with what the superblock carries. The detail
+    // needs root, which is why the read is here; it takes no guard,
+    // because it changes nothing.
+    OPERATION_READ_RAID = 12;
+    // The member operations of an array that exists. Creating an array and
+    // destroying one are deliberately absent: that is a decision about a
+    // machine's whole disk layout, taken when the machine is built, not an
+    // operation run over a running fleet.
+    OPERATION_RAID_MEMBER_FAIL = 13;
+    OPERATION_RAID_MEMBER_REMOVE = 14;
+    OPERATION_RAID_MEMBER_ADD = 15;
+    // LVM beyond growing a volume: a new volume in an existing group, a new
+    // disk under a group, a snapshot and its removal, and the removal of a
+    // volume, which deletes what stood on it.
+    OPERATION_LVM_LV_CREATE = 16;
+    OPERATION_LVM_LV_REMOVE = 17;
+    OPERATION_LVM_VG_EXTEND = 18;
+    OPERATION_LVM_SNAPSHOT_CREATE = 19;
+    OPERATION_LVM_SNAPSHOT_REMOVE = 20;
   }
   Operation operation = 1;
   string source = 2;
@@ -788,6 +922,21 @@ message StorageRequest {
   // identity.
   string expected_by_id = 16;
   string expected_wwn = 17;
+  // The software array a member operation acts on, and the identity out of
+  // its superblock. /dev/md0 is whichever array the kernel assembled first
+  // this boot; the UUID is the same array on every boot, so the helper
+  // compares it under the storage guard before touching a member. The
+  // member travels in device with the by-id link above.
+  string array = 18;
+  string expected_array_uuid = 19;
+  // The LVM volume group an operation acts in, and its identity: a group
+  // name can be given to another group after a rename, a UUID cannot.
+  string group = 20;
+  string expected_group_uuid = 21;
+  // The name of the logical volume being created, and the identity of the
+  // volume an operation removes or takes a snapshot of.
+  string volume = 22;
+  string expected_volume_uuid = 23;
 }
 
 message StorageResult {

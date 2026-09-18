@@ -213,7 +213,7 @@ func readClaims(action ActionType) []ResourceClaim {
 	case ActionReadJournal, ActionFollowJournal, ActionReadLogFile, ActionDockerEvents:
 		claims = append(claims, ResourceClaim{Class: ClaimLogsRead, Mode: ClaimShared, Weight: 1})
 	case ActionProcessList, ActionDockerRead, ActionInventoryRefresh, ActionSecurityScan,
-		ActionCertificateScan, ActionStoragePlan, ActionPackageList:
+		ActionCertificateScan, ActionStoragePlan, ActionPackageList, ActionDockerPlan:
 		claims = append(claims, ResourceClaim{Class: ClaimInventoryHeavy, Mode: ClaimShared, Weight: 1})
 	}
 	sort.Slice(claims, func(i, j int) bool { return claims[i].Class < claims[j].Class })
@@ -286,7 +286,14 @@ var contracts = map[ActionType]contract{
 	ActionNetworkRouteEnsure:  {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkMTUSet:       {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkRollback:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyConnectivity},
-	ActionDNSHostApply:        {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
+	// A layered change goes under the same watchdog as an address change,
+	// because it is the more dangerous of the two: enslaving a member takes
+	// its addressing away at once. The verification is the connectivity
+	// proof plus the layering read back - a bond that came up with one of
+	// its two members is not the bond that was approved.
+	ActionNetworkLinkApply:  {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
+	ActionNetworkLinkRemove: {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
+	ActionDNSHostApply:      {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 
 	// The firewall, the same way: the ruleset is replaced atomically under a
 	// watchdog, and restoring a ruleset is the rollback itself.
@@ -307,7 +314,29 @@ var contracts = map[ActionType]contract{
 	ActionLVMExtend:        {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyPlanRecheck, weight: 3},
 	ActionFilesystemResize: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyPlanRecheck, weight: 3},
 	ActionFilesystemCreate: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
-	ActionDiskWipe:         {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, weight: 3},
+	ActionDiskWipe:         {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
+
+	// Software RAID. Marking a member bad and taking it out are undone by
+	// putting a member back and waiting for the rebuild - that is a
+	// compensating change, never an exact restore, because the data on the
+	// member is written again from the others. Adding a member overwrites
+	// the device, so there is nothing to put back and no blind repeat.
+	ActionRAIDMemberFail:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionRAIDMemberRemove: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionRAIDMemberAdd:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
+
+	// LVM. A volume or a snapshot that was created is undone by removing
+	// it, which is a compensating change and a decision of its own; a
+	// removed volume and a disk taken into a group have no way back at all.
+	// None of them is repeated blind: lvcreate run twice makes a second
+	// volume, so the group is read back first and the plan computed again
+	// from what it says - and the check is that read, not the plan, because
+	// the size LVM really gave is rounded up to whole extents.
+	ActionLVMVolumeCreate:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionLVMVolumeRemove:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
+	ActionLVMGroupExtend:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
+	ActionLVMSnapshotCreate: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionLVMSnapshotRemove: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
 
 	// sshd. The configuration goes in as a staged drop-in under a watchdog
 	// that keeps the login path; a host key rotation is a change of
@@ -444,6 +473,19 @@ var contracts = map[ActionType]contract{
 	ActionDockerPull:    {cancel: CancelSafe, retry: RetryAutomatic, rollback: RollbackBestEffort, verify: VerifyCustom, weight: 3},
 	ActionDockerPrune:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, weight: 2},
 	ActionComposeDeploy: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyCustom, weight: 3},
+
+	// Declared objects. A container that differs is replaced, so there is
+	// no way back to the container that stood there - the way back is the
+	// previous description, declared again, which is a change of its own.
+	// A repeat is safe only after the plan was computed again: the host it
+	// would run on is no longer the host the plan described. A declared
+	// network or volume that was created is undone by removing it, which
+	// is a compensating change; a removal frees what is gone.
+	ActionDockerContainerEnsure: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
+	ActionDockerNetworkEnsure:   {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionDockerNetworkRemove:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
+	ActionDockerVolumeEnsure:    {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
+	ActionDockerVolumeRemove:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
 }
 
 // KnownCancelMode checks that the mode is one of the registry's.

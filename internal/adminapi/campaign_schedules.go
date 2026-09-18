@@ -324,6 +324,11 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 	// One moment places one order: a second pass over the same moment -
 	// two panels, a retried tick - gets the campaign already placed.
 	request.IdempotencyKey = fmt.Sprintf("schedule:%s:%d", schedule.ID, runAt.Unix())
+	// A schedule places its order at a moment nobody is watching, so there
+	// is no preview behind it. A token stored with the order when the
+	// schedule was created would describe a fleet of weeks ago; the order
+	// carries none and is checked, host by host, the way it always is.
+	request.PreviewID, request.PreviewDigest = "", ""
 
 	actor := *author
 	actor.Subject = "schedule:" + schedule.ID
@@ -337,7 +342,7 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 
 	answer := &caughtAnswer{header: http.Header{}}
 	if _, ok := s.authorizeCollection(answer, inner, authz.PermCampaignCreate, "campaign"); ok {
-		s.orderCampaign(answer, inner, request, "")
+		s.orderCampaign(answer, inner, request, "", true)
 	}
 	if answer.status >= http.StatusBadRequest {
 		refusal := answer.refusal()

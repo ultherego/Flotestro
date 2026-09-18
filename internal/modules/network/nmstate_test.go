@@ -217,8 +217,9 @@ func TestNmstateProfileDocumentSetsAddressesGatewayAndResolver(t *testing.T) {
 	state, _ := ParseNmstateState([]byte(nmstateYAML))
 	current, _ := state.Profile("enp0s8")
 
-	plan := ComputeProfile("enp0s8", current, "manual", []string{"192.168.56.41/24"},
-		"192.168.56.2", []string{"192.168.56.51"})
+	plan := ComputeProfile("enp0s8", current, ProfileRequest{Method: "manual",
+		Addresses: []string{"192.168.56.41/24"}, Gateway: "192.168.56.2",
+		DNS: []string{"192.168.56.51"}}, IPv6Settings{})
 	document, err := NmstateDocument(PlanProfile, current, *plan.Desired)
 	if err != nil {
 		t.Fatal(err)

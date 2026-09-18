@@ -55,6 +55,42 @@ type DevicePlan struct {
 	DesiredFSType string `json:"desired_fs_type,omitempty"`
 	DesiredLabel  string `json:"desired_label,omitempty"`
 
+	// The LVM identity a volume operation binds to. A group and a volume
+	// are known by their UUID: a name can be given to another group or
+	// another volume tomorrow, and a plan that named one by name would
+	// carry the consent over to whatever holds the name at execution time.
+	GroupUUID  string `json:"group_uuid,omitempty"`
+	VolumeName string `json:"volume_name,omitempty"`
+	VolumeUUID string `json:"volume_uuid,omitempty"`
+	// OriginName and OriginUUID name the volume a snapshot is taken of.
+	OriginName string `json:"origin_name,omitempty"`
+	OriginUUID string `json:"origin_uuid,omitempty"`
+	// ExtentSizeBytes is the grain the group allocates in, and
+	// RequestedBytes what the order asks for once it is read as a number of
+	// bytes. A request smaller than one extent becomes one extent, and the
+	// plan says so rather than surprising the operator with the size after.
+	ExtentSizeBytes uint64 `json:"extent_size_bytes,omitempty"`
+	RequestedBytes  uint64 `json:"requested_bytes,omitempty"`
+
+	// The array identity a member operation binds to. The UUID out of the
+	// superblock is the only name of an array that survives a reboot;
+	// /dev/md0 is whichever array the kernel assembled first.
+	Array          string `json:"array,omitempty"`
+	ArrayUUID      string `json:"array_uuid,omitempty"`
+	ArrayLevel     string `json:"array_level,omitempty"`
+	ArrayState     string `json:"array_state,omitempty"`
+	ArrayDegraded  bool   `json:"array_degraded,omitempty"`
+	ArrayRedundant bool   `json:"array_redundant,omitempty"`
+	ArraySync      string `json:"array_sync,omitempty"`
+	RaidDevices    int    `json:"raid_devices,omitempty"`
+	ActiveDevices  int    `json:"active_devices,omitempty"`
+	SpareDevices   int    `json:"spare_devices,omitempty"`
+	// MemberRole is what the array thinks the member is now, and
+	// RedundancyAfter what the array is left with once the change lands -
+	// the sentence the operator is really approving.
+	MemberRole      string `json:"member_role,omitempty"`
+	RedundancyAfter string `json:"redundancy_after,omitempty"`
+
 	Refusal string `json:"refusal,omitempty"`
 	// RefusalCode is the typed code of the refusal where one exists:
 	// stable_identity_required, disk_changed, disk_in_use. A refusal
@@ -71,12 +107,48 @@ const (
 	PlanFormat   = "format"
 	PlanWipe     = "wipe"
 
+	// The LVM operations beyond growing a volume: a new volume in an
+	// existing group, a new disk under a group, a snapshot and its removal,
+	// and the removal of a volume, which deletes everything on it.
+	PlanLVCreate       = "lvm_lv_create"
+	PlanLVRemove       = "lvm_lv_remove"
+	PlanVGExtend       = "lvm_vg_extend"
+	PlanSnapshotCreate = "lvm_snapshot_create"
+	PlanSnapshotRemove = "lvm_snapshot_remove"
+
+	// The member operations of a software array. Creating and destroying an
+	// array is deliberately not among them: that is a decision about a
+	// machine's whole disk layout, taken once when the machine is built,
+	// not an operation on a running fleet.
+	PlanRAIDMemberFail   = "raid_member_fail"
+	PlanRAIDMemberRemove = "raid_member_remove"
+	PlanRAIDMemberAdd    = "raid_member_add"
+
 	PlanRun = "run"
 )
 
+// KnownPlanKind says whether the panel knows a plan by that name.
+//
+// A plan kind the host does not know would come back as a refusal from the
+// far end of a job. Refusing it where it is typed says the same thing
+// earlier and to the person who can fix it.
+func KnownPlanKind(kind string) bool {
+	switch kind {
+	case PlanCheck, PlanFSResize, PlanLVExtend, PlanFormat, PlanWipe,
+		PlanLVCreate, PlanLVRemove, PlanVGExtend, PlanSnapshotCreate, PlanSnapshotRemove,
+		PlanRAIDMemberFail, PlanRAIDMemberRemove, PlanRAIDMemberAdd:
+		return true
+	}
+	return false
+}
+
 // Destructive says whether the plan kind loses the data on the device.
+//
+// Removing a logical volume belongs here: the extents go back to the group
+// and the filesystem on them is gone, which is the same loss as a format
+// and gets the same treatment - two approvals and the target typed out.
 func Destructive(kind string) bool {
-	return kind == PlanFormat || kind == PlanWipe
+	return kind == PlanFormat || kind == PlanWipe || kind == PlanLVRemove || kind == PlanVGExtend
 }
 
 // ComputeCheck computes an fsck plan.

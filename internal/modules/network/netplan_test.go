@@ -165,7 +165,11 @@ func TestNetplanRouteListKeepsTheGateway(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(document, "to: default") || !strings.Contains(document, "via: 192.168.56.1") {
+	// The default route is written with the destination of its own family
+	// rather than the word "default", which netplan reads from the family
+	// of the gateway: on a host with both families that word would make a
+	// v6 default route look like a v4 one.
+	if !strings.Contains(document, "to: "+defaultRouteIPv4) || !strings.Contains(document, "via: 192.168.56.1") {
 		t.Errorf("the route list dropped the gateway: %s", document)
 	}
 	if !strings.Contains(document, "to: 10.8.0.0/24") || strings.Contains(document, "10.9.0.0/24") {
@@ -188,8 +192,9 @@ func TestNetplanRouteListKeepsTheGateway(t *testing.T) {
 func TestNetplanProfileDocumentSetsAddressesAndGateway(t *testing.T) {
 	config, _ := ParseNetplan(netplanGetOutput)
 	current, _ := config.Profile("enp0s8")
-	plan := ComputeProfile("enp0s8", current, "manual", []string{"192.168.56.61/24"},
-		"192.168.56.2", []string{"192.168.56.51"})
+	plan := ComputeProfile("enp0s8", current, ProfileRequest{Method: "manual",
+		Addresses: []string{"192.168.56.61/24"}, Gateway: "192.168.56.2",
+		DNS: []string{"192.168.56.51"}}, IPv6Settings{})
 	document, err := NetplanManagedDocument("", config, "enp0s8", PlanProfile, current, *plan.Desired)
 	if err != nil {
 		t.Fatal(err)
@@ -208,7 +213,8 @@ func TestNetplanProfileDocumentSetsAddressesAndGateway(t *testing.T) {
 
 	old, _ := MergeNetplanDocuments(netplanCloudInit, netplanVagrant)
 	oldCurrent, _ := old.Profile("enp0s8")
-	plan = ComputeProfile("enp0s8", oldCurrent, "manual", []string{"192.168.56.61/24"}, "192.168.56.2", nil)
+	plan = ComputeProfile("enp0s8", oldCurrent, ProfileRequest{Method: "manual",
+		Addresses: []string{"192.168.56.61/24"}, Gateway: "192.168.56.2"}, IPv6Settings{})
 	document, err = NetplanManagedDocument("", old, "enp0s8", PlanProfile, oldCurrent, *plan.Desired)
 	if err != nil {
 		t.Fatal(err)
