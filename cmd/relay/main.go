@@ -99,6 +99,12 @@ func configCommand(args []string) error {
 		fmt.Printf("network names:   %s\n", strings.Join(cfg.Relay.AdvertisedNames, ", "))
 		fmt.Printf("state directory: %s\n", cfg.Relay.StateDir)
 		fmt.Printf("buffer (bytes):  %d\n", cfg.Buffer())
+		spoolDir, spoolOptions := spoolSettings(cfg)
+		fmt.Printf("spool:           %s\n", spoolDir)
+		fmt.Printf("spool (bytes):   %d, reserve %d, free floor %d\n",
+			spoolOptions.MaxBytes, spoolOptions.CriticalReserveBytes, spoolOptions.MinFreeBytes)
+		fmt.Printf("spool ack:       %s, at most %d in flight per host\n",
+			spoolOptions.AckTimeout, spoolOptions.MaxInflightPerHost)
 		fmt.Printf("enrollment:      %s\n", cfg.Upstream.EnrollmentURL)
 		fmt.Printf("gateways:        %s\n", strings.Join(cfg.Upstream.GatewayURLs, ", "))
 		return nil
@@ -219,6 +225,13 @@ func runCommand(args []string, log *slog.Logger) error {
 
 	live := relay.NewLive(identity)
 	gateway := cfg.Upstream.GatewayURLs[0]
+	// The spool before anything else: a relay that cannot write its spool
+	// must not take the messages of the site, because it would lose them
+	// at the first break of the link.
+	spoolDir, spoolOptions := spoolSettings(cfg)
+	if err := prepareSpoolDir(spoolDir); err != nil {
+		return err
+	}
 	// The state file is what the tool on the machine reads: whether the
 	// relay reaches the centre, how full its buffer is and when its
 	// certificate ends. Written from the first moment, so that a relay that
@@ -227,10 +240,10 @@ func runCommand(args []string, log *slog.Logger) error {
 	state.Update(func(s *ctl.RelayState) {
 		s.Gateway = gateway
 		s.Listen = cfg.Relay.Listen
-		s.BufferMaxBytes = cfg.Buffer()
+		s.BufferMaxBytes = spoolOptions.MaxBytes
 		s.CertificateNotAfter = identity.NotAfter
 	})
-	proxy := relay.New(relay.Options{
+	proxy, err := relay.New(relay.Options{
 		UpstreamURL:  gateway,
 		UpstreamURLs: cfg.Upstream.GatewayURLs,
 		// The enrollment address enables the mediation of registrations. In an
@@ -239,9 +252,23 @@ func runCommand(args []string, log *slog.Logger) error {
 		EnrollmentURL: cfg.Upstream.EnrollmentURL,
 		Identity:      identity.Certificate,
 		TrustPool:     identity.CAPool,
-		BufferBytes:   int(cfg.Buffer()),
+		SpoolDir:      spoolDir,
+		Spool:         spoolOptions,
 		Log:           log,
 	})
+	if err != nil {
+		return err
+	}
+	// The spool is flushed and closed on the way out: what the relay took
+	// and has not sent on is on disk when the process ends.
+	defer func() {
+		if err := proxy.Close(); err != nil {
+			log.Error("the spool was not closed cleanly", "err", err)
+		}
+	}()
+	// What waits in the spool at the start is the backlog of the site, and
+	// the operator has to see it before anything else the relay logs.
+	logSpoolBacklog(log, spoolDir, spoolOptions, readSpoolBacklog(proxy, spoolDir))
 	// A host has no certificate before its registration, so the handshake
 	// must not demand one. Every RPC other than the registration checks it
 	// separately.
@@ -294,7 +321,7 @@ func runCommand(args []string, log *slog.Logger) error {
 	}
 	log.Info("the relay is listening", "address", cfg.Relay.Listen,
 		"centre", proxy.Gateway(), "gateways", len(cfg.Upstream.GatewayURLs),
-		"buffer_bytes", cfg.Buffer())
+		"spool", spoolDir, "spool_max_bytes", spoolOptions.MaxBytes)
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- server.ServeTLS(listener, "", "") }()

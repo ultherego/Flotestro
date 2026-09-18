@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ultherego/flotestro/internal/jobs"
+	"github.com/ultherego/flotestro/internal/opspec"
 )
 
 // TestTheRebootJudgementFollowsTheWindowThenTheTimeout guards the
@@ -243,5 +244,54 @@ func TestTheRebootFollowsThePolicyAndTheResult(t *testing.T) {
 	}
 	if rebootNeeded(Campaign{RebootPolicy: RebootIfRequired}, nil) {
 		t.Error("a task without a result got a reboot")
+	}
+}
+
+// TestOnlyAConfirmedChangeCarriesTheHostForward guards what chapter 1 of
+// the functional review asks for: a task that says succeeded settles the
+// host succeeded only once the host's own reading after the change showed
+// the state that was ordered. A verification that failed leaves the host
+// applied_unverified with the verifier's reason, and an operation that has
+// no verifier of its own - or one the panel settles on the host's return -
+// is not held back by a verification it was never going to send.
+func TestOnlyAConfirmedChangeCarriesTheHostForward(t *testing.T) {
+	verified := &jobs.Attempt{Verification: json.RawMessage(
+		`{"verifier":"unit_state","verified":true,"expected":"active","observed":"active"}`)}
+	failed := &jobs.Attempt{Verification: json.RawMessage(
+		`{"verifier":"unit_state","verified":false,"expected":"active","observed":"failed",` +
+			`"reason":"the unit did not stay active"}`)}
+	bare := &jobs.Attempt{Verification: json.RawMessage(
+		`{"verifier":"unit_state","verified":false,"expected":"active","observed":"failed"}`)}
+
+	if reason := unverifiedChange(opspec.ActionUnitRestart, verified); reason != "" {
+		t.Errorf("a confirmed change was held back: %s", reason)
+	}
+	reason := unverifiedChange(opspec.ActionUnitRestart, failed)
+	if reason == "" {
+		t.Fatal("a change nobody observed was taken for a success")
+	}
+	if !strings.Contains(reason, "the unit did not stay active") {
+		t.Errorf("the reason of the verifier was dropped: %s", reason)
+	}
+	// A verifier that gave no reason still has to say what it looked for
+	// and what it found: the operator reads the strip, not the code.
+	if said := unverifiedChange(opspec.ActionUnitRestart, bare); !strings.Contains(said, "active") ||
+		!strings.Contains(said, "failed") {
+		t.Errorf("the observation says nothing: %s", said)
+	}
+	// A read is its own observation, a restart is settled by the panel on
+	// the host's return, and an attempt from an agent before the verifiers
+	// sends none at all: none of the three is a failed verification.
+	if reason := unverifiedChange(opspec.ActionUnitStatus, failed); reason != "" {
+		t.Errorf("an operation without a verifier was held back: %s", reason)
+	}
+	if reason := unverifiedChange(opspec.ActionSystemReboot, failed); reason != "" {
+		t.Errorf("an operation the panel settles was held back: %s", reason)
+	}
+	if reason := unverifiedChange(opspec.ActionUnitRestart, &jobs.Attempt{}); reason != "" {
+		t.Errorf("an attempt without a verification was held back: %s", reason)
+	}
+	if reason := unverifiedChange(opspec.ActionUnitRestart, nil); reason != "" {
+		t.Errorf("a task without an attempt was held back: %s", reason)
 	}
 }

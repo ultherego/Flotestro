@@ -111,6 +111,56 @@ export function cancelAckLine(job: { cancel_outcome?: string; cancel_phase?: str
   }
 }
 
+/**
+ * The host's reading of itself after a change, as the attempt carries it:
+ * which verifier of the contract looked, whether it saw the state the
+ * order asked for, what it expected, what it found, and why it did not
+ * match. An attempt without one reported none - a read, an operation the
+ * panel settles on the host's return, or an agent from before the
+ * verifiers - which is not the same as a change nobody confirmed.
+ */
+export type Verification = {
+  verifier?: string;
+  verified?: boolean;
+  expected?: string;
+  observed?: string;
+  reason?: string;
+};
+
+/** The attempt as the page reads it: the collection type plus the verification. */
+type AttemptDetail = Attempt & { verification?: Verification; output_truncated?: boolean };
+
+/**
+ * The verification in one line: the verifier, what it expected, what it
+ * observed, and the reason when the two differ. The words come from the
+ * host - a state word, a digest, a version - and a field the host left
+ * empty reads as unknown rather than as an empty string, because an
+ * unread state is not an empty one.
+ */
+export function verificationLine(verification: Verification,
+  t: (key: string, params?: Record<string, string | number>) => string): string {
+  const said = (value: string | undefined) => (value && value.trim() ? value : t("unknown"));
+  const head = t("{verifier}: expected {expected}, observed {observed}", {
+    verifier: said(verification.verifier),
+    expected: said(verification.expected),
+    observed: said(verification.observed),
+  });
+  if (verification.verified) return head;
+  return verification.reason ? `${head} — ${verification.reason}` : head;
+}
+
+/**
+ * The sentence a job carries when the change was made and the state was
+ * not observed. It is said in full words rather than by the code alone:
+ * applied_unverified is not a failure to change the host, and an operator
+ * reading "failed" alone would repeat a change that already happened.
+ */
+export function appliedUnverifiedNote(job: { result_error_code?: string },
+  t: (key: string) => string): string {
+  if (job.result_error_code !== "applied_unverified") return "";
+  return t("The change was made and the host did not show the state that was ordered. Read the host before ordering again: repeating the operation would repeat a change that already happened.");
+}
+
 /** Whether a JSON value says anything: an order without preconditions carries an empty object or nothing. */
 export function hasContent(value: unknown): boolean {
   const text = prettyJSON(value);
@@ -174,6 +224,12 @@ export function JobPage() {
   const planHash = (planned?.detail?.plan_hash as string | undefined) || plan?.plan_hash;
   const report = progress.get(id);
   const fields = payloadPairs(data.payload);
+  // The verifications of the job, in the order of the attempts that made
+  // them. A retried job has one per attempt, and they may differ: the
+  // reason the first one gives is what the operator is looking for.
+  const verifications = (attempts.data?.items ?? [])
+    .map((item) => ({ attempt: item.id, verification: (item as AttemptDetail).verification }))
+    .filter((entry): entry is { attempt: string; verification: Verification } => !!entry.verification);
 
   return (
     <>
@@ -319,6 +375,27 @@ export function JobPage() {
             <Pair label={t("Result")}>{data.result_status || "—"}</Pair>
             <Pair label={t("Error code")}>{data.result_error_code ? <ErrorCode code={data.result_error_code} /> : "—"}</Pair>
             <Pair label={t("Message")}>{data.result_message || "—"}</Pair>
+            {/* The host's own reading of itself after the change, one line
+                per attempt that made one: only that reading turns a change
+                into a success, so it stands with the result and not in a
+                corner of the output. */}
+            <Pair label={t("Verification")}>
+              {verifications.length === 0 ? (
+                <span className="source">{t("The host reported no verification for this operation.")}</span>
+              ) : (
+                verifications.map(({ attempt, verification }) => (
+                  <div key={attempt}>
+                    <span className={verification.verified ? "badge ok" : "badge error"}>
+                      {verification.verified ? t("observed") : t("not observed")}
+                    </span>{" "}
+                    <span className="mono">{verificationLine(verification, t)}</span>
+                  </div>
+                ))
+              )}
+              {appliedUnverifiedNote(data, t) && (
+                <div className="warning">{appliedUnverifiedNote(data, t)}</div>
+              )}
+            </Pair>
             <Pair label={t("Payload hash")}><span className="mono" style={{ wordBreak: "break-all" }}>{data.payload_hash}</span></Pair>
           </Pairs>
         </Card>
@@ -421,10 +498,18 @@ export function JobPage() {
                   {attempt.accepted_at && <> · {t("accepted")} <Time value={attempt.accepted_at} /></>}
                   {attempt.started_at && <> · {t("started")} <Time value={attempt.started_at} /></>}
                   {attempt.finished_at && <> · {t("finished")} <Time value={attempt.finished_at} /></>}
-                  {(attempt as Attempt & { output_truncated?: boolean }).output_truncated && (
+                  {(attempt as AttemptDetail).output_truncated && (
                     <> · <span className="badge warn">{t("output cut by the host at its limit")}</span></>
                   )}
                 </div>
+                {/* The reading the host made after this attempt's change,
+                    next to the attempt that made it. */}
+                {(attempt as AttemptDetail).verification && (
+                  <div className="source">
+                    {t("verification")}:{" "}
+                    {verificationLine((attempt as AttemptDetail).verification as Verification, t)}
+                  </div>
+                )}
                 {attempt.stdout && (
                   <Output label="stdout" text={attempt.stdout} filename={outputFilename(data.id, attempt.attempt_number, "stdout")} />
                 )}

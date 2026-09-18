@@ -30,6 +30,17 @@ import (
 // a new Hello.
 const StatusAfterReplacement = "agent_upgrade_in_flight"
 
+// StatusAwaitingReturn marks a result there is no point in sending back
+// because the operation's verifier is the host coming up again: a restart.
+//
+// The host was told to go down and accepted; from that moment nothing on
+// it can observe the state the operator asked for, because the observer
+// goes down with the machine. A result sent now would say "succeeded" over
+// the exit code of the scheduling - the same exit code a host that never
+// comes back produces. The task therefore stays open and the panel settles
+// it on the next Hello, from the boot identifier the host brings.
+const StatusAwaitingReturn = "reboot_in_flight"
+
 // StatusInProgress marks the answer to a redelivery of an operation this
 // process is still carrying out. The answer went out already, as a progress
 // report with the stage StageInProgress, and a result with this code is
@@ -175,6 +186,10 @@ type TaskExecutor struct {
 	// host. It fills the answer for a package operation whose outcome is
 	// unknown; nil means the answer carries no package facts.
 	packageState PackageStateProbe
+	// verifyReaders are the reads the verifiers observe the host through
+	// after a change. Nil means they have not been assembled yet: the real
+	// ones are built on first use, and a test puts its own host here.
+	verifyReaders *hostReaders
 }
 
 // SecretFetch reaches for the value of the secret named in the task.
@@ -864,9 +879,18 @@ func unitDetailToAgent(detail systemd.UnitDetail) *agentv1.UnitDetail {
 	}
 }
 
-// rebootHost orders a restart through the helper. The result is sent back
-// before the host disappears: the delay on the helper side leaves time for
-// that.
+// rebootHost orders a restart through the helper.
+//
+// No result is sent back: the verifier of the operation is the host coming
+// up on another boot identifier, and the process that would observe it
+// goes down with the machine. An answer saying "succeeded" here would be
+// the exit code of the scheduling, which a host that never comes back
+// produces just the same. The job therefore stays open with its attempt
+// and the panel settles it on the next Hello
+// (internal/gateway/reboot_settle.go); a host that does not come back
+// within the wait ends reboot_not_observed. A refusal and a failure of the
+// scheduling are results like any other: nothing is going down, so there
+// is nothing to wait for.
 func (e *TaskExecutor) rebootHost(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.RebootPayload) *agentv1.TaskResult {
 	timeout := timeoutOf(task, opspec.ActionSystemReboot)
@@ -895,10 +919,11 @@ func (e *TaskExecutor) rebootHost(ctx context.Context, task *agentv1.TaskEnvelop
 			response.GetErrorCode(), response.GetMessage())
 	}
 	return &agentv1.TaskResult{
-		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
-		ExitCode: 0,
-		Stdout:   response.GetStdout(),
-		Message:  "restart zaplanowany",
+		TaskId:    task.GetTaskId(),
+		Status:    agentv1.TaskResult_STATUS_UNSPECIFIED,
+		ErrorCode: StatusAwaitingReturn,
+		Stdout:    response.GetStdout(),
+		Message:   "the restart was scheduled; the return of the host decides the result",
 	}
 }
 

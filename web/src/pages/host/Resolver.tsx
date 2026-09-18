@@ -8,6 +8,7 @@ import {
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Link = {
@@ -81,6 +82,9 @@ type Snapshot = {
  * owned by a service gets overwritten on the next network event, so the
  * owner decides whether the panel may change anything here.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const RESOLVER_CHANGES = ["dns.host.apply"];
+
 export function Resolver() {
   const t = useT();
   const host = useHost();
@@ -147,17 +151,20 @@ export function Resolver() {
         title={t("DNS")}
         description={t("What the host resolves with, and who writes that configuration. A file owned by a service is rewritten on the next network event, so ownership decides whether the panel can change anything here.")}
         actions={
-          <button
-            className="secondary"
-            onClick={() => setForm((open) => !open)}
-            disabled={!snapshot?.writable}
-            title={snapshot?.writable ? "" : snapshot?.read_only_reason}
-          >
-            {form ? t("Cancel") : t("Change resolver")}
-          </button>
+          <ActionGuard action="dns.host.apply" host={host.id}>
+            <button
+              className="secondary"
+              onClick={() => setForm((open) => !open)}
+              disabled={!snapshot?.writable}
+              title={snapshot?.writable ? "" : snapshot?.read_only_reason}
+            >
+              {form ? t("Cancel") : t("Change resolver")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={RESOLVER_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -251,12 +258,14 @@ export function Resolver() {
               </Field>
             </Fields>
             <FormActions>
-              <button
-                onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
-                disabled={!nameList.length || request.isPending}
-              >
-                {t("Resolve")}
-              </button>
+              <ActionGuard action="dns.resolve.test" host={host.id} explain>
+                <button
+                  onClick={() => request.mutate({ action: "dns.resolve.test", payload: { dns: { names: nameList } } })}
+                  disabled={!nameList.length || request.isPending}
+                >
+                  {t("Resolve")}
+                </button>
+              </ActionGuard>
             </FormActions>
           </Form>
         </div>
@@ -288,12 +297,14 @@ export function Resolver() {
       </Section>
 
       {form && (
-        <ResolverChange
-          defaultInterface={managementLink?.name ?? ""}
-          defaultServers={(snapshot?.servers ?? []).join(", ")}
-          defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
-          onIntent={setIntent}
-        />
+        <ActionGuard action="dns.host.apply" host={host.id}>
+          <ResolverChange
+            defaultInterface={managementLink?.name ?? ""}
+            defaultServers={(snapshot?.servers ?? []).join(", ")}
+            defaultDomains={(snapshot?.search_domains ?? []).map((d) => d.replace(/^~/, "")).join(", ")}
+            onIntent={setIntent}
+          />
+        </ActionGuard>
       )}
 
       <Section title={t("Per-link resolvers")} count={snapshot?.links?.length} span={12} flush>

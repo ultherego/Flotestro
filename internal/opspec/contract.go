@@ -416,6 +416,13 @@ var contracts = map[ActionType]contract{
 	ActionLocalUserLock:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserUnlock: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalSSHKeysSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	// The keys edited one at a time. An add is undone by removing the
+	// fingerprint it appended, a remove by putting the key back - the
+	// order carries it - and the replace by writing the list the operator
+	// saw. A retry reads the file again: adding a key twice is one key.
+	ActionLocalSSHKeysAdd:        {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	ActionLocalSSHKeysRemove:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
+	ActionLocalSSHKeysReplaceAll: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	// The previous group list and the previous expiry date are read back
 	// from the account before the change, so each has a compensating
 	// change. A deleted account has none: the UID's ownership of what it

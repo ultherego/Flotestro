@@ -45,6 +45,36 @@ off.
 | `FLOTESTRO_CLONE_POLICY` | `quarantine` | What the gateway does with the same identity alive on two boots: `quarantine` ends both sessions and quarantines the host, `report` records the incident and lets the newer session stand. Any other word refuses to start. | yes | `report` lets a cloned key act until somebody looks. |
 | `FLOTESTRO_RELAY_IDENTITY` | `prefer` | What the gateway does with a session through a relay in which the host did not sign its own identity envelope (`relay.identity` v2). A signed envelope is verified under every mode - relay, host, certificate by serial, site and environment, payload digest, signature, sequence - and marks the host `relay_identity: end_to_end` (`flotestro_relay_session_identity_total{strength="end_to_end"}`, `auth_strength: end_to_end` on the session); a bad envelope is refused under every mode with `relay_envelope_invalid`, `relay_body_hash_mismatch`, `relay_sequence_replayed` or `relay_host_signature_invalid` on the host. Without an envelope, `observe` and `prefer` let the session in on the relay's attestation (`attested`) or word alone (`weak`), counted under those strengths and recorded as `auth_strength: relay_only`. `enforce` refuses a relay that names the host alone with `relay_identity_missing`, and an agent that does not sign behind a relay that attests with `blocked_upgrade_required`. A renewal or a secret fetch through a relay requires the envelope under every mode. Any other word refuses to start. | yes | Upgrade the panel, then the relays, then the agents; set `enforce` once `weak` and `relay_only` sessions are at zero. |
 
+### Local accounts and their SSH keys
+
+One list of privileged groups is read by every binary that judges a local
+account - the control plane, the agent and the helper - so that the panel
+calls privileged exactly what the host does. The same goes for the UID
+range that tells a person's account from a service's: it comes from the
+host's `/etc/login.defs` and is not a setting of the panel.
+
+| Variable | Default | Meaning | Restart | Security |
+|---|---|---|---|---|
+| `FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS` | `sudo,wheel,docker,lxd` | The groups whose membership is root by another name: sudo and wheel give root directly, docker and lxd through the engine socket. An order that creates an account in one of them, or moves an account into one, ranks critical: it needs the permission `accounts.privileged_groups` in the host's scope beside the operation's own, fresh authentication with a reason, and an approval. The names are separated by commas or spaces, lowercased and deduplicated; an empty value leaves the default, because an installation that set nothing did not mean that no group is privileged. | yes | Taking a group off the list does not take away the rights it grants - it takes away the gate in front of granting them. Add the groups your installation uses (`admin`, `adm`, `systemd-journal`) rather than shortening the list. The permission itself is the platform administrator's alone: the identity administrator makes accounts and keys, and putting one into a privileged group is the other half of the decision. |
+
+The keys of an account are edited one key at a time - an add appends, a
+removal names fingerprints, a replace carries the list the operator saw and
+is refused as stale when the account has changed in between - and each
+order edits one file. By default that is the user's own
+`~/.ssh/authorized_keys`, which is also where a key of a newly created
+account goes.
+
+An order may instead name the panel's managed file,
+`/etc/ssh/authorized_keys.d/<account>/60-flotestro.keys`: root-owned,
+world-readable, and beyond the reach of the user, so the panel's keys stay
+apart from the ones the user wrote and a replace there touches nothing
+anybody else put on the host. The file is only written when sshd says it
+reads it: the effective configuration (`sshd -T`) has to carry
+`/etc/ssh/authorized_keys.d/%u/60-flotestro.keys` in `AuthorizedKeysFile`,
+otherwise such an order is refused with `managed_file_not_read` rather than
+writing keys that open nothing. The panel shows, for every key, which of
+the two files it came from.
+
 ### Identity provider and browser sessions
 
 | Variable | Default | Meaning | Restart | Security |
@@ -74,11 +104,82 @@ off.
 
 ### Notifications (webhook)
 
+The webhook of the environment file is the implicit channel of the
+installation: one address, every event of the durable trail, configured
+here rather than in the panel. The channels an administrator writes in
+the panel are a second consumer of the same trail, with a cursor of their
+own, and are not configured by variables at all - an address, the
+subjects it carries and the part of the fleet it speaks for are records
+of the panel, written with a reason and kept in the audit trail.
+
 | Variable | Default | Meaning | Restart | Security |
 |---|---|---|---|---|
 | `FLOTESTRO_WEBHOOK_URL` | empty | Where the events of the durable trail are posted in batches; empty disables the webhook. | yes | |
 | `FLOTESTRO_WEBHOOK_SECRET` | empty | The HMAC-SHA256 secret the deliveries are signed with. | yes | Secret; without it the deliveries are not verifiable and the panel warns at start. |
 | `FLOTESTRO_WEBHOOK_EVENTS` | empty | The prefixes of the event types to deliver, comma separated, e.g. `campaign.`; empty delivers every event. | yes | |
+
+### Notification queue
+
+A message to a channel is a durable row, not a call. The router writes
+one row per event and channel in the transaction of the event; the worker
+of every panel instance claims the rows that are due, sends them under a
+lease and settles them. A receiver that is down therefore delays a
+message rather than losing it: the row waits, the attempts are counted on
+it, and a row whose attempts ran out - or whose receiver refused the
+credentials - becomes a dead letter an operator sends again from the
+panel. Two instances never send the same row at once, and a row whose
+worker died is reclaimed when its lease runs out.
+
+The settings below tune that worker. They are the same on every instance;
+raising the batch or lowering the poll makes the queue quicker and the
+database busier, and a fleet with few channels has no reason to touch
+them.
+
+| Variable | Default | Meaning | Restart | Security |
+|---|---|---|---|---|
+| `FLOTESTRO_NOTIFY_POLL` | `2s` | How often a worker looks for rows that are due when nothing woke it. A row written by the router, and a dead letter an operator put back, wake the worker of that instance at once, so this is the floor for the other instances rather than the usual delay. | yes | |
+| `FLOTESTRO_NOTIFY_BATCH` | `50` | How many rows one claim takes. A round that fills its batch is followed by another at once, so this bounds one transaction rather than the pace. | yes | |
+| `FLOTESTRO_NOTIFY_MAX_ATTEMPTS` | `20` | How many attempts a row gets before it is a dead letter. With the backoff below that is about a day of a receiver being down. A 401 or 403 from the receiver, and a mail relay that refuses the login, are dead letters at the first attempt whatever this says: another attempt with the same credential cannot help. | yes | |
+| `FLOTESTRO_NOTIFY_BACKOFF_BASE` | `30s` | The pause before the second attempt. Each attempt after it doubles the pause, drawn with full jitter - a uniform draw between nothing and the doubled pause - so a thousand rows that failed together do not come back together. | yes | |
+| `FLOTESTRO_NOTIFY_BACKOFF_MAX` | `1h` | The ceiling of that pause. | yes | |
+| `FLOTESTRO_NOTIFY_LEASE` | `30s` | How long a claimed row is one worker's. The lease is renewed while a send runs, so a slow receiver does not hand the row to a second worker; a worker that died holds its rows only until the lease runs out. | yes | |
+
+Settled rows - delivered and suppressed - are swept after thirty days. A
+row that still waits is never swept: a dead letter is an operator's to
+settle, however old.
+
+### Notification channel credentials
+
+A credential never lies in a channel record. The address of an incoming
+webhook (it carries the token that lets anybody post to the room), the
+key a webhook is signed with and the password of a mailbox are versions
+of the panel's secret store, named `panel.notification.<channel id>`.
+They go there the moment they are typed, are read only at the moment of
+sending, and the API answers with `secret_configured` and
+`secret_last_rotated_at` in their place - never the value, not even to a
+platform administrator.
+
+What follows from that, on the API and on the screen:
+
+- An edit that leaves the secret field empty keeps the stored credential;
+  the form says which channels have one and when it was last replaced. A
+  webhook's signing key is cleared by asking for it explicitly, and an
+  incoming webhook cannot be left without an address at all.
+- `GET /api/v1/notifications/channels/{id}` carries no address for an
+  incoming webhook. Beside the configuration it carries `public_config`,
+  a summary with the host of the address and nothing of the path, so a
+  mistyped receiver is told from the right one without showing the token.
+- The scheduler refuses to issue a secret under the
+  `panel.notification.` prefix to a host: a credential of the panel is
+  not a task's to carry.
+- Channels written by a release before this one kept their credentials in
+  the configuration column. They are moved into the secret store once, at
+  the first start of the panel after the upgrade, and the move is
+  recorded with its count; it is idempotent, so a second start moves
+  nothing. A panel of the previous release started against the same
+  database still reads the configuration column and sends nothing for a
+  moved channel - which is the intent: a credential is not left where the
+  older release could read it.
 
 ### Vulnerability feeds
 

@@ -45,3 +45,44 @@ upstream:
   # The fleet CA bundle for the first connection. After enrollment the relay
   # uses the copy saved in the state directory.
   bootstrap_ca_file: "/var/lib/flotestro-relay/ca.pem"
+
+# The durable spool: the messages of the agents the centre has not yet
+# confirmed it consumed. They survive a restart of the relay and of the
+# machine and leave the spool only on the panel's acknowledgement, so the
+# results of an outage reach the centre instead of being lost with the
+# process.
+#
+# The values below are the defaults and are shown to be changed, not to be
+# uncommented: a key that is absent takes exactly the value written here.
+# Sizes are in bytes.
+#
+# spool:
+#   # The directory of the segment files; without it the spool lives in
+#   # the "spool" directory under state_dir. It belongs to the relay's
+#   # account alone (mode 0700): the records hold the results and the
+#   # inventories of the whole site.
+#   path: "/var/lib/flotestro-relay/spool"
+#
+#   # The room the waiting records may take together. Without this key
+#   # the spool takes the limit of buffer_max_bytes above, so an upgrade
+#   # does not change the room the operator gave the site; a file that
+#   # names neither gets a gigabyte.
+#   max_bytes: 268435456
+#
+#   # The part of max_bytes only the control messages and the results of
+#   # the operations may enter. Inventories, metric samples and log lines
+#   # stop before it: a site under a long outage keeps what says what
+#   # happened to it and drops what only describes it.
+#   critical_reserve_bytes: 134217728
+#
+#   # The floor of free space on the filesystem of the spool. Nothing is
+#   # appended below it, whatever the class: a filesystem the relay filled
+#   # takes from the site what works locally.
+#   min_free_bytes: 268435456
+#
+#   # How long a record sent up waits for the panel's acknowledgement
+#   # before it is sent again. Between a second and an hour.
+#   ack_timeout: 30s
+#
+#   # The records of one host sent and not yet acknowledged at a time.
+#   max_inflight_per_host: 64

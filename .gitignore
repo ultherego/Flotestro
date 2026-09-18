@@ -23,3 +23,5 @@ node_modules/
 # Dependencies and the build output of the panel
 web/node_modules/
 web/dist/
+# The incremental build record of tsc: a local cache, not a source.
+web/tsconfig.tsbuildinfo

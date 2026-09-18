@@ -10,6 +10,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Source = {
@@ -71,6 +72,9 @@ type Intent = { action: string; label: string; description: string; payload: Rec
 
 /** The threshold above which an offset stops being measurement noise. */
 const STEP_THRESHOLD = 1;
+
+/** The changes this page offers; when every one is refused, the page says so once. */
+const TIME_CHANGES = ["time.config.apply", "time.timezone.set"];
 
 /**
  * The host's clock and its synchronisation.
@@ -158,6 +162,7 @@ export function Time() {
         description={t("The clock is what everything else assumes. Kerberos refuses tickets from outside its window, mTLS refuses certificates that are not valid yet, and a journal from a host with a shifted clock sorts into the wrong order.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={TIME_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -356,17 +361,20 @@ export function Time() {
               </Check>
             )}
             <FormActions>
-              <button
-                onClick={() =>
-                  request.mutate({
-                    action: "time.sync.test",
-                    payload: { time: { probe: serverList } },
-                  })
-                }
-                disabled={request.isPending}
-              >
-                {t("Test")}
-              </button>
+              <ActionGuard action="time.sync.test" host={host.id} explain>
+                <button
+                  onClick={() =>
+                    request.mutate({
+                      action: "time.sync.test",
+                      payload: { time: { probe: serverList } },
+                    })
+                  }
+                  disabled={request.isPending}
+                >
+                  {t("Test")}
+                </button>
+              </ActionGuard>
+              <ActionGuard action="time.config.apply" host={host.id}>
               <button
                 className="secondary"
                 onClick={() =>
@@ -397,6 +405,7 @@ export function Time() {
               >
                 {t("Set as sources")}
               </button>
+              </ActionGuard>
             </FormActions>
           </Form>
         </div>
@@ -445,6 +454,7 @@ export function Time() {
             </Field>
           </Fields>
           <FormActions>
+            <ActionGuard action="time.timezone.set" host={host.id}>
             <button
               onClick={() =>
                 setIntent({
@@ -460,6 +470,7 @@ export function Time() {
             >
               {t("Set timezone")}
             </button>
+            </ActionGuard>
           </FormActions>
         </Form>
       </Section>

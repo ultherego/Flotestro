@@ -3,14 +3,11 @@ package adminapi
 import (
 	"context"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ultherego/flotestro/internal/authz"
-	"github.com/ultherego/flotestro/internal/hosts"
-	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
 
@@ -189,8 +186,12 @@ type fleetHostFilter struct {
 	Severity string
 	// Sort is "affected" (the default: the worst first), "fixable" (the
 	// most vendor fixes waiting first) or "hostname".
-	Sort   string
-	Limit  int
+	Sort  string
+	Limit int
+	// Cursor is the key of the last row of the previous page; Offset the
+	// number of rows to skip for a caller that still pages the old way.
+	// The cursor wins when both are given.
+	Cursor vuln.FleetCursor
 	Offset int
 }
 
@@ -209,17 +210,68 @@ func parseFleetHostFilter(w http.ResponseWriter, r *http.Request) (fleetHostFilt
 		return filter, false
 	}
 	switch filter.Sort {
-	case "", "affected", "fixable", "hostname":
+	case "":
+		filter.Sort = vuln.SortAffected
+	case vuln.SortAffected, vuln.SortFixable, vuln.SortHostname:
 	default:
 		problem(w, http.StatusBadRequest, "invalid_filter", "sort must be affected, fixable or hostname")
 		return filter, false
 	}
-	limit, _ := strconv.Atoi(query.Get("limit"))
-	filter.Limit = paging.Limit(limit, defaultListPage, maxListPage)
+	limit, cursorText, ok := parseFleetPage(w, r)
+	if !ok {
+		return filter, false
+	}
+	filter.Limit = limit
+	cursor, err := vuln.ParseFleetCursor(cursorText)
+	if err != nil {
+		invalidCursor(w, err)
+		return filter, false
+	}
+	filter.Cursor = cursor
 	if offset, err := strconv.Atoi(query.Get("offset")); err == nil && offset > 0 {
 		filter.Offset = offset
 	}
 	return filter, true
+}
+
+// store renders the table filter for the store under the caller's scopes.
+func (f fleetHostFilter) store(scopes []authz.Scope) vuln.FleetFilter {
+	return vuln.FleetFilter{Scopes: scopes, Query: f.Query, Severity: f.Severity, Sort: f.Sort}
+}
+
+// fleetVulnerabilitiesView is the answer of the fleet screen: the coverage
+// of the fleet, the sums over every assessed host in scope, the sources
+// and one page of the host table.
+type fleetVulnerabilitiesView struct {
+	fleetCoverage
+	Items      []hostVulnerabilities `json:"items"`
+	Count      int                   `json:"count"`
+	Total      int                   `json:"total"`
+	NextCursor string                `json:"next_cursor,omitempty"`
+	Limit      int                   `json:"limit"`
+	Offset     int                   `json:"offset"`
+
+	Affected              int `json:"affected"`
+	AffectedWithVendorFix int `json:"affected_with_vendor_fix"`
+	AffectedNoFix         int `json:"affected_no_fix"`
+	Unknown               int `json:"unknown"`
+	// Four numbers, because they are four different questions: how many
+	// CVEs, how many vendor issues, how many package instances to touch
+	// and how many hosts it concerns. One "findings" number answers none
+	// of them.
+	UniqueCVEs               int `json:"unique_cves"`
+	UniqueAdvisories         int `json:"unique_advisories"`
+	AffectedPackageInstances int `json:"affected_package_instances"`
+	HostsAffected            int `json:"hosts_affected"`
+	// HostsTotal, HostsAssessed and HostsWithoutAssessment keep the names
+	// the screen read before the coverage head: the hosts in scope, those
+	// fully assessed and those never assessed.
+	HostsTotal             int              `json:"hosts_total"`
+	HostsAssessed          int              `json:"hosts_assessed"`
+	HostsWithoutAssessment int              `json:"hosts_without_assessment"`
+	CoverageReasons        map[string]int   `json:"coverage_reasons"`
+	Sources                []map[string]any `json:"sources"`
+	MaxSnapshotAgeHours    int              `json:"max_snapshot_age_hours"`
 }
 
 // handleFleetVulnerabilities returns the assessment of the whole visible
@@ -227,7 +279,8 @@ func parseFleetHostFilter(w http.ResponseWriter, r *http.Request) (fleetHostFilt
 //
 // The screen has two numbers, not one: how many vulnerabilities and what
 // part of the fleet could be assessed at all. Without the second the first
-// is a promise, not a result.
+// is a promise, not a result. Both are counted by the database over every
+// host in scope, and the table comes a page at a time under its order.
 func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermVulnerabilityRead, "fleet")
 	if !ok {
@@ -246,23 +299,32 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	scopes := principal.ScopesFor(authz.PermVulnerabilityRead)
+	now := time.Now().UTC()
+	if asCSV {
+		s.writeVulnerabilitiesCSV(w, r, filter.store(scopes), now)
+		return
+	}
 
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
+	summary, err := s.vulnerabilities.FleetSummary(r.Context(), scopes)
 	if err != nil {
 		s.fail(w, err)
 		return
 	}
-	names := map[string]string{}
-	ids := make([]string, 0, len(list))
-	for _, host := range list {
-		if principal.Can(authz.PermVulnerabilityRead,
-			authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			names[host.ID] = host.Hostname
-			ids = append(ids, host.ID)
-		}
+	// Uniques are counted at the fleet level, not by summing per host: the
+	// same CVE on twenty hosts is one vendor issue and twenty hosts to
+	// touch. Summing the host counters turns one into the other.
+	uniques, err := s.vulnerabilities.UniquesInScope(r.Context(), scopes)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
-
-	states, err := s.vulnerabilities.HostStates(r.Context(), ids)
+	page, err := s.vulnerabilities.FleetPage(r.Context(), filter.store(scopes), filter.Cursor, filter.Limit, filter.Offset)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	rows, err := s.fleetVulnerabilityRows(r.Context(), page.Items)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -272,109 +334,6 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		s.fail(w, err)
 		return
 	}
-
-	now := time.Now().UTC()
-	items := make([]hostVulnerabilities, 0, len(ids))
-	var affected, withVendorFix, noFix, unknown, assessed, unassessed int
-	var packageInstances, hostsAffected int
-	reasons := map[string]int{}
-	// Uniques are counted at the fleet level, not by summing per host: the
-	// same CVE on twenty hosts is one vendor issue and twenty hosts to
-	// touch. Summing the host counters turns one into the other.
-	uniques, err := s.vulnerabilities.Uniques(r.Context(), ids)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	severities, err := s.vulnerabilities.SeverityCounts(r.Context(), ids)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	for _, hostID := range ids {
-		state, present := states[hostID]
-		state.HostID = hostID
-		state.Hostname = names[hostID]
-		if !present || state.EvaluatedAt == nil {
-			// A host not assessed yet is not a host without vulnerabilities.
-			unassessed++
-			state.CoverageReason = vuln.ReasonPackageListMissing
-		} else if state.FullAssessment() {
-			// A complete assessment is not only no obstacle: the feed must cover
-			// all the host packages and none may remain undetermined.
-			assessed++
-		}
-		if state.CoverageReason != "" {
-			reasons[state.CoverageReason]++
-		}
-		affected += state.Affected
-		withVendorFix += state.AffectedWithVendorFix
-		noFix += state.AffectedNoFix
-		unknown += state.Unknown
-		packageInstances += state.AffectedPackages
-		if state.Affected > 0 {
-			hostsAffected++
-		}
-		bySeverity := severities[hostID]
-		if bySeverity == nil {
-			bySeverity = map[string]int{}
-		}
-		items = append(items, hostVulnerabilities{
-			HostState: state, CoveragePercent: state.Coverage() * 100,
-			FullyAssessed: state.FullAssessment(), BySeverity: bySeverity,
-		})
-	}
-
-	// The table is narrowed after the fleet is counted: the numbers above
-	// it describe the whole visible fleet whatever the operator is looking
-	// for in it.
-	rows := make([]hostVulnerabilities, 0, len(items))
-	for _, item := range items {
-		if filter.Query != "" && !strings.Contains(strings.ToLower(item.Hostname), filter.Query) {
-			continue
-		}
-		if filter.Severity != "" && item.BySeverity[filter.Severity] == 0 {
-			continue
-		}
-		rows = append(rows, item)
-	}
-
-	// The worst on top: hosts with vulnerabilities, then those that could
-	// not be assessed, clean ones at the end. Sorting by the vendor fixes
-	// waiting puts the hosts something can be done about first.
-	sort.SliceStable(rows, func(i, j int) bool {
-		switch filter.Sort {
-		case "hostname":
-			return rows[i].Hostname < rows[j].Hostname
-		case "fixable":
-			if rows[i].AffectedWithVendorFix != rows[j].AffectedWithVendorFix {
-				return rows[i].AffectedWithVendorFix > rows[j].AffectedWithVendorFix
-			}
-		}
-		if rows[i].Affected != rows[j].Affected {
-			return rows[i].Affected > rows[j].Affected
-		}
-		if (rows[i].CoverageReason == "") != (rows[j].CoverageReason == "") {
-			return rows[i].CoverageReason != ""
-		}
-		return rows[i].Hostname < rows[j].Hostname
-	})
-	// The file takes the filtered and sorted table whole, without the
-	// screen's page: a page is for reading, a file for the rest.
-	if asCSV {
-		s.writeVulnerabilitiesCSV(w, r, rows, now)
-		return
-	}
-	total := len(rows)
-	if filter.Offset >= len(rows) {
-		rows = rows[:0]
-	} else {
-		rows = rows[filter.Offset:]
-	}
-	if len(rows) > filter.Limit {
-		rows = rows[:filter.Limit]
-	}
-
 	sources := make([]map[string]any, 0, len(snapshots)+1)
 	for _, snapshot := range snapshots {
 		sources = append(sources, map[string]any{
@@ -388,7 +347,7 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 	// updateinfo - are a source too, without a feed of their own: the
 	// table names it, or a Fedora host's findings would seem to come from
 	// nowhere.
-	if repository, err := s.vulnerabilities.HostRepositorySource(r.Context(), ids); err != nil {
+	if repository, err := s.vulnerabilities.HostRepositorySourceInScope(r.Context(), scopes); err != nil {
 		s.fail(w, err)
 		return
 	} else if repository != nil {
@@ -399,24 +358,53 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": rows, "count": len(rows), "total": total,
-		"limit": filter.Limit, "offset": filter.Offset,
-		"affected":                 affected,
-		"affected_with_vendor_fix": withVendorFix,
-		"affected_no_fix":          noFix, "unknown": unknown,
-		// Four numbers, because they are four different questions: how many
-		// CVEs, how many vendor issues, how many package instances to touch
-		// and how many hosts it concerns. One "findings" number answers none
-		// of them.
-		"unique_cves": uniques.CVE, "unique_advisories": uniques.Advisories,
-		"affected_package_instances": packageInstances, "hosts_affected": hostsAffected,
-		"hosts_total": len(ids), "hosts_assessed": assessed,
-		"hosts_without_assessment": unassessed,
-		"coverage_reasons":         reasons,
-		"sources":                  sources,
-		"max_snapshot_age_hours":   int(s.feedAge.Hours()),
+	coverage := fleetCoverage{
+		TotalHosts: summary.Hosts, EvaluatedHosts: summary.Evaluated, UnknownHosts: summary.Unassessed,
+		UnknownReasons: map[string]int{},
+	}
+	if summary.Unassessed > 0 {
+		coverage.UnknownReasons[unknownNoAssessment] = summary.Unassessed
+	}
+	writeJSON(w, http.StatusOK, fleetVulnerabilitiesView{
+		fleetCoverage: coverage,
+		Items:         rows, Count: len(rows), Total: page.Total, NextCursor: page.NextCursor,
+		Limit: filter.Limit, Offset: filter.Offset,
+		Affected: summary.Affected, AffectedWithVendorFix: summary.AffectedWithVendorFix,
+		AffectedNoFix: summary.AffectedNoFix, Unknown: summary.Unknown,
+		UniqueCVEs: uniques.CVE, UniqueAdvisories: uniques.Advisories,
+		AffectedPackageInstances: summary.AffectedPackages, HostsAffected: summary.HostsAffected,
+		HostsTotal: summary.Hosts, HostsAssessed: summary.FullyAssessed,
+		HostsWithoutAssessment: summary.Unassessed,
+		CoverageReasons:        summary.CoverageReasons,
+		Sources:                sources,
+		MaxSnapshotAgeHours:    int(s.feedAge.Hours()),
 	})
+}
+
+// fleetVulnerabilityRows dresses one page of host states for the table:
+// the coverage as a share, the verdict on its completeness and the
+// findings by severity, the last read in one query for the page.
+func (s *Server) fleetVulnerabilityRows(ctx context.Context, states []vuln.HostState) ([]hostVulnerabilities, error) {
+	ids := make([]string, 0, len(states))
+	for _, state := range states {
+		ids = append(ids, state.HostID)
+	}
+	severities, err := s.vulnerabilities.SeverityCounts(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]hostVulnerabilities, 0, len(states))
+	for _, state := range states {
+		bySeverity := severities[state.HostID]
+		if bySeverity == nil {
+			bySeverity = map[string]int{}
+		}
+		rows = append(rows, hostVulnerabilities{
+			HostState: state, CoveragePercent: state.Coverage() * 100,
+			FullyAssessed: state.FullAssessment(), BySeverity: bySeverity,
+		})
+	}
+	return rows, nil
 }
 
 // vulnerabilitiesCSVColumns is the header of the fleet export. The order
@@ -431,18 +419,35 @@ var vulnerabilitiesCSVColumns = []string{
 }
 
 // writeVulnerabilitiesCSV streams the fleet assessment as a file: one row
-// per host of the filtered table, in the order the screen sorts it, with
-// the coverage next to the counts - a host with zero findings and no
+// per host of the filtered table, in the order the screen sorts it, a
+// page at a time from the same cursor the screen pages with, with the
+// coverage next to the counts - a host with zero findings and no
 // assessment is not a clean host, and the file says so in its own
 // columns. The screen's page does not apply; the export's own cap does.
-func (s *Server) writeVulnerabilitiesCSV(w http.ResponseWriter, r *http.Request, items []hostVulnerabilities, now time.Time) {
+func (s *Server) writeVulnerabilitiesCSV(w http.ResponseWriter, r *http.Request, filter vuln.FleetFilter, now time.Time) {
 	s.writeCSV(w, r, exportFileName("vulnerabilities", now), vulnerabilitiesCSVColumns, func(yield func([]string) bool) error {
-		for _, item := range items {
-			if !yield(hostVulnerabilitiesCSVRow(item)) {
+		cursor := vuln.FleetCursor{}
+		for {
+			page, err := s.vulnerabilities.FleetPage(r.Context(), filter, cursor, vuln.MaxPage, 0)
+			if err != nil {
+				return err
+			}
+			rows, err := s.fleetVulnerabilityRows(r.Context(), page.Items)
+			if err != nil {
+				return err
+			}
+			for _, item := range rows {
+				if !yield(hostVulnerabilitiesCSVRow(item)) {
+					return nil
+				}
+			}
+			if page.NextCursor == "" {
 				return nil
 			}
+			if cursor, err = vuln.ParseFleetCursor(page.NextCursor); err != nil {
+				return err
+			}
 		}
-		return nil
 	})
 }
 

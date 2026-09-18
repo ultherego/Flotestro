@@ -10,6 +10,9 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
+	"io"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"net/url"
@@ -50,13 +53,26 @@ func (f *fakeRecords) Get(_ context.Context, hostID string) (*hosts.Host, error)
 	return f.host, nil
 }
 
-func (f *fakeRecords) Accept(_ context.Context, hostID, sessionID string, sequence uint64) (bool, error) {
+func (f *fakeRecords) Accept(_ context.Context, hostID, sessionID string, sequence uint64) (bool, uint64, error) {
 	key := hostID + "/" + sessionID
-	if f.sequences[key] >= sequence {
-		return false, nil
+	last, known := f.sequences[key]
+	if known && last >= sequence {
+		return false, last, nil
 	}
 	f.sequences[key] = sequence
-	return true, nil
+	return true, last, nil
+}
+
+// fixedSequences answers the same way every time: what the record of a
+// session says without a database behind it, so that a refusal the real
+// store reaches only in a race can be put in front of the verifier.
+type fixedSequences struct {
+	accepted bool
+	last     uint64
+}
+
+func (f fixedSequences) Accept(context.Context, string, string, uint64) (bool, uint64, error) {
+	return f.accepted, f.last, nil
 }
 
 // testHost is a host with a live certificate on record, its key, and the
@@ -342,5 +358,118 @@ func TestTheAuthStrengthFollowsTheRelayIdentity(t *testing.T) {
 		if got := hosts.AuthStrength(identity); got != want {
 			t.Errorf("%q: %q, expected %q", identity, got, want)
 		}
+	}
+}
+
+// A relay keeps a message until the panel acknowledges it, so a link that
+// breaks in between means the relay carries the message again. That
+// second copy is a redelivery rather than a replay: the same session
+// spent the number already. A number the session never spent - one above
+// its last, which only another gateway's write can produce - stays the
+// refusal it was.
+func TestARedeliveredSequenceIsToldFromAReplay(t *testing.T) {
+	host := newTestHost(t, true)
+	ctx := context.Background()
+	signer := host.signer(uuid.NewString())
+
+	first := signedHello(t, signer)
+	if _, err := host.verifier.VerifyMessage(ctx, host.peer, first); err != nil {
+		t.Fatalf("the signed Hello was refused: %v", err)
+	}
+	_, err := host.verifier.VerifyMessage(ctx, host.peer, first)
+	refusal := RelayRefusalOf(err)
+	if refusal == nil || refusal.Code != hosts.RefusalRelaySequenceReplayed {
+		t.Fatalf("the message carried again answered %q", refusalCode(err))
+	}
+	if !refusal.Redelivery {
+		t.Fatal("a message the session had consumed was not read as a redelivery")
+	}
+
+	// The same store refusing a number the session never spent - it
+	// stands below the first message of a session nobody has spoken in,
+	// which is what another gateway's write or another session's number
+	// looks like from here. Nothing the relay is retrying, and the host
+	// hears about it.
+	verifier := NewRelayVerifier(host.records, host.records, fixedSequences{accepted: false, last: 0})
+	_, err = verifier.VerifyMessage(ctx, host.peer, signedHello(t, host.signer(uuid.NewString())))
+	refusal = RelayRefusalOf(err)
+	if refusal == nil || refusal.Code != hosts.RefusalRelaySequenceReplayed {
+		t.Fatalf("a sequence the session never took answered %q", refusalCode(err))
+	}
+	if refusal.Redelivery {
+		t.Fatal("a sequence above the last one of the session was read as a redelivery")
+	}
+}
+
+// The stream drops a redelivered message and acknowledges it once more -
+// the record is stuck in the spool of the relay until it hears the panel
+// has it - and writes nothing on the host: an honest retry of a relay is
+// not a refusal of a machine.
+func TestARedeliveredMessageIsAcknowledgedAndNotHeldAgainstTheHost(t *testing.T) {
+	host := newTestHost(t, true)
+	service := &AgentService{
+		log:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		envelopes: host.verifier,
+	}
+	session := NewSession(uuid.NewString(), testHostID, "0.54.0", uuid.NewString(), "127.0.0.1:1", 4)
+	relayed := &relayedSession{peer: host.peer, endToEnd: true}
+	ctx := context.Background()
+
+	heartbeat := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Heartbeat{Heartbeat: &agentv1.Heartbeat{}}}
+	if err := host.signer(uuid.NewString()).SignMessage(heartbeat); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.checkRelayedMessage(ctx, testHostID, session, relayed, heartbeat); err != nil {
+		t.Fatalf("the signed heartbeat was refused: %v", err)
+	}
+	select {
+	case message := <-session.Outbound():
+		t.Fatalf("the check acknowledged a message the panel had not consumed yet: %+v", message)
+	default:
+	}
+
+	if err := service.checkRelayedMessage(ctx, testHostID, session, relayed, heartbeat); !errors.Is(err, errMessageDropped) {
+		t.Fatalf("the redelivered heartbeat answered %v, expected a dropped message", err)
+	}
+	select {
+	case message := <-session.Outbound():
+		ack := message.GetMessageAck()
+		if ack == nil {
+			t.Fatalf("the redelivery was answered with %+v", message)
+		}
+		if ack.GetHostId() != testHostID || ack.GetSessionId() != heartbeat.GetEnvelope().GetSessionId() ||
+			ack.GetSequence() != heartbeat.GetEnvelope().GetSequence() {
+			t.Fatalf("the acknowledgement reads %+v, the envelope says session %s sequence %d",
+				ack, heartbeat.GetEnvelope().GetSessionId(), heartbeat.GetEnvelope().GetSequence())
+		}
+	default:
+		t.Fatal("the redelivered message was not acknowledged; its record would stay in the spool")
+	}
+}
+
+// A message that carries an envelope is acknowledged over its own
+// session, and one without an envelope - a host connected directly, with
+// no spool behind it - is not.
+func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
+	service := &AgentService{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	session := NewSession(uuid.NewString(), testHostID, "0.54.0", uuid.NewString(), "127.0.0.1:1", 4)
+
+	service.acknowledge(testHostID, session, nil)
+	select {
+	case message := <-session.Outbound():
+		t.Fatalf("a direct message was acknowledged: %+v", message)
+	default:
+	}
+
+	service.acknowledge(testHostID, session, &agentv1.RelayedEnvelope{
+		SessionId: "a3f4b1c2-0000-4000-8000-000000000001", Sequence: 7,
+	})
+	select {
+	case message := <-session.Outbound():
+		if ack := message.GetMessageAck(); ack == nil || ack.GetSequence() != 7 {
+			t.Fatalf("the acknowledgement reads %+v", message)
+		}
+	default:
+		t.Fatal("a relayed message was not acknowledged")
 	}
 }

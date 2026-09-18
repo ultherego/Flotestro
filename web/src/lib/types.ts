@@ -320,6 +320,20 @@ export type Attempt = {
   unit_state_before?: UnitState;
   unit_state_after?: UnitState;
   detail?: Record<string, unknown>;
+  /**
+   * The host's reading of itself after the change: which verifier of the
+   * contract looked, whether it saw the state that was ordered, what it
+   * expected, what it found and why the two differ. Absent for a read, for
+   * an operation the panel settles on the host's return, and for an agent
+   * from before the verifiers.
+   */
+  verification?: {
+    verifier?: string;
+    verified?: boolean;
+    expected?: string;
+    observed?: string;
+    reason?: string;
+  };
   // The delivery to the host, the agent's acknowledgement, the start it
   // reported and the end: the window of the attempt on the host. An
   // attempt never heard from has neither an acknowledgement nor a start.

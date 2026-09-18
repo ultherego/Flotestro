@@ -174,6 +174,28 @@ func run() error {
 	flag.DurationVar(&metricsRetention.RollupRetention, "metrics-retention-rollup",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_ROLLUP", monitoring.DefaultRollupRetention),
 		"how long the quarter-hour rollups of the resource samples are kept")
+	// The notification queue. One worker per instance; the defaults are
+	// the ones the document names, and an installation with a few
+	// channels has no reason to touch them.
+	notifyOptions := notify.Options{}
+	flag.DurationVar(&notifyOptions.Poll, "notify-poll",
+		config.EnvDuration("FLOTESTRO_NOTIFY_POLL", notify.DefaultPoll),
+		"how often a notification worker looks for rows that are due")
+	flag.IntVar(&notifyOptions.Batch, "notify-batch",
+		config.EnvInt("FLOTESTRO_NOTIFY_BATCH", notify.DefaultBatch),
+		"how many notification deliveries one claim takes")
+	flag.IntVar(&notifyOptions.MaxAttempts, "notify-max-attempts",
+		config.EnvInt("FLOTESTRO_NOTIFY_MAX_ATTEMPTS", notify.DefaultMaxAttempts),
+		"how many attempts a notification gets before it is a dead letter")
+	flag.DurationVar(&notifyOptions.BaseBackoff, "notify-backoff-base",
+		config.EnvDuration("FLOTESTRO_NOTIFY_BACKOFF_BASE", notify.DefaultBaseBackoff),
+		"the pause before the second attempt; every attempt after it doubles the pause, with full jitter")
+	flag.DurationVar(&notifyOptions.MaxBackoff, "notify-backoff-max",
+		config.EnvDuration("FLOTESTRO_NOTIFY_BACKOFF_MAX", notify.DefaultMaxBackoff),
+		"the ceiling of that pause")
+	flag.DurationVar(&notifyOptions.Lease, "notify-lease",
+		config.EnvDuration("FLOTESTRO_NOTIFY_LEASE", notify.DefaultLease),
+		"how long a claimed notification delivery belongs to one worker")
 	// The trail is evidence and is kept forever unless the installation
 	// decides otherwise; the ended agent sessions are swept after a month
 	// on their own, because nothing reads an older one.
@@ -769,11 +791,30 @@ func run() error {
 	// holds the other back. The router reads the mail passwords from the
 	// secret store at the moment of sending; the links in the messages
 	// point at the public address of the panel.
-	notificationStore := notify.NewStore(pool)
+	notificationStore := notify.NewStore(pool, secretStore)
+	// The credentials of the channels written by the previous release are
+	// moved into the secret store once, here: only this process holds the
+	// key that seals a version, so the migration could add the columns but
+	// not fill them. A row already moved carries no plaintext, and a
+	// failure stops the start - a panel that went on sending with a
+	// credential in a column is what this release ends.
+	if moved, err := notificationStore.MigrateSecrets(ctx); err != nil {
+		return fmt.Errorf("moving the notification channel credentials into the secret store: %w", err)
+	} else if moved > 0 {
+		log.Info("the credentials of the notification channels were moved into the secret store", "channels", moved)
+	}
 	notifier := notify.NewRouter(pool, notificationStore, secretStore, *publicURL, log)
 	panelServer.SetNotifications(notificationStore, notifier)
 	notifications := outbox.NewConsumer(pool, "notifications", notifier, log, 2*time.Second)
 	go notifications.Run(ctx)
+	// The queue is what actually sends: the consumer writes a row per
+	// channel in the transaction of the event, and the worker of every
+	// instance takes the rows that are due. A recipient that is down
+	// delays a row rather than consuming the event, and a restart of the
+	// panel resumes from the rows.
+	notificationWorker := notify.NewWorker(notificationStore, notifier, notifyOptions, log)
+	panelServer.SetNotificationQueue(notificationWorker)
+	go notificationWorker.Run(ctx)
 	go func() {
 		wakes, unsubscribe := eventBus.Subscribe(events.ForOutbox())
 		defer unsubscribe()

@@ -2,6 +2,7 @@ package adminapi
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -68,6 +69,38 @@ func exportFormat(w http.ResponseWriter, r *http.Request) (asCSV bool, ok bool) 
 	}
 }
 
+// exportPartialError is what rows returns when the list behind the file
+// ended before its last row for a reason the list itself named - a sweep
+// out of its time budget. The file then ends with the truncation marker
+// and the reason, and carries the partial trailer, rather than with the
+// error marker of a broken read: the rows written are right, there are
+// only fewer of them.
+type exportPartialError struct {
+	reason string
+}
+
+func (e exportPartialError) Error() string {
+	return "the export stops before the last row: " + e.reason
+}
+
+// partialHeader says that an export does not describe the whole list it
+// stands for. A caller that already knows - the fleet view behind the
+// file was itself partial - sets it with markPartial before the first
+// row, and it travels as an ordinary header. What is discovered while
+// writing - the cap, a read error, a sweep out of its time budget -
+// travels as a trailer, because the status line is long sent by then. A
+// script that reads an export checks both, and the marker in the first
+// cell of the last row, before it trusts the file.
+const partialHeader = "X-Flotestro-Partial"
+
+// markPartial says, before the first row is written, that the numbers in
+// the file describe a part of the fleet. It is for a view that knows its
+// own answer was partial: the rows are all there, and they still do not
+// add up to the fleet.
+func markPartial(w http.ResponseWriter) {
+	w.Header().Set(partialHeader, "true")
+}
+
 // writeCSV streams one export. The columns are the header row; rows
 // produces the file's rows and hands each to yield, and stops when yield
 // says false - the cap is reached or the socket is gone. An error rows
@@ -124,12 +157,25 @@ func (s *Server) writeCSV(w http.ResponseWriter, r *http.Request, filename strin
 		}
 		return true
 	})
-	if err != nil && !stopped {
+	var cut exportPartialError
+	switch {
+	case errors.As(err, &cut) && !stopped:
+		_ = writer.Write(exportMarkerRow(len(columns), exportTruncatedMarker, cut.Error()))
+		stopped = true
+	case err != nil && !stopped:
 		s.log.Warn("the CSV export broke off", "path", r.URL.Path, "rows", count, "err", err)
 		_ = writer.Write(exportMarkerRow(len(columns), exportErrorMarker,
 			"the export broke off before its end; ask for it again"))
+		stopped = true
 	}
 	writer.Flush()
+	// The trailer travels after the last chunk: a file that ended with a
+	// marker row is flagged for a reader that looks at the headers rather
+	// than at the last row. The prefix is what makes it a trailer on a
+	// header set after the body began.
+	if stopped {
+		w.Header().Set(http.TrailerPrefix+partialHeader, "true")
+	}
 }
 
 // exportMarkerRow is the last row of a file that did not reach its end:

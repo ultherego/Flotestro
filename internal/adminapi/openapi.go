@@ -108,12 +108,24 @@ func (s *Server) openAPI() map[string]any {
 			"inventory_stale, package_list_stale, unsupported_system, no_remediation.")
 	describe(schemas, "PolicyResult", "observed_revision", "The revision of the inventory module the verdict rests on.")
 	register("HostAccess", hostAccessView{})
+	register("HostAction", hostAction{})
 	register("HostPackageList", hostPackageList{})
 	register("CampaignSchedule", campaigns.Schedule{})
 	register("NotificationChannel", notify.Channel{})
 	register("NotificationDelivery", notify.Delivery{})
 	describe(schemas, "AuditEvent", "actor",
 		"The actor as it was when the event was written: principal_id, subject, display_name, kind, resource_type, resource_id, resource_name, credential_id.")
+	describe(schemas, "Attempt", "verification",
+		"The host's reading of itself after the change: verifier (the contract's verifier - unit_state, package_versions, file_content, sysctl, reboot, ...), verified, expected, observed and reason. "+
+			"Absent when the attempt reported none: a read, an operation the panel settles on the host's return, or an agent from before the verifiers - which is not the same as a change nobody confirmed.")
+	describe(schemas, "NotificationDelivery", "state",
+		"pending and retry_wait wait for the worker, leased is being sent now, delivered is done, dead_letter needs the operator (the credentials were refused or the attempts ran out; POST .../retry puts it back), suppressed was silenced before it was ever sent.")
+	describe(schemas, "HostAction", "allowed",
+		"Whether this operator may order this action on this host now. The panel hides what is not allowed; the order itself is authorised again on the server, and this answer never stands in for that.")
+	describe(schemas, "HostAction", "reason_code",
+		"permission_denied, capability_missing, host_quarantined, host_recovery, host_retired, read_only_host, helper_unavailable or lifecycle_state_mismatch; empty when the action is allowed.")
+	describe(schemas, "HostAction", "note",
+		"A fact about an allowed action: the order will wait in the queue for an offline host, or it will ask for fresh authentication. It refuses nothing.")
 	describe(schemas, "HostAccess", "known",
 		"Whether the directory has an entry for the host. False leaves the directory's rules undetermined, not absent; the local rules are reported either way.")
 	describe(schemas, "HostAccess", "local_sudo_rules",
@@ -446,7 +458,26 @@ var queryParameters = map[string][]queryParameter{
 		{"severity", "string", "critical, high, medium, low, negligible or unrated: hosts with an affected finding of that rung."},
 		{"sort", "string", "affected (default), fixable or hostname."},
 		{"limit", "integer", "The page size: 100 by default, 500 at most."},
-		{"offset", "integer", "Rows to skip."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page. A cursor issued under one order is refused under another."},
+		{"offset", "integer", "Rows to skip; the cursor wins when both are given."},
+	},
+	// The fleet views count over every host in scope and hand the detail
+	// out a page at a time, so each of them takes the paging controls
+	// besides its own filters. Every one of them answers total_hosts,
+	// evaluated_hosts and unknown_hosts, and says partial with a
+	// partial_reason when the answer does not cover the whole fleet.
+	"GET /api/v1/security": {
+		{"check", "string", "The identifier of one check; the answer is then one page of the hosts failing it rather than the whole profile."},
+		{"limit", "integer", "The page size of the host list of a check: 100 by default, 500 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
+	},
+	"GET /api/v1/backups": {
+		{"limit", "integer", "The page size: 100 by default, 500 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page. The moment the ages were judged at travels in it, so every page of one reading judges by the same clock."},
+	},
+	"GET /api/v1/certificates": {
+		{"limit", "integer", "The page size: 100 by default, 500 at most."},
+		{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
 	},
 	"GET /api/v1/vulnerabilities/cves": {
 		{"q", "string", "A prefix of a CVE number or of an affected package name."},
@@ -469,7 +500,8 @@ var queryParameters = map[string][]queryParameter{
 	},
 	"GET /api/v1/notifications/deliveries": {
 		{"channel_id", "string", "One channel's deliveries."},
-		{"status", "string", "sent or failed."},
+		{"status", "string", "sent or failed, the words of the previous release."},
+		{"state", "string", "pending, leased, delivered, retry_wait, dead_letter or suppressed."},
 		{"since", "string", "RFC 3339; deliveries at or after this moment."},
 		{"limit", "integer", "100 by default, 500 at most."},
 	},
@@ -581,53 +613,55 @@ func collection(name string) map[string]any {
 // The endpoints whose answers are known resources. The rest answer with
 // module-specific views described by their handlers.
 var responseSchemas = map[string]map[string]any{
-	"GET /api/v1/hosts":                               pagedCollection("Host"),
-	"GET /api/v1/hosts/{id}":                          ref("Host"),
-	"PUT /api/v1/hosts/{id}/tags":                     ref("Host"),
-	"PUT /api/v1/hosts/{id}/channel":                  ref("Host"),
-	"PUT /api/v1/hosts/{id}/owner":                    ref("Host"),
-	"PUT /api/v1/hosts/{id}/management-address":       ref("Host"),
-	"PUT /api/v1/hosts/{id}/failure-domain":           ref("Host"),
-	"PUT /api/v1/hosts/{id}/placement":                ref("Host"),
-	"GET /api/v1/jobs":                                cursorCollection("Job"),
-	"GET /api/v1/jobs/{id}":                           ref("Job"),
-	"POST /api/v1/jobs/{id}/approve":                  ref("Job"),
-	"POST /api/v1/jobs/{id}/cancel":                   ref("Job"),
-	"GET /api/v1/jobs/{id}/attempts":                  collection("Attempt"),
-	"POST /api/v1/hosts/{id}/operations":              ref("Job"),
-	"GET /api/v1/campaigns":                           collection("Campaign"),
-	"POST /api/v1/campaigns":                          ref("Campaign"),
-	"GET /api/v1/campaigns/{id}":                      ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/approve":             ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/pause":               ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/resume":              ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/cancel":              ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/retry":               ref("Campaign"),
-	"POST /api/v1/campaigns/{id}/targets/{host}/skip": ref("CampaignTarget"),
-	"GET /api/v1/campaign-schedules":                  collection("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules":                 ref("CampaignSchedule"),
-	"GET /api/v1/campaign-schedules/{id}":             ref("CampaignSchedule"),
-	"PUT /api/v1/campaign-schedules/{id}":             ref("CampaignSchedule"),
-	"POST /api/v1/campaign-schedules/{id}/run-now":    ref("Campaign"),
-	"GET /api/v1/campaigns/{id}/targets":              pagedCollection("CampaignTarget"),
-	"GET /api/v1/campaigns/{id}/timeline":             collection("TimelineEntry"),
-	"GET /api/v1/campaigns/{id}/steps":                cursorCollection("CampaignStep"),
-	"GET /api/v1/audit":                               cursorCollection("AuditEvent"),
-	"GET /api/v1/budgets":                             items("Budget"),
-	"GET /api/v1/fleet/summary":                       ref("FleetSummary"),
-	"GET /api/v1/hosts/{id}/audit":                    cursorCollection("AuditEvent"),
-	"GET /api/v1/hosts/{id}/packages":                 ref("HostPackageList"),
-	"GET /api/v1/hosts/{id}/system/history":           collection("SystemHistoryEntry"),
-	"GET /api/v1/hosts/{id}/access":                   ref("HostAccess"),
-	"GET /api/v1/policies":                            collection("Policy"),
-	"POST /api/v1/policies":                           ref("Policy"),
-	"GET /api/v1/policies/{id}":                       ref("Policy"),
-	"PUT /api/v1/policies/{id}":                       ref("Policy"),
-	"POST /api/v1/policies/{id}/publish":              ref("Policy"),
-	"POST /api/v1/policies/{id}/evaluate":             ref("PolicyOutcome"),
-	"GET /api/v1/policies/{id}/results":               pagedCollection("PolicyResult"),
-	"GET /api/v1/policies/{id}/versions":              collection("PolicyVersion"),
-	"GET /api/v1/hosts/{id}/policies":                 collection("PolicyResult"),
+	"GET /api/v1/hosts":                                pagedCollection("Host"),
+	"GET /api/v1/hosts/{id}":                           ref("Host"),
+	"PUT /api/v1/hosts/{id}/tags":                      ref("Host"),
+	"PUT /api/v1/hosts/{id}/channel":                   ref("Host"),
+	"PUT /api/v1/hosts/{id}/owner":                     ref("Host"),
+	"PUT /api/v1/hosts/{id}/management-address":        ref("Host"),
+	"PUT /api/v1/hosts/{id}/failure-domain":            ref("Host"),
+	"PUT /api/v1/hosts/{id}/placement":                 ref("Host"),
+	"GET /api/v1/jobs":                                 cursorCollection("Job"),
+	"GET /api/v1/jobs/{id}":                            ref("Job"),
+	"POST /api/v1/jobs/{id}/approve":                   ref("Job"),
+	"POST /api/v1/jobs/{id}/cancel":                    ref("Job"),
+	"GET /api/v1/jobs/{id}/attempts":                   collection("Attempt"),
+	"POST /api/v1/hosts/{id}/operations":               ref("Job"),
+	"GET /api/v1/campaigns":                            collection("Campaign"),
+	"POST /api/v1/campaigns":                           ref("Campaign"),
+	"GET /api/v1/campaigns/{id}":                       ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/approve":              ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/pause":                ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/resume":               ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/cancel":               ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/retry":                ref("Campaign"),
+	"POST /api/v1/campaigns/{id}/targets/{host}/skip":  ref("CampaignTarget"),
+	"POST /api/v1/notifications/deliveries/{id}/retry": ref("NotificationDelivery"),
+	"GET /api/v1/campaign-schedules":                   collection("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules":                  ref("CampaignSchedule"),
+	"GET /api/v1/campaign-schedules/{id}":              ref("CampaignSchedule"),
+	"PUT /api/v1/campaign-schedules/{id}":              ref("CampaignSchedule"),
+	"POST /api/v1/campaign-schedules/{id}/run-now":     ref("Campaign"),
+	"GET /api/v1/campaigns/{id}/targets":               pagedCollection("CampaignTarget"),
+	"GET /api/v1/campaigns/{id}/timeline":              collection("TimelineEntry"),
+	"GET /api/v1/campaigns/{id}/steps":                 cursorCollection("CampaignStep"),
+	"GET /api/v1/audit":                                cursorCollection("AuditEvent"),
+	"GET /api/v1/budgets":                              items("Budget"),
+	"GET /api/v1/fleet/summary":                        ref("FleetSummary"),
+	"GET /api/v1/hosts/{id}/audit":                     cursorCollection("AuditEvent"),
+	"GET /api/v1/hosts/{id}/packages":                  ref("HostPackageList"),
+	"GET /api/v1/hosts/{id}/actions":                   collection("HostAction"),
+	"GET /api/v1/hosts/{id}/system/history":            collection("SystemHistoryEntry"),
+	"GET /api/v1/hosts/{id}/access":                    ref("HostAccess"),
+	"GET /api/v1/policies":                             collection("Policy"),
+	"POST /api/v1/policies":                            ref("Policy"),
+	"GET /api/v1/policies/{id}":                        ref("Policy"),
+	"PUT /api/v1/policies/{id}":                        ref("Policy"),
+	"POST /api/v1/policies/{id}/publish":               ref("Policy"),
+	"POST /api/v1/policies/{id}/evaluate":              ref("PolicyOutcome"),
+	"GET /api/v1/policies/{id}/results":                pagedCollection("PolicyResult"),
+	"GET /api/v1/policies/{id}/versions":               collection("PolicyVersion"),
+	"GET /api/v1/hosts/{id}/policies":                  collection("PolicyResult"),
 }
 
 // items is a whole list answered at once, without a count: the budgets

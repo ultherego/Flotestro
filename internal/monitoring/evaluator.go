@@ -43,9 +43,20 @@ type openAlert struct {
 // condition that stops holding in between clears the episode before it
 // fires. A rule with an empty window fires at the first sample.
 //
+// The window counts only the time the fleet was actually watched. A hole
+// in the samples longer than maxSampleGap - the agent was restarted, the
+// host was rebooted, the panel was down - is not a stretch of the
+// condition holding; it is a stretch of nobody looking. The episode's
+// timer therefore restarts after the hole, and an alert says "this held
+// for ten minutes" only when ten minutes of samples say so. Without that,
+// a host that goes quiet for an hour under a load spike and comes back
+// under the same spike fires at once for a window nobody observed.
+//
 // A host whose newest sample is older than three intervals is not
 // evaluated by the sample rules: a stale reading is not a reading, and
-// its silence is a matter for host_offline.
+// its silence is a matter for host_offline. A rule left without data that
+// way holds its pending episode in place - the no-data state - rather
+// than letting the timer run on to firing.
 func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 	rules, err := s.ListRules(ctx)
 	if err != nil {
@@ -73,8 +84,17 @@ func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 			key := rule.ID + "/" + host.ID
 			episode, exists := open[key]
 			if !known {
-				// Nothing can be said: the episode stays as it is, neither
-				// advanced nor cleared.
+				// Nothing can be said: the episode is not cleared - the
+				// condition may well still hold - but it is not advanced
+				// either. A pending episode is held in its no-data state,
+				// its timer restarted, so that when the readings come back
+				// the window is counted from the reading rather than from
+				// a silence.
+				if exists && noDataHold(episode, now) {
+					if err := s.restart(ctx, episode.ID, now); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 			holds := compare(rule.Operator, value, rule.Threshold)
@@ -84,7 +104,11 @@ func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 					return err
 				}
 			case holds && episode.State == "pending":
-				if now.Sub(episode.StartedAt) >= time.Duration(rule.ForMinutes)*time.Minute {
+				since, err := s.observedSince(ctx, rule, host, episode, now)
+				if err != nil {
+					return err
+				}
+				if now.Sub(since) >= time.Duration(rule.ForMinutes)*time.Minute {
 					if err := s.fire(ctx, episode.ID, value, detail, now); err != nil {
 						return err
 					}
@@ -197,6 +221,100 @@ func (s *Store) startEpisode(ctx context.Context, rule Rule, host hostState,
 		on conflict do nothing`,
 		uuid.NewString(), rule.ID, rule.Name, rule.Metric, rule.Severity, host.ID, state,
 		float32(value), detail, now, firedAt)
+	return err
+}
+
+// maxSampleGap is the longest hole in a host's samples that still counts
+// as one continuous run of readings: twice the sampling interval, so a
+// single lost sample is a lost sample and two in a row are a gap. The
+// same limit answers both questions - how long a for-window may be
+// believed, and how long a rule may be without data before its pending
+// episode is held back.
+const maxSampleGap = 2 * SamplingInterval
+
+// observedSince returns the moment from which the rule's window is
+// counted for the episode: the start of the uninterrupted run of samples
+// that reaches now. A rule that fires at the first sample, and the
+// host_offline rule - whose subject is the absence of samples, so a gap
+// is its evidence rather than its blind spot - count from the episode.
+//
+// A run that starts later than the episode is written onto the episode,
+// so the history says when the condition began to be watched rather than
+// when it was first seen, and the next run of the evaluator does not read
+// the samples of the gap again.
+func (s *Store) observedSince(ctx context.Context, rule Rule, host hostState,
+	episode openAlert, now time.Time) (time.Time, error) {
+	if rule.ForMinutes == 0 || rule.Metric == MetricHostOffline {
+		return episode.StartedAt, nil
+	}
+	samples, err := s.sampleTimes(ctx, host.ID, episode.StartedAt)
+	if err != nil {
+		return time.Time{}, err
+	}
+	since := continuousSince(episode.StartedAt, samples, now, maxSampleGap)
+	if since.After(episode.StartedAt) {
+		if err := s.restart(ctx, episode.ID, since); err != nil {
+			return time.Time{}, err
+		}
+	}
+	return since, nil
+}
+
+// continuousSince walks the samples of an episode in order and returns
+// the start of the last uninterrupted run: the moment after the last hole
+// wider than gap. A last sample older than gap means no run reaches now
+// at all, and the run starts now - the condition has yet to be watched.
+func continuousSince(started time.Time, samples []time.Time, now time.Time, gap time.Duration) time.Time {
+	since, last := started, started
+	for _, at := range samples {
+		if at.Before(started) {
+			continue
+		}
+		if at.Sub(last) > gap {
+			since = at
+		}
+		last = at
+	}
+	if now.Sub(last) > gap {
+		return now
+	}
+	return since
+}
+
+// noDataHold says whether a pending episode without a reading has been
+// without one long enough to have its timer restarted. The check spares
+// the database a write on every run of the evaluator for a host that has
+// nothing to say - a rule on swap over a host without swap - while a
+// silence longer than a gap still cannot carry the episode to firing.
+func noDataHold(episode openAlert, now time.Time) bool {
+	return episode.State == "pending" && now.Sub(episode.StartedAt) > maxSampleGap
+}
+
+// sampleTimes reads the moments of the host's samples since the given one,
+// oldest first.
+func (s *Store) sampleTimes(ctx context.Context, hostID string, since time.Time) ([]time.Time, error) {
+	rows, err := s.pool.Query(ctx,
+		`select at from host_metrics where host_id = $1 and at >= $2 order by at`, hostID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var moments []time.Time
+	for rows.Next() {
+		var at time.Time
+		if err := rows.Scan(&at); err != nil {
+			return nil, err
+		}
+		moments = append(moments, at)
+	}
+	return moments, rows.Err()
+}
+
+// restart moves the start of a pending episode, so its window is counted
+// from there. A firing episode is never moved: it has already fired.
+func (s *Store) restart(ctx context.Context, id string, at time.Time) error {
+	_, err := s.pool.Exec(ctx,
+		`update alerts set started_at = $2 where id = $1 and state = 'pending'`, id, at)
 	return err
 }
 

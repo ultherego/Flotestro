@@ -386,6 +386,10 @@ func (s *AgentService) Connect(ctx context.Context,
 	// replaced halfway. The settlement is a result and is fenced with the
 	// session that has just claimed the host.
 	s.settleAgentUpgrade(ctx, hostID, hello.GetAgentVersion(), session.Fence())
+	// A restart is settled the same way and for the same reason: the host
+	// carries out its own verification by coming back on another boot, and
+	// no process on it survives to report that.
+	s.settleReboot(ctx, hostID, hello.GetBootId(), session.Fence())
 	// The management address is refreshed at every connection: a host can
 	// change its address, move behind a relay or come back from behind one.
 	if address, source := managementAddress(session.RemoteAddr, hello.GetLocalAddress(), relayID); address != "" {
@@ -508,7 +512,7 @@ func (s *AgentService) Connect(ctx context.Context,
 				return nil
 			}
 			if relayed != nil {
-				switch problem := s.checkRelayedMessage(ctx, hostID, relayed, msg); {
+				switch problem := s.checkRelayedMessage(ctx, hostID, session, relayed, msg); {
 				case errors.Is(problem, errMessageDropped):
 					continue
 				case problem != nil:
@@ -530,10 +534,11 @@ type relayedSession struct {
 	endToEnd bool
 }
 
-// errMessageDropped says a relayed message was refused on its own without
-// ending the session: a sequence the session accepted before, or a
+// errMessageDropped says a relayed message was put aside on its own
+// without ending the session: a message the panel consumed already and
+// the relay carried again, a sequence the session never spent, or a
 // message without an envelope on a session that signs. A relay that lost
-// the connection halfway through sending its buffer sends the message
+// the connection halfway through sending its spool sends the message
 // again, and the host must not lose its session over the relay's honest
 // retry; the message itself is not handled twice, and an unsigned one is
 // not handled at all.
@@ -578,11 +583,17 @@ func (s *AgentService) admitRelayedHello(ctx context.Context, who peer, first *a
 // upgrade, and a session that dies on each of them would drain that
 // buffer one reconnect at a time. Nothing unsigned is handled either
 // way. A session that did not sign its Hello is checked whenever a
-// message carries an envelope all the same - the buffer may hold messages
+// message carries an envelope all the same - the spool may hold messages
 // of an earlier, signing session of the host, and a bad envelope is
 // refused under every mode.
-func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, relayed *relayedSession,
-	msg *agentv1.AgentMessage) error {
+//
+// A number the same session spent already is the one case that is no
+// refusal at all: the relay holds a record until the panel acknowledges
+// it, so a link that broke in between means the record comes back. It is
+// dropped, acknowledged once more and counted, and the host's record is
+// left alone.
+func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, session *Session,
+	relayed *relayedSession, msg *agentv1.AgentMessage) error {
 	if msg.GetEnvelope() == nil {
 		if !relayed.endToEnd {
 			return nil
@@ -597,6 +608,20 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, r
 	verified, err := s.envelopes.VerifyMessage(ctx, relayed.peer, msg)
 	if err != nil {
 		if refusal := RelayRefusalOf(err); refusal != nil && refusal.Code == hosts.RefusalRelaySequenceReplayed {
+			if refusal.Redelivery {
+				// The panel consumed this message already and the relay
+				// carried it again because the acknowledgement never
+				// reached it - a link that broke while the spool was
+				// draining. The message is not handled twice, the
+				// acknowledgement goes out once more so the record leaves
+				// the spool, and nothing is written on the host: the relay
+				// did what the spool is for.
+				metrics.RelayEnvelopeRedelivery.Inc()
+				s.acknowledge(hostID, session, msg.GetEnvelope())
+				s.log.Debug("a relayed message the panel had consumed was carried again and acknowledged",
+					"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
+				return errMessageDropped
+			}
 			s.refused(ctx, hostID, refusal.Code, refusal.Detail)
 			metrics.RelayEnvelopeRefusal.Inc(refusal.Code)
 			s.log.Warn("a relayed message was carried a second time and was dropped",
@@ -640,7 +665,63 @@ func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verifi
 	}
 }
 
+// handle consumes a message of the agent and, once it is consumed,
+// acknowledges it to the relay that carried it.
+//
+// The order is the whole point of the durable spool of chapter 13: the
+// relay keeps a message until the panel says it has it, and the panel
+// says so only after the transaction behind the message committed. A
+// handler that returned an error is a message the panel refused - the
+// result was not written, the heartbeat not applied - and it is left
+// unacknowledged, so the relay carries it again after the reconnect
+// rather than losing it on the panel's word.
 func (s *AgentService) handle(ctx context.Context, hostID string, session *Session,
+	msg *agentv1.AgentMessage) error {
+	if err := s.consume(ctx, hostID, session, msg); err != nil {
+		return err
+	}
+	s.acknowledge(hostID, session, msg.GetEnvelope())
+	return nil
+}
+
+// acknowledge tells the relay that the message of the envelope is the
+// panel's now and its record may leave the spool. A message without an
+// envelope came from a direct session: there is no spool behind it and
+// nothing to free, so nothing is sent. The acknowledgement travels the
+// session it arrived on, because the relay reads it off the stream of
+// that very host and answers for no other.
+//
+// A send that does not fit into the outbound buffer is noted and nothing
+// more: an unacknowledged record stays in the spool and comes back, which
+// is exactly what the spool is for, while a session torn down over a
+// missing acknowledgement would cost the host its link.
+func (s *AgentService) acknowledge(hostID string, session *Session, envelope *agentv1.RelayedEnvelope) {
+	if envelope == nil || session == nil {
+		return
+	}
+	err := session.Send(&agentv1.ServerMessage{
+		Payload: &agentv1.ServerMessage_MessageAck{MessageAck: &agentv1.MessageAck{
+			HostId:    hostID,
+			SessionId: envelope.GetSessionId(),
+			Sequence:  envelope.GetSequence(),
+		}},
+	}, ackSendTimeout)
+	if err != nil {
+		s.log.Warn("the acknowledgement of a relayed message was not sent; the relay will carry it again",
+			"host_id", hostID, "session_id", envelope.GetSessionId(),
+			"sequence", envelope.GetSequence(), "err", err)
+	}
+}
+
+// ackSendTimeout bounds the wait for a slot in the outbound buffer of the
+// session. Short on purpose: the acknowledgement is a courtesy to the
+// relay, and the receive loop of a host must not stand still for it.
+const ackSendTimeout = 2 * time.Second
+
+// consume applies a message of the agent to the records of the panel. Its
+// error is the panel's refusal of the message, which keeps it in the
+// spool of the relay.
+func (s *AgentService) consume(ctx context.Context, hostID string, session *Session,
 	msg *agentv1.AgentMessage) error {
 	switch payload := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Heartbeat:
@@ -1075,6 +1156,11 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
 		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
 		Detail:          resultDetailJSON(result),
+		// The host's reading of itself after the change goes onto the
+		// attempt as it came: without it the operator sees
+		// applied_unverified with no way to learn which verifier looked,
+		// what it expected and what it found.
+		Verification: verificationJSON(result.GetVerification()),
 	}, state, session.Fence())
 	if errors.Is(err, jobs.ErrStaleFence) {
 		// The database refused the settlement: the host was claimed by a

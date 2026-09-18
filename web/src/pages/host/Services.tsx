@@ -13,6 +13,7 @@ import {
   useHost, useModule, useModuleRefresh,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type ServicesState = {
@@ -62,6 +63,9 @@ type Attempt = JobAttempt<DetailDocument>;
 
 /** How many units the list shows before the operator asks for more. */
 const UNIT_PAGE = 50;
+
+/** The changes this page offers; when every one is refused, the page says so once. */
+const UNIT_CHANGES = ["unit.restart", "unit.start", "unit.stop", "unit.reset_failed", "unit.enable.set", "unit.mask.set"];
 
 /**
  * The detail of a read, typed by the panel from the result of the agent. An
@@ -213,15 +217,18 @@ export function Services() {
         title={t("Services")}
         description={t("systemd units: what failed, what runs and what starts at boot.")}
         actions={
-          <button
-            onClick={() => request.mutate({ action: "unit.status", payload: { unit_status: { all: true } } })}
-            disabled={request.isPending || host.connection_state !== "online"}
-          >
-            {request.isPending ? t("Requesting…") : t("Read from host")}
-          </button>
+          <ActionGuard action="unit.status" host={host.id} explain>
+            <button
+              onClick={() => request.mutate({ action: "unit.status", payload: { unit_status: { all: true } } })}
+              disabled={request.isPending || host.connection_state !== "online"}
+            >
+              {request.isPending ? t("Requesting…") : t("Read from host")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={UNIT_CHANGES} />
       <Message text={message} />
 
       <Widgets>
@@ -259,11 +266,17 @@ export function Services() {
                   </td>
                   <td>
                     <div className="operations">
-                      <button onClick={() => operation("unit.restart", unit)}>{t("Restart")}</button>
-                      <button onClick={() => operation("unit.start", unit)}>{t("Start")}</button>
+                      <ActionGuard action="unit.restart" host={host.id}>
+                        <button onClick={() => operation("unit.restart", unit)}>{t("Restart")}</button>
+                      </ActionGuard>
+                      <ActionGuard action="unit.start" host={host.id}>
+                        <button onClick={() => operation("unit.start", unit)}>{t("Start")}</button>
+                      </ActionGuard>
                       {/* Clearing the record after a fix: the next failure
                           is then told from the one already seen. */}
-                      <button className="secondary" onClick={() => operation("unit.reset_failed", unit)}>{t("Reset failed")}</button>
+                      <ActionGuard action="unit.reset_failed" host={host.id}>
+                        <button className="secondary" onClick={() => operation("unit.reset_failed", unit)}>{t("Reset failed")}</button>
+                      </ActionGuard>
                     </div>
                   </td>
                 </tr>
@@ -352,6 +365,7 @@ export function Services() {
                 {page.map((unit) => (
                   <UnitRow
                     key={unit.name}
+                    hostID={host.id}
                     columns={columns}
                     unit={unit}
                     expanded={expanded === unit.name}
@@ -406,8 +420,9 @@ export function Services() {
 
 /** One unit of the list, with its detail panel under it when opened. */
 function UnitRow({
-  columns, unit, expanded, detail, loading, error, onToggle, onRefresh, onOperation, onEnable, onUnmask, onMask,
+  hostID, columns, unit, expanded, detail, loading, error, onToggle, onRefresh, onOperation, onEnable, onUnmask, onMask,
 }: {
+  hostID: string;
   columns: Columns;
   unit: Unit;
   expanded: boolean;
@@ -445,30 +460,46 @@ function UnitRow({
         <Td columns={columns} name="sub_state">{unit.sub_state}</Td>
         <Td columns={columns} name="on_boot">{unit.unit_file_state || "—"}</Td>
         <Td columns={columns} name="actions">
+          {/* Every button stands behind the server's preview of what this
+              operator may order on this host: a viewer sees none of them,
+              and a refused order is not the way to learn about a missing
+              permission. */}
           <div className="operations">
             {unit.active_state === "active" ? (
               <>
-                <button onClick={() => onOperation("unit.restart", unit.name)}>{t("Restart")}</button>
-                <button onClick={() => onOperation("unit.stop", unit.name)}>{t("Stop")}</button>
+                <ActionGuard action="unit.restart" host={hostID}>
+                  <button onClick={() => onOperation("unit.restart", unit.name)}>{t("Restart")}</button>
+                </ActionGuard>
+                <ActionGuard action="unit.stop" host={hostID}>
+                  <button onClick={() => onOperation("unit.stop", unit.name)}>{t("Stop")}</button>
+                </ActionGuard>
               </>
             ) : (
-              <button onClick={() => onOperation("unit.start", unit.name)}>{t("Start")}</button>
+              <ActionGuard action="unit.start" host={hostID}>
+                <button onClick={() => onOperation("unit.start", unit.name)}>{t("Start")}</button>
+              </ActionGuard>
             )}
             {unit.active_state === "failed" && (
-              <button className="secondary" onClick={() => onOperation("unit.reset_failed", unit.name)}>{t("Reset failed")}</button>
+              <ActionGuard action="unit.reset_failed" host={hostID}>
+                <button className="secondary" onClick={() => onOperation("unit.reset_failed", unit.name)}>{t("Reset failed")}</button>
+              </ActionGuard>
             )}
             {/* Enabling changes the host's behaviour after a reboot, so it
                 is separate from starting now. */}
-            {unit.unit_file_state === "enabled" ? (
-              <button onClick={() => onEnable(false)}>{t("Disable")}</button>
-            ) : unit.unit_file_state === "disabled" ? (
-              <button onClick={() => onEnable(true)}>{t("Enable")}</button>
-            ) : null}
-            {unit.unit_file_state === "masked" ? (
-              <button onClick={onUnmask}>{t("Unmask")}</button>
-            ) : (
-              <button className="hm-danger" onClick={onMask}>{t("Mask")}</button>
-            )}
+            <ActionGuard action="unit.enable.set" host={hostID}>
+              {unit.unit_file_state === "enabled" ? (
+                <button onClick={() => onEnable(false)}>{t("Disable")}</button>
+              ) : unit.unit_file_state === "disabled" ? (
+                <button onClick={() => onEnable(true)}>{t("Enable")}</button>
+              ) : null}
+            </ActionGuard>
+            <ActionGuard action="unit.mask.set" host={hostID}>
+              {unit.unit_file_state === "masked" ? (
+                <button onClick={onUnmask}>{t("Unmask")}</button>
+              ) : (
+                <button className="hm-danger" onClick={onMask}>{t("Mask")}</button>
+              )}
+            </ActionGuard>
           </div>
         </Td>
       </tr>

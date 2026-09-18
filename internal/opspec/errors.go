@@ -33,7 +33,8 @@ type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
 	// admission, dispatch, agent, helper, verify, reconcile, approval,
-	// cancel, or startup for the states the panel refuses to start in.
+	// cancel, startup for the states the panel refuses to start in, or
+	// notification for the dead letters of the notification queue.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -326,6 +327,14 @@ var reportedGuides = []ErrorGuide{
 	{Code: "reboot_failed", Stage: "verify", Retry: RetryReadState,
 		Meaning: "The reboot operation failed on the host.",
 		Action:  "Check the host out of band.", CountsAsFailure: true},
+	// The verifier of the operation: a change is a success only once the
+	// host was read after it and showed the state the operator asked for.
+	{Code: ErrorAppliedUnverified, Stage: "verify", Retry: RetryReadState,
+		Meaning: "The change was made and the read of the host after it did not show the state the operator asked for: the unit is not active, the file has another digest, the package is at another version, the mount is not there. The result names the verifier, what was expected and what was observed, and says whether the host put the previous state back.",
+		Action:  "Read the host - the verifier's observation is in the result - before ordering anything again; the change happened, so a blind repeat is not the answer. Where the result says the previous state was put back, the host stands as before the change.", CountsAsFailure: true},
+	{Code: ErrorRebootNotObserved, Stage: "verify", Retry: RetryReadState,
+		Meaning: "The reboot was ordered and accepted by the host, and no session with a new boot identifier followed within the wait: the host is down, is up without the agent, or came back so late that the wait ran out first.",
+		Action:  "Check the host out of band. A host that comes back later reconnects on its own; the job stays failed, because nobody saw the return in time.", CountsAsFailure: true},
 	{Code: "job_create_failed", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The operation for the host could not be created.",
 		Action:  "Check the panel log; order again.", CountsAsFailure: true},
@@ -493,6 +502,48 @@ var reportedGuides = []ErrorGuide{
 	{Code: "skip_not_allowed", Stage: "cancel", Retry: RetryAfterChange,
 		Meaning: "The skip named a host that is not waiting for its connection: a host under way settles on its own, a host in the queue starts on the next pass, and a settled host is settled.",
 		Action:  "Read the host's state again. Cancel the campaign to stop a host that has not started; a host carrying its task cannot be skipped."},
+
+	// Local accounts and their keys (security remediation, chapter 14.1).
+	// The host edits the key file line by line under the account lock and
+	// refuses, with the code, what would cut an account off or write
+	// what nobody reviewed.
+	{Code: "account_without_credential", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The order would create an account with no key and, since the panel sets no passwords, no way to log in - and did not say so.",
+		Action:  "Give the account a key, or set inactive: true to create it deliberately without a way in; the panel then shows it as locked."},
+	{Code: "key_not_found", Stage: "helper", Retry: RetryReadState,
+		Meaning: "A removal named a fingerprint the account's key file does not carry: the key was taken away in between, or the list came from another host.",
+		Action:  "Read the account's keys again and remove what is there; an order that may find the key already gone says ignore_missing: true."},
+	{Code: "last_key_lockout", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The removal or the replace would take the last key of an account that has no password login (no password, or a locked one, or a password state the host could not read), and nobody could enter as it afterwards. Nothing was written.",
+		Action:  "Add the replacement key first and remove the old one after, or - when cutting the account off is the intent - order the removal with allow_lockout: true, or lock the account instead."},
+	{Code: "managed_file_not_read", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The order asked for the panel's own key file under /etc/ssh/authorized_keys.d and sshd on this host does not list it in AuthorizedKeysFile: keys written there would grant nothing.",
+		Action:  "Add /etc/ssh/authorized_keys.d/%u/60-flotestro.keys to AuthorizedKeysFile through the sshd module, or order the change without managed_file and edit the user's authorized_keys."},
+	{Code: "invalid_ssh_key", Stage: "helper", Retry: RetryNever,
+		Meaning: "The material given as a public key is not one sshd would read: the host parsed it before writing and could not.",
+		Action:  "Paste the public key as ssh-keygen prints it (type, material, optional comment); options in front of it are allowed, a private key never is.", CountsAsFailure: true},
+	{Code: "system_account", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The account's identifier lies outside the UID range of people in the host's login.defs (UID_MIN..UID_MAX): it belongs to a service or to the system, and the order did not say it meant one.",
+		Action:  "Pick the account of a person; a change to a service account is ordered with system: true, and root and the agent's own account are never changed through the panel.", CountsAsFailure: true},
+
+	// The dead letters of the notification queue (security remediation,
+	// chapter 10). The stage is the delivery of a notification, not a
+	// task; none of them counts against a campaign.
+	{Code: "channel_credentials_rejected", Stage: "notification", Retry: RetryAfterChange,
+		Meaning: "The receiver of a notification channel answered 401 or 403, or the mail relay refused the login: the credential of the channel is wrong or revoked. The message is a dead letter.",
+		Action:  "Replace the credential on the channel (the incoming webhook address, the signing secret, the password secret) and retry the dead letters from the notifications screen."},
+	{Code: "permanent_http_error", Stage: "notification", Retry: RetryAfterChange,
+		Meaning: "The receiver of a notification channel answered a status that is neither a success nor one that passes - a 404, a 400 - so the address or the shape of the message is wrong for it. The message is a dead letter.",
+		Action:  "Check the address and what the receiver expects; send a test from the channel; then retry the dead letters."},
+	{Code: "permanent_smtp_error", Stage: "notification", Retry: RetryAfterChange,
+		Meaning: "The mail relay refused the message with a permanent reply (5xx): a sender or a recipient it does not accept, a message it will not take. The message is a dead letter.",
+		Action:  "Read the reply on the delivery, correct the sender or the recipients on the channel, send a test, then retry the dead letters."},
+	{Code: "delivery_attempts_exhausted", Stage: "notification", Retry: RetryAfterChange,
+		Meaning: "The receiver of a notification channel kept failing in a way that passes - a 5xx, a 429, an unreachable address - until the attempts ran out. The message is a dead letter; the last transport error is on the delivery.",
+		Action:  "Bring the receiver back or fix the address, send a test from the channel, then retry the dead letters; nothing was lost."},
+	{Code: "channel_misconfigured", Stage: "notification", Retry: RetryAfterChange,
+		Meaning: "A notification channel cannot send as it is: it was disabled while its messages waited, its configuration does not read, or the panel has no sender for its kind.",
+		Action:  "Enable or correct the channel and retry the dead letters; the messages of a channel that is to stay disabled can be left as they are."},
 }
 
 // RefusalError is a validation refusal with a code of its own. Validate

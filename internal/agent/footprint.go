@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -45,12 +46,47 @@ type Footprint struct {
 	HelperRSSBytes *uint64
 }
 
+// mayRelease says whether enough time has passed since the last release.
+// The sampler is the only caller, so the clock of the sample decides.
+func (s *Sampler) mayRelease() bool {
+	now := s.Now()
+	if !s.releasedAt.IsZero() && now.Sub(s.releasedAt) < releaseEvery {
+		return false
+	}
+	s.releasedAt = now
+	return true
+}
+
+// release hands the free pages back to the host. Replaced in tests.
+func (s *Sampler) release() {
+	if s.Release != nil {
+		s.Release()
+		return
+	}
+	debug.FreeOSMemory()
+}
+
 // processCPU is a snapshot of the busy time of a process: the CPU counter
 // in USER_HZ ticks and the moment it was read.
 type processCPU struct {
 	ticks uint64
 	at    time.Time
 }
+
+// releaseThreshold is the resident size past which the agent hands the
+// pages it no longer uses back to the host before it reports.
+//
+// A package plan or a full inventory allocates for a moment and frees at
+// once; the Go runtime keeps those pages for a while, and the host sees
+// an agent that holds twenty-odd megabytes it is not using. The agent is
+// a guest on somebody's server: it gives them back rather than wait for
+// the scavenger, and it reports what the host sees afterwards. The
+// release costs a collection - milliseconds - and is not repeated more
+// often than releaseEvery.
+const (
+	releaseThreshold = 24 << 20
+	releaseEvery     = 5 * time.Minute
+)
 
 // footprint reads the agent's own numbers. The CPU percentage covers the
 // interval since the previous call; the first call has no interval and no
@@ -62,6 +98,14 @@ func (s *Sampler) footprint(ctx context.Context) Footprint {
 	if data, err := os.ReadFile(filepath.Join(self, "status")); err == nil {
 		if rss, ok := parseVmRSS(string(data)); ok {
 			fp.RSSBytes = &rss
+		}
+	}
+	if rss := fp.RSSBytes; rss != nil && *rss >= releaseThreshold && s.mayRelease() {
+		s.release()
+		if data, err := os.ReadFile(filepath.Join(self, "status")); err == nil {
+			if released, ok := parseVmRSS(string(data)); ok {
+				fp.RSSBytes = &released
+			}
 		}
 	}
 

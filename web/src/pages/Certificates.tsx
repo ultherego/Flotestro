@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { api, loadedItems, LIST_PAGE } from "../lib/api";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { ErrorBox, Empty } from "../components/ui";
 import { absoluteTime, relativeTime } from "../lib/format";
 import { Card, PageHeader, Toolbar } from "../components/layout";
@@ -24,10 +25,18 @@ type Item = {
   unavailable_reason?: string;
 };
 
-type View = {
+/** One page of the fleet list with the counts over all of it.
+ *
+ *  The counts, the timeline and the coverage are the server's, taken over
+ *  every certificate of every host in scope; the items are one page,
+ *  keyed by the cursor. The two must never be confused: the list is what
+ *  fits on the screen, the counts are what the fleet has. */
+type View = Coverage & {
   items: Item[];
+  count: number;
+  total: number;
+  next_cursor?: string;
   counts: Record<string, number>;
-  truncated: boolean;
   hosts_total: number;
   hosts_without_certificates: number;
   // The expiry timeline: how many certificates end in which time window.
@@ -69,14 +78,23 @@ function ExpiryBadge({ status, days }: { status: string; days?: number }) {
  */
 export function FleetCertificates() {
   const t = useT();
-  const { data, error } = useQuery({
+  // The list grows page by page with the cursor the server hands back;
+  // the counters above it come from the first page and describe the whole
+  // fleet, whatever part of the list is loaded.
+  const list = useInfiniteQuery({
     queryKey: ["certificates", "fleet"],
-    queryFn: () => api.get<View>("/api/v1/certificates"),
+    queryFn: ({ pageParam }) => api.get<View>(
+      `/api/v1/certificates?limit=${LIST_PAGE}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
   });
-  // The list comes sorted from the nearest deadline and is bounded, so a
-  // click on a heading reorders it in the browser; the server's order is
-  // the one a cleared sort goes back to. A deadline nobody could read
-  // sorts as unknown, apart from the far ones.
+  const error = list.error;
+  const data = list.data?.pages[0];
+  const items = loadedItems<Item>(list.data);
+  // A heading reorders the rows already loaded, in the browser; the
+  // server's order - the nearest deadline first - is the one a cleared
+  // sort goes back to. A deadline nobody could read sorts as unknown,
+  // apart from the far ones.
   const columns = useColumns("certificates", [
     { key: "expires", label: t("Expires"), sort: "expires" },
     { key: "host", label: t("Host"), sort: "host", fixed: true },
@@ -85,7 +103,7 @@ export function FleetCertificates() {
     { key: "issuer", label: t("Issuer"), sort: "issuer", secondary: true },
     { key: "renewal", label: t("Renewal"), sort: "renewal" },
   ] satisfies ColumnDef[]);
-  const { sort, setSort, sorted } = useSort(data?.items ?? [], (item, column) => {
+  const { sort, setSort, sorted } = useSort(items, (item, column) => {
     switch (column) {
       case "expires": return item.not_after ?? null;
       case "host": return item.hostname;
@@ -102,11 +120,15 @@ export function FleetCertificates() {
   const expired = counts.expired ?? 0;
   const critical = counts.critical ?? 0;
   const warning = counts.warning ?? 0;
-  const reporting = data.hosts_total - data.hosts_without_certificates;
-  // What renews the listed certificates: the list is the closest
+  // The hosts that reported a certificate: the judged ones minus the ones
+  // that reported an empty list. A host nobody has pointed at a path is
+  // not a host without certificates, and neither is one that never
+  // reported at all - the coverage line above counts the second kind.
+  const reporting = Math.max(0, data.evaluated_hosts - data.hosts_without_certificates);
+  // What renews the loaded certificates: the list starts at the closest
   // deadlines, so this says whether the next wave renews itself.
-  const renewal = (kind: string) => data.items.filter((item) => item.renewal === kind).length;
-  const listed = t("among the {n} listed", { n: data.items.length });
+  const renewal = (kind: string) => items.filter((item) => item.renewal === kind).length;
+  const listed = t("among the {n} listed", { n: items.length });
   return (
     <>
       <PageHeader
@@ -116,6 +138,7 @@ export function FleetCertificates() {
         })}
         actions={<ExportButton path="/api/v1/certificates" />}
       />
+      <FleetCoverage coverage={data} />
 
       <div className="widgets">
         {/* The counts cover every certificate the fleet reports, not only
@@ -132,26 +155,33 @@ export function FleetCertificates() {
 
         {/* A host that reports none is not a host without certificates: it
             is a host nobody has pointed at a path yet. */}
-        <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.hosts_total })}>
+        <Card className="span-3" title={t("Hosts")} description={t("{n} of {total} hosts report none", { n: data.hosts_without_certificates, total: data.total_hosts })}>
           <Breakdown items={[
             { label: t("Reporting certificates"), value: reporting, tone: "ok" },
             { label: t("Reporting none"), value: data.hosts_without_certificates, tone: "warn" },
+            // A host nobody has heard from is not a host without
+            // certificates: its deadline may be tomorrow.
+            { label: t("Nothing known"), value: data.unknown_hosts, tone: "unknown" },
           ]} />
         </Card>
 
-        <Trust leaves={data.items} />
+        <Trust leaves={items} />
 
         <Card
           className="span-9"
           flush
-          footer={data.truncated && (
-            <p>{t("Only the closest {n} certificates are listed. The counts above cover all of them.", { n: data.items.length })}</p>
+          footer={list.hasNextPage && (
+            <p>
+              <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+                {t("Load more ({n} left)", { n: data.total - items.length })}
+              </button>
+            </p>
           )}
         >
           <Toolbar end={<ColumnChooser columns={columns} />}>
             <span className="source">{t("Sorted from the nearest deadline; a heading reorders the listed rows.")}</span>
           </Toolbar>
-          {!data.items.length ? (
+          {!items.length ? (
             <Empty>
               {t("No host reports a certificate yet. Open a host, watch a path and scan it.")}
             </Empty>
@@ -225,7 +255,7 @@ export function FleetCertificates() {
   );
 }
 
-type TrustView = {
+type TrustView = Coverage & {
   items: {
     fingerprint_sha256?: string;
     subject?: string;
@@ -298,6 +328,10 @@ function Trust({ leaves }: { leaves: Item[] }) {
             {t("{n} hosts have not reported a trust store yet", { n: data.hosts_unknown })}
             {withoutStore.map((group) => `; ${group.count}: ${group.reason}`).join("")}
           </div>
+          {/* The store is read host by host, so a fleet big enough can run
+              the sweep out of its budget; the answer then says so rather
+              than letting a part of the fleet pass for all of it. */}
+          <FleetCoverage coverage={data} />
         </div>
       }
       flush

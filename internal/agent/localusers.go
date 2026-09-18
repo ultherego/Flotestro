@@ -10,14 +10,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
-)
-
-// The default UID range of the accounts of people. The values come from
-// /etc/login.defs when the file is readable; these are the fallback and match
-// the settings of the distributions.
-const (
-	defaultUIDMin = 1000
-	defaultUIDMax = 60000
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
 // AccountSource describes where an account comes from.
@@ -68,16 +61,20 @@ type LocalAccount struct {
 // The accounts from the directory are not visible here: NSS resolves them only
 // on request, and fetching the full list of domain users from every host would
 // be exactly the load on the directory the document guards against.
+//
+// The UID range that tells a person's account from the system's is the
+// one classifier of the accounts module, read from /etc/login.defs; the
+// helper reads the same file before it writes, so the panel never lists
+// as a person an account the host then refuses as the system's.
 func ReadLocalAccounts() []LocalAccount {
-	uidMin, uidMax := parseUIDRange("/etc/login.defs")
-	return parsePasswd("/etc/passwd", uidMin, uidMax, groupsOf)
+	return parsePasswd("/etc/passwd", accounts.LoadUIDRange(), groupsOf)
 }
 
 // parsePasswd reads the accounts from the given file. The path and the source
 // of the groups are parameters so that the classification can be checked
 // without changing the system.
-func parsePasswd(path string, uidMin, uidMax int64, groups func(string) []string) []LocalAccount {
-	var accounts []LocalAccount
+func parsePasswd(path string, uidRange accounts.UIDRange, groups func(string) []string) []LocalAccount {
+	var found []LocalAccount
 	for line := range iterLines(path) {
 		fields := strings.Split(line, ":")
 		if len(fields) < 7 {
@@ -101,40 +98,13 @@ func parsePasswd(path string, uidMin, uidMax int64, groups func(string) []string
 		// An account outside the range of the accounts of people belongs to a
 		// service. The lower bound alone is not enough: "nobody" has UID 65534,
 		// which lies above the range, and is not the account of a person.
-		if uid < uint64(uidMin) || uid > uint64(uidMax) {
+		if uidRange.IsSystem(int64(uid)) {
 			account.Source = SourceSystem
 		}
 		account.Groups = groups(fields[0])
-		accounts = append(accounts, account)
+		found = append(found, account)
 	}
-	return accounts
-}
-
-// parseUIDRange reads the UID range of the accounts of people from the system
-// configuration. Distributions differ here, and useradd follows this file, so
-// the classification of the panel has to follow the same source.
-func parseUIDRange(path string) (int64, int64) {
-	uidMin, uidMax := int64(defaultUIDMin), int64(defaultUIDMax)
-	for line := range iterLines(path) {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		value, err := strconv.ParseInt(fields[1], 10, 64)
-		if err != nil {
-			continue
-		}
-		switch fields[0] {
-		case "UID_MIN":
-			uidMin = value
-		case "UID_MAX":
-			uidMax = value
-		}
-	}
-	if uidMax < uidMin {
-		return defaultUIDMin, defaultUIDMax
-	}
-	return uidMin, uidMax
+	return found
 }
 
 // groupsOf returns the groups of an account. A read error gives an empty list
@@ -178,11 +148,17 @@ func mergePrivilegedAccounts(accounts []LocalAccount, result *helperv1.LocalAcco
 		accounts[index].PasswordSet = detail.PasswordSet
 		accounts[index].ExpiresAt = detail.GetExpiresAt()
 		for _, key := range detail.GetSshKeys() {
+			// A helper from before the managed file names no source; its
+			// keys came from the user's file, the only one it read.
+			source := key.GetSource()
+			if source == "" {
+				source = "authorized_keys"
+			}
 			accounts[index].SSHKeys = append(accounts[index].SSHKeys, SSHKeyInfo{
 				Fingerprint: key.GetFingerprint(),
 				Type:        key.GetType(),
 				Comment:     key.GetComment(),
-				Source:      "authorized_keys",
+				Source:      source,
 			})
 		}
 		if reason := result.GetUnavailableReason(); reason != "" {

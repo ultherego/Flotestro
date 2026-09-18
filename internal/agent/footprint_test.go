@@ -172,3 +172,55 @@ func TestFootprintLeavesOutWhatItCannotRead(t *testing.T) {
 		t.Error("agent_goroutines is absent")
 	}
 }
+
+// TestTheAgentHandsBackWhatItNoLongerUses: a sample taken while the agent
+// holds more than the release threshold frees the pages once and reports
+// what the host sees afterwards; the next sample a minute later does not
+// free again, and a small agent is never asked to.
+func TestTheAgentHandsBackWhatItNoLongerUses(t *testing.T) {
+	root := procFixture(t, "cpu 100 0 50 800 20 0 5 25 0 0")
+	selfFixture(t, root, statFixture(100, 20), 7)
+	sampler := fixtureSampler(t, root)
+	released := 0
+	sampler.Release = func() {
+		released++
+		// The release gives the pages back: the host now sees less.
+		status := "Name:\tflotestro-agent\nVmRSS:\t   18000 kB\nThreads:\t12\n"
+		if err := os.WriteFile(filepath.Join(root, "self", "status"), []byte(status), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, err := sampler.Sample()
+	if err != nil {
+		t.Fatalf("first sample: %v", err)
+	}
+	if released != 1 {
+		t.Errorf("the agent freed %d times at %d bytes resident, want once", released, 34568*1024)
+	}
+	if first.AgentRssBytes == nil || *first.AgentRssBytes != 18000*1024 {
+		t.Errorf("agent_rss_bytes = %v; the sample must say what the host sees after the release", first.AgentRssBytes)
+	}
+
+	// A minute later the agent is small: nothing to hand back.
+	base := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
+	sampler.Now = func() time.Time { return base.Add(time.Minute) }
+	if _, err := sampler.Sample(); err != nil {
+		t.Fatalf("second sample: %v", err)
+	}
+	if released != 1 {
+		t.Errorf("the agent freed %d times, want once: below the threshold it has nothing to hand back", released)
+	}
+
+	// It grows again within the same five minutes: the release waits, so
+	// a burst of tasks is not paid for with a collection every minute.
+	if err := os.WriteFile(filepath.Join(root, "self", "status"), []byte(statusFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sampler.Sample(); err != nil {
+		t.Fatalf("third sample: %v", err)
+	}
+	if released != 1 {
+		t.Errorf("the agent freed %d times within five minutes, want once", released)
+	}
+}

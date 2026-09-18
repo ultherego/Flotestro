@@ -17,6 +17,7 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { FacetList, useFleetFacets } from "../Bulk";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type SystemState = {
@@ -30,6 +31,13 @@ type SystemState = {
     virtualization?: string;
   };
 };
+
+/**
+ * The changes this page offers; when every one is refused, the lifecycle
+ * section says so once. The three lifecycle orders are not operations of
+ * the catalogue, but the same preview answers for them under these names.
+ */
+const OVERVIEW_CHANGES = ["system.hostname.set", "host.quarantine", "host.quarantine.release", "host.decommission"];
 
 export function Overview() {
   const t = useT();
@@ -656,41 +664,45 @@ function RenameHost({ host, reported }: { host: Host; reported?: string }) {
       {reported && reported !== host.hostname && (
         <FormNote>{t("The host reports the name {name}; the panel will follow at the next inventory.", { name: reported })}</FormNote>
       )}
-      {!open ? (
-        <FormActions>
-          <button className="secondary" onClick={() => setOpen(true)} disabled={host.connection_state !== "online"}>
-            {t("Rename host")}
-          </button>
-        </FormActions>
-      ) : (
-        <Form>
-          <Fields>
-            <Field
-              label={t("New hostname")}
-              help={t("An RFC 1123 name, lower-case: a label or a fully qualified name.")}
-            >
-              <input value={hostname} placeholder="web02.example.internal" onChange={(e) => setHostname(e.target.value)} />
-            </Field>
-            <Field label={t("Pretty name")} help={t("Optional; what hostnamectl shows to people.")}>
-              <input value={pretty} placeholder="Web 02" onChange={(e) => setPretty(e.target.value)} />
-            </Field>
-          </Fields>
-          {name !== "" && !valid && (
-            <Message text={t("This is not a valid hostname: lower-case letters, digits and hyphens, labels joined by dots.")} error />
-          )}
-          {unchanged && <Message text={t("The host already has this name.")} />}
-          <FormNote>
-            {t("The host checks first whether the name resolves in DNS to another machine and whether the agent's certificate is bound to the name. /etc/hosts follows the rename; DNS, Kerberos and service certificates do not.")}
-          </FormNote>
+      {/* The trigger and the form stand behind the preview together: a
+          rename nobody may order has no form to fill in either. */}
+      <ActionGuard action="system.hostname.set" host={host.id}>
+        {!open ? (
           <FormActions>
-            <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!valid || unchanged || confirming}>
-              {t("Rename host…")}
+            <button className="secondary" onClick={() => setOpen(true)} disabled={host.connection_state !== "online"}>
+              {t("Rename host")}
             </button>
-            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
           </FormActions>
-          <Message text={message} />
-        </Form>
-      )}
+        ) : (
+          <Form>
+            <Fields>
+              <Field
+                label={t("New hostname")}
+                help={t("An RFC 1123 name, lower-case: a label or a fully qualified name.")}
+              >
+                <input value={hostname} placeholder="web02.example.internal" onChange={(e) => setHostname(e.target.value)} />
+              </Field>
+              <Field label={t("Pretty name")} help={t("Optional; what hostnamectl shows to people.")}>
+                <input value={pretty} placeholder="Web 02" onChange={(e) => setPretty(e.target.value)} />
+              </Field>
+            </Fields>
+            {name !== "" && !valid && (
+              <Message text={t("This is not a valid hostname: lower-case letters, digits and hyphens, labels joined by dots.")} error />
+            )}
+            {unchanged && <Message text={t("The host already has this name.")} />}
+            <FormNote>
+              {t("The host checks first whether the name resolves in DNS to another machine and whether the agent's certificate is bound to the name. /etc/hosts follows the rename; DNS, Kerberos and service certificates do not.")}
+            </FormNote>
+            <FormActions>
+              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={!valid || unchanged || confirming}>
+                {t("Rename host…")}
+              </button>
+              <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+            </FormActions>
+            <Message text={message} />
+          </Form>
+        )}
+      </ActionGuard>
 
       {confirming && (
         <TargetConfirmation
@@ -762,6 +774,7 @@ function Lifecycle({ host }: { host: Host }) {
         <Fact label={t("Reason")}>{host.lifecycle_reason || "—"}</Fact>
         <Fact label={t("Meaning")} wide>{lifecycleMeaning(t, host.lifecycle_state)}</Fact>
       </Facts>
+      <ReadOnlyModuleNotice host={host.id} actions={OVERVIEW_CHANGES} />
       {alive && <Quarantine host={host} />}
       {alive && <IdentityRecovery host={host} prompted={!!refusal && RECOVERABLE_REFUSALS.includes(refusal.code)} />}
       {outcome && <div className="hm-section-body"><DecommissionResult outcome={outcome} /></div>}
@@ -845,38 +858,47 @@ function Quarantine({ host }: { host: Host }) {
 
   return (
     <div className="hm-section-body" data-testid="quarantine">
+      {/* The permission list of the session, checked above, is the first
+          gate; the preview of the host's actions judges in the scope of
+          the host and in its lifecycle state, and is the second. */}
       {mayRelease && (
-        <FormActions>
-          <button onClick={() => setConfirming("release")} disabled={confirming !== null}>
-            {t("Release from quarantine…")}
-          </button>
-        </FormActions>
+        <ActionGuard action="host.quarantine.release" host={host.id}>
+          <FormActions>
+            <button onClick={() => setConfirming("release")} disabled={confirming !== null}>
+              {t("Release from quarantine…")}
+            </button>
+          </FormActions>
+        </ActionGuard>
       )}
       {mayQuarantine && !open && (
-        <FormActions>
-          <button className="hm-danger" onClick={() => setOpen(true)}>{t("Quarantine host…")}</button>
-        </FormActions>
+        <ActionGuard action="host.quarantine" host={host.id}>
+          <FormActions>
+            <button className="hm-danger" onClick={() => setOpen(true)}>{t("Quarantine host…")}</button>
+          </FormActions>
+        </ActionGuard>
       )}
       {mayQuarantine && open && (
-        <Form>
-          <Check checked={revoke} onChange={setRevoke}>
-            {t("Revoke the certificates as well (suspected key theft)")}
-          </Check>
-          <FormNote>
-            {revoke
-              ? t("The certificates stop working now. A host with revoked certificates is not released: its return is an identity recovery.")
-              : t("The certificates stay valid; the lifecycle state alone keeps the host out, and a release lets it back in.")}
-          </FormNote>
-          <FormNote>
-            {t("The session is closed, the undelivered jobs are cancelled, and the host takes no operations and no secrets. A task already delivered runs to its end; the panel cannot undo it.")}
-          </FormNote>
-          <FormActions>
-            <button className="hm-danger" onClick={() => setConfirming("quarantine")} disabled={confirming !== null}>
-              {t("Quarantine host…")}
-            </button>
-            <button className="secondary" onClick={() => { setOpen(false); setConfirming(null); }}>{t("Cancel")}</button>
-          </FormActions>
-        </Form>
+        <ActionGuard action="host.quarantine" host={host.id}>
+          <Form>
+            <Check checked={revoke} onChange={setRevoke}>
+              {t("Revoke the certificates as well (suspected key theft)")}
+            </Check>
+            <FormNote>
+              {revoke
+                ? t("The certificates stop working now. A host with revoked certificates is not released: its return is an identity recovery.")
+                : t("The certificates stay valid; the lifecycle state alone keeps the host out, and a release lets it back in.")}
+            </FormNote>
+            <FormNote>
+              {t("The session is closed, the undelivered jobs are cancelled, and the host takes no operations and no secrets. A task already delivered runs to its end; the panel cannot undo it.")}
+            </FormNote>
+            <FormActions>
+              <button className="hm-danger" onClick={() => setConfirming("quarantine")} disabled={confirming !== null}>
+                {t("Quarantine host…")}
+              </button>
+              <button className="secondary" onClick={() => { setOpen(false); setConfirming(null); }}>{t("Cancel")}</button>
+            </FormActions>
+          </Form>
+        </ActionGuard>
       )}
       <Message text={message} />
       {signInAgain && (
@@ -1140,37 +1162,42 @@ function DecommissionHost({ host, onDone }: { host: Host; onDone: (outcome: Deco
 
   return (
     <div className="hm-section-body">
-      {!open ? (
-        <FormActions>
-          <button className="hm-danger" onClick={() => setOpen(true)}>
-            {t("Decommission host…")}
-          </button>
-        </FormActions>
-      ) : (
-        <Form>
-          <Check checked={wipe} onChange={setWipe}>
-            {t("Wipe the identity and the journal on the host and disable its agent service")}
-          </Check>
-          <Check checked={revokeOffline} onChange={setRevokeOffline}>
-            {t("Revoke the certificates at once if the host is offline")}
-          </Check>
-          <FormNote>
-            {online
-              ? t("The host is connected: it will finish the operations under way, drop its secret leases and report it is ready; then its certificates are revoked and, with the wipe, its identity removed. The panel waits up to two minutes for the answer.")
-              : t("The host is not connected: it is retired without its cooperation. Its certificates are revoked now, or at its first contact when the box above is cleared. What is on its disk stays unknown until somebody wipes it out of band.")}
-          </FormNote>
-          <FormNote>
-            {t("The record, the inventory and the audit trail stay. A retired host does not come back; its machine is refused for a new-host token for 30 days.")}
-          </FormNote>
+      {/* The trigger and the form stand behind the preview together: the
+          server judges the permission in the host's scope and the state
+          the host is in. */}
+      <ActionGuard action="host.decommission" host={host.id}>
+        {!open ? (
           <FormActions>
-            <button className="hm-danger" onClick={() => setConfirming(true)} disabled={confirming}>
+            <button className="hm-danger" onClick={() => setOpen(true)}>
               {t("Decommission host…")}
             </button>
-            <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
           </FormActions>
-          <Message text={message} error />
-        </Form>
-      )}
+        ) : (
+          <Form>
+            <Check checked={wipe} onChange={setWipe}>
+              {t("Wipe the identity and the journal on the host and disable its agent service")}
+            </Check>
+            <Check checked={revokeOffline} onChange={setRevokeOffline}>
+              {t("Revoke the certificates at once if the host is offline")}
+            </Check>
+            <FormNote>
+              {online
+                ? t("The host is connected: it will finish the operations under way, drop its secret leases and report it is ready; then its certificates are revoked and, with the wipe, its identity removed. The panel waits up to two minutes for the answer.")
+                : t("The host is not connected: it is retired without its cooperation. Its certificates are revoked now, or at its first contact when the box above is cleared. What is on its disk stays unknown until somebody wipes it out of band.")}
+            </FormNote>
+            <FormNote>
+              {t("The record, the inventory and the audit trail stay. A retired host does not come back; its machine is refused for a new-host token for 30 days.")}
+            </FormNote>
+            <FormActions>
+              <button className="hm-danger" onClick={() => setConfirming(true)} disabled={confirming}>
+                {t("Decommission host…")}
+              </button>
+              <button className="secondary" onClick={() => { setOpen(false); setConfirming(false); }}>{t("Cancel")}</button>
+            </FormActions>
+            <Message text={message} error />
+          </Form>
+        )}
+      </ActionGuard>
 
       {confirming && (
         <TargetConfirmation

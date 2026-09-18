@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,14 @@ func (s *Server) SetNotifications(store *notify.Store, router *notify.Router) {
 	s.notifier = router
 }
 
+// SetNotificationQueue attaches the worker of this instance, so a row an
+// operator put back in the queue is taken at once rather than at the next
+// round. A panel without one still queues: the worker of another instance
+// picks the row up.
+func (s *Server) SetNotificationQueue(worker *notify.Worker) {
+	s.notificationQueue = worker
+}
+
 // notificationRoutes registers the channel endpoints.
 func (s *Server) notificationRoutes(mux *http.ServeMux) {
 	s.route(mux, "GET /api/v1/notifications/channels", s.handleListNotificationChannels)
@@ -38,6 +47,7 @@ func (s *Server) notificationRoutes(mux *http.ServeMux) {
 	s.route(mux, "PUT /api/v1/notifications/channels/{id}", s.handleUpdateNotificationChannel)
 	s.route(mux, "DELETE /api/v1/notifications/channels/{id}", s.handleDeleteNotificationChannel)
 	s.route(mux, "POST /api/v1/notifications/channels/{id}/test", s.handleTestNotificationChannel)
+	s.route(mux, "POST /api/v1/notifications/deliveries/{id}/retry", s.handleRetryNotificationDelivery)
 	s.route(mux, "GET /api/v1/notifications/deliveries", s.handleListNotificationDeliveries)
 }
 
@@ -172,7 +182,10 @@ func (s *Server) handleListNotificationChannels(w http.ResponseWriter, r *http.R
 	writeJSON(w, http.StatusOK, map[string]any{
 		"items": visible, "count": len(visible),
 		// The vocabulary of a channel, so the form does not carry a copy.
+		// The states of the queue go with it: the log filter offers what
+		// the queue really has rather than a list written twice.
 		"kinds": notify.Kinds, "subjects": notify.Subjects, "severities": notify.Severities,
+		"states": notify.States,
 	})
 }
 
@@ -316,13 +329,94 @@ func (s *Server) handleTestNotificationChannel(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, delivery)
 }
 
+// handleRetryNotificationDelivery puts a dead letter back in the queue.
+//
+// A delivery goes to the dead letter when the recipient refused the
+// credentials or when the attempts ran out; neither is mended by trying
+// again on its own, so the panel never does it by itself. Once the
+// operator has mended the channel, this is how the message goes out - the
+// event was never marked delivered, and the row still carries it.
+func (s *Server) handleRetryNotificationDelivery(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	principal, ok := s.authorize(w, r, authz.PermNotificationManage, authz.GlobalScope, "notification_delivery", id)
+	if !ok {
+		return
+	}
+	if !s.notificationsEnabled(w) {
+		return
+	}
+	delivery, err := s.notifications.Retry(r.Context(), id)
+	if errors.Is(err, notify.ErrDeliveryNotFound) {
+		problem(w, http.StatusNotFound, "delivery_not_found", "no such notification delivery")
+		return
+	}
+	if s.channelProblem(w, err) {
+		return
+	}
+	// The worker of this instance is asked for a round now; without one
+	// the row waits for the next round of any instance.
+	if s.notificationQueue != nil {
+		s.notificationQueue.Wake()
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "notification.delivery.retry", TargetType: "notification_delivery", TargetID: id,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: map[string]any{
+			"channel_id": delivery.ChannelID, "event_type": delivery.EventType,
+			"last_error_code": delivery.LastErrorCode,
+		},
+	})
+	writeJSON(w, http.StatusOK, delivery)
+}
+
+// deliveryFilterOf reads the query of the delivery list. The second and
+// third results are the code and the sentence of a refusal; both are
+// empty when the query reads.
+//
+// Two vocabularies narrow the list. status is the previous release's -
+// sent or failed - and stays because the exports and the links written
+// under it still say it; state is the queue's own, and is the one that
+// tells a row waiting for its next attempt from a row nobody will ever
+// receive. A query may carry either, and an unknown word in either is a
+// refusal rather than a filter that quietly matches nothing.
+func deliveryFilterOf(query url.Values) (notify.DeliveryFilter, string, string) {
+	filter := notify.DeliveryFilter{
+		ChannelID: query.Get("channel_id"),
+		Status:    query.Get("status"),
+		State:     query.Get("state"),
+	}
+	switch filter.Status {
+	case "", notify.StatusSent, notify.StatusFailed:
+	default:
+		return filter, "invalid_status", "status must be sent or failed"
+	}
+	if filter.State != "" && !notify.KnownState(filter.State) {
+		return filter, "invalid_state", "state must be one of " + strings.Join(notify.States, ", ")
+	}
+	if since := query.Get("since"); since != "" {
+		at, err := time.Parse(time.RFC3339, since)
+		if err != nil {
+			return filter, "invalid_since", "since must be an RFC 3339 timestamp"
+		}
+		filter.Since = at
+	}
+	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
+	return filter, "", ""
+}
+
 // deliveriesCSVColumns is the header of the log export.
 var deliveriesCSVColumns = []string{
 	"id", "channel_name", "channel_id", "event_id", "event_type", "attempt", "status", "error_code", "error", "sent_at",
 }
 
-// handleListNotificationDeliveries returns the log, newest first, narrowed
-// by channel, status and a moment; as CSV on request.
+// handleListNotificationDeliveries returns the queue, newest first,
+// narrowed by channel, state and a moment; as CSV on request.
+//
+// The answer carries the number of dead letters of the whole
+// installation beside the page, not only of the rows in it: a message
+// nobody received is work waiting for an operator, and the screen has to
+// say so even when the filter of the moment hides it.
 func (s *Server) handleListNotificationDeliveries(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorizeCollection(w, r, authz.PermNotificationRead, "notification_delivery"); !ok {
 		return
@@ -330,27 +424,15 @@ func (s *Server) handleListNotificationDeliveries(w http.ResponseWriter, r *http
 	if !s.notificationsEnabled(w) {
 		return
 	}
-	query := r.URL.Query()
 	asCSV, ok := exportFormat(w, r)
 	if !ok {
 		return
 	}
-	filter := notify.DeliveryFilter{ChannelID: query.Get("channel_id"), Status: query.Get("status")}
-	switch filter.Status {
-	case "", notify.StatusSent, notify.StatusFailed:
-	default:
-		problem(w, http.StatusBadRequest, "invalid_status", "status must be sent or failed")
+	filter, code, message := deliveryFilterOf(r.URL.Query())
+	if code != "" {
+		problem(w, http.StatusBadRequest, code, message)
 		return
 	}
-	if since := query.Get("since"); since != "" {
-		at, err := time.Parse(time.RFC3339, since)
-		if err != nil {
-			problem(w, http.StatusBadRequest, "invalid_since", "since must be an RFC 3339 timestamp")
-			return
-		}
-		filter.Since = at
-	}
-	filter.Limit, _ = strconv.Atoi(query.Get("limit"))
 	if asCSV {
 		filter.Limit = notify.MaxDeliveries
 	}
@@ -368,7 +450,7 @@ func (s *Server) handleListNotificationDeliveries(w http.ResponseWriter, r *http
 						eventID = strconv.FormatInt(delivery.EventID, 10)
 					}
 					if !yield([]string{
-						strconv.FormatInt(delivery.ID, 10), delivery.ChannelName, delivery.ChannelID, eventID,
+						delivery.ID, delivery.ChannelName, delivery.ChannelID, eventID,
 						delivery.EventType, strconv.Itoa(delivery.Attempt), delivery.Status, delivery.ErrorCode,
 						delivery.Error, csvInstant(delivery.SentAt),
 					}) {
@@ -379,5 +461,12 @@ func (s *Server) handleListNotificationDeliveries(w http.ResponseWriter, r *http
 			})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": deliveries, "count": len(deliveries)})
+	deadLetters, err := s.notifications.DeadLetterCount(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": deliveries, "count": len(deliveries), "dead_letters": deadLetters,
+	})
 }

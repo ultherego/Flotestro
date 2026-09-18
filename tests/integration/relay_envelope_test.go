@@ -79,6 +79,36 @@ type relayedStream struct {
 	stream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]
 	signer *relayproof.Signer
 	cancel context.CancelFunc
+	// server carries what the centre sends down after the session
+	// configuration. A real relay reads this stream the same way: the
+	// acknowledgements of the messages the panel consumed come down it,
+	// and a record leaves the relay's spool on nothing else.
+	server chan *agentv1.ServerMessage
+}
+
+// awaitAck waits for the panel's acknowledgement of the message of the
+// envelope. Whatever else the centre sends meanwhile - an inventory
+// request, a task - is stepped over.
+func (r *relayedStream) awaitAck(envelope *agentv1.RelayedEnvelope, limit time.Duration) (*agentv1.MessageAck, error) {
+	deadline := time.After(limit)
+	for {
+		select {
+		case message, ok := <-r.server:
+			if !ok {
+				return nil, errors.New("the session ended before the acknowledgement arrived")
+			}
+			ack := message.GetMessageAck()
+			if ack == nil {
+				continue
+			}
+			if ack.GetSessionId() == envelope.GetSessionId() && ack.GetSequence() == envelope.GetSequence() {
+				return ack, nil
+			}
+		case <-deadline:
+			return nil, fmt.Errorf("sequence %d of session %s was not acknowledged within %s",
+				envelope.GetSequence(), envelope.GetSessionId(), limit)
+		}
+	}
 }
 
 func (r *relayedStream) close() {
@@ -117,6 +147,24 @@ func openRelayedStream(ctx context.Context, gateway string, relay testRelay, hos
 		session.close()
 		return nil, errors.New("the server answered Hello with something other than the session configuration")
 	}
+	// From here the test reads the downward stream the way a relay does:
+	// one reader, everything the centre sends buffered for whoever waits
+	// for it.
+	session.server = make(chan *agentv1.ServerMessage, 64)
+	go func() {
+		defer close(session.server)
+		for {
+			message, err := stream.Receive()
+			if err != nil {
+				return
+			}
+			select {
+			case session.server <- message:
+			case <-streamCtx.Done():
+				return
+			}
+		}
+	}()
 	return session, nil
 }
 
@@ -150,11 +198,15 @@ func (h *harness) awaitRefusal(hostID, code string, limit time.Duration) bool {
 // TestARelayedSessionCarriesTheHostsOwnSignature plays a relay that
 // attests the host and a host that signs its envelope: the session is
 // end_to_end on the host. A payload changed after the signature is
-// refused as relay_body_hash_mismatch; a signed message carried a second
-// time is dropped as relay_sequence_replayed without ending the session;
-// a Hello of an earlier session replayed as a new one is refused the same
-// way; and a session in which the host did not sign is still let in on the
-// relay's attestation under the packaged mode, visibly.
+// refused as relay_body_hash_mismatch. Every message the panel consumes
+// is acknowledged over the same session, which is what lets a record
+// leave the durable spool of the relay; a message carried a second time
+// is a redelivery - acknowledged again, applied no second time, and held
+// against nobody. A Hello of an earlier session replayed as a new one is
+// no redelivery: a relay never spools a Hello, so it is refused as
+// relay_sequence_replayed. A session in which the host did not sign is
+// still let in on the relay's attestation under the packaged mode,
+// visibly.
 func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -178,23 +230,44 @@ func TestARelayedSessionCarriesTheHostsOwnSignature(t *testing.T) {
 		t.Fatalf("the host says its session was %q, expected end_to_end", strength)
 	}
 
-	// A heartbeat signed and sent, then the same message once more: the
-	// second copy is a replay, dropped and named on the host, and the
-	// session goes on - the relay retries its buffer honestly after a
-	// broken link, and the host must not lose its session over that.
+	// A heartbeat signed and sent: the panel applies it and only then
+	// says it has it. That acknowledgement is what a relay waits for
+	// before it deletes the record from its durable spool, so it names
+	// the session and the sequence of the envelope the message carried.
 	heartbeat := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Heartbeat{Heartbeat: &agentv1.Heartbeat{}}}
 	if err := session.send(heartbeat); err != nil {
 		t.Fatalf("the signed heartbeat was not sent: %v", err)
 	}
-	if err := session.stream.Send(heartbeat); err != nil {
-		t.Fatalf("the replayed heartbeat was not sent: %v", err)
+	ack, err := session.awaitAck(heartbeat.GetEnvelope(), 15*time.Second)
+	if err != nil {
+		t.Fatalf("the consumed heartbeat was not acknowledged: %v", err)
 	}
-	if !h.awaitRefusal(host.ID, "relay_sequence_replayed", 10*time.Second) {
-		t.Fatalf("the replayed heartbeat was not named on the host: %+v", h.hostRefusal(host.ID))
+	if ack.GetHostId() != host.ID {
+		t.Fatalf("the acknowledgement names host %q, the session is the one of %s", ack.GetHostId(), host.ID)
+	}
+
+	// The same message once more: a relay whose link broke while its
+	// spool was draining never saw the acknowledgement and carries the
+	// record again. The panel has that message already - it is not
+	// applied a second time - and answers with the acknowledgement once
+	// more, so the record can finally go. Nothing is written on the host:
+	// an honest retry of a relay is not a refusal of a machine.
+	refusalBefore := fmt.Sprintf("%+v", h.hostRefusal(host.ID))
+	if err := session.stream.Send(heartbeat); err != nil {
+		t.Fatalf("the redelivered heartbeat was not sent: %v", err)
+	}
+	if _, err := session.awaitAck(heartbeat.GetEnvelope(), 15*time.Second); err != nil {
+		t.Fatalf("the redelivered heartbeat was not acknowledged; its record would stay in the spool: %v", err)
+	}
+	if after := fmt.Sprintf("%+v", h.hostRefusal(host.ID)); after != refusalBefore {
+		t.Fatalf("a redelivered message changed the refusal on the host from %s to %s", refusalBefore, after)
 	}
 	later := &agentv1.AgentMessage{Payload: &agentv1.AgentMessage_Heartbeat{Heartbeat: &agentv1.Heartbeat{}}}
 	if err := session.send(later); err != nil {
-		t.Fatalf("the session did not survive the replay: %v", err)
+		t.Fatalf("the session did not survive the redelivery: %v", err)
+	}
+	if _, err := session.awaitAck(later.GetEnvelope(), 15*time.Second); err != nil {
+		t.Fatalf("the heartbeat after the redelivery was not acknowledged: %v", err)
 	}
 
 	// A payload changed after the signature: refused, with the code on

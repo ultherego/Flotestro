@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
 // TestShadowSemantics guards the separation of a lock from a missing password.
@@ -149,7 +150,7 @@ func joinedCall(call []string) string { return strings.Join(call, " ") }
 // accounts before they look at any file.
 func userRangeUID(t *testing.T) int {
 	t.Helper()
-	if os.Getuid() < systemUIDCeiling {
+	if accounts.LoadUIDRange().IsSystem(int64(os.Getuid())) {
 		t.Skipf("the test needs a user-range identifier, running as %d", os.Getuid())
 	}
 	return os.Getuid()
@@ -346,7 +347,7 @@ func TestWritingKeysRefusesASymlinkedKeyDirectory(t *testing.T) {
 		t.Fatal("the key file was written behind the link")
 	}
 
-	if os.Getuid() < systemUIDCeiling {
+	if accounts.LoadUIDRange().IsSystem(int64(os.Getuid())) {
 		// The refusal of a system account comes first; the link check is
 		// covered above.
 		return

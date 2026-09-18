@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { api, loadedItems, LIST_PAGE } from "../lib/api";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
@@ -21,8 +22,18 @@ type Item = {
   last_restore_at?: string;
 };
 
-type View = {
+/** One page of the fleet list with the counts over all of it.
+ *
+ *  The counts, the backends and the coverage are the server's, taken over
+ *  every definition of every host in scope; the items are one page, keyed
+ *  by the cursor. A host without a definition is not a host without
+ *  backups - the panel does not know whether anything copies it - and
+ *  that is what the coverage line says. */
+type View = Coverage & {
   items: Item[];
+  count: number;
+  total: number;
+  next_cursor?: string;
   counts: Record<string, number>;
   unverified: number;
   never_restored?: number;
@@ -66,14 +77,22 @@ function AgeBadge({ status, age }: { status: string; age?: number }) {
  */
 export function FleetBackups() {
   const t = useT();
-  const { data, error } = useQuery({
+  // The list grows page by page with the cursor the server hands back,
+  // the worst rows first; the counters above it come from the first page
+  // and describe the whole fleet, whatever part of the list is loaded.
+  const list = useInfiniteQuery({
     queryKey: ["backups", "fleet"],
-    queryFn: () => api.get<View>("/api/v1/backups"),
+    queryFn: ({ pageParam }) => api.get<View>(
+      `/api/v1/backups?limit=${LIST_PAGE}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ""}`),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
   });
-  // The list comes with the worst rows on top and is bounded, so a click
-  // on a heading reorders it in the browser; a cleared sort goes back to
-  // the server's order. The age of a copy that never ran is unknown, not
-  // zero, and sorts apart from the fresh ones.
+  const error = list.error;
+  const data = list.data?.pages[0];
+  const items = loadedItems<Item>(list.data);
+  // A heading reorders the rows already loaded, in the browser; a cleared
+  // sort goes back to the server's order. The age of a copy that never
+  // ran is unknown, not zero, and sorts apart from the fresh ones.
   const columns = useColumns("backups", [
     { key: "age", label: t("Age"), sort: "age" },
     { key: "host", label: t("Host"), sort: "host", fixed: true },
@@ -82,7 +101,7 @@ export function FleetBackups() {
     { key: "destination", label: t("Destination"), sort: "destination", secondary: true },
     { key: "verified", label: t("Verified"), sort: "verified" },
   ] satisfies ColumnDef[]);
-  const { sort, setSort, sorted } = useSort(data?.items ?? [], (item, column) => {
+  const { sort, setSort, sorted } = useSort(items, (item, column) => {
     switch (column) {
       case "age": return item.age_hours ?? null;
       case "host": return item.hostname;
@@ -103,12 +122,12 @@ export function FleetBackups() {
   // The listed definitions by tool and by verification: which backup
   // program the fleet leans on, and how many copies anybody has read back.
   const tally = (key: (item: Item) => string) => Object.entries(
-    data.items.reduce<Record<string, number>>((acc, item) => { const k = key(item); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
+    items.reduce<Record<string, number>>((acc, item) => { const k = key(item); acc[k] = (acc[k] ?? 0) + 1; return acc; }, {}),
   ).sort((x, y) => y[1] - x[1]);
   const byTool = tally((item) => item.tool || "—");
-  const verified = data.items.filter((item) => !item.unverified).length;
-  const restored = data.items.filter((item) => !!item.last_restore_at).length;
-  const listed = t("among the {n} listed", { n: data.items.length });
+  const verified = items.filter((item) => !item.unverified).length;
+  const restored = items.filter((item) => !!item.last_restore_at).length;
+  const listed = t("among the {n} listed", { n: items.length });
 
   return (
     <>
@@ -119,13 +138,14 @@ export function FleetBackups() {
         })}
         actions={<ExportButton path="/api/v1/backups" />}
       />
+      <FleetCoverage coverage={data} />
 
       <div className="widgets">
         {/* The age of the newest copy, one segment per verdict, and beside
             it what nobody has checked: a copy nobody has ever restored is a
             hope, not a copy. The panel does not force a trial - it is to
             say there was none. */}
-        <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} hosts", { n: data.items.length, hosts: data.hosts_total })}>
+        <Card className="span-8" title={t("Age")} description={t("{n} definitions on {hosts} of {total} hosts", { n: data.total, hosts: data.evaluated_hosts, total: data.total_hosts })}>
           <StatusBar segments={[
             { label: t("Never ran"), value: never, tone: "error" },
             { label: t("Stale"), value: stale, tone: "error" },
@@ -139,18 +159,33 @@ export function FleetBackups() {
             { label: t("Unverified"), value: data.unverified, tone: "warn" },
             { label: t("Never restored"), value: neverRestored, tone: "unknown" },
           ]} />
+          {/* A host with no definition at all is not a host with fresh
+              copies; it stands here rather than nowhere. */}
+          <Breakdown items={[
+            { label: t("Hosts with nothing defined"), value: data.unknown_hosts, tone: "unknown" },
+          ]} />
         </Card>
 
         {/* The calendar and the backends are two short blocks: side by side
             they make one row above the list instead of two thin strips. */}
-        <Calendar items={data.items} wide={!(data.repositories ?? []).length} />
+        <Calendar items={items} wide={!(data.repositories ?? []).length} />
         <Repositories repositories={data.repositories ?? []} />
 
-        <Card className="span-9" flush>
+        <Card
+          className="span-9"
+          flush
+          footer={list.hasNextPage && (
+            <p>
+              <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+                {t("Load more ({n} left)", { n: data.total - items.length })}
+              </button>
+            </p>
+          )}
+        >
           <Toolbar end={<ColumnChooser columns={columns} />}>
             <span className="source">{t("The worst rows on top; a heading reorders the listed rows.")}</span>
           </Toolbar>
-          {!data.items.length ? (
+          {!items.length ? (
             <Empty>
               {t("No host has a backup definition yet. Open a host and describe what to copy, where to and how long it stays.")}
               {" "}
@@ -201,8 +236,8 @@ export function FleetBackups() {
           )}
         </Card>
 
-        <Card className="span-3" title={t("By tool")} description={data.items.length ? listed : undefined}>
-          {!data.items.length ? (
+        <Card className="span-3" title={t("By tool")} description={items.length ? listed : undefined}>
+          {!items.length ? (
             <p className="fp-blank">{t("No backup definition yet.")}</p>
           ) : (
             <>
@@ -210,9 +245,9 @@ export function FleetBackups() {
               <h4 className="widget-subhead">{t("Verification")}</h4>
               <Breakdown items={[
                 { label: t("verified"), value: verified, tone: "ok" },
-                { label: t("not verified"), value: data.items.length - verified, tone: "warn" },
+                { label: t("not verified"), value: items.length - verified, tone: "warn" },
                 { label: t("restored"), value: restored, tone: "ok" },
-                { label: t("never restored"), value: data.items.length - restored, tone: "warn" },
+                { label: t("never restored"), value: items.length - restored, tone: "warn" },
               ]} />
             </>
           )}

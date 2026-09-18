@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/compliance"
 	"github.com/ultherego/flotestro/internal/hosts"
+	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/reports"
 )
@@ -334,6 +335,11 @@ type securitySummary struct {
 	BySeverity        []severityView `json:"by_severity"`
 	Checks            []checkSummary `json:"checks"`
 	EvaluatedAt       time.Time      `json:"evaluated_at"`
+	// Partial says the sweep did not reach every host of the filter
+	// within its time budget; the numbers then describe the hosts it
+	// reached, and PartialReason says why it stopped.
+	Partial       bool   `json:"partial"`
+	PartialReason string `json:"partial_reason,omitempty"`
 }
 
 // severityRank orders the severities of the checks, the gravest first;
@@ -344,7 +350,9 @@ var severityRank = map[string]int{
 
 // securityReport judges every host of the filter with the built-in
 // checks, a page of hosts at a time, and tallies the findings by check
-// and by severity.
+// and by severity. The sweep is the one of the fleet view, with its time
+// budget: a report that ran out of it says so rather than printing a
+// part of the fleet as the whole.
 func (s *Server) securityReport(ctx context.Context, request reportRequest, principal authz.Principal) (*securitySummary, error) {
 	filter := hosts.ListFilter{
 		Site: request.site, Environment: request.environment,
@@ -357,20 +365,11 @@ func (s *Server) securityReport(ctx context.Context, request reportRequest, prin
 		order = append(order, check.ID)
 	}
 	summary := &securitySummary{BySeverity: []severityView{}, Checks: []checkSummary{}, EvaluatedAt: request.generatedAt}
-	cursor := hosts.Cursor{}
-	for {
-		page, err := s.hosts.ListPaged(ctx, filter, cursor, maxListPage)
-		if err != nil {
-			return nil, err
-		}
-		fragments, err := s.inventory.HostFragments(ctx, hostIDs(page.Items))
-		if err != nil {
-			return nil, err
-		}
-		for _, host := range page.Items {
+	sweep, err := s.sweepFleet(ctx, filter, "", "", complianceModules(),
+		func(host hosts.Host, fragments []inventory.Fragment) bool {
 			summary.Hosts++
 			failed := false
-			report := compliance.Evaluate(host.ID, hostInput(host, fragments[host.ID]), request.generatedAt)
+			report := compliance.Evaluate(host.ID, hostInput(host, fragments), request.generatedAt)
 			for _, finding := range report.Findings {
 				check, ok := checks[finding.CheckID]
 				if !ok {
@@ -384,14 +383,12 @@ func (s *Server) securityReport(ctx context.Context, request reportRequest, prin
 			if failed {
 				summary.HostsWithFindings++
 			}
-		}
-		if page.NextCursor == "" {
-			break
-		}
-		if cursor, err = hosts.ParseCursor(page.NextCursor); err != nil {
-			return nil, err
-		}
+			return true
+		})
+	if err != nil {
+		return nil, err
 	}
+	summary.Partial, summary.PartialReason = sweep.Partial, sweep.Reason
 	severities := map[string]*severityView{}
 	for _, id := range order {
 		check := checks[id]
@@ -544,6 +541,12 @@ func (s *Server) writeComplianceCSV(w http.ResponseWriter, r *http.Request, requ
 		if err != nil {
 			s.fail(w, err)
 			return
+		}
+		if summary.Partial {
+			// Every check has its row; the counts in them cover only the
+			// hosts the sweep reached, and a file that did not say so would
+			// be filed as the compliance of the whole fleet.
+			markPartial(w)
 		}
 		s.writeCSV(w, r, exportFileName("report-compliance-security", request.generatedAt), complianceSecurityCSVColumns,
 			func(yield func([]string) bool) error {

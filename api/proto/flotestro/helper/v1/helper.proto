@@ -195,14 +195,21 @@ message LocalUserActionRequest {
     OPERATION_SET_EXPIRY = 6;
     // Deleting the account, optionally with its home directory.
     OPERATION_DELETE = 7;
+    // The keys edited one at a time: an add appends what is not there, a
+    // remove takes named fingerprints away, a replace writes the list
+    // anew bound to the fingerprints the operator saw. SET_SSH_KEYS is
+    // the replace under its old name, kept one release.
+    OPERATION_ADD_SSH_KEYS = 8;
+    OPERATION_REMOVE_SSH_KEYS = 9;
+    OPERATION_REPLACE_SSH_KEYS = 10;
   }
   Operation operation = 1;
   string name = 2;
   string gecos = 3;
   string shell = 4;
   repeated string groups = 5;
-  // Public keys in full form. A private key never reaches the system, and
-  // passwords are not sent at all.
+  // Public keys in full form for a create or a replace. A private key
+  // never reaches the system, and passwords are not sent at all.
   repeated string ssh_keys = 6;
   // CreateHome creates the home directory when creating the account.
   bool create_home = 7;
@@ -210,6 +217,34 @@ message LocalUserActionRequest {
   string expires_at = 8;
   // RemoveHome deletes the home directory together with the account.
   bool remove_home = 9;
+  // Keys are the keys an add appends.
+  repeated LocalSSHKeyInput keys = 10;
+  // Fingerprints names the keys a remove takes away.
+  repeated string fingerprints = 11;
+  // IgnoreMissing lets a remove pass over a fingerprint the account does
+  // not have.
+  bool ignore_missing = 12;
+  // ExpectedFingerprints is the list the operator saw when ordering a
+  // replace; a replace is refused as stale when the account has another
+  // list. The old SET_SSH_KEYS verifies it only when it is not empty.
+  repeated string expected_fingerprints = 13;
+  // AllowLockout permits taking the last key of an account with no
+  // password login.
+  bool allow_lockout = 14;
+  // ManagedFile edits the panel's file under /etc/ssh/authorized_keys.d;
+  // refused when sshd does not read it.
+  bool managed_file = 15;
+  // System says the order means a system account; without it an account
+  // outside the UID range of people is refused.
+  bool system = 16;
+  // Inactive: a create with no key, made locked so nobody enters.
+  bool inactive = 17;
+}
+
+// LocalSSHKeyInput is one key to add.
+message LocalSSHKeyInput {
+  string public_key = 1;
+  string comment = 2;
 }
 
 // DomainEnrollRequest joins the host to the domain. Requires root, because
@@ -1378,6 +1413,9 @@ message LocalSSHKey {
   string fingerprint = 1;
   string type = 2;
   string comment = 3;
+  // Source says which file carries the key: authorized_keys (the user's
+  // own file) or managed (the panel's file under /etc/ssh/authorized_keys.d).
+  string source = 4;
 }
 
 message DomainEnrollResult {

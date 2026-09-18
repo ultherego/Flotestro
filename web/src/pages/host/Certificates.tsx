@@ -10,6 +10,7 @@ import {
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type KeyMetadata = {
@@ -150,6 +151,9 @@ function StatusBadge({ status, days }: { status: string; days?: number }) {
  * The panel never looks at the private key: it only knows where it lies,
  * what permissions it has and which secret it comes from.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const CERTIFICATE_CHANGES = ["certificate.deploy", "certificate.renew"];
+
 export function Certificates() {
   const t = useT();
   const host = useHost();
@@ -233,32 +237,37 @@ export function Certificates() {
             <button className="secondary" onClick={() => setForm(form === "watch" ? "" : "watch")}>
               {form === "watch" ? t("Cancel") : t("Watch a path")}
             </button>
-            <button className="secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
-              {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
-            </button>
-            <button
-              onClick={() =>
-                request.mutate({
-                  action: "certificate.scan",
-                  payload: {
-                    certificate: {
-                      targets: targets.map((target) => ({
-                        path: target.path,
-                        key_path: target.key_path ?? "",
-                        service: target.service ?? "",
-                      })),
+            <ActionGuard action="certificate.deploy" host={host.id}>
+              <button className="secondary" onClick={() => setForm(form === "deploy" ? "" : "deploy")}>
+                {form === "deploy" ? t("Cancel") : t("Deploy a certificate")}
+              </button>
+            </ActionGuard>
+            <ActionGuard action="certificate.scan" host={host.id} explain>
+              <button
+                onClick={() =>
+                  request.mutate({
+                    action: "certificate.scan",
+                    payload: {
+                      certificate: {
+                        targets: targets.map((target) => ({
+                          path: target.path,
+                          key_path: target.key_path ?? "",
+                          service: target.service ?? "",
+                        })),
+                      },
                     },
-                  },
-                })
-              }
-              disabled={host.connection_state !== "online" || request.isPending}
-            >
-              {t("Scan host")}
-            </button>
+                  })
+                }
+                disabled={host.connection_state !== "online" || request.isPending}
+              >
+                {t("Scan host")}
+              </button>
+            </ActionGuard>
           </>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={CERTIFICATE_CHANGES} />
       <Message text={message} />
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
@@ -313,7 +322,9 @@ export function Certificates() {
 
       {form === "watch" && <WatchForm onSave={(body) => watch.mutate(body)} />}
       {form === "deploy" && (
-        <DeployForm targets={targets} hostname={host.hostname} onIntent={setIntent} />
+        <ActionGuard action="certificate.deploy" host={host.id}>
+          <DeployForm targets={targets} hostname={host.hostname} onIntent={setIntent} />
+        </ActionGuard>
       )}
 
       <Section
@@ -429,31 +440,33 @@ export function Certificates() {
                       {/* Only certmonger renews from the panel; a manual
                           certificate has no button, not a dead one. */}
                       {certificate.renewal === "tracked" && certificate.tracking?.request && (
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          setIntent({
-                            action: "certificate.renew",
-                            label: t("Renew certificate"),
-                            description:
-                              t("certmonger on {host} is asked to reissue request {request} for {path}", {
-                                host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
-                              }) +
-                              (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
-                              ".",
-                            payload: {
-                              certificate: {
-                                request: certificate.tracking?.request ?? "",
-                                path: certificate.path,
-                                reload_unit: certificate.reload_unit ?? "",
-                                probe_target: certificate.probe_target ?? "",
+                      <ActionGuard action="certificate.renew" host={host.id}>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            setIntent({
+                              action: "certificate.renew",
+                              label: t("Renew certificate"),
+                              description:
+                                t("certmonger on {host} is asked to reissue request {request} for {path}", {
+                                  host: host.hostname, request: certificate.tracking?.request ?? "", path: certificate.path,
+                                }) +
+                                (certificate.reload_unit ? `, ${t("then {unit} is reloaded", { unit: certificate.reload_unit })}` : "") +
+                                ".",
+                              payload: {
+                                certificate: {
+                                  request: certificate.tracking?.request ?? "",
+                                  path: certificate.path,
+                                  reload_unit: certificate.reload_unit ?? "",
+                                  probe_target: certificate.probe_target ?? "",
+                                },
                               },
-                            },
-                          })
-                        }
-                      >
-                        {t("Renew")}
-                      </button>
+                            })
+                          }
+                        >
+                          {t("Renew")}
+                        </button>
+                      </ActionGuard>
                       )}
                       {certificate.watched && (
                         <button className="secondary" title={t("The panel stops reading this path; the file on the host stays as it is.")} onClick={() => forget.mutate(certificate.path)}>

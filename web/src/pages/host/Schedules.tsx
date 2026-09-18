@@ -9,6 +9,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Schedule = {
@@ -80,6 +81,9 @@ type Intent = {
  * has to be adopted explicitly - otherwise the first operation from the
  * panel would erase somebody else's work.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const SCHEDULE_CHANGES = ["schedule.ensure", "schedule.run_now", "schedule.disable", "schedule.remove"];
+
 export function Schedules() {
   const t = useT();
   const host = useHost();
@@ -121,12 +125,15 @@ export function Schedules() {
         title={t("Schedules")}
         description={t("Cron entries and systemd timers under one list. Entries created here belong to Flotestro and live in their own files; entries found on the host stay untouched until you adopt them.")}
         actions={
-          <button onClick={() => setForm((open) => !open)}>
-            {form ? t("Cancel") : t("New schedule")}
-          </button>
+          <ActionGuard action="schedule.ensure" host={host.id}>
+            <button onClick={() => setForm((open) => !open)}>
+              {form ? t("Cancel") : t("New schedule")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={SCHEDULE_CHANGES} />
       <Message text={message} />
 
       {/* No entries and no read are two different things: an empty list
@@ -162,13 +169,15 @@ export function Schedules() {
       </Section>
 
       {form && (
-        <NewEntry
-          hostId={host.id}
-          online={host.connection_state === "online"}
-          onRequest={(payload) =>
-            request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
-          }
-        />
+        <ActionGuard action="schedule.ensure" host={host.id}>
+          <NewEntry
+            hostId={host.id}
+            online={host.connection_state === "online"}
+            onRequest={(payload) =>
+              request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
+            }
+          />
+        </ActionGuard>
       )}
 
       <Section title={t("Schedules")} count={module.data ? entries.length : undefined} span={12} flush>
@@ -218,54 +227,63 @@ export function Schedules() {
                   <td className="hm-mono" title={command(entry)}>{command(entry).slice(0, 50)}</td>
                   <td>{entry.enabled ? <span className="badge ok">{t("enabled")}</span> : <span className="badge">{t("disabled")}</span>}</td>
                   <td>
+                    {/* Every button stands behind the server's preview of
+                        what this operator may order on this host: a viewer
+                        sees none of them. */}
                     <div className="operations">
-                      <button
-                        onClick={() =>
-                          setIntent({
-                            action: "schedule.run_now",
-                            label: t("Run now"),
-                            description: t("{command} will run immediately on {host}, outside its schedule.", { command: command(entry), host: host.hostname }),
-                            payload: { schedule: { id: entry.id } },
-                          })
-                        }
-                        disabled={entry.source !== "managed"}
-                        title={
-                          entry.source === "managed"
-                            ? ""
-                            : t("Only entries owned by Flotestro can be run from the panel.")
-                        }
-                      >
-                        {t("Run now")}
-                      </button>
+                      <ActionGuard action="schedule.run_now" host={host.id}>
+                        <button
+                          onClick={() =>
+                            setIntent({
+                              action: "schedule.run_now",
+                              label: t("Run now"),
+                              description: t("{command} will run immediately on {host}, outside its schedule.", { command: command(entry), host: host.hostname }),
+                              payload: { schedule: { id: entry.id } },
+                            })
+                          }
+                          disabled={entry.source !== "managed"}
+                          title={
+                            entry.source === "managed"
+                              ? ""
+                              : t("Only entries owned by Flotestro can be run from the panel.")
+                          }
+                        >
+                          {t("Run now")}
+                        </button>
+                      </ActionGuard>
                       {/* Enabling and disabling are reversible with one click
                           and do not erase the entry's content, so the operator
                           is not stopped by a separate confirmation. */}
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          request.mutate({
-                            action: "schedule.disable",
-                            payload: { schedule: { id: entry.id, enabled: !entry.enabled } },
-                          })
-                        }
-                        disabled={entry.source !== "managed"}
-                      >
-                        {entry.enabled ? t("Disable") : t("Enable")}
-                      </button>
-                      <button
-                        className="hm-danger"
-                        onClick={() =>
-                          setIntent({
-                            action: "schedule.remove",
-                            label: t("Remove"),
-                            description: t("{id} will be removed from {path}.", { id: entry.id, path: entry.path || t("the host") }),
-                            payload: { schedule: { id: entry.id } },
-                          })
-                        }
-                        disabled={entry.source !== "managed"}
-                      >
-                        {t("Remove")}
-                      </button>
+                      <ActionGuard action="schedule.disable" host={host.id}>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            request.mutate({
+                              action: "schedule.disable",
+                              payload: { schedule: { id: entry.id, enabled: !entry.enabled } },
+                            })
+                          }
+                          disabled={entry.source !== "managed"}
+                        >
+                          {entry.enabled ? t("Disable") : t("Enable")}
+                        </button>
+                      </ActionGuard>
+                      <ActionGuard action="schedule.remove" host={host.id}>
+                        <button
+                          className="hm-danger"
+                          onClick={() =>
+                            setIntent({
+                              action: "schedule.remove",
+                              label: t("Remove"),
+                              description: t("{id} will be removed from {path}.", { id: entry.id, path: entry.path || t("the host") }),
+                              payload: { schedule: { id: entry.id } },
+                            })
+                          }
+                          disabled={entry.source !== "managed"}
+                        >
+                          {t("Remove")}
+                        </button>
+                      </ActionGuard>
                     </div>
                   </td>
                 </tr>
@@ -409,13 +427,15 @@ function NewEntry({
           </FormNote>
         )}
         <FormActions>
-          <button
-            className="secondary"
-            onClick={() => preview.mutate(expression.trim())}
-            disabled={!expression.trim() || preview.isPending || !online}
-          >
-            {preview.isPending ? t("Asking the host…") : t("Preview next runs")}
-          </button>
+          <ActionGuard action="schedule.preview" host={hostId} explain>
+            <button
+              className="secondary"
+              onClick={() => preview.mutate(expression.trim())}
+              disabled={!expression.trim() || preview.isPending || !online}
+            >
+              {preview.isPending ? t("Asking the host…") : t("Preview next runs")}
+            </button>
+          </ActionGuard>
           <button
             onClick={() =>
               onRequest({

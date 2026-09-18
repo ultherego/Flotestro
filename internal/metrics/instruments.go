@@ -280,6 +280,16 @@ var (
 	RelayEnvelopeRefusal = Default.NewCounter("flotestro_relay_envelope_refusal_total",
 		"Relayed messages whose identity envelope was refused, by code.",
 		"code")
+	// RelayEnvelopeRedelivery counts the relayed messages the panel had
+	// consumed already and the relay carried a second time because it
+	// never saw the acknowledgement - a link that broke while the spool
+	// was draining. The message is dropped and acknowledged again, and
+	// nothing is written on the host: an honest retry of a relay is not a
+	// refusal of the host. The counter rising with every reconnect is the
+	// spool doing its work; rising while the link holds means the
+	// acknowledgements do not reach the relay.
+	RelayEnvelopeRedelivery = Default.NewCounter("flotestro_relay_envelope_redelivery_total",
+		"Relayed messages carried again after the panel had already consumed them.")
 	// AgentRenewal counts the certificate renewals by how they ended. The
 	// gateway increments it where the renewal is settled (renewal.go):
 	// renewed, refused, or failed - a refusal is the panel's decision, a
@@ -298,4 +308,13 @@ var (
 	// that keeps streams it no longer owns.
 	SessionFence = Default.NewCounter("flotestro_session_fence_total",
 		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
+	// NotificationDeliveries counts the settled attempts of the
+	// notification queue by the state they settled in: delivered,
+	// retry_wait, dead_letter. The worker increments it once per attempt
+	// (internal/notify worker.go); a rising retry_wait is a receiver that
+	// is down, a rising dead_letter is a channel to mend. The dead
+	// letters waiting for an operator are a gauge of the collector,
+	// flotestro_notification_dead_letters, read from the table.
+	NotificationDeliveries = Default.NewCounter("flotestro_notification_deliveries_total",
+		"Settled attempts of the notification queue, by the state they settled in.", "state")
 )

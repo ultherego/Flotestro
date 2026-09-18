@@ -267,3 +267,91 @@ func TestPointsCarryRatesBetweenConsecutiveSamples(t *testing.T) {
 		t.Error("a point carries a null list")
 	}
 }
+
+// A "for" window says the condition held that long, and holding is
+// something somebody watched. These check the two halves of that: a hole
+// in the samples restarts the window, and a rule left without readings
+// holds its episode instead of letting the window run on to firing.
+func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
+	started := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	gap := maxSampleGap
+	// An unbroken minute-by-minute run counts from the start of the
+	// episode: ten samples, no hole, the window is the whole ten minutes.
+	var unbroken []time.Time
+	for i := 1; i <= 10; i++ {
+		unbroken = append(unbroken, started.Add(time.Duration(i)*time.Minute))
+	}
+	now := started.Add(10 * time.Minute)
+	if since := continuousSince(started, unbroken, now, gap); !since.Equal(started) {
+		t.Errorf("an unbroken run counts from %s rather than from the start of the episode", since)
+	}
+
+	// The host went quiet after the third sample and came back at the
+	// eighth minute: the window counts from the reading that came back,
+	// not from the condition nobody was watching.
+	broken := []time.Time{
+		started.Add(1 * time.Minute), started.Add(2 * time.Minute), started.Add(3 * time.Minute),
+		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
+	}
+	since := continuousSince(started, broken, now, gap)
+	if !since.Equal(started.Add(8 * time.Minute)) {
+		t.Errorf("the window after a gap counts from %s rather than from the sample that came back", since)
+	}
+	// Which is what keeps the alert from firing: five minutes of samples
+	// are not the ten minutes the rule asks for, however old the episode.
+	if now.Sub(since) >= 10*time.Minute {
+		t.Error("an episode fired on a window that was not watched")
+	}
+	if now.Sub(started) < 10*time.Minute {
+		t.Fatal("the episode itself is younger than the window; the case checks nothing")
+	}
+
+	// One lost sample is a lost sample, not a gap: the run holds.
+	oneLost := []time.Time{
+		started.Add(1 * time.Minute), started.Add(3 * time.Minute), started.Add(4 * time.Minute),
+		started.Add(5 * time.Minute), started.Add(6 * time.Minute), started.Add(7 * time.Minute),
+		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
+	}
+	if since := continuousSince(started, oneLost, now, gap); !since.Equal(started) {
+		t.Errorf("a single lost sample broke the run at %s", since)
+	}
+
+	// An episode whose newest sample is older than a gap has no run that
+	// reaches now: it starts now and has nothing behind it.
+	stale := []time.Time{started.Add(1 * time.Minute), started.Add(2 * time.Minute)}
+	if since := continuousSince(started, stale, now, gap); !since.Equal(now) {
+		t.Errorf("a run with no recent sample starts at %s rather than now", since)
+	}
+	// And an episode with no sample at all behind it likewise.
+	if since := continuousSince(started, nil, now, gap); !since.Equal(now) {
+		t.Errorf("an episode without samples starts at %s rather than now", since)
+	}
+	// While an episode a moment old, whose samples have yet to arrive,
+	// keeps its start: it has not been waiting long enough to be a gap.
+	fresh := started.Add(time.Minute)
+	if since := continuousSince(started, nil, fresh, gap); !since.Equal(started) {
+		t.Errorf("a fresh episode was restarted at %s", since)
+	}
+}
+
+func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
+	started := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	pending := openAlert{ID: "a1", State: "pending", StartedAt: started}
+	// Within a gap nothing is done: the sample may simply be late, and a
+	// write on every run for every quiet host is not worth it.
+	if noDataHold(pending, started.Add(time.Minute)) {
+		t.Error("a late sample restarted the window")
+	}
+	// Past it the episode is held: the window restarts, so however long
+	// the host stays silent the episode cannot reach its firing point on
+	// the strength of that silence.
+	if !noDataHold(pending, started.Add(5*time.Minute)) {
+		t.Error("an episode without data for five minutes was not held")
+	}
+	// A firing episode is not touched: it has fired, and the absence of
+	// readings is not the resolve of the condition either.
+	firing := openAlert{ID: "a2", State: "firing", StartedAt: started}
+	if noDataHold(firing, started.Add(time.Hour)) {
+		t.Error("a firing episode was restarted")
+	}
+}

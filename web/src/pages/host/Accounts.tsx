@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import type { Host, Job, LocalAccount } from "../../lib/types";
 import { ErrorBox, Time, Empty } from "../../components/ui";
 import { Breakdown } from "../../components/widgets";
+import { ActionGuard } from "../../components/ActionGuard";
 import {
   Check, Field, Fields, Form, FormActions, FormNote, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
   countWhere, useHost,
@@ -13,14 +14,42 @@ import { useT } from "../../i18n";
 
 /**
  * The groups whose membership is root by another name: sudo and wheel give
- * root directly, docker through the engine socket, adm reads every log,
- * root and admin are what they say. The same list the control plane uses
- * to raise such an order to critical.
+ * root directly, docker and lxd through the engine socket. The same list
+ * the accounts module of the control plane carries, so the panel names as
+ * privileged what the server will judge as privileged. An installation
+ * that extends the list is not known here - the server has the final word
+ * on every order, and a group missing from this list only means the badge
+ * is absent, never that the order goes through unjudged.
  */
-const PRIVILEGED_GROUPS = ["sudo", "wheel", "docker", "adm", "root", "admin"];
+const PRIVILEGED_GROUPS = ["sudo", "wheel", "docker", "lxd"];
 
 /** The panel opened under an account row. */
 type Panel = "keys" | "groups" | "expiry" | "delete";
+
+/** One key of an account, as the inventory reports it. */
+type AccountKey = LocalAccount["ssh_keys"][number];
+
+/**
+ * The file a key lives in: the user's own `~/.ssh/authorized_keys`, or the
+ * file the panel manages under `/etc/ssh/authorized_keys.d`. Every key
+ * operation edits one file, so the file a key came from decides where its
+ * removal goes. A report from an agent that did not name the source comes
+ * from the user's file - the only one such an agent read.
+ */
+type KeyFile = "authorized_keys" | "managed";
+
+function fileOf(key: AccountKey): KeyFile {
+  return key.source === "managed" ? "managed" : "authorized_keys";
+}
+
+function fileName(t: (text: string) => string, file: KeyFile): string {
+  return file === "managed" ? t("the panel's managed file") : t("the user's authorized_keys");
+}
+
+/** The fingerprint as a row shows it: short, with the full one in the title. */
+function shortFingerprint(fingerprint: string): string {
+  return `${fingerprint.replace(/^SHA256:/, "").slice(0, 12)}…`;
+}
 
 /**
  * The host's local accounts.
@@ -66,7 +95,11 @@ export function HostAccounts() {
       <ModuleHeader
         title={t("Accounts")}
         description={t("Accounts seen on the host at the agent's last report.")}
-        actions={<NewAccountButton onOpen={() => setCreating(true)} open={creating} />}
+        actions={
+          <ActionGuard action="localuser.create" host={host.id}>
+            <NewAccountButton onOpen={() => setCreating(true)} open={creating} />
+          </ActionGuard>
+        }
       />
       {accounts.length > 0 && (
         <p className="hm-freshness">
@@ -178,23 +211,13 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
           ) : (
             account.ssh_keys.map((key) => (
               <div key={key.fingerprint} title={`${t("fingerprint")} ${key.fingerprint}`} className="hm-mono">
-                {key.type || "?"} · {key.fingerprint.replace(/^SHA256:/, "").slice(0, 12)}…
+                {key.type || "?"} · {shortFingerprint(key.fingerprint)}
                 {key.comment && <span className="source"> {key.comment}</span>}
               </div>
             ))
           )}
         </td>
-        <td className="source">
-          {account.groups.map((group, index) => (
-            <span key={group}>
-              {index > 0 && ", "}
-              {PRIVILEGED_GROUPS.includes(group)
-                ? <span className="badge warn" title={t("Membership of this group gives root-level rights.")}>{group}</span>
-                : group}
-            </span>
-          ))}
-          {account.groups.length === 0 && "—"}
-        </td>
+        <td className="source"><AccountGroups groups={account.groups} /></td>
         <td><Expiry account={account} /></td>
         <td>
           {fromDirectory ? (
@@ -205,26 +228,32 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
           ) : (
             <div className="operations">
               {account.locked === true ? (
-                <button
-                  title={t("Lets the account log in again; the order goes out at once.")}
-                  onClick={() => request.mutate({ action: "localuser.unlock", name: account.name })}
-                >
-                  {t("Unlock")}
-                </button>
+                <ActionGuard action="localuser.unlock" host={host.id}>
+                  <button
+                    title={t("Lets the account log in again; the order goes out at once.")}
+                    onClick={() => request.mutate({ action: "localuser.unlock", name: account.name })}
+                  >
+                    {t("Unlock")}
+                  </button>
+                </ActionGuard>
               ) : (
-                <button
-                  title={t("Locks the account so nobody can log in as it; the order goes out at once and can be undone with Unlock.")}
-                  onClick={() => request.mutate({ action: "localuser.lock", name: account.name })}
-                >
-                  {t("Lock")}
-                </button>
+                <ActionGuard action="localuser.lock" host={host.id}>
+                  <button
+                    title={t("Locks the account so nobody can log in as it; the order goes out at once and can be undone with Unlock.")}
+                    onClick={() => request.mutate({ action: "localuser.lock", name: account.name })}
+                  >
+                    {t("Lock")}
+                  </button>
+                </ActionGuard>
               )}
               <button className="secondary" onClick={() => toggle("keys")}>{t("SSH keys")}</button>
               <button className="secondary" onClick={() => toggle("groups")}>{t("Groups")}</button>
               <button className="secondary" onClick={() => toggle("expiry")}>{t("Expiry")}</button>
               {/* Deletion is irreversible, so it does not go straight from
                   the click - it opens the target confirmation. */}
-              <button className="hm-danger" onClick={() => toggle("delete")}>{t("Delete")}</button>
+              <ActionGuard action="localuser.delete" host={host.id}>
+                <button className="hm-danger" onClick={() => toggle("delete")}>{t("Delete")}</button>
+              </ActionGuard>
             </div>
           )}
         </td>
@@ -233,21 +262,21 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
       {panel === "keys" && (
         <tr>
           <td colSpan={8}>
-            <KeysPanel account={account} request={request} onClose={() => setPanel(null)} />
+            <KeysPanel hostID={host.id} account={account} request={request} onClose={() => setPanel(null)} />
           </td>
         </tr>
       )}
       {panel === "groups" && (
         <tr>
           <td colSpan={8}>
-            <GroupsPanel account={account} request={request} onClose={() => setPanel(null)} />
+            <GroupsPanel hostID={host.id} account={account} request={request} onClose={() => setPanel(null)} />
           </td>
         </tr>
       )}
       {panel === "expiry" && (
         <tr>
           <td colSpan={8}>
-            <ExpiryPanel account={account} request={request} onClose={() => setPanel(null)} />
+            <ExpiryPanel hostID={host.id} account={account} request={request} onClose={() => setPanel(null)} />
           </td>
         </tr>
       )}
@@ -268,6 +297,36 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
   );
 }
 
+/**
+ * The groups of an account, with a badge on the ones that are root by
+ * another name. The badge is a warning before the click: changing such a
+ * membership asks for a permission of its own and for an approval.
+ */
+export function AccountGroups({ groups }: { groups: string[] }) {
+  const t = useT();
+  if (groups.length === 0) return <>—</>;
+  return (
+    <>
+      {groups.map((group, index) => (
+        <span key={group}>
+          {index > 0 && ", "}
+          {PRIVILEGED_GROUPS.includes(group)
+            ? (
+              <span
+                className="badge warn"
+                data-testid="privileged-group"
+                title={t("Membership of this group is root by another name: changing it needs the permission accounts.privileged_groups on top of the operation's own, and an approval.")}
+              >
+                {group}
+              </span>
+            )
+            : group}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** The expiry date of an account: a date, none, or unknown when the record was not read. */
 function Expiry({ account }: { account: LocalAccount }) {
   const t = useT();
@@ -283,66 +342,301 @@ function Expiry({ account }: { account: LocalAccount }) {
   return <span className="source">{t("never")}</span>;
 }
 
-function KeysPanel({ account, request, onClose }: { account: LocalAccount; request: Request; onClose: () => void }) {
+/**
+ * The keys of one account, edited one key at a time.
+ *
+ * The editor never opens empty and never replaces the list by accident: it
+ * lists the keys the inventory knows, with the file each one lives in, and
+ * offers an add and a removal by fingerprint. Writing the whole list anew
+ * is a separate, confirmed order that carries the fingerprints the operator
+ * saw, so a key added by somebody else in the meantime makes the order
+ * stale instead of disappearing under it.
+ */
+export function KeysPanel({
+  hostID, account, request, onClose,
+}: { hostID: string; account: LocalAccount; request: Request; onClose: () => void }) {
   const t = useT();
-  const [keys, setKeys] = useState("");
+  const keys = account.ssh_keys;
+  const [publicKey, setPublicKey] = useState("");
+  const [comment, setComment] = useState("");
+  const [target, setTarget] = useState<KeyFile>("authorized_keys");
+  // The fingerprint whose removal is waiting for the lockout consent.
+  const [lockoutFor, setLockoutFor] = useState<string | null>(null);
+  const [replacing, setReplacing] = useState(false);
+  const privileged = account.groups.filter((group) => PRIVILEGED_GROUPS.includes(group));
+
+  // Taking this key away leaves the account with no key at all, and the
+  // account cannot log in with a password - an unread password state is
+  // not "a password is set" either. The host refuses such a removal with
+  // last_key_lockout unless the order says the lockout is meant.
+  const cutsOff = (fingerprint: string) =>
+    account.password_set !== true && keys.every((key) => key.fingerprint === fingerprint);
+
+  const remove = (key: AccountKey, allowLockout: boolean) => {
+    setLockoutFor(null);
+    request.mutate({
+      action: "localuser.sshkeys.remove",
+      name: account.name,
+      fingerprints: [key.fingerprint],
+      managed_file: fileOf(key) === "managed" || undefined,
+      allow_lockout: allowLockout || undefined,
+    });
+  };
+
+  const add = () => {
+    request.mutate({
+      action: "localuser.sshkeys.add",
+      name: account.name,
+      keys: [{ public_key: publicKey.trim(), comment: comment.trim() || undefined }],
+      managed_file: target === "managed" || undefined,
+    });
+    setPublicKey("");
+    setComment("");
+  };
+
   return (
     <Form>
+      {privileged.length > 0 && (
+        <Message
+          error
+          text={t("{name} is in {groups}: a key here opens an account that is root by another name. Changing that membership needs the permission accounts.privileged_groups on top of the operation's own, and an approval.", {
+            name: account.name, groups: privileged.join(", "),
+          })}
+        />
+      )}
+
+      {keys.length === 0 ? (
+        <FormNote>{t("The host reports no key for {name}. A key added here is the first way in.", { name: account.name })}</FormNote>
+      ) : (
+        <Table>
+          <thead>
+            <tr>
+              <th>{t("Type")}</th><th>{t("Fingerprint")}</th><th>{t("Comment")}</th><th>{t("Key file")}</th><th>{t("Actions")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {keys.map((key) => (
+              <tr key={`${fileOf(key)}:${key.fingerprint}`} data-testid="account-key">
+                <td>{key.type || "?"}</td>
+                <td className="hm-mono" title={key.fingerprint}>{shortFingerprint(key.fingerprint)}</td>
+                <td className="source">{key.comment || "—"}</td>
+                <td className="source">{fileName(t, fileOf(key))}</td>
+                <td>
+                  <ActionGuard action="localuser.sshkeys.remove" host={hostID}>
+                    <button
+                      className="hm-danger"
+                      disabled={request.busy}
+                      onClick={() => (cutsOff(key.fingerprint) ? setLockoutFor(key.fingerprint) : remove(key, false))}
+                    >
+                      {t("Remove")}
+                    </button>
+                  </ActionGuard>
+                  {lockoutFor === key.fingerprint && (
+                    <div className="hm-form">
+                      <Message
+                        error
+                        text={t("This is the last key of {name}, and the account has no password login: after the removal nobody can log in as it. Add the new key first, or say that cutting the account off is the intent.", { name: account.name })}
+                      />
+                      <FormActions>
+                        <button className="hm-danger" onClick={() => remove(key, true)}>
+                          {t("Remove and cut the account off")}
+                        </button>
+                        <button className="secondary" onClick={() => setLockoutFor(null)}>{t("Cancel")}</button>
+                      </FormActions>
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      )}
+
       <Fields>
-        <Field label={t("SSH keys")} help={t("The complete set of keys for {name}, one per line. Saving an empty list revokes SSH key access.", { name: account.name })} wide>
-          <textarea
-            rows={4}
-            value={keys}
+        <Field
+          label={t("New key")}
+          help={t("One public key as it goes into the file: the type, the material and an optional comment. It is appended; the keys above stay as they are.")}
+          wide
+        >
+          <input
+            value={publicKey}
             placeholder="ssh-ed25519 AAAA… jane@laptop"
-            onChange={(event) => setKeys(event.target.value)}
+            onChange={(event) => setPublicKey(event.target.value)}
           />
         </Field>
+        <Field label={t("Comment")} help={t("Appended only when the key carries none of its own.")}>
+          <input value={comment} placeholder="jane@laptop" onChange={(event) => setComment(event.target.value)} />
+        </Field>
+        <Field label={t("Key file")} help={t("The panel's file keeps its keys apart from the ones the user wrote; sshd has to list it in AuthorizedKeysFile, or the host refuses the write.")}>
+          <select value={target} onChange={(event) => setTarget(event.target.value as KeyFile)}>
+            <option value="authorized_keys">{t("the user's authorized_keys")}</option>
+            <option value="managed">{t("the panel's managed file")}</option>
+          </select>
+        </Field>
       </Fields>
+
+      <FormActions>
+        <ActionGuard action="localuser.sshkeys.add" host={hostID}>
+          <button disabled={!publicKey.trim() || request.busy} onClick={add}>{t("Add key")}</button>
+        </ActionGuard>
+        <ActionGuard action="localuser.sshkeys.replace_all" host={hostID}>
+          <button className="hm-danger" disabled={replacing} onClick={() => setReplacing(true)}>
+            {t("Replace all…")}
+          </button>
+        </ActionGuard>
+        <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
+      </FormActions>
+
+      {replacing && (
+        <ReplaceAllKeys account={account} request={request} onClose={() => setReplacing(false)} />
+      )}
+    </Form>
+  );
+}
+
+/**
+ * Writing the key file of an account anew.
+ *
+ * The order carries the fingerprints the operator saw in this very list,
+ * so a key added between the read and the click makes it stale and the
+ * host refuses it rather than overwriting what nobody reviewed. The
+ * confirmation names every key that goes away, one by one: a list of
+ * twelve-character prefixes is what tells the operator that the key they
+ * were keeping is among them.
+ */
+function ReplaceAllKeys({
+  account, request, onClose,
+}: { account: LocalAccount; request: Request; onClose: () => void }) {
+  const t = useT();
+  const [file, setFile] = useState<KeyFile>("authorized_keys");
+  const [text, setText] = useState("");
+  const [reason, setReason] = useState("");
+  const [allowLockout, setAllowLockout] = useState(false);
+
+  // One order writes one file, so the list the order is bound to is the
+  // list of that file - not the union the table above shows.
+  const current = account.ssh_keys.filter((key) => fileOf(key) === file);
+  const expected = current.map((key) => key.fingerprint);
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const cutsOff = lines.length === 0 && account.password_set !== true
+    && account.ssh_keys.every((key) => fileOf(key) === file);
+  const ready = reason.trim().length >= 8 && (!cutsOff || allowLockout) && !request.busy;
+
+  return (
+    <div className="hm-form">
+      <Fields>
+        <Field label={t("Key file")} help={t("The file that is written anew; the other file of the account is not touched.")}>
+          <select value={file} onChange={(event) => setFile(event.target.value as KeyFile)}>
+            <option value="authorized_keys">{t("the user's authorized_keys")}</option>
+            <option value="managed">{t("the panel's managed file")}</option>
+          </select>
+        </Field>
+        <Field
+          label={t("The complete list")}
+          help={t("One public key per line. What is not on the list is gone from the file; an empty list revokes key access to it.")}
+          wide
+        >
+          <textarea rows={4} value={text} placeholder="ssh-ed25519 AAAA… jane@laptop&#10;ssh-ed25519 AAAA… deploy@ci" onChange={(event) => setText(event.target.value)} />
+        </Field>
+        <Field label={t("Reason")} help={t("Writing the whole list anew is a critical change of access: at least 8 characters, recorded with the order.")} wide>
+          <input value={reason} onChange={(event) => setReason(event.target.value)} />
+        </Field>
+      </Fields>
+
+      {current.length === 0 ? (
+        <FormNote>{t("{file} of {name} carries no key today, so this order takes nothing away.", { file: fileName(t, file), name: account.name })}</FormNote>
+      ) : (
+        <>
+          <FormNote>
+            {t("These keys are in {file} of {name} now. Every one of them goes away unless it is on the list above:", { file: fileName(t, file), name: account.name })}
+          </FormNote>
+          <ul className="source" data-testid="keys-going-away">
+            {current.map((key) => (
+              <li key={key.fingerprint} className="hm-mono" title={key.fingerprint}>
+                {key.type || "?"} · {shortFingerprint(key.fingerprint)}{key.comment ? ` · ${key.comment}` : ""}
+              </li>
+            ))}
+          </ul>
+          <FormNote>
+            {t("The order carries these fingerprints as the state it was composed on; a key added to the account in the meantime makes it stale and the host refuses it.")}
+          </FormNote>
+        </>
+      )}
+
+      {cutsOff && (
+        <Check checked={allowLockout} onChange={setAllowLockout}>
+          {t("The account keeps no key and has no password login: after this order nobody can log in as {name}. That is the intent.", { name: account.name })}
+        </Check>
+      )}
+
       <FormActions>
         <button
-          onClick={() =>
+          className="hm-danger"
+          disabled={!ready}
+          onClick={() => {
             request.mutate({
-              action: "localuser.sshkeys.set",
+              action: "localuser.sshkeys.replace_all",
               name: account.name,
-              ssh_keys: keys.split("\n").map((line) => line.trim()).filter(Boolean),
-            })
-          }
+              ssh_keys: lines,
+              expected_fingerprints: expected,
+              managed_file: file === "managed" || undefined,
+              allow_lockout: allowLockout || undefined,
+              reason: reason.trim(),
+            });
+            onClose();
+          }}
         >
-          {t("Save keys")}
+          {t("Replace all keys")}
         </button>
         <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
-    </Form>
+    </div>
   );
 }
 
 /**
  * The supplementary groups of an account, as a complete list: what is not
  * on it is taken away. A privileged group on the list is root by another
- * name; the panel says so before the order goes out, and the control plane
- * treats such an order as critical.
+ * name; the panel says so before the order goes out, the control plane
+ * treats such an order as critical, and it asks for a permission of its
+ * own beside the one for changing groups at all.
  */
-function GroupsPanel({ account, request, onClose }: { account: LocalAccount; request: Request; onClose: () => void }) {
+function GroupsPanel({
+  hostID, account, request, onClose,
+}: { hostID: string; account: LocalAccount; request: Request; onClose: () => void }) {
   const t = useT();
   const [groups, setGroups] = useState(account.groups.join(", "));
+  const [reason, setReason] = useState("");
   const list = groups.split(/[\s,]+/).map((group) => group.trim()).filter(Boolean);
   const privileged = list.filter((group) => PRIVILEGED_GROUPS.includes(group));
+  const ready = privileged.length === 0 || reason.trim().length >= 8;
   return (
     <Form>
       <Fields>
         <Field label={t("Groups")} help={t("The complete list of supplementary groups for {name}, separated by commas or spaces. An empty list takes every supplementary group away.", { name: account.name })} wide>
           <input value={groups} placeholder="developers, adm" onChange={(event) => setGroups(event.target.value)} />
         </Field>
+        {privileged.length > 0 && (
+          <Field label={t("Reason")} help={t("A change of access that grants root by another name: at least 8 characters, recorded with the order.")} wide>
+            <input value={reason} onChange={(event) => setReason(event.target.value)} />
+          </Field>
+        )}
       </Fields>
       {privileged.length > 0 && (
-        <Message text={t("Privileged: {groups}. Membership there is root by another name; the order is critical and asks for fresh authentication.", { groups: privileged.join(", ") })} error />
+        <Message text={t("Privileged: {groups}. Membership there is root by another name; the order needs the permission accounts.privileged_groups beside localuser.groups.write, ranks critical and asks for fresh authentication and an approval.", { groups: privileged.join(", ") })} error />
       )}
       <FormActions>
-        <button
-          onClick={() => request.mutate({ action: "localuser.groups.set", name: account.name, groups: list })}
-        >
-          {t("Set groups")}
-        </button>
+        <ActionGuard action="localuser.groups.set" host={hostID}>
+          <button
+            disabled={!ready}
+            onClick={() => request.mutate({
+              action: "localuser.groups.set", name: account.name, groups: list,
+              reason: privileged.length > 0 ? reason.trim() : undefined,
+            })}
+          >
+            {t("Set groups")}
+          </button>
+        </ActionGuard>
         <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
     </Form>
@@ -353,7 +647,9 @@ function GroupsPanel({ account, request, onClose }: { account: LocalAccount; req
  * The expiry date of an account: access with a date attached. Clearing it
  * restores access - a deliberate change, sent as an empty date.
  */
-function ExpiryPanel({ account, request, onClose }: { account: LocalAccount; request: Request; onClose: () => void }) {
+function ExpiryPanel({
+  hostID, account, request, onClose,
+}: { hostID: string; account: LocalAccount; request: Request; onClose: () => void }) {
   const t = useT();
   const [date, setDate] = useState(account.expires_at ?? "");
   return (
@@ -364,19 +660,23 @@ function ExpiryPanel({ account, request, onClose }: { account: LocalAccount; req
         </Field>
       </Fields>
       <FormActions>
-        <button
-          disabled={date === ""}
-          onClick={() => request.mutate({ action: "localuser.expiry.set", name: account.name, expires_at: date })}
-        >
-          {t("Set expiry")}
-        </button>
-        <button
-          className="secondary"
-          disabled={!account.expires_at}
-          onClick={() => request.mutate({ action: "localuser.expiry.set", name: account.name, expires_at: "" })}
-        >
-          {t("Clear expiry")}
-        </button>
+        <ActionGuard action="localuser.expiry.set" host={hostID}>
+          <button
+            disabled={date === ""}
+            onClick={() => request.mutate({ action: "localuser.expiry.set", name: account.name, expires_at: date })}
+          >
+            {t("Set expiry")}
+          </button>
+        </ActionGuard>
+        <ActionGuard action="localuser.expiry.set" host={hostID}>
+          <button
+            className="secondary"
+            disabled={!account.expires_at}
+            onClick={() => request.mutate({ action: "localuser.expiry.set", name: account.name, expires_at: "" })}
+          >
+            {t("Clear expiry")}
+          </button>
+        </ActionGuard>
         <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
       </FormActions>
     </Form>
@@ -455,7 +755,18 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [groups, setGroups] = useState("");
   const [keys, setKeys] = useState("");
+  const [inactive, setInactive] = useState(false);
+  const [reason, setReason] = useState("");
   const request = useRequest(host);
+
+  const groupList = groups.split(",").map((group) => group.trim()).filter(Boolean);
+  const keyList = keys.split("\n").map((key) => key.trim()).filter(Boolean);
+  const privileged = groupList.filter((group) => PRIVILEGED_GROUPS.includes(group));
+  // An account with neither a key nor a password is an account nobody can
+  // enter. The panel sets no passwords, so the operator has to say that
+  // such an account is what they mean.
+  const ready = name.trim() !== "" && (keyList.length > 0 ? !inactive : inactive)
+    && (privileged.length === 0 || reason.trim().length >= 8);
 
   return (
     <Section
@@ -472,28 +783,48 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
             <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Jane Smith" />
           </Field>
           <Field label={t("Additional groups")}>
-            <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="sudo, adm" />
+            <input value={groups} onChange={(e) => setGroups(e.target.value)} placeholder="developers, adm" />
           </Field>
           <Field label={t("SSH public keys, one per line")} wide>
             <textarea rows={3} value={keys} onChange={(e) => setKeys(e.target.value)} />
           </Field>
+          {privileged.length > 0 && (
+            <Field label={t("Reason")} help={t("A change of access that grants root by another name: at least 8 characters, recorded with the order.")} wide>
+              <input value={reason} onChange={(e) => setReason(e.target.value)} />
+            </Field>
+          )}
         </Fields>
+        {keyList.length === 0 && (
+          <Check checked={inactive} onChange={setInactive}>
+            {t("Create the account with no way in: no key, and the panel sets no password. Somebody will have to add a key before anybody can log in.")}
+          </Check>
+        )}
+        {privileged.length > 0 && (
+          <Message
+            error
+            text={t("Privileged: {groups}. An account created straight into such a group is root by another name; the order needs the permission accounts.privileged_groups beside localuser.create, ranks critical and asks for fresh authentication and an approval.", { groups: privileged.join(", ") })}
+          />
+        )}
         <FormActions>
-          <button
-            disabled={!name.trim()}
-            onClick={() =>
-              request.mutate({
-                action: "localuser.create",
-                name: name.trim(),
-                gecos: description.trim(),
-                groups: groups.split(",").map((g) => g.trim()).filter(Boolean),
-                ssh_keys: keys.split("\n").map((k) => k.trim()).filter(Boolean),
-                create_home: true,
-              })
-            }
-          >
-            {t("Request account creation")}
-          </button>
+          <ActionGuard action="localuser.create" host={host.id}>
+            <button
+              disabled={!ready}
+              onClick={() =>
+                request.mutate({
+                  action: "localuser.create",
+                  name: name.trim(),
+                  gecos: description.trim(),
+                  groups: groupList,
+                  ssh_keys: keyList,
+                  create_home: true,
+                  inactive: inactive || undefined,
+                  reason: privileged.length > 0 ? reason.trim() : undefined,
+                })
+              }
+            >
+              {t("Request account creation")}
+            </button>
+          </ActionGuard>
           <button className="secondary" onClick={onClose}>{t("Cancel")}</button>
         </FormActions>
         <Message text={request.message} />
@@ -507,7 +838,20 @@ type Order = {
   name: string;
   gecos?: string;
   groups?: string[];
+  /** The complete key list of a create or a replace; an empty one is a decision. */
   ssh_keys?: string[];
+  /** The keys an add appends, each with the comment it is to carry. */
+  keys?: { public_key: string; comment?: string }[];
+  /** The keys a removal names, by fingerprint. */
+  fingerprints?: string[];
+  /** The keys the operator saw; a replace is bound to them. */
+  expected_fingerprints?: string[];
+  /** Consent to leaving the account with no way in. */
+  allow_lockout?: boolean;
+  /** Edit the panel's own key file instead of the user's authorized_keys. */
+  managed_file?: boolean;
+  /** Consent to creating an account nobody can log in as. */
+  inactive?: boolean;
   create_home?: boolean;
   /** The expiry date as YYYY-MM-DD; an empty string on an expiry order clears it. */
   expires_at?: string;
@@ -517,7 +861,7 @@ type Order = {
   target_confirmation?: string;
 };
 
-type Request = { mutate: (order: Order) => void; message: string; busy: boolean };
+export type Request = { mutate: (order: Order) => void; message: string; busy: boolean };
 
 /**
  * Requesting an operation creates a plan, not an immediate change: a
@@ -540,6 +884,12 @@ function useRequest(host: Host): Request {
             gecos: rest.gecos || undefined,
             groups: rest.groups,
             ssh_keys: rest.ssh_keys,
+            keys: rest.keys,
+            fingerprints: rest.fingerprints,
+            expected_fingerprints: rest.expected_fingerprints,
+            allow_lockout: rest.allow_lockout,
+            managed_file: rest.managed_file,
+            inactive: rest.inactive,
             create_home: rest.create_home,
             expires_at: rest.expires_at,
             remove_home: rest.remove_home,
@@ -553,6 +903,7 @@ function useRequest(host: Host): Request {
           : t("Job {id} has been queued. The list refreshes after the agent's next report.", { id: job.id.slice(0, 8) }),
       );
       queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["local-accounts", host.id] });
     },
     onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
   });

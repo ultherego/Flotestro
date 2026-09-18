@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { api, LIST_PAGE, loadedItems } from "../lib/api";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { useDebounced } from "../lib/debounce";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Card, PageHeader, Toolbar } from "../components/layout";
@@ -47,11 +48,12 @@ type Source = {
 /** The fleet answer: the summary numbers over the whole visible fleet and
  *  one page of the host table. The summary does not change with the table
  *  filters - a filter changes what is listed, not how bad the fleet is. */
-type View = {
+type View = Coverage & {
   items: Item[];
   count: number;
   total: number;
   offset: number;
+  next_cursor?: string;
   affected: number;
   affected_with_vendor_fix: number;
   affected_no_fix: number;
@@ -138,20 +140,24 @@ export type FleetFilters = {
 
 /** The address of one page of the fleet list for the current filters.
  *
- *  Both tables page by offset: the server sorts the whole visible fleet in
- *  memory for the host table and by a grouped query for the CVE table, so a
- *  key-set cursor would buy nothing over a plain offset. */
-export function fleetListAddress(filters: FleetFilters, offset: number, limit = LIST_PAGE): string {
+ *  The host table is sorted and cut in the database over the whole visible
+ *  fleet, so it pages by the key of its last row: a host enrolled while
+ *  the operator scrolls shifts every offset and would hide or repeat a
+ *  row. The CVE table is a grouped query whose rows do not move that way
+ *  and still pages by offset, so the page argument is a cursor for the
+ *  one and a number for the other. */
+export function fleetListAddress(filters: FleetFilters, page: string | number, limit = LIST_PAGE): string {
   const params = new URLSearchParams();
   if (filters.q.trim()) params.set("q", filters.q.trim());
   if (filters.severity) params.set("severity", filters.severity);
   if (filters.view === "cves") {
     if (filters.fixable) params.set("fixable", "true");
-  } else if (filters.sort) {
-    params.set("sort", filters.sort);
+    if (typeof page === "number" && page > 0) params.set("offset", String(page));
+  } else {
+    if (filters.sort) params.set("sort", filters.sort);
+    if (typeof page === "string" && page) params.set("cursor", page);
   }
   params.set("limit", String(limit));
-  if (offset > 0) params.set("offset", String(offset));
   const path = filters.view === "cves" ? "/api/v1/vulnerabilities/cves" : "/api/v1/vulnerabilities";
   return `${path}?${params}`;
 }
@@ -213,8 +219,8 @@ export function FleetVulnerabilities() {
   const hostTable = useInfiniteQuery({
     queryKey: ["vulnerabilities", "fleet", "hosts", settledQuery, filters.severity, filters.sort],
     queryFn: ({ pageParam }) => api.get<View>(fleetListAddress(hostFilters, pageParam)),
-    initialPageParam: 0,
-    getNextPageParam: (last) => (last.offset + last.count < last.total ? last.offset + last.count : undefined),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: filters.view === "hosts",
     retry: false,
   });
@@ -257,6 +263,7 @@ export function FleetVulnerabilities() {
         title={t("Vulnerabilities")}
         description={t("Decided by each distribution's own security tracker, because fixes are backported: a version that looks vulnerable upstream may already carry the patch. Upstream feeds can add descriptions and scores later, but they never overrule the vendor.")}
       />
+      <FleetCoverage coverage={data} />
 
       {Object.keys(data.coverage_reasons ?? {}).length > 0 && (
         <p className="warning">
@@ -299,7 +306,7 @@ export function FleetVulnerabilities() {
         <Card
           className="span-4"
           title={t("Assessed")}
-          description={t("{n} of {total} hosts fully assessed", { n: data.hosts_assessed, total: data.hosts_total })}
+          description={t("{n} of {total} hosts fully assessed", { n: data.hosts_assessed, total: data.total_hosts })}
         >
           <StatusBar segments={[
             { label: t("Fully assessed"), value: data.hosts_assessed, tone: fullyAssessed ? "ok" : "warn" },
@@ -377,7 +384,7 @@ export function FleetVulnerabilities() {
                     is one row per host, whatever the toggle shows. */}
                 {filters.view === "hosts" && (
                   <ExportButton path="/api/v1/vulnerabilities"
-                    params={new URLSearchParams(fleetListAddress(hostFilters, 0).split("?")[1])} />
+                    params={new URLSearchParams(fleetListAddress(hostFilters, "").split("?")[1])} />
                 )}
               </>
             }

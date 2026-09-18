@@ -1,26 +1,43 @@
-import { describe, expect, it } from "vitest";
-import { fleetListAddress, packagesPreview, severityTone } from "./Vulnerabilities";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
+import "@testing-library/jest-dom/vitest";
+import { FleetVulnerabilities, fleetListAddress, packagesPreview, severityTone } from "./Vulnerabilities";
 import { patchAddress } from "./Vulnerability";
 import { findingMatches, patchAddress as hostPatchAddress, severityRung } from "./host/Vulnerabilities";
 
-/* The fleet screen reads the same findings two ways and pages both by
-   offset; the address it asks for is a pure function of the filters, so
-   every branch is checked here without a screen. */
+/* The fleet screen reads the same findings two ways. The host table is
+   sorted and cut in the database over the whole visible fleet and pages
+   by the key of its last row; the CVE table is a grouped query and still
+   pages by offset. The address it asks for is a pure function of the
+   filters, so every branch is checked here without a screen. */
 
 const params = (address: string) => new URLSearchParams(address.slice(address.indexOf("?") + 1));
 
 describe("fleetListAddress", () => {
-  it("asks the host list with the hostname search, the severity, the sort and the page", () => {
-    const address = fleetListAddress({ view: "hosts", q: " web ", severity: "critical", fixable: true, sort: "fixable" }, 200);
+  it("asks the host list with the hostname search, the severity, the sort and the cursor", () => {
+    const address = fleetListAddress(
+      { view: "hosts", q: " web ", severity: "critical", fixable: true, sort: "fixable" }, "the-next-page");
     expect(address.startsWith("/api/v1/vulnerabilities?")).toBe(true);
     const query = params(address);
     expect(query.get("q")).toBe("web");
     expect(query.get("severity")).toBe("critical");
     expect(query.get("sort")).toBe("fixable");
-    expect(query.get("offset")).toBe("200");
+    expect(query.get("cursor")).toBe("the-next-page");
     expect(query.get("limit")).toBe("100");
+    // A key-set list never offsets: an offset loses rows when the fleet
+    // moves under the reader.
+    expect(query.has("offset")).toBe(false);
     // The fix toggle belongs to the CVE table alone.
     expect(query.has("fixable")).toBe(false);
+  });
+
+  it("asks the first page of the host list without a cursor", () => {
+    const query = params(fleetListAddress({ view: "hosts", q: "", severity: "", fixable: false, sort: "" }, ""));
+    expect(query.has("cursor")).toBe(false);
+    expect(query.has("offset")).toBe(false);
   });
 
   it("asks the CVE list with the fix toggle and without a sort", () => {
@@ -133,5 +150,76 @@ describe("patchAddress on the host tab", () => {
 
   it("offers nothing when no finding has a fix to install", () => {
     expect(hostPatchAddress(host, [{ state: "affected", vendor_fix: "unavailable", binary_package: "curl" }])).toBeNull();
+  });
+});
+
+/* The screen itself has two numbers, not one: how many vulnerabilities
+   and what part of the fleet could be assessed at all. Without the second
+   the first is a promise - a host the feed does not cover carries the
+   same zero as a clean one - so the coverage line is checked on a fleet
+   larger than the five hundred hosts the old screen read. */
+
+const fleetAnswer = {
+  total_hosts: 1001, evaluated_hosts: 300, unknown_hosts: 701, partial: false,
+  unknown_reasons: { no_assessment: 701 },
+  items: [
+    {
+      host_id: "h1", hostname: "web-01", distribution: "debian", release: "12",
+      packages_total: 120, packages_covered: 120, affected: 9, affected_with_vendor_fix: 5,
+      affected_no_fix: 4, unknown: 0, affected_packages: 7, unique_advisories: 3, unique_cves: 9,
+      coverage_reason: "", advisories_reason: "", evaluated_at: "2026-09-18T08:00:00Z",
+      coverage_percent: 100, fully_assessed: true, by_severity: { critical: 2 },
+    },
+  ],
+  count: 1, total: 300, next_cursor: "the-next-page", limit: 100, offset: 0,
+  affected: 900, affected_with_vendor_fix: 500, affected_no_fix: 400, unknown: 0,
+  unique_cves: 120, unique_advisories: 60, affected_package_instances: 700, hosts_affected: 210,
+  hosts_total: 1001, hosts_assessed: 300, hosts_without_assessment: 701,
+  coverage_reasons: { package_list_missing: 701 },
+  sources: [], max_snapshot_age_hours: 48,
+};
+
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      get: (path: string) => {
+        if (path.startsWith("/api/v1/vulnerabilities/cves")) {
+          return Promise.resolve({ items: [], count: 0, total: 0, limit: 50, offset: 0 });
+        }
+        if (path.startsWith("/api/v1/vulnerabilities")) return Promise.resolve(fleetAnswer);
+        return Promise.reject(new Error(`no answer for ${path}`));
+      },
+    },
+  };
+});
+
+function draw(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>{node}</MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+afterEach(cleanup);
+
+describe("the fleet vulnerability screen", () => {
+  it("says how much of the fleet it assessed and never shows the rest as a zero", async () => {
+    draw(<FleetVulnerabilities />);
+    const coverage = await screen.findByTestId("fleet-coverage");
+    expect(coverage).toHaveTextContent("300 of 1001 hosts evaluated · 701 unknown");
+    // A host nobody has assessed is not a host without vulnerabilities.
+    expect(coverage).toHaveTextContent("701 never assessed");
+    expect(screen.queryByTestId("fleet-partial")).toBeNull();
+  });
+
+  it("counts the whole fleet above a table that grows on the cursor", async () => {
+    draw(<FleetVulnerabilities />);
+    await waitFor(() => expect(screen.getByText("300 of 1001 hosts fully assessed")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Load more (299 left)" })).toBeInTheDocument();
   });
 });

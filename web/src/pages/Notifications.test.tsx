@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  addressWithheld, channelBody, deliveryParams, deliveryWords, describeChannel, describeFilter, emptyForm, formOf, recipients,
-  type Channel,
+  addressWithheld, canRetry, channelBody, deliveryParams, deliveryWords, describeChannel, describeFilter,
+  emptyForm, formOf, nextAttemptAt, recipients, secretWords, stateTone, stateWords,
+  type Channel, type Delivery,
 } from "./Notifications";
 
 /* The page sends what these helpers build and shows what they say: the
@@ -123,5 +124,103 @@ describe("deliveryParams", () => {
 
   it("asks for the whole log when nothing narrows it", () => {
     expect(deliveryParams({ channel: "", status: "", window: "" }, now).toString()).toBe("");
+  });
+});
+
+/* The queue is what the second half of the screen shows: a row per event
+   and channel, with its state, its attempts and what refused it last.
+   These check the words that table is built out of. */
+
+const row: Delivery = {
+  id: "d1", channel_id: "c1", channel_name: "on-call", event_id: 42, event_type: "alert.fired",
+  title: "cpu_percent > 90 on web-01", state: "retry_wait", attempt: 3,
+  next_attempt_at: "2026-09-15T12:04:00Z", last_error_code: "receiver_status",
+  last_error: "the receiver answered 503", created_at: "2026-09-15T12:00:00Z",
+  updated_at: "2026-09-15T12:02:00Z", status: "failed", error_code: "receiver_status",
+  error: "the receiver answered 503", sent_at: "2026-09-15T12:02:00Z",
+};
+
+describe("the queue", () => {
+  it("names every state and colours the ones an operator has to act on", () => {
+    expect(stateWords(t, "delivered")).toBe("sent");
+    expect(stateWords(t, "retry_wait")).toBe("waiting to retry");
+    expect(stateWords(t, "dead_letter")).toBe("dead letter");
+    expect(stateWords(t, "suppressed")).toBe("kept back");
+    // A state the panel does not know is shown as it came rather than hidden.
+    expect(stateWords(t, "something_new")).toBe("something_new");
+    expect(stateTone("delivered")).toBe("ok");
+    expect(stateTone("dead_letter")).toBe("error");
+    expect(stateTone("retry_wait")).toBe("warn");
+    expect(stateTone("pending")).toBe("unknown");
+  });
+
+  it("offers the retry button on a dead letter alone", () => {
+    expect(canRetry({ ...row, state: "dead_letter" })).toBe(true);
+    // A row the worker still has in hand is not an operator's to restart.
+    for (const state of ["pending", "leased", "retry_wait", "delivered", "suppressed"] as const) {
+      expect(canRetry({ ...row, state })).toBe(false);
+    }
+  });
+
+  it("names the next attempt only for a row that has one", () => {
+    expect(nextAttemptAt(row)).toBe("2026-09-15T12:04:00Z");
+    expect(nextAttemptAt({ ...row, state: "pending" })).toBe("2026-09-15T12:04:00Z");
+    // A dead letter's next_attempt_at is whatever it was when the attempts
+    // ran out; showing it would read as a promise the queue does not make.
+    expect(nextAttemptAt({ ...row, state: "dead_letter" })).toBe("");
+    expect(nextAttemptAt({ ...row, state: "delivered" })).toBe("");
+    expect(nextAttemptAt({ ...row, state: "suppressed" })).toBe("");
+  });
+
+  it("reads the outcome from the state and the typed error of the row", () => {
+    expect(deliveryWords(t, { ...row, state: "delivered" })).toBe("sent");
+    expect(deliveryWords(t, row)).toBe("receiver_status: the receiver answered 503");
+    expect(deliveryWords(t, { ...row, state: "dead_letter", last_error_code: "channel_credentials_rejected", last_error: "", error_code: "", error: "" }))
+      .toBe("channel_credentials_rejected");
+    expect(deliveryWords(t, { ...row, state: "suppressed", last_error_code: "", last_error: "silence until 2026-09-15T13:00:00Z: planned audit", error_code: "", error: "" }))
+      .toBe("silence until 2026-09-15T13:00:00Z: planned audit");
+    expect(deliveryWords(t, { ...row, state: "pending", last_error_code: "", last_error: "", error_code: "", error: "" })).toBe("failed");
+  });
+
+  it("narrows the log by either vocabulary: the old status or the queue's state", () => {
+    const now = new Date("2026-09-15T12:00:00Z");
+    expect(deliveryParams({ channel: "", status: "sent", window: "" }, now).toString()).toBe("status=sent");
+    expect(deliveryParams({ channel: "", status: "dead_letter", window: "" }, now).toString()).toBe("state=dead_letter");
+    expect(deliveryParams({ channel: "", status: "suppressed", window: "" }, now).get("status")).toBeNull();
+  });
+});
+
+describe("the secret of a channel", () => {
+  it("never shows the value, only that one is configured and when it was rotated", () => {
+    const none = "nothing is configured";
+    expect(secretWords(t, { secretSet: false, secretRotatedAt: "" }, none)).toBe(none);
+    expect(secretWords(t, { secretSet: true, secretRotatedAt: "" }, none))
+      .toBe("A secret is configured; leave the field empty to keep it, or type a new one.");
+    const rotated = secretWords(t, { secretSet: true, secretRotatedAt: "2026-09-15T10:00:00Z" }, none);
+    expect(rotated).toContain("last rotated");
+    expect(rotated).toContain(new Date("2026-09-15T10:00:00Z").toLocaleString());
+  });
+
+  it("reads the channel's own flags rather than the configuration it no longer carries", () => {
+    // The API of the queue release says it on the channel; the field in
+    // the configuration is the same fact in the older shape.
+    const fresh: Channel = {
+      ...stored, config: { url: "https://hooks.example.com/flotestro" },
+      secret_configured: true, secret_last_rotated_at: "2026-09-16T08:00:00Z",
+    };
+    const form = formOf(fresh);
+    expect(form.secret).toBe("");
+    expect(form.secretSet).toBe(true);
+    expect(form.secretRotatedAt).toBe("2026-09-16T08:00:00Z");
+    // And an empty field keeps what the store holds.
+    expect(channelBody({ ...form, reason: "edited the events" }).body?.config)
+      .toEqual({ url: "https://hooks.example.com/flotestro", secret_set: true });
+
+    // An incoming webhook whose address is the credential is withheld on
+    // the strength of the same flag.
+    const slack: Channel = { ...stored, kind: "slack_webhook", config: {}, secret_configured: true };
+    expect(addressWithheld(slack)).toBe(true);
+    expect(formOf(slack).urlSet).toBe(true);
+    expect(describeChannel({ ...slack, public_config: { display_host: "hooks.slack.com" } })).toBe("hooks.slack.com");
   });
 });

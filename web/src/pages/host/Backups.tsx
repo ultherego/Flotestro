@@ -9,6 +9,7 @@ import {
   countWhere, useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useConfirm } from "../../components/Modal";
 import { useToast } from "../../components/Toast";
 import { useT } from "../../i18n";
@@ -127,6 +128,9 @@ function StatusBadge({ status, age }: { status: string; age?: number }) {
  * repository password is named by a secret; the host fetches its value once,
  * at the moment of the operation.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const BACKUP_CHANGES = ["backup.run", "backup.verify", "backup.restore"];
+
 export function Backups() {
   const t = useT();
   const host = useHost();
@@ -300,6 +304,7 @@ export function Backups() {
           </button>
         }
       />
+      <ReadOnlyModuleNotice host={host.id} actions={BACKUP_CHANGES} />
       <p className="hm-freshness">
         {tools.map((tool) => (
           <span key={tool.name} className={`badge ${tool.available ? "ok" : ""}`}>
@@ -413,49 +418,59 @@ export function Backups() {
                     )}
                   </td>
                   <td>
+                    {/* Every order stands behind the server's preview of
+                        what this operator may place on this host; the
+                        definition itself is the panel's record and stays
+                        editable. */}
                     <div className="operations">
-                      <button
-                        className="secondary"
-                        disabled={host.connection_state !== "online"}
-                        onClick={() =>
-                          request.mutate({
-                            action: "backup.plan",
-                            payload: { backup: definitionRequest(item) },
-                          })
-                        }
-                      >
-                        {t("Read repository")}
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          setIntent({
-                            action: "backup.run",
-                            label: t("Run backup"),
-                            description: t("{name} copies {paths} from {host} to {repository}. The data goes straight from the host; the panel only records that it happened.", {
-                              name: item.name, paths: (item.paths ?? []).join(", "), host: host.hostname, repository: item.repository ?? "",
-                            }),
-                            payload: { backup: definitionRequest(item) },
-                          })
-                        }
-                      >
-                        {t("Back up now")}
-                      </button>
-                      <button
-                        className="secondary"
-                        onClick={() =>
-                          setIntent({
-                            action: "backup.verify",
-                            label: t("Verify backup"),
-                            description: t("{name} is checked on {host}, including reading part of the data back. Until something reads a copy, it is a promise, not a safeguard.", {
-                              name: item.name, host: host.hostname,
-                            }),
-                            payload: { backup: definitionRequest(item, { read_data: true }) },
-                          })
-                        }
-                      >
-                        {t("Verify")}
-                      </button>
+                      <ActionGuard action="backup.plan" host={host.id}>
+                        <button
+                          className="secondary"
+                          disabled={host.connection_state !== "online"}
+                          onClick={() =>
+                            request.mutate({
+                              action: "backup.plan",
+                              payload: { backup: definitionRequest(item) },
+                            })
+                          }
+                        >
+                          {t("Read repository")}
+                        </button>
+                      </ActionGuard>
+                      <ActionGuard action="backup.run" host={host.id}>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            setIntent({
+                              action: "backup.run",
+                              label: t("Run backup"),
+                              description: t("{name} copies {paths} from {host} to {repository}. The data goes straight from the host; the panel only records that it happened.", {
+                                name: item.name, paths: (item.paths ?? []).join(", "), host: host.hostname, repository: item.repository ?? "",
+                              }),
+                              payload: { backup: definitionRequest(item) },
+                            })
+                          }
+                        >
+                          {t("Back up now")}
+                        </button>
+                      </ActionGuard>
+                      <ActionGuard action="backup.verify" host={host.id}>
+                        <button
+                          className="secondary"
+                          onClick={() =>
+                            setIntent({
+                              action: "backup.verify",
+                              label: t("Verify backup"),
+                              description: t("{name} is checked on {host}, including reading part of the data back. Until something reads a copy, it is a promise, not a safeguard.", {
+                                name: item.name, host: host.hostname,
+                              }),
+                              payload: { backup: definitionRequest(item, { read_data: true }) },
+                            })
+                          }
+                        >
+                          {t("Verify")}
+                        </button>
+                      </ActionGuard>
                       <button className="hm-danger" onClick={() => remove.mutate(item.name)}>
                         {t("Forget")}
                       </button>
@@ -490,13 +505,15 @@ export function Backups() {
                     <td><Time value={snapshot.time} /></td>
                     <td className="source hm-mono">{snapshot.paths?.join(", ")}</td>
                     <td>
-                      <button
-                        className="danger"
-                        disabled={!definition}
-                        onClick={() => askRestoreTarget(snapshot)}
-                      >
-                        {t("Restore…")}
-                      </button>
+                      <ActionGuard action="backup.restore" host={host.id}>
+                        <button
+                          className="danger"
+                          disabled={!definition}
+                          onClick={() => askRestoreTarget(snapshot)}
+                        >
+                          {t("Restore…")}
+                        </button>
+                      </ActionGuard>
                     </td>
                   </tr>
                 ))}

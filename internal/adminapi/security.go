@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
@@ -16,6 +18,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/inventory"
 	"github.com/ultherego/flotestro/internal/opspec"
+	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/remediation"
 )
 
@@ -46,7 +49,8 @@ func (s *Server) handleHostSecurity(w http.ResponseWriter, r *http.Request) {
 
 // HostsPerCheckLimit bounds the host list at one check. The count is exact;
 // the list is a sample, so the fleet screen does not become a printout of
-// the whole inventory.
+// the whole inventory. The whole list of a check is read page by page
+// with the check parameter of the fleet view.
 const HostsPerCheckLimit = 50
 
 // checkView gathers one check at fleet scale.
@@ -76,11 +80,55 @@ type hostWithFinding struct {
 	Action   string `json:"action,omitempty"`
 }
 
+// complianceModules names the inventory modules the checks compute from,
+// so a sweep loads those and nothing else.
+func complianceModules() []string {
+	seen := map[string]bool{}
+	modules := []string{}
+	for _, check := range compliance.Checks {
+		if check.Module == "" || seen[check.Module] {
+			continue
+		}
+		seen[check.Module] = true
+		modules = append(modules, check.Module)
+	}
+	return modules
+}
+
+// evaluated says whether a report judged anything at all: a host with
+// every finding unknown reported no fact a check could read, and is an
+// unknown host, not a compliant one.
+func evaluated(report compliance.Report) bool {
+	for _, finding := range report.Findings {
+		if !finding.Unknown {
+			return true
+		}
+	}
+	return false
+}
+
+// fleetSecurityView is the answer of the fleet screen: the coverage of
+// the fleet, the checks with their counts over every host the sweep
+// reached, and a sample of the failing hosts under each.
+type fleetSecurityView struct {
+	fleetCoverage
+	// Hosts counts the hosts the sweep judged; it equals TotalHosts unless
+	// the answer is partial.
+	Hosts       int         `json:"hosts"`
+	Checks      []checkView `json:"checks"`
+	GeneratedAt time.Time   `json:"generated_at"`
+}
+
 // handleFleetSecurity returns the compliance of the whole visible fleet.
 //
 // The fleet view is the basic mode of this module: one bad setting on a
 // hundred hosts is one problem, not a hundred - and that is visible only
-// when the findings stand side by side.
+// when the findings stand side by side. The checks are judged in the
+// panel from the inventory, so the fleet is swept host by host within
+// the reader's scope; the counts are over every host reached, and a
+// sweep that ran out of time says so instead of passing a part off as
+// the whole. With the check parameter the answer is instead one page of
+// the hosts failing that check, read with a cursor.
 func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRead, "fleet")
 	if !ok {
@@ -90,31 +138,22 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	visible := make([]hosts.Host, 0, len(list))
-	ids := make([]string, 0, len(list))
-	for _, host := range list {
-		if principal.Can(authz.PermSecurityRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			visible = append(visible, host)
-			ids = append(ids, host.ID)
-		}
-	}
-
-	fragments, err := s.inventory.HostFragments(r.Context(), ids)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-
+	filter := hosts.ListFilter{Scopes: principal.ScopesFor(authz.PermSecurityRead)}
 	now := time.Now().UTC()
-	if asCSV {
-		s.writeFindingsCSV(w, r, visible, fragments, now)
+	if checkID := strings.TrimSpace(r.URL.Query().Get("check")); checkID != "" {
+		s.handleCheckHosts(w, r, filter, checkID, now)
 		return
 	}
+	if asCSV {
+		s.writeFindingsCSV(w, r, filter, now)
+		return
+	}
+	total, err := s.hosts.Count(r.Context(), filter)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
 	checks := map[string]*checkView{}
 	order := make([]string, 0, len(compliance.Checks))
 	for _, check := range compliance.Checks {
@@ -124,34 +163,43 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 		}
 		order = append(order, check.ID)
 	}
-
-	for _, host := range visible {
-		report := compliance.Evaluate(host.ID, hostInput(host, fragments[host.ID]), now)
-		for _, finding := range report.Findings {
-			view, ok := checks[finding.CheckID]
-			if !ok {
-				continue
+	judged := 0
+	sweep, err := s.sweepFleet(r.Context(), filter, "", "", complianceModules(),
+		func(host hosts.Host, fragments []inventory.Fragment) bool {
+			report := compliance.Evaluate(host.ID, hostInput(host, fragments), now)
+			if evaluated(report) {
+				judged++
 			}
-			switch {
-			case !finding.Applicable:
-				view.NotApplicable++
-			case finding.Unknown:
-				view.Unknown++
-			case finding.Passed:
-				view.Passed++
-			default:
-				view.Failed++
-				if finding.Remediation != nil && finding.Remediation.Action != "" {
-					view.Fixable++
+			for _, finding := range report.Findings {
+				view, ok := checks[finding.CheckID]
+				if !ok {
+					continue
 				}
-				if len(view.Hosts) < HostsPerCheckLimit {
-					view.Hosts = append(view.Hosts, hostWithFinding{
-						HostID: host.ID, Hostname: host.Hostname, Observed: finding.Observed,
-						Action: remediationAction(finding),
-					})
+				switch {
+				case !finding.Applicable:
+					view.NotApplicable++
+				case finding.Unknown:
+					view.Unknown++
+				case finding.Passed:
+					view.Passed++
+				default:
+					view.Failed++
+					if finding.Remediation != nil && finding.Remediation.Action != "" {
+						view.Fixable++
+					}
+					if len(view.Hosts) < HostsPerCheckLimit {
+						view.Hosts = append(view.Hosts, hostWithFinding{
+							HostID: host.ID, Hostname: host.Hostname, Observed: finding.Observed,
+							Action: remediationAction(finding),
+						})
+					}
 				}
 			}
-		}
+			return true
+		})
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 
 	results := make([]checkView, 0, len(order))
@@ -164,8 +212,88 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 		}
 		return results[i].CheckID < results[j].CheckID
 	})
+	writeJSON(w, http.StatusOK, fleetSecurityView{
+		fleetCoverage: sweepCoverage(total, sweep, judged),
+		Hosts:         sweep.Swept, Checks: results, GeneratedAt: now,
+	})
+}
+
+// sweepCoverage describes a sweep as the head of a fleet view: the hosts
+// judged, the hosts reached but without a fact to judge, and the hosts
+// the sweep never reached - the last two unknown, each under its reason.
+func sweepCoverage(total int, sweep fleetSweep, judged int) fleetCoverage {
+	notReached := max(total-sweep.Swept, 0)
+	coverage := fleetCoverage{
+		TotalHosts: total, EvaluatedHosts: judged, UnknownHosts: max(total-judged, 0),
+		Partial: sweep.Partial, PartialReason: sweep.Reason,
+		UnknownReasons: map[string]int{},
+	}
+	if silent := max(sweep.Swept-judged, 0); silent > 0 {
+		coverage.UnknownReasons[unknownNoObservation] = silent
+	}
+	if notReached > 0 {
+		coverage.UnknownReasons[unknownNotReached] = notReached
+	}
+	return coverage
+}
+
+// handleCheckHosts answers one page of the hosts failing one check. The
+// sweep starts after the host the cursor names and stops once the page
+// is full; the cursor of the next page names the last host judged, not
+// the last one listed, so no host is skipped between two pages.
+func (s *Server) handleCheckHosts(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter,
+	checkID string, now time.Time) {
+	known := false
+	for _, check := range compliance.Checks {
+		if check.ID == checkID {
+			known = true
+		}
+	}
+	if !known {
+		problem(w, http.StatusBadRequest, "unknown_check", "the check "+checkID+" does not exist")
+		return
+	}
+	limit, cursor, ok := parseFleetPage(w, r)
+	if !ok {
+		return
+	}
+	afterName, afterID := "", ""
+	if parts, err := paging.Decode(cursor, 2); err != nil {
+		invalidCursor(w, err)
+		return
+	} else if parts != nil {
+		if _, err := uuid.Parse(parts[1]); err != nil {
+			invalidCursor(w, err)
+			return
+		}
+		afterName, afterID = parts[0], parts[1]
+	}
+	items := []hostWithFinding{}
+	sweep, err := s.sweepFleet(r.Context(), filter, afterName, afterID, complianceModules(),
+		func(host hosts.Host, fragments []inventory.Fragment) bool {
+			report := compliance.Evaluate(host.ID, hostInput(host, fragments), now)
+			for _, finding := range report.Findings {
+				if finding.CheckID != checkID || !finding.Applicable || finding.Unknown || finding.Passed {
+					continue
+				}
+				items = append(items, hostWithFinding{
+					HostID: host.ID, Hostname: host.Hostname, Observed: finding.Observed,
+					Action: remediationAction(finding),
+				})
+			}
+			return len(items) < limit
+		})
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	next := ""
+	if len(items) >= limit || sweep.Partial {
+		next = paging.Encode(sweep.LastName, sweep.LastID)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"hosts": len(visible), "checks": results, "generated_at": now,
+		"check_id": checkID, "items": items, "count": len(items), "next_cursor": next,
+		"partial": sweep.Partial, "partial_reason": sweep.Reason, "generated_at": now,
 	})
 }
 
@@ -180,19 +308,28 @@ var findingsCSVColumns = []string{
 // host and check, with the verdict of that pair in the status column -
 // failed, passed, unknown or not_applicable. The screen sums the checks
 // and shows a sample of the hosts behind each; the file is the whole
-// matrix, because an auditor asks which hosts, not how many. The fleet
-// list is the one the screen judges, so the file agrees with the screen;
-// past exportRowLimit rows the file ends with a truncation row.
-func (s *Server) writeFindingsCSV(w http.ResponseWriter, r *http.Request, visible []hosts.Host,
-	fragments map[string][]inventory.Fragment, now time.Time) {
+// matrix, because an auditor asks which hosts, not how many. The rows go
+// from the sweep straight to the socket, a page of hosts at a time; a
+// sweep out of its time budget ends the file with the truncation row and
+// the partial trailer.
+func (s *Server) writeFindingsCSV(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter, now time.Time) {
 	s.writeCSV(w, r, exportFileName("findings", now), findingsCSVColumns, func(yield func([]string) bool) error {
-		for _, host := range visible {
-			report := compliance.Evaluate(host.ID, hostInput(host, fragments[host.ID]), now)
-			for _, finding := range report.Findings {
-				if !yield(findingCSVRow(host, finding)) {
-					return nil
+		sweep, err := s.sweepFleet(r.Context(), filter, "", "", complianceModules(),
+			func(host hosts.Host, fragments []inventory.Fragment) bool {
+				report := compliance.Evaluate(host.ID, hostInput(host, fragments), now)
+				for _, finding := range report.Findings {
+					if !yield(findingCSVRow(host, finding)) {
+						return false
+					}
 				}
-			}
+				return true
+			})
+		if err != nil {
+			return err
+		}
+		if sweep.Partial {
+			return exportPartialError{reason: "the sweep ran out of its time budget after " +
+				strconv.Itoa(sweep.Swept) + " hosts; narrow the scope or ask again"}
 		}
 		return nil
 	})

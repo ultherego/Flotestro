@@ -29,7 +29,10 @@ type channelView struct {
 }
 
 type deliveryView struct {
-	ID          int64     `json:"id"`
+	// The identifier of a row of the queue is a UUID: a delivery is a
+	// durable row an operator can point at and send again, not the
+	// sequence number the log of the previous release had.
+	ID          string    `json:"id"`
 	ChannelID   string    `json:"channel_id"`
 	ChannelName string    `json:"channel_name"`
 	EventID     int64     `json:"event_id"`

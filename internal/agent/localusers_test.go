@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
 func TestComparingTheStateOfAnAccount(t *testing.T) {
@@ -62,7 +63,7 @@ func TestComparingTheStateOfAnAccount(t *testing.T) {
 
 func TestFillingInThePrivilegedData(t *testing.T) {
 	trueValue := true
-	accounts := []LocalAccount{{Name: "smith"}, {Name: "jones"}}
+	listed := []LocalAccount{{Name: "smith"}, {Name: "jones"}}
 	result := &helperv1.LocalAccountsResult{
 		Accounts: []*helperv1.LocalAccountDetail{{
 			Name:        "smith",
@@ -72,7 +73,7 @@ func TestFillingInThePrivilegedData(t *testing.T) {
 		}},
 	}
 
-	merged := mergePrivilegedAccounts(accounts, result)
+	merged := mergePrivilegedAccounts(listed, result)
 	if merged[0].Locked == nil || !*merged[0].Locked {
 		t.Error("the lock state was not carried over")
 	}
@@ -83,27 +84,6 @@ func TestFillingInThePrivilegedData(t *testing.T) {
 	// Writing "unlocked" here would be an invented fact.
 	if merged[1].Locked != nil {
 		t.Error("missing data has to stay an unknown state")
-	}
-}
-
-func TestTheUIDRangeFromLoginDefs(t *testing.T) {
-	directory := t.TempDir()
-	path := filepath.Join(directory, "login.defs")
-	content := "# a comment\nUID_MIN\t\t 500\nUID_MAX\t\t 50000\nGID_MIN 1000\n"
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	uidMin, uidMax := parseUIDRange(path)
-	if uidMin != 500 || uidMax != 50000 {
-		t.Fatalf("read the range %d-%d, expected 500-50000", uidMin, uidMax)
-	}
-
-	// A missing file must not shift the classification: the fallback values match
-	// the settings of the distributions.
-	uidMin, uidMax = parseUIDRange(filepath.Join(directory, "does-not-exist"))
-	if uidMin != defaultUIDMin || uidMax != defaultUIDMax {
-		t.Fatalf("a missing file gave the range %d-%d", uidMin, uidMax)
 	}
 }
 
@@ -122,14 +102,17 @@ func TestTheClassificationOfAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	accounts := parsePasswd(path, 1000, 60000, func(string) []string { return nil })
+	// The range is the shared classifier's; the inventory takes it as read
+	// from login.defs rather than keeping a boundary of its own.
+	uidRange := accounts.UIDRange{Min: 1000, Max: 60000}
+	found := parsePasswd(path, uidRange, func(string) []string { return nil })
 	sources := map[string]AccountSource{}
-	for _, account := range accounts {
+	for _, account := range found {
 		sources[account.Name] = account.Source
 	}
 
-	if len(accounts) != 4 {
-		t.Fatalf("read %d accounts, expected 4 (the broken line is skipped)", len(accounts))
+	if len(found) != 4 {
+		t.Fatalf("read %d accounts, expected 4 (the broken line is skipped)", len(found))
 	}
 	for name, expected := range map[string]AccountSource{
 		"root": SourceSystem, "daemon": SourceSystem,
@@ -140,7 +123,7 @@ func TestTheClassificationOfAccounts(t *testing.T) {
 		}
 	}
 
-	for _, account := range accounts {
+	for _, account := range found {
 		if account.Name == "smith" && account.Gecos != "John Smith" {
 			t.Errorf("the description of the account was read as %q", account.Gecos)
 		}

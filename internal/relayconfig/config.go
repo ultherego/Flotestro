@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -43,6 +44,30 @@ type Config struct {
 	SchemaVersion int      `yaml:"schema_version"`
 	Relay         Relay    `yaml:"relay"`
 	Upstream      Upstream `yaml:"upstream"`
+	Spool         Spool    `yaml:"spool"`
+}
+
+// Spool bounds the durable spool of the relay: the messages of the
+// agents the centre has not yet confirmed it consumed. Every limit is a
+// pointer so that a missing entry can be told from an explicit value.
+type Spool struct {
+	// Path is the directory of the segment files; empty means the spool
+	// directory under state_dir. Root-owned and private.
+	Path string `yaml:"path"`
+	// MaxBytes is the room the waiting records may take together.
+	MaxBytes *int64 `yaml:"max_bytes"`
+	// CriticalReserveBytes is the part of max_bytes only control and job
+	// results may enter; inventory, metrics and logs stop before it.
+	CriticalReserveBytes *int64 `yaml:"critical_reserve_bytes"`
+	// MinFreeBytes is the floor of free space on the filesystem of the
+	// spool below which nothing is appended, whatever the class.
+	MinFreeBytes *int64 `yaml:"min_free_bytes"`
+	// AckTimeout is how long a sent record waits for the panel's
+	// acknowledgement before it is sent again.
+	AckTimeout *time.Duration `yaml:"ack_timeout"`
+	// MaxInflightPerHost bounds the records of one host sent and not yet
+	// acknowledged.
+	MaxInflightPerHost *int `yaml:"max_inflight_per_host"`
 }
 
 // Relay describes the node of the site itself.
@@ -56,10 +81,11 @@ type Relay struct {
 	Listen          string   `yaml:"listen"`
 	AdvertisedNames []string `yaml:"advertised_names"`
 	StateDir        string   `yaml:"state_dir"`
-	// BufferMaxBytes is a pointer so that a missing entry can be told from an
-	// explicit zero. Zero means "buffer nothing" and is a choice rather than
-	// an absence: a relay without a buffer loses every result while the link
-	// is down.
+	// BufferMaxBytes is the limit of the memory buffer of the releases
+	// before the spool. It is still read: a file that names it and says
+	// nothing under spool.max_bytes gets the same limit for the spool, so
+	// an upgraded relay keeps the room the operator gave it. A pointer so
+	// that a missing entry can be told from an explicit zero.
 	BufferMaxBytes *int64 `yaml:"buffer_max_bytes"`
 }
 
@@ -87,6 +113,8 @@ var (
 	ErrGatewayMissing    = errors.New("relay_config_gateway_missing")
 	ErrGatewayDuplicate  = errors.New("relay_config_gateway_duplicate")
 	ErrBuffer            = errors.New("relay_config_buffer_out_of_range")
+	ErrSpoolPath         = errors.New("relay_config_spool_path_invalid")
+	ErrSpoolLimit        = errors.New("relay_config_spool_out_of_range")
 )
 
 // The limits of the buffer. The bottom is deliberately zero: a relay without
@@ -96,6 +124,22 @@ var (
 const (
 	DefaultBuffer int64 = 256 << 20
 	MaxBuffer     int64 = 4 << 30
+)
+
+// The defaults of the spool. The floor of free space is what the state
+// directory needs for the identity and the segment being written; the
+// reserve is what a site's results take over an outage of a day while
+// its samples are dropped. Both are configurable in relay.yaml.
+const (
+	DefaultSpoolMaxBytes        int64 = 1 << 30
+	DefaultSpoolCriticalReserve int64 = 128 << 20
+	DefaultSpoolMinFree         int64 = 256 << 20
+	DefaultSpoolAckTimeout            = 30 * time.Second
+	DefaultSpoolMaxInflight           = 64
+	MaxSpoolBytes               int64 = 64 << 30
+	// SpoolDirName is the directory of the spool under state_dir when the
+	// file names no path.
+	SpoolDirName = "spool"
 )
 
 // Defaults returns the settings that hold without an entry in the file.
@@ -158,6 +202,58 @@ func fillDefaults(cfg *Config) {
 		buffer := DefaultBuffer
 		cfg.Relay.BufferMaxBytes = &buffer
 	}
+	fillSpoolDefaults(cfg)
+}
+
+// fillSpoolDefaults completes the spool section. A file from before the
+// spool names buffer_max_bytes alone: that limit becomes the spool's, so
+// the upgrade keeps the room the operator gave the site. The reserve is
+// capped at the limit, so a small limit still leaves room for control
+// and results.
+func fillSpoolDefaults(cfg *Config) {
+	if cfg.Spool.MaxBytes == nil {
+		limit := DefaultSpoolMaxBytes
+		if cfg.Relay.BufferMaxBytes != nil && *cfg.Relay.BufferMaxBytes > 0 {
+			limit = *cfg.Relay.BufferMaxBytes
+		}
+		cfg.Spool.MaxBytes = &limit
+	}
+	if cfg.Spool.CriticalReserveBytes == nil {
+		reserve := DefaultSpoolCriticalReserve
+		if reserve > *cfg.Spool.MaxBytes/2 {
+			reserve = *cfg.Spool.MaxBytes / 2
+		}
+		cfg.Spool.CriticalReserveBytes = &reserve
+	}
+	if cfg.Spool.MinFreeBytes == nil {
+		free := DefaultSpoolMinFree
+		cfg.Spool.MinFreeBytes = &free
+	}
+	if cfg.Spool.AckTimeout == nil {
+		timeout := DefaultSpoolAckTimeout
+		cfg.Spool.AckTimeout = &timeout
+	}
+	if cfg.Spool.MaxInflightPerHost == nil {
+		inflight := DefaultSpoolMaxInflight
+		cfg.Spool.MaxInflightPerHost = &inflight
+	}
+}
+
+// SpoolPath returns the directory of the spool: the one named in the
+// file, or the spool directory under state_dir.
+func (c Config) SpoolPath() string {
+	if c.Spool.Path != "" {
+		return c.Spool.Path
+	}
+	return filepath.Join(c.Relay.StateDir, SpoolDirName)
+}
+
+// SpoolLimits returns the limits of the spool with the defaults filled.
+func (c Config) SpoolLimits() (maxBytes, reserve, minFree int64, ackTimeout time.Duration, maxInflight int) {
+	cfg := c
+	fillSpoolDefaults(&cfg)
+	return *cfg.Spool.MaxBytes, *cfg.Spool.CriticalReserveBytes, *cfg.Spool.MinFreeBytes,
+		*cfg.Spool.AckTimeout, *cfg.Spool.MaxInflightPerHost
 }
 
 // Buffer returns the limit of the buffer of results.
@@ -216,6 +312,32 @@ func (c Config) Check() error {
 	}
 	if buffer := c.Buffer(); buffer < 0 || buffer > MaxBuffer {
 		return fmt.Errorf("%w: %d", ErrBuffer, buffer)
+	}
+	return c.checkSpool()
+}
+
+// checkSpool guards the spool section. The limits have a floor of one
+// megabyte: a spool smaller than a single inventory report would refuse
+// every result and say critical from the first minute.
+func (c Config) checkSpool() error {
+	if c.Spool.Path != "" && !filepath.IsAbs(c.Spool.Path) {
+		return fmt.Errorf("%w: %s", ErrSpoolPath, c.Spool.Path)
+	}
+	maxBytes, reserve, minFree, ackTimeout, maxInflight := c.SpoolLimits()
+	if maxBytes < 1<<20 || maxBytes > MaxSpoolBytes {
+		return fmt.Errorf("%w: max_bytes %d", ErrSpoolLimit, maxBytes)
+	}
+	if reserve < 0 || reserve > maxBytes {
+		return fmt.Errorf("%w: critical_reserve_bytes %d", ErrSpoolLimit, reserve)
+	}
+	if minFree < 0 {
+		return fmt.Errorf("%w: min_free_bytes %d", ErrSpoolLimit, minFree)
+	}
+	if ackTimeout < time.Second || ackTimeout > time.Hour {
+		return fmt.Errorf("%w: ack_timeout %s", ErrSpoolLimit, ackTimeout)
+	}
+	if maxInflight < 1 || maxInflight > 10000 {
+		return fmt.Errorf("%w: max_inflight_per_host %d", ErrSpoolLimit, maxInflight)
 	}
 	return nil
 }

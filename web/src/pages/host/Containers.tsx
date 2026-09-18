@@ -10,6 +10,7 @@ import {
   ModulePage, Section, Summary as SummaryBar, Table, Widgets, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Summary = {
@@ -139,6 +140,12 @@ type EventsResult = {
  * are what host clean-up trips over, and they outlive the containers that
  * created them.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const CONTAINER_CHANGES = [
+  "docker.container.start", "docker.container.stop", "docker.container.restart", "docker.container.remove",
+  "docker.image.pull", "docker.prune",
+];
+
 export function Containers() {
   const t = useT();
   const host = useHost();
@@ -238,15 +245,18 @@ export function Containers() {
         title={t("Containers")}
         description={t("Full lists are read from the host on request, not on every inventory cycle.")}
         actions={
-          <button
-            onClick={() => refresh.mutate()}
-            disabled={refresh.isPending || host.connection_state !== "online"}
-          >
-            {refresh.isPending ? t("Requesting…") : t("Read from host")}
-          </button>
+          <ActionGuard action="docker.read" host={host.id} explain>
+            <button
+              onClick={() => refresh.mutate()}
+              disabled={refresh.isPending || host.connection_state !== "online"}
+            >
+              {refresh.isPending ? t("Requesting…") : t("Read from host")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={summary.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={CONTAINER_CHANGES} />
       <Message text={message} error />
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
@@ -332,6 +342,7 @@ export function Containers() {
         {view === "containers" && (
           <>
             <ContainerTable
+              hostID={host.id}
               containers={lists?.containers}
               read={read}
               operation={containerOperation}
@@ -346,6 +357,7 @@ export function Containers() {
         {view === "images" && (
           <>
             <ImageTable
+              hostID={host.id}
               images={lists?.images}
               read={read}
               remove={(image) =>
@@ -357,6 +369,7 @@ export function Containers() {
               }
             />
             <PullImage
+              hostID={host.id}
               busy={request.isPending}
               onPull={(reference) => request.mutate({ action: "docker.image.pull", payload: { docker_image: { reference } } })}
             />
@@ -364,6 +377,7 @@ export function Containers() {
         )}
         {view === "networks" && (
           <NetworkTable
+            hostID={host.id}
             networks={lists?.networks}
             read={read}
             remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
@@ -371,6 +385,7 @@ export function Containers() {
         )}
         {view === "volumes" && (
           <VolumeTable
+            hostID={host.id}
             volumes={lists?.volumes}
             read={read}
             remove={(volume) =>
@@ -517,9 +532,11 @@ function Events() {
             </div>
           </Fields>
           <FormActions>
-            <button onClick={() => request.mutate()} disabled={busy || host.connection_state !== "online"}>
-              {busy ? t("Reading…") : t("Read events")}
-            </button>
+            <ActionGuard action="docker.events" host={host.id} explain>
+              <button onClick={() => request.mutate()} disabled={busy || host.connection_state !== "online"}>
+                {busy ? t("Reading…") : t("Read events")}
+              </button>
+            </ActionGuard>
           </FormActions>
           <FormNote>
             {t("The host reads a closed window and the task ends by itself. No filter selected means all four kinds.")}
@@ -627,24 +644,26 @@ function ContainerLogs({ container, onClose }: { container: Container; onClose: 
             </div>
           </Fields>
           <FormActions>
-            <button
-              onClick={() =>
-                read.order({
-                  action: "docker.container.logs",
-                  payload: {
-                    docker_logs: {
-                      container_id: container.id,
-                      lines: bounded,
-                      since: since.trim(),
-                      timestamps,
+            <ActionGuard action="docker.container.logs" host={host.id} explain>
+              <button
+                onClick={() =>
+                  read.order({
+                    action: "docker.container.logs",
+                    payload: {
+                      docker_logs: {
+                        container_id: container.id,
+                        lines: bounded,
+                        since: since.trim(),
+                        timestamps,
+                      },
                     },
-                  },
-                })
-              }
-              disabled={read.busy || host.connection_state !== "online"}
-            >
-              {read.busy ? t("Reading…") : t("Read log")}
-            </button>
+                  })
+                }
+                disabled={read.busy || host.connection_state !== "online"}
+              >
+                {read.busy ? t("Reading…") : t("Read log")}
+              </button>
+            </ActionGuard>
           </FormActions>
           <Message text={read.message} error />
         </Form>
@@ -722,12 +741,14 @@ function EmptyList({ read, what }: { read: boolean; what: string }) {
 }
 
 function ContainerTable({
+  hostID,
   containers,
   read,
   operation,
   logs,
   remove,
 }: {
+  hostID: string;
   containers?: Container[];
   read: boolean;
   operation: (action: string, container: Container) => void;
@@ -782,21 +803,35 @@ function ContainerTable({
             </td>
             <td>{container.compose ? `${container.compose.project}/${container.compose.service}` : "—"}</td>
             <td>
+              {/* Every button stands behind the server's preview of what
+                  this operator may order on this host: a viewer sees none
+                  of them, and a refused order is not the way to learn about
+                  a missing permission. */}
               <div className="operations">
                 {container.state === "running" ? (
                   <>
-                    <button onClick={() => operation("docker.container.restart", container)}>{t("Restart")}</button>
-                    <button onClick={() => operation("docker.container.stop", container)}>{t("Stop")}</button>
+                    <ActionGuard action="docker.container.restart" host={hostID}>
+                      <button onClick={() => operation("docker.container.restart", container)}>{t("Restart")}</button>
+                    </ActionGuard>
+                    <ActionGuard action="docker.container.stop" host={hostID}>
+                      <button onClick={() => operation("docker.container.stop", container)}>{t("Stop")}</button>
+                    </ActionGuard>
                   </>
                 ) : (
-                  <button onClick={() => operation("docker.container.start", container)}>{t("Start")}</button>
+                  <ActionGuard action="docker.container.start" host={hostID}>
+                    <button onClick={() => operation("docker.container.start", container)}>{t("Start")}</button>
+                  </ActionGuard>
                 )}
                 {/* The log of a stopped container is still there: reading
                     it is often the reason the container is looked at. */}
-                <button className="secondary" onClick={() => logs(container)}>{t("Logs")}</button>
+                <ActionGuard action="docker.container.logs" host={hostID}>
+                  <button className="secondary" onClick={() => logs(container)}>{t("Logs")}</button>
+                </ActionGuard>
                 {/* Removal is irreversible, so it does not go straight from
                     the click - it opens the target confirmation. */}
-                <button className="hm-danger" onClick={() => remove(container)}>{t("Remove")}</button>
+                <ActionGuard action="docker.container.remove" host={hostID}>
+                  <button className="hm-danger" onClick={() => remove(container)}>{t("Remove")}</button>
+                </ActionGuard>
               </div>
             </td>
           </tr>
@@ -807,10 +842,12 @@ function ContainerTable({
 }
 
 function ImageTable({
+  hostID,
   images,
   read,
   remove,
 }: {
+  hostID: string;
   images?: FullState["images"];
   read: boolean;
   remove: (image: NonNullable<FullState["images"]>[number]) => void;
@@ -832,7 +869,9 @@ function ImageTable({
               {image.in_use ? (
                 "—"
               ) : (
-                <button className="hm-danger" onClick={() => remove(image)}>{t("Remove")}</button>
+                <ActionGuard action="docker.prune" host={hostID}>
+                  <button className="hm-danger" onClick={() => remove(image)}>{t("Remove")}</button>
+                </ActionGuard>
               )}
             </td>
           </tr>
@@ -851,26 +890,30 @@ const IMAGE_REFERENCE_PATTERN = /^[a-z0-9][A-Za-z0-9._\-/:@]{0,511}$/;
  * a mutation and waits for approval like every other; it adds to the host
  * and removes nothing, so it needs no typed confirmation.
  */
-function PullImage({ busy, onPull }: { busy: boolean; onPull: (reference: string) => void }) {
+function PullImage({ hostID, busy, onPull }: { hostID: string; busy: boolean; onPull: (reference: string) => void }) {
   const t = useT();
   const [reference, setReference] = useState("");
   const value = reference.trim();
   const valid = IMAGE_REFERENCE_PATTERN.test(value);
+  // The whole form exists for one order; without the right to place it
+  // the form is not drawn at all.
   return (
-    <div className="hm-section-body">
-      <Form>
-        <Fields>
-          <Field label={t("Pull an image")} help={t("The full reference, e.g. nginx:1.27 or registry.example.internal/team/app@sha256:…; the engine pulls it with its own credentials.")} wide>
-            <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="nginx:1.27" />
-          </Field>
-        </Fields>
-        <FormActions>
-          <button className="secondary" disabled={!valid || busy} onClick={() => onPull(value)}>
-            {t("Pull image")}
-          </button>
-        </FormActions>
-      </Form>
-    </div>
+    <ActionGuard action="docker.image.pull" host={hostID}>
+      <div className="hm-section-body">
+        <Form>
+          <Fields>
+            <Field label={t("Pull an image")} help={t("The full reference, e.g. nginx:1.27 or registry.example.internal/team/app@sha256:…; the engine pulls it with its own credentials.")} wide>
+              <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="nginx:1.27" />
+            </Field>
+          </Fields>
+          <FormActions>
+            <button className="secondary" disabled={!valid || busy} onClick={() => onPull(value)}>
+              {t("Pull image")}
+            </button>
+          </FormActions>
+        </Form>
+      </div>
+    </ActionGuard>
   );
 }
 
@@ -883,10 +926,12 @@ function PullImage({ busy, onPull }: { busy: boolean; onPull: (reference: string
  * error is worse than its absence.
  */
 function NetworkTable({
+  hostID,
   networks,
   read,
   remove,
 }: {
+  hostID: string;
   networks?: Network[];
   read: boolean;
   remove: (network: Network) => void;
@@ -940,7 +985,9 @@ function NetworkTable({
               {network.predefined || network.in_use ? (
                 "—"
               ) : (
-                <button className="hm-danger" onClick={() => remove(network)}>{t("Remove")}</button>
+                <ActionGuard action="docker.prune" host={hostID}>
+                  <button className="hm-danger" onClick={() => remove(network)}>{t("Remove")}</button>
+                </ActionGuard>
               )}
             </td>
           </tr>
@@ -959,10 +1006,12 @@ function NetworkTable({
  * container is not nobody's.
  */
 function VolumeTable({
+  hostID,
   volumes,
   read,
   remove,
 }: {
+  hostID: string;
   volumes?: Volume[];
   read: boolean;
   remove: (volume: Volume) => void;
@@ -1008,7 +1057,9 @@ function VolumeTable({
               {volume.in_use ? (
                 "—"
               ) : (
-                <button className="hm-danger" onClick={() => remove(volume)}>{t("Remove")}</button>
+                <ActionGuard action="docker.prune" host={hostID}>
+                  <button className="hm-danger" onClick={() => remove(volume)}>{t("Remove")}</button>
+                </ActionGuard>
               )}
             </td>
           </tr>

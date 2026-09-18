@@ -347,11 +347,6 @@ func (s *Server) handleCertificateDeployments(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"items": deployments, "count": len(deployments)})
 }
 
-// FleetCertificateLimit bounds the list on the fleet screen. The counts are
-// exact; the list is a sample, so that the screen does not become an
-// inventory printout.
-const FleetCertificateLimit = 100
-
 // fleetCertificate describes one certificate at fleet scale.
 type fleetCertificate struct {
 	HostID       string     `json:"host_id"`
@@ -367,12 +362,52 @@ type fleetCertificate struct {
 	Reason       string     `json:"unavailable_reason,omitempty"`
 }
 
+// fleetCertificateOf judges one certificate the host reported at the
+// moment now, the way the host tab judges it.
+func fleetCertificateOf(row certificatestore.FleetRow, now time.Time) fleetCertificate {
+	var certificate certmodule.Certificate
+	_ = json.Unmarshal(row.Certificate, &certificate)
+	state := certificatestore.State(certificate.NotAfter, now)
+	if certificate.UnavailableReason != "" {
+		state = certificatestore.StateUnknown
+	}
+	return fleetCertificate{
+		HostID: row.HostID, Hostname: row.Hostname, Path: certificate.Path,
+		Subject: certificate.Subject, Issuer: certificate.Issuer, NotAfter: certificate.NotAfter,
+		DaysToExpiry: certificate.DaysToExpiry(now), Status: state,
+		Renewal: certificate.Renewal, Service: certificate.OwnerService,
+		Reason: certificate.UnavailableReason,
+	}
+}
+
+// fleetCertificatesView is the answer of the fleet screen: the coverage
+// of the fleet, the counts over every certificate in scope, and one page
+// of the list.
+type fleetCertificatesView struct {
+	fleetCoverage
+	Items      []fleetCertificate `json:"items"`
+	Count      int                `json:"count"`
+	Total      int                `json:"total"`
+	NextCursor string             `json:"next_cursor,omitempty"`
+	Counts     map[string]int     `json:"counts"`
+	Timeline   []hostGroup        `json:"timeline"`
+	// HostsTotal and HostsWithoutCertificates keep the names the screen
+	// read before the coverage head: the hosts in scope, and the judged
+	// hosts that report an empty list.
+	HostsTotal               int            `json:"hosts_total"`
+	HostsWithoutCertificates int            `json:"hosts_without_certificates"`
+	Thresholds               map[string]int `json:"thresholds"`
+}
+
 // handleFleetCertificates returns the certificate expiries of the whole
 // visible fleet.
 //
 // This is the basic mode of this module. A certificate expires quietly and
 // always at the worst moment; the only defence is a list on which all the
-// dates stand side by side, sorted from the nearest.
+// dates stand side by side, sorted from the nearest. The counts and the
+// timeline are counted by the database over every host in scope; the list
+// comes a page at a time, and a host that reported nothing is an unknown
+// host, not a host without certificates.
 func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCertificateRead, "fleet")
 	if !ok {
@@ -382,97 +417,72 @@ func (s *Server) handleFleetCertificates(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
-	if err != nil {
-		s.fail(w, err)
+	limit, cursorText, ok := parseFleetPage(w, r)
+	if !ok {
 		return
 	}
-	visible := make([]hosts.Host, 0, len(list))
-	ids := make([]string, 0, len(list))
-	for _, host := range list {
-		if principal.Can(authz.PermCertificateRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			visible = append(visible, host)
-			ids = append(ids, host.ID)
-		}
-	}
-	fragments, err := s.inventory.HostFragments(r.Context(), ids)
+	cursor, err := certificatestore.ParseFleetCursor(cursorText)
 	if err != nil {
-		s.fail(w, err)
+		invalidCursor(w, err)
 		return
 	}
-
+	scopes := principal.ScopesFor(authz.PermCertificateRead)
 	now := time.Now().UTC()
-	items := make([]fleetCertificate, 0, len(visible))
-	counts := map[string]int{}
-	withoutObservation := 0
-
-	for _, host := range visible {
-		fragment := moduleFragment(fragments[host.ID], "certificates")
-		if fragment == nil {
-			withoutObservation++
-			continue
-		}
-		var snapshot certmodule.Snapshot
-		if len(fragment.Payload) > 0 {
-			_ = json.Unmarshal(fragment.Payload, &snapshot)
-		}
-		if len(snapshot.Certificates) == 0 {
-			withoutObservation++
-			continue
-		}
-		for _, certificate := range snapshot.Certificates {
-			state := certificatestore.State(certificate.NotAfter, now)
-			if certificate.UnavailableReason != "" {
-				state = certificatestore.StateUnknown
-			}
-			counts[state]++
-			item := fleetCertificate{
-				HostID: host.ID, Hostname: host.Hostname, Path: certificate.Path,
-				Subject: certificate.Subject, Issuer: certificate.Issuer,
-				DaysToExpiry: certificate.DaysToExpiry(now), Status: state,
-				Renewal: certificate.Renewal, Service: certificate.OwnerService,
-				Reason: certificate.UnavailableReason,
-			}
-			item.NotAfter = certificate.NotAfter
-			items = append(items, item)
-		}
-	}
-
-	// Sorted from the nearest date; a certificate without a date goes last,
-	// because its problem is different: it is unknown what lies there.
-	sort.SliceStable(items, func(i, j int) bool {
-		if (items[i].NotAfter == nil) != (items[j].NotAfter == nil) {
-			return items[j].NotAfter == nil
-		}
-		if items[i].NotAfter == nil {
-			return items[i].Hostname < items[j].Hostname
-		}
-		return items[i].NotAfter.Before(*items[j].NotAfter)
-	})
-	// The file is the whole list, not the screen's cut of it: the cut
-	// keeps the screen readable, and a file is where the rest goes.
 	if asCSV {
-		s.writeCertificatesCSV(w, r, items, now)
+		s.writeCertificatesCSV(w, r, scopes, now)
 		return
 	}
-	// The expiry timeline is computed before truncating the list: the
-	// truncation concerns what is shown, not what the fleet really has.
-	all := items
-	truncated := false
-	if len(items) > FleetCertificateLimit {
-		items = items[:FleetCertificateLimit]
-		truncated = true
+	summary, err := s.certificates.FleetSummary(r.Context(), scopes, now)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items, "counts": counts, "truncated": truncated,
-		"timeline":    expiryTimeline(all),
-		"hosts_total": len(visible), "hosts_without_certificates": withoutObservation,
-		"thresholds": map[string]int{
+	rows, next, err := s.certificates.FleetPage(r.Context(), scopes, cursor, limit)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	items := make([]fleetCertificate, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, fleetCertificateOf(row, now))
+	}
+	timeline := make([]hostGroup, 0, len(certificatestore.TimelineBuckets))
+	for _, bucket := range certificatestore.TimelineBuckets {
+		timeline = append(timeline, hostGroup{Reason: bucket, Count: summary.Timeline[bucket]})
+	}
+	writeJSON(w, http.StatusOK, fleetCertificatesView{
+		fleetCoverage: moduleCoverage(hosts.ModuleCoverage{
+			Hosts: summary.Hosts, Observed: summary.Observed,
+			Unavailable: summary.Unavailable, Stale: summary.Stale,
+		}),
+		Items: items, Count: len(items), Total: summary.Certificates, NextCursor: next,
+		Counts: summary.Counts, Timeline: timeline,
+		HostsTotal: summary.Hosts, HostsWithoutCertificates: summary.WithoutCertificates,
+		Thresholds: map[string]int{
 			"critical_days": int(certificatestore.CriticalThreshold.Hours() / 24),
 			"warning_days":  int(certificatestore.WarningThreshold.Hours() / 24),
 		},
 	})
+}
+
+// moduleCoverage renders the coverage of one inventory module as the head
+// of a fleet view: the hosts judged are the observed ones with a fresh
+// fragment; the rest are unknown, each under its reason.
+func moduleCoverage(coverage hosts.ModuleCoverage) fleetCoverage {
+	head := fleetCoverage{
+		TotalHosts: coverage.Hosts, EvaluatedHosts: coverage.Evaluated(), UnknownHosts: coverage.Unknown(),
+		UnknownReasons: map[string]int{},
+	}
+	if missing := coverage.Missing(); missing > 0 {
+		head.UnknownReasons[unknownNoObservation] = missing
+	}
+	if coverage.Unavailable > 0 {
+		head.UnknownReasons[unknownUnavailable] = coverage.Unavailable
+	}
+	if coverage.Stale > 0 {
+		head.UnknownReasons[unknownStaleObservation] = coverage.Stale
+	}
+	return head
 }
 
 // certificatesCSVColumns is the header of the fleet export. The order is
@@ -483,17 +493,30 @@ var certificatesCSVColumns = []string{
 }
 
 // writeCertificatesCSV streams every certificate of the visible fleet,
-// nearest expiry first as the screen sorts them, without the screen's cut
-// at FleetCertificateLimit: the file is for the operator who wants the
-// whole list, and the truncation row of the export is the only bound.
-func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, items []fleetCertificate, now time.Time) {
+// nearest expiry first as the screen sorts them, a page at a time from
+// the same cursor the screen pages with: the file is for the operator
+// who wants the whole list, and the truncation row of the export is the
+// only bound.
+func (s *Server) writeCertificatesCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("certificates", now), certificatesCSVColumns, func(yield func([]string) bool) error {
-		for _, item := range items {
-			if !yield(fleetCertificateCSVRow(item)) {
+		cursor := certificatestore.FleetCursor{}
+		for {
+			rows, next, err := s.certificates.FleetPage(r.Context(), scopes, cursor, certificatestore.MaxPage)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				if !yield(fleetCertificateCSVRow(fleetCertificateOf(row, now))) {
+					return nil
+				}
+			}
+			if next == "" {
 				return nil
 			}
+			if cursor, err = certificatestore.ParseFleetCursor(next); err != nil {
+				return err
+			}
 		}
-		return nil
 	})
 }
 
@@ -531,31 +554,34 @@ type fleetAnchor struct {
 	Reason string `json:"unavailable_reason,omitempty"`
 }
 
+// fleetTrustView is the answer of the trust screen: the coverage of the
+// fleet and the managed authorities with the hosts trusting each.
+type fleetTrustView struct {
+	fleetCoverage
+	Items      []fleetAnchor `json:"items"`
+	HostsTotal int           `json:"hosts_total"`
+	// HostsWithoutTrustStore groups the judged hosts whose store could not
+	// be read, by the reason; HostsUnknown counts the hosts that reported
+	// no store at all.
+	HostsWithoutTrustStore []hostGroup `json:"hosts_without_trust_store"`
+	HostsUnknown           int         `json:"hosts_unknown"`
+}
+
 // handleFleetTrust shows which authority which host trusts.
 //
 // This is the rotation screen: during a rotation part of the fleet trusts
 // both authorities at once, and only this view says whether the old one can
 // be withdrawn yet. Without it the operator would infer that from campaigns
-// that finished a week ago.
+// that finished a week ago. The anchors are read from the certificates
+// fragment of every host in scope, a page at a time; a sweep out of its
+// time budget says so.
 func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCertificateRead, "fleet")
 	if !ok {
 		return
 	}
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	visible := make([]hosts.Host, 0, len(list))
-	ids := make([]string, 0, len(list))
-	for _, host := range list {
-		if principal.Can(authz.PermCertificateRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			visible = append(visible, host)
-			ids = append(ids, host.ID)
-		}
-	}
-	fragments, err := s.inventory.HostFragments(r.Context(), ids)
+	filter := hosts.ListFilter{Scopes: principal.ScopesFor(authz.PermCertificateRead)}
+	total, err := s.hosts.Count(r.Context(), filter)
 	if err != nil {
 		s.fail(w, err)
 		return
@@ -565,53 +591,60 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 	byKey := map[string]*fleetAnchor{}
 	withoutStore := map[string]int{}
 	unknown := 0
-
-	for _, host := range visible {
-		fragment := moduleFragment(fragments[host.ID], "certificates")
-		if fragment == nil || len(fragment.Payload) == 0 {
-			unknown++
-			continue
-		}
-		var snapshot certmodule.Snapshot
-		if err := json.Unmarshal(fragment.Payload, &snapshot); err != nil || snapshot.Trust == nil {
-			// A host that has not reported its store yet is not a host without
-			// trust: it is missing knowledge and is to be counted as such.
-			unknown++
-			continue
-		}
-		if snapshot.Trust.UnavailableReason != "" {
-			withoutStore[snapshot.Trust.UnavailableReason]++
-			continue
-		}
-		for _, anchor := range snapshot.Trust.Anchors {
-			// The store has hundreds of distribution authorities; the panel
-			// shows the ones it installed itself. The rest is the content of
-			// the host image, not of the fleet.
-			if !anchor.Managed {
-				continue
+	judged := 0
+	sweep, err := s.sweepFleet(r.Context(), filter, "", "", []string{certificatestore.Module},
+		func(host hosts.Host, fragments []inventory.Fragment) bool {
+			fragment := moduleFragment(fragments, certificatestore.Module)
+			if fragment == nil || len(fragment.Payload) == 0 {
+				unknown++
+				return true
 			}
-			key := anchor.FingerprintSHA256
-			if key == "" {
-				key = anchor.Path + ":" + anchor.UnavailableReason
+			var snapshot certmodule.Snapshot
+			if err := json.Unmarshal(fragment.Payload, &snapshot); err != nil || snapshot.Trust == nil {
+				// A host that has not reported its store yet is not a host without
+				// trust: it is missing knowledge and is to be counted as such.
+				unknown++
+				return true
 			}
-			entry, present := byKey[key]
-			if !present {
-				entry = &fleetAnchor{
-					FingerprintSHA256: anchor.FingerprintSHA256,
-					Subject:           anchor.Subject,
-					AnchorID:          anchor.ID,
-					Managed:           anchor.Managed,
-					NotAfter:          anchor.NotAfter,
-					Reason:            anchor.UnavailableReason,
+			judged++
+			if snapshot.Trust.UnavailableReason != "" {
+				withoutStore[snapshot.Trust.UnavailableReason]++
+				return true
+			}
+			for _, anchor := range snapshot.Trust.Anchors {
+				// The store has hundreds of distribution authorities; the panel
+				// shows the ones it installed itself. The rest is the content of
+				// the host image, not of the fleet.
+				if !anchor.Managed {
+					continue
 				}
-				byKey[key] = entry
-				order = append(order, key)
+				key := anchor.FingerprintSHA256
+				if key == "" {
+					key = anchor.Path + ":" + anchor.UnavailableReason
+				}
+				entry, present := byKey[key]
+				if !present {
+					entry = &fleetAnchor{
+						FingerprintSHA256: anchor.FingerprintSHA256,
+						Subject:           anchor.Subject,
+						AnchorID:          anchor.ID,
+						Managed:           anchor.Managed,
+						NotAfter:          anchor.NotAfter,
+						Reason:            anchor.UnavailableReason,
+					}
+					byKey[key] = entry
+					order = append(order, key)
+				}
+				entry.Hosts++
+				if len(entry.Sample) < 12 {
+					entry.Sample = append(entry.Sample, host.Hostname)
+				}
 			}
-			entry.Hosts++
-			if len(entry.Sample) < 12 {
-				entry.Sample = append(entry.Sample, host.Hostname)
-			}
-		}
+			return true
+		})
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 
 	anchors := make([]fleetAnchor, 0, len(order))
@@ -628,56 +661,9 @@ func (s *Server) handleFleetTrust(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.SliceStable(reasons, func(i, j int) bool { return reasons[i].Reason < reasons[j].Reason })
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": anchors, "hosts_total": len(visible),
-		"hosts_without_trust_store": reasons,
-		"hosts_unknown":             unknown,
+	writeJSON(w, http.StatusOK, fleetTrustView{
+		fleetCoverage: sweepCoverage(total, sweep, judged),
+		Items:         anchors, HostsTotal: total,
+		HostsWithoutTrustStore: reasons, HostsUnknown: unknown + max(total-sweep.Swept, 0),
 	})
-}
-
-// expiryTimeline groups the fleet certificates by the time they have left.
-//
-// A list sorted by date answers the question "what is on fire now". It does
-// not answer "when is the next wave" - and that is what decides whether the
-// rotation has to be planned for this week or for the quarter.
-func expiryTimeline(items []fleetCertificate) []hostGroup {
-	buckets := []struct {
-		name string
-		days int
-	}{
-		{"expired", 0}, {"7 days", 7}, {"30 days", 30}, {"90 days", 90}, {"later", -1},
-	}
-	counts := make([]int, len(buckets))
-	unknown := 0
-
-	for _, item := range items {
-		if item.DaysToExpiry == nil {
-			// A certificate without a date is not a certificate valid for
-			// long: it is missing knowledge and is to stand apart.
-			unknown++
-			continue
-		}
-		days := *item.DaysToExpiry
-		placed := false
-		for i, bucket := range buckets {
-			if bucket.days < 0 {
-				continue
-			}
-			if (bucket.days == 0 && days < 0) || (bucket.days > 0 && days >= 0 && days <= bucket.days) {
-				counts[i]++
-				placed = true
-				break
-			}
-		}
-		if !placed {
-			counts[len(buckets)-1]++
-		}
-	}
-
-	groups := make([]hostGroup, 0, len(buckets)+1)
-	for i, bucket := range buckets {
-		groups = append(groups, hostGroup{Reason: bucket.name, Count: counts[i]})
-	}
-	groups = append(groups, hostGroup{Reason: "no expiry", Count: unknown})
-	return groups
 }

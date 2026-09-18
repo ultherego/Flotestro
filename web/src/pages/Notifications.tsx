@@ -23,12 +23,22 @@ import { useT } from "../i18n";
 
 export type ChannelKind = "webhook" | "email" | "slack_webhook";
 
-/** A channel as the API serves it: the configuration without its secret. */
+/**
+ * A channel as the API serves it. The credential is never in it: the
+ * address of an incoming webhook, the key a webhook is signed with and a
+ * mail password live in the secret store, and the channel carries only
+ * that one is configured and when it was last replaced.
+ */
 export type Channel = {
   id: string;
   name: string;
   kind: ChannelKind;
   config: Record<string, unknown>;
+  /** The address in summary - the host of a webhook, the relay of a mailbox - with nothing secret in it. */
+  public_config?: Record<string, unknown>;
+  secret_configured?: boolean;
+  secret_last_rotated_at?: string | null;
+  revision?: number;
   events: string[];
   filter: { severity_min?: string; site?: string; environment?: string };
   enabled: boolean;
@@ -36,18 +46,50 @@ export type Channel = {
   reason: string;
   created_at: string;
   updated_at: string;
-  last_delivery?: Delivery | null;
+  last_delivery?: DeliverySummary | null;
 };
 
-/** One attempt of one channel. */
+/** The states of a row of the queue, as the schema names them. */
+export type DeliveryState =
+  | "pending" | "leased" | "delivered" | "retry_wait" | "dead_letter" | "suppressed";
+
+/** What a channel says about its newest row. */
+export type DeliverySummary = {
+  id: string;
+  state: DeliveryState;
+  at: string;
+  error_code?: string;
+  /** The previous release's words, still served beside the state. */
+  status?: "sent" | "failed";
+  sent_at?: string;
+  error?: string;
+};
+
+/**
+ * One row of the queue: one event for one channel, with the attempts
+ * counted on it and the outcome so far. A row is durable - a receiver
+ * that is down delays it rather than losing it - so the table shows the
+ * state, the attempt, when the next one is due and what went wrong last.
+ */
 export type Delivery = {
-  id: number;
+  id: string;
   channel_id: string;
   channel_name?: string;
   event_id: number;
   event_type: string;
+  title?: string;
+  state: DeliveryState;
   attempt: number;
-  status: "sent" | "failed";
+  next_attempt_at: string;
+  last_error_code: string;
+  last_error: string;
+  policy_id?: string;
+  suppression_reason?: string;
+  delivered_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  /** The previous release's words, derived from the state. */
+  status: "sent" | "failed" | string;
   error_code: string;
   error: string;
   sent_at: string;
@@ -55,7 +97,12 @@ export type Delivery = {
 
 export type Subject = { name: string; description: string };
 
-type ChannelList = Collection<Channel> & { kinds: ChannelKind[]; subjects: Subject[]; severities: string[] };
+type ChannelList = Collection<Channel> & {
+  kinds: ChannelKind[]; subjects: Subject[]; severities: string[]; states?: DeliveryState[];
+};
+
+/** The queue as the log asks for it: the page and the dead letters of the whole installation. */
+type DeliveryList = Collection<Delivery> & { dead_letters?: number };
 
 /** The form of a channel as it is edited, every kind's fields side by side. */
 export type ChannelForm = {
@@ -65,8 +112,10 @@ export type ChannelForm = {
   /** True while a stored incoming webhook has an address the form does not show. */
   urlSet: boolean;
   secret: string;
-  /** True while a stored webhook has a secret the form does not show. */
+  /** True while a stored channel has a credential in the secret store. */
   secretSet: boolean;
+  /** When that credential was last set or replaced; "" when there is none. */
+  secretRotatedAt: string;
   /** False when the operator asked for the stored secret to be cleared. */
   keepSecret: boolean;
   host: string;
@@ -87,7 +136,7 @@ export type ChannelForm = {
 
 export function emptyForm(kind: ChannelKind = "webhook"): ChannelForm {
   return {
-    name: "", kind, url: "", urlSet: false, secret: "", secretSet: false, keepSecret: true,
+    name: "", kind, url: "", urlSet: false, secret: "", secretSet: false, secretRotatedAt: "", keepSecret: true,
     host: "", port: "587", starttls: true, from: "", to: "", username: "", passwordSecret: "",
     events: ["alert.fired", "alert.resolved"], severityMin: "", site: "", environment: "",
     enabled: true, reason: "",
@@ -103,9 +152,12 @@ export function formOf(channel: Channel): ChannelForm {
     name: channel.name,
     kind: channel.kind,
     url: text("url"),
-    urlSet: config.url_set === true,
+    urlSet: config.url_set === true || (channel.kind === "slack_webhook" && channel.secret_configured === true),
     secret: "",
-    secretSet: config.secret_set === true,
+    // The channel says whether a credential is in the secret store; the
+    // flag in the configuration is the same fact in the older shape.
+    secretSet: channel.secret_configured === true || config.secret_set === true,
+    secretRotatedAt: channel.secret_last_rotated_at ?? "",
     keepSecret: true,
     host: text("host"),
     port: config.port ? String(config.port) : "587",
@@ -199,20 +251,43 @@ export function problemWords(t: (text: string, params?: Record<string, string | 
 }
 
 /** The address of a channel in one line, for the table. */
-export function describeChannel(channel: Pick<Channel, "kind" | "config">): string {
+export function describeChannel(channel: Pick<Channel, "kind" | "config" | "public_config">): string {
   const config = channel.config ?? {};
   if (channel.kind === "email") {
     const to = Array.isArray(config.to) ? (config.to as unknown[]).map(String) : [];
     const relay = `${String(config.host ?? "")}:${String(config.port ?? "")}`;
     return `${to.join(", ")} via ${relay}${config.starttls === false ? "" : " (STARTTLS)"}`;
   }
-  return String(config.url ?? "");
+  // An incoming webhook shows the host of its address and nothing of the
+  // path: enough to tell a mistyped receiver from the right one, nothing
+  // of the token the path carries.
+  return String(config.url ?? channel.public_config?.display_host ?? "");
 }
 
 /** True for a stored incoming webhook whose address the API keeps to itself. */
-export function addressWithheld(channel: Pick<Channel, "kind" | "config">): boolean {
+export function addressWithheld(channel: Pick<Channel, "kind" | "config" | "secret_configured">): boolean {
   const config = channel.config ?? {};
-  return channel.kind === "slack_webhook" && !config.url && config.url_set === true;
+  return channel.kind === "slack_webhook" && !config.url &&
+    (config.url_set === true || channel.secret_configured === true);
+}
+
+/**
+ * What the form says in place of a secret. The value itself is never
+ * shown back - it left the panel for the secret store the moment it was
+ * typed - so the operator is told the one thing that can be checked
+ * without it: whether a credential is configured, and how old it is.
+ */
+export function secretWords(
+  t: (text: string, params?: Record<string, string | number>) => string,
+  form: Pick<ChannelForm, "secretSet" | "secretRotatedAt">,
+  none: string,
+): string {
+  if (!form.secretSet) return none;
+  if (!form.secretRotatedAt) {
+    return t("A secret is configured; leave the field empty to keep it, or type a new one.");
+  }
+  return t("A secret is configured, last rotated {when}; leave the field empty to keep it, or type a new one.",
+    { when: new Date(form.secretRotatedAt).toLocaleString() });
 }
 
 /** The name of a kind for the table and the form. */
@@ -238,19 +313,77 @@ export function describeFilter(t: (text: string) => string, filter: Channel["fil
 /** The window of the delivery log, in hours; "" is the whole month the log keeps. */
 export type LogWindow = "" | "1" | "24" | "168";
 
-/** The query of the log for the screen's filter, the since moment computed from the window. */
+/**
+ * The query of the log for the screen's filter, the since moment computed
+ * from the window. The filter's one word narrows by either vocabulary:
+ * sent and failed are the previous release's and go out as status, every
+ * state of the queue goes out as state. The server refuses a word neither
+ * knows, so a typo is an answer rather than an empty table.
+ */
 export function deliveryParams(filter: { channel: string; status: string; window: LogWindow }, now: Date): URLSearchParams {
   const params = new URLSearchParams();
   if (filter.channel) params.set("channel_id", filter.channel);
-  if (filter.status) params.set("status", filter.status);
+  if (filter.status === "sent" || filter.status === "failed") params.set("status", filter.status);
+  else if (filter.status) params.set("state", filter.status);
   if (filter.window) params.set("since", new Date(now.getTime() - Number(filter.window) * 3600 * 1000).toISOString());
   return params;
 }
 
 /** The outcome of a delivery in one line: sent, or the typed failure and its sentence. */
-export function deliveryWords(t: (text: string, params?: Record<string, string | number>) => string, delivery: Pick<Delivery, "status" | "error_code" | "error">): string {
-  if (delivery.status === "sent") return t("sent");
-  return delivery.error ? `${delivery.error_code}: ${delivery.error}` : delivery.error_code || t("failed");
+export function deliveryWords(
+  t: (text: string, params?: Record<string, string | number>) => string,
+  delivery: Partial<Pick<Delivery, "status" | "error_code" | "error" | "state" | "last_error_code" | "last_error">>,
+): string {
+  const code = delivery.last_error_code || delivery.error_code || "";
+  const sentence = delivery.last_error || delivery.error || "";
+  if (delivery.state === "delivered" || (!delivery.state && delivery.status === "sent")) return t("sent");
+  if (delivery.state === "suppressed") return sentence || t("kept back");
+  if (!code && !sentence) return t("failed");
+  return sentence ? `${code}: ${sentence}` : code;
+}
+
+/** The state of a row of the queue in the words of the screen. */
+export function stateWords(t: (text: string) => string, state: DeliveryState | string): string {
+  switch (state) {
+    case "pending": return t("queued");
+    case "leased": return t("sending");
+    case "delivered": return t("sent");
+    case "retry_wait": return t("waiting to retry");
+    case "dead_letter": return t("dead letter");
+    case "suppressed": return t("kept back");
+  }
+  return state;
+}
+
+/** The colour a state reads in: delivered is well, a dead letter is not. */
+export function stateTone(state: DeliveryState | string): string {
+  switch (state) {
+    case "delivered": return "ok";
+    case "dead_letter": return "error";
+    case "retry_wait": return "warn";
+  }
+  return "unknown";
+}
+
+/**
+ * True for a row an operator can send again. Only a dead letter: a row
+ * still waiting for its next attempt is the worker's, and pressing the
+ * button on it would only reset the attempts of a receiver that is
+ * coming back on its own.
+ */
+export function canRetry(delivery: Pick<Delivery, "state">): boolean {
+  return delivery.state === "dead_letter";
+}
+
+/**
+ * When the next attempt of a row is due, or "" for a row that has none: a
+ * row that arrived, one that was kept back, a dead letter nobody put back
+ * in the queue. Showing the column for those would read as a promise the
+ * queue does not make.
+ */
+export function nextAttemptAt(delivery: Pick<Delivery, "state" | "next_attempt_at">): string {
+  if (delivery.state !== "pending" && delivery.state !== "retry_wait") return "";
+  return delivery.next_attempt_at ?? "";
 }
 
 function usePermissions(): Set<string> {
@@ -290,10 +423,11 @@ export function Notifications() {
     queryFn: () => {
       const params = new URLSearchParams(logParams);
       params.set("limit", "100");
-      return api.get<Collection<Delivery>>(`/api/v1/notifications/deliveries?${params}`);
+      return api.get<DeliveryList>(`/api/v1/notifications/deliveries?${params}`);
     },
     refetchInterval: 30000,
   });
+  const deadLetters = deliveries.data?.dead_letters ?? 0;
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["notifications"] });
   const failed = (error: unknown) => {
@@ -333,11 +467,23 @@ export function Notifications() {
     onSuccess: () => { toast.success(t("The channel is deleted with its log.")); refresh(); },
     onError: failed,
   });
+  // A dead letter is put back in the queue by hand: the message was never
+  // received, the row still carries it, and the worker takes it again as
+  // soon as the operator has mended what refused it.
+  const retry = useMutation({
+    mutationFn: (id: string) => api.post<Delivery>(`/api/v1/notifications/deliveries/${id}/retry`),
+    onSuccess: () => {
+      toast.success(t("The message is back in the queue; the next attempt goes out in a moment."));
+      setErrorMessage("");
+      refresh();
+    },
+    onError: failed,
+  });
   const test = useMutation({
     mutationFn: (id: string) => api.post<Delivery>(`/api/v1/notifications/channels/${id}/test`),
     onSuccess: (delivery, id) => {
       setTestOutcome({ id, delivery });
-      if (delivery.status === "sent") toast.success(t("The test message went out."));
+      if (delivery.state === "delivered" || delivery.status === "sent") toast.success(t("The test message went out."));
       else toast.error(t("The test message did not arrive: {reason}", { reason: deliveryWords(t, delivery) }));
       refresh();
     },
@@ -370,6 +516,9 @@ export function Notifications() {
   const items = channels.data?.items ?? [];
   const subjects = channels.data?.subjects ?? [];
   const severities = channels.data?.severities ?? ["info", "warning", "critical"];
+  // The states the queue really has; the server sends them so the filter
+  // is never a list written twice.
+  const states = channels.data?.states ?? [];
   const check = editing ? channelBody(editing) : undefined;
 
   return (
@@ -391,7 +540,7 @@ export function Notifications() {
       {editing && (
         <Card
           title={editingID ? t("Edit the channel") : t("New channel")}
-          description={t("A mail password never lies in the channel: name a secret of the secret store and the panel reads it when it sends. A webhook's secret is shown once, on this form, and kept until it is cleared.")}
+          description={t("No credential lies in the channel: the address of an incoming webhook, the key a webhook is signed with and a mail password go to the secret store the moment they are typed and are never shown back. The form says only whether one is configured and when it was last rotated; an empty field keeps the stored one.")}
         >
           <ChannelFields form={editing} subjects={subjects} severities={severities} onChange={setEditing} />
           <Actions>
@@ -444,8 +593,20 @@ export function Notifications() {
 
         <Card
           className="span-12"
-          title={t("Delivery log")}
-          description={t("Every attempt, newest first: what went out, what did not and why. The log keeps a month.")}
+          title={
+            <>
+              {t("Delivery queue")}
+              {deadLetters > 0 && (
+                <>
+                  {" "}
+                  <span className="badge error" title={t("Messages nobody received: the attempts ran out or the receiver refused the credentials. They wait here until an operator sends them again.")}>
+                    {t("{n} dead letters", { n: deadLetters })}
+                  </span>
+                </>
+              )}
+            </>
+          }
+          description={t("One row per event and channel, newest first. A receiver that is down delays a message rather than losing it: the row waits, the attempts are counted on it, and a message nobody received ends as a dead letter an operator sends again.")}
           actions={
             <>
               <select value={logFilter.channel} onChange={(e) => setLogFilter({ ...logFilter, channel: e.target.value })}>
@@ -453,9 +614,10 @@ export function Notifications() {
                 {items.map((channel) => <option key={channel.id} value={channel.id}>{channel.name}</option>)}
               </select>
               <select value={logFilter.status} onChange={(e) => setLogFilter({ ...logFilter, status: e.target.value })}>
-                <option value="">{t("sent and failed")}</option>
+                <option value="">{t("every state")}</option>
                 <option value="sent">{t("sent")}</option>
                 <option value="failed">{t("failed")}</option>
+                {states.map((state) => <option key={state} value={state}>{stateWords(t, state)}</option>)}
               </select>
               <select value={logFilter.window} onChange={(e) => setLogFilter({ ...logFilter, window: e.target.value as LogWindow })}>
                 <option value="1">{t("last hour")}</option>
@@ -478,29 +640,51 @@ export function Notifications() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("When")}</th><th>{t("Channel")}</th><th>{t("Event")}</th><th className="num">{t("Attempt")}</th>
-                  <th>{t("Outcome")}</th>
+                  <th>{t("When")}</th><th>{t("Channel")}</th><th>{t("Event")}</th>
+                  <th>{t("State")}</th><th className="num">{t("Attempt")}</th><th>{t("Next attempt")}</th>
+                  <th>{t("Last error")}</th>{canManage && <th>{t("Actions")}</th>}
                 </tr>
               </thead>
               <tbody>
-                {deliveries.data.items.map((delivery) => (
-                  <tr key={delivery.id}>
-                    <td><Time value={delivery.sent_at} /></td>
-                    <td>{delivery.channel_name || delivery.channel_id.slice(0, 8)}</td>
-                    <td>
-                      <div className="fp-host-cell">
-                        <span className="hm-mono">{delivery.event_type}</span>
-                        {delivery.event_id > 0 && <span className="source">#{delivery.event_id}</span>}
-                      </div>
-                    </td>
-                    <td className="num">{delivery.attempt}</td>
-                    <td>
-                      {delivery.status === "sent"
-                        ? <span className="badge ok">{t("sent")}</span>
-                        : <><span className="badge error">{t("failed")}</span> <span className="source">{deliveryWords(t, delivery)}</span></>}
-                    </td>
-                  </tr>
-                ))}
+                {deliveries.data.items.map((delivery) => {
+                  const next = nextAttemptAt(delivery);
+                  return (
+                    <tr key={delivery.id}>
+                      <td><Time value={delivery.updated_at || delivery.sent_at} /></td>
+                      <td>{delivery.channel_name || delivery.channel_id.slice(0, 8)}</td>
+                      <td>
+                        <div className="fp-host-cell">
+                          <span className="hm-mono">{delivery.event_type}</span>
+                          {delivery.title && <span className="source">{delivery.title}</span>}
+                          {!delivery.title && delivery.event_id > 0 && <span className="source">#{delivery.event_id}</span>}
+                        </div>
+                      </td>
+                      <td>
+                        <span className={`badge ${stateTone(delivery.state)}`}>{stateWords(t, delivery.state)}</span>
+                      </td>
+                      <td className="num">{delivery.attempt}</td>
+                      <td>{next ? <Time value={next} /> : <span className="source">—</span>}</td>
+                      <td>
+                        {delivery.last_error_code
+                          ? <div className="fp-host-cell">
+                              <span className="hm-mono">{delivery.last_error_code}</span>
+                              {delivery.last_error && <span className="source">{delivery.last_error}</span>}
+                            </div>
+                          : <span className="source">{deliveryWords(t, delivery)}</span>}
+                      </td>
+                      {canManage && (
+                        <td>
+                          {canRetry(delivery) && (
+                            <button className="secondary" disabled={retry.isPending}
+                              onClick={() => retry.mutate(delivery.id)}>
+                              {t("Retry")}
+                            </button>
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -533,10 +717,10 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
           {last ? (
             <div className="fp-host-cell">
               <span>
-                {last.status === "sent" ? <span className="badge ok">{t("sent")}</span> : <span className="badge error">{t("failed")}</span>}
-                {" "}<Time value={last.sent_at} />
+                <span className={`badge ${stateTone(last.state)}`}>{stateWords(t, last.state)}</span>
+                {" "}<Time value={last.at || last.sent_at || ""} />
               </span>
-              {last.status === "failed" && <span className="source">{deliveryWords(t, last)}</span>}
+              {last.error_code && <span className="source">{last.error_code}</span>}
             </div>
           ) : <span className="source">{t("nothing sent yet")}</span>}
         </td>
@@ -554,7 +738,7 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
       {outcome && (
         <tr>
           <td colSpan={canManage ? 7 : 6}>
-            {outcome.status === "sent"
+            {outcome.state === "delivered" || outcome.status === "sent"
               ? <span className="badge ok">{t("The test message went out at {when}.", { when: new Date(outcome.sent_at).toLocaleString() })}</span>
               : <><span className="badge error">{t("The test failed")}</span> <span className="source">{deliveryWords(t, outcome)}</span></>}
           </td>
@@ -595,14 +779,14 @@ function ChannelFields({ form, subjects, severities, onChange }: {
           hint={form.kind === "webhook"
             ? t("The deliveries are JSON, signed with HMAC-SHA256 over the body and the timestamp like the webhook of the environment file.")
             : form.urlSet
-              ? t("URL is set; leave the field empty to keep it, or type a new one. The address is the credential of the channel and is never shown back.")
+              ? secretWords(t, form, t("URL is set; leave the field empty to keep it, or type a new one. The address is the credential of the channel and is never shown back."))
               : t("An incoming webhook of Slack, or of a service that reads its shape: the body is {text, blocks}.")}>
           <input value={form.url} onChange={(e) => set({ url: e.target.value })} className="mono" placeholder={form.urlSet ? t("URL is set") : "https://"} />
         </Field>
       )}
       {form.kind === "webhook" && (
         <Field label={t("Signing secret")} wide
-          hint={form.secretSet ? t("A secret is set; leave the field empty to keep it, or type a new one.") : t("Empty means the deliveries are not signed in a way the receiver can verify.")}>
+          hint={secretWords(t, form, t("Empty means the deliveries are not signed in a way the receiver can verify."))}>
           <input type="password" autoComplete="new-password" value={form.secret} onChange={(e) => set({ secret: e.target.value })} className="mono" />
         </Field>
       )}

@@ -351,6 +351,17 @@ const (
 	PermLocalUserLock    Permission = "localuser.lock"
 	PermLocalUserUnlock  Permission = "localuser.unlock"
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
+	// The keys edited one at a time: appending a key and taking a named
+	// one away are ordinary changes of access, while writing the whole
+	// list anew is the operation that has cut accounts off by accident
+	// and keeps a permission of its own.
+	PermLocalSSHKeyAdd     Permission = "localuser.sshkeys.add"
+	PermLocalSSHKeyRemove  Permission = "localuser.sshkeys.remove"
+	PermLocalSSHKeyReplace Permission = "localuser.sshkeys.replace"
+	// PermAccountsPrivilegedGroups is asked for on top of the permission
+	// of the change whenever an account lands in a group that is root by
+	// another name: sudo, wheel, docker, lxd.
+	PermAccountsPrivilegedGroups Permission = "accounts.privileged_groups"
 	// The groups and the expiry of an account are changes of access with a
 	// scope of their own: a group can be root by another name, an expiry is
 	// a lock with a date. Deleting an account is destructive and belongs to
@@ -540,6 +551,13 @@ var rolePermissions = map[Role][]Permission{
 		// the hosts.
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
+		PermLocalSSHKeyAdd, PermLocalSSHKeyRemove, PermLocalSSHKeyReplace,
+		// Not accounts.privileged_groups: this role makes accounts and
+		// keys, and putting one into sudo, wheel, docker or lxd is a
+		// grant of root by another name. The two are different levels of
+		// trust, so the second belongs to the platform administrator -
+		// the compound permission means nothing if the same role holds
+		// both halves.
 		PermNotificationRead,
 		PermScheduleRootExec,
 	},
@@ -591,6 +609,8 @@ var rolePermissions = map[Role][]Permission{
 		PermHostDecommission, PermPrincipalManage,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermLocalUserGroupsWrite,
+		PermLocalSSHKeyAdd, PermLocalSSHKeyRemove, PermLocalSSHKeyReplace,
+		PermAccountsPrivilegedGroups,
 		PermLocalUserExpiryWrite, PermLocalUserDelete, PermMetricsRead,
 		PermPKIRead, PermPKIRotate,
 		PermSecretRead, PermSecretWrite, PermSecretDestroy,

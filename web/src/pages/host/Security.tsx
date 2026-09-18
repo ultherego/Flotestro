@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { capability } from "./modules";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 /**
@@ -168,6 +169,9 @@ function SeverityBadge({ finding }: { finding: Finding }) {
  * separate mechanism: each maps to a typed operation of the module that
  * owns the given thing.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const SECURITY_CHANGES = ["selinux.mode.set", "security.audit.reload", "security.remediate"];
+
 export function Security() {
   const t = useT();
   const host = useHost();
@@ -290,12 +294,15 @@ export function Security() {
         title={t("Security")}
         description={t("The host reports facts; the panel judges them. Checks are versioned and run against inventory the host already sends, so a result can be repeated and two hosts are judged by the same check. Every fix maps to a typed operation of the module that owns the thing being fixed.")}
         actions={
-          <button onClick={() => scan.mutate()} disabled={scan.isPending}>
-            {t("Scan now")}
-          </button>
+          <ActionGuard action="security.scan" host={host.id} explain>
+            <button onClick={() => scan.mutate()} disabled={scan.isPending}>
+              {t("Scan now")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={SECURITY_CHANGES} />
       <Message text={message} />
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
@@ -373,7 +380,7 @@ export function Security() {
                 </span>
               )}
             {selinux && (snapshot?.mac?.mode === "enforcing" || snapshot?.mac?.mode === "permissive") && (
-              <>
+              <ActionGuard action="selinux.mode.set" host={host.id}>
                 {" "}
                 <button
                   type="button"
@@ -392,7 +399,7 @@ export function Security() {
                 >
                   {otherMode === "enforcing" ? t("set enforcing…") : t("set permissive…")}
                 </button>
-              </>
+              </ActionGuard>
             )}
           </Fact>
           <Fact label={t("Audit daemon")}>
@@ -408,7 +415,7 @@ export function Security() {
                       <span className="badge warn"> {t("{n} in files", { n: snapshot.audit.rules_configured })}</span>
                     )}
                   {auditWritable && (
-                    <>
+                    <ActionGuard action="security.audit.reload" host={host.id}>
                       {" "}
                       <button
                         type="button"
@@ -425,7 +432,7 @@ export function Security() {
                       >
                         {t("reload rules…")}
                       </button>
-                    </>
+                    </ActionGuard>
                   )}
                 </>}
           </Fact>
@@ -580,20 +587,26 @@ export function Security() {
           </Table>
         )}
         <Foot>
-          <button
-            onClick={() =>
-              setIntent({
-                label: t("Apply remediation"),
-                description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
-                  n: selected.length, host: host.hostname,
-                }),
-              })
-            }
-            disabled={!selected.length || remediate.isPending || Boolean(running)}
-            title={running ? t("a remediation plan is already running on this host") : undefined}
-          >
-            {t("Fix selected ({n})", { n: selected.length })}
-          </button>
+          {/* The plan and its stop go through the remediation endpoint, which
+              asks for the same permission the catalogue names for
+              security.remediate; the preview of that action is the answer
+              for both. */}
+          <ActionGuard action="security.remediate" host={host.id}>
+            <button
+              onClick={() =>
+                setIntent({
+                  label: t("Apply remediation"),
+                  description: t("{n} finding(s) on {host} will be fixed step by step, each step an ordinary job of the module that owns it, with its own permissions and approval. The next step starts only once the previous one succeeded, and the plan stops at the first failure. It is bound to the state you are looking at: if the host changed meanwhile, the request is refused.", {
+                    n: selected.length, host: host.hostname,
+                  }),
+                })
+              }
+              disabled={!selected.length || remediate.isPending || Boolean(running)}
+              title={running ? t("a remediation plan is already running on this host") : undefined}
+            >
+              {t("Fix selected ({n})", { n: selected.length })}
+            </button>
+          </ActionGuard>
           <span>
             {t("{n} of the findings that need action have an operation behind them", { n: fixable.length })}
           </span>
@@ -629,11 +642,13 @@ export function Security() {
                   {plan.stop_on_failure ? ` · ${t("stops on failure")}` : ` · ${t("continues after failure")}`}
                 </span>
                 {plan.state === "running" && (
-                  <div className="hm-tools">
-                    <button className="hm-danger" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
-                      {t("Stop")}
-                    </button>
-                  </div>
+                  <ActionGuard action="security.remediate" host={host.id}>
+                    <div className="hm-tools">
+                      <button className="hm-danger" onClick={() => stop.mutate(plan.id)} disabled={stop.isPending}>
+                        {t("Stop")}
+                      </button>
+                    </div>
+                  </ActionGuard>
                 )}
               </div>
               <Table>

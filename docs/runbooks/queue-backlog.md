@@ -117,6 +117,14 @@ In the API and the panel:
   finished under `canceling` are not undone.
 - A lowered `FLOTESTRO_DISPATCH_RATE` takes effect at the next restart.
 
+### A restart that has not come back
+
+A restart stays `running` while the host is down and settles when the host reconnects with a new
+boot identifier; the result names both boots. A host that has not come back within the attempt
+lease (five minutes of silence) plus ten minutes of grace ends `reboot_not_observed`, and the job
+is never delivered again - a second delivery would restart the machine a second time. Look at the
+host's console or its hypervisor; order the restart again once it is up.
+
 ## Related codes
 
 `budget_capacity`, `budget_fair_share` (admission, automatic retry); `resource_busy`,

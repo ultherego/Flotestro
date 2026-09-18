@@ -170,6 +170,15 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		if err := backup.ValidateRestore(order.Restore); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
+		// A restore is bound to its plan like a copy and a check: the
+		// operator approved unpacking out of the repository as the plan
+		// described it, and a repository that has taken another copy or
+		// lost one since is not that repository. The recomputation happens
+		// here, under the guard of the family, right before the data is
+		// written over the target.
+		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
+			return refusal
+		}
 		// The target is checked right before unpacking: only the host knows what
 		// really lies in that directory, and it knows it only now.
 		if err := backup.CheckTarget(order.Restore); err != nil {
@@ -247,6 +256,19 @@ func backupPlanResponse(state backup.State, definition backup.Definition,
 // checkBackupPlanDigest compares the plan computed now with the one the
 // operator consented to. A different digest means the scope or the repository
 // changed since the planning - and that is a refusal, not a warning.
+//
+// The recomputation runs under the guard of the backup family, which the
+// caller took before anything was read: between the digest computed here
+// and the copy, the check or the restore that follows, no second backup
+// operation of this host can move the repository.
+//
+// An order that carries no digest at all is the one convenience left, and
+// it is a single-host one: an operator running a copy from the host's own
+// screen may order it without planning first, and the panel's own plan
+// screens and every campaign bind the digest. The rule is therefore not
+// "a plan is optional" but "a plan that is named must still hold": a
+// digest that no longer describes the host is refused with stale_plan and
+// nothing runs.
 func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 	order backup.Order, action *helperv1.BackupRequest, verification bool) *helperv1.HelperResponse {
 	expected := action.GetPlanHash()
@@ -260,7 +282,11 @@ func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 	now := backup.Compute(state, order.Definition, verification,
 		order.ReadData, backup.PathSize)
 	if now.PlanHash != expected {
-		return reject(ErrorPreconditionFailed,
+		// The shared code of every planned family: the fingerprint computed
+		// again under the lock is not the one that was approved. The
+		// operator plans again and approves the new plan; the old consent
+		// does not carry over.
+		return reject(errorStalePlan,
 			"the scope of the copy or the repository changed since the planning; the operation needs a new plan")
 	}
 	return nil

@@ -19,6 +19,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/buildinfo"
 	"github.com/ultherego/flotestro/internal/jcs"
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
@@ -245,7 +246,16 @@ const (
 	ActionLocalUserCreate ActionType = "localuser.create"
 	ActionLocalUserLock   ActionType = "localuser.lock"
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
-	ActionLocalSSHKeysSet ActionType = "localuser.sshkeys.set"
+	// The keys of an account are edited one at a time (security
+	// remediation, chapter 14.1): an add appends what is not there yet, a
+	// remove takes named fingerprints away, and a replace writes the whole
+	// list anew and is bound to the list the operator saw. The old set
+	// operation is the replace under its previous name, kept for one
+	// release so an order placed before the upgrade still runs.
+	ActionLocalSSHKeysAdd        ActionType = "localuser.sshkeys.add"
+	ActionLocalSSHKeysRemove     ActionType = "localuser.sshkeys.remove"
+	ActionLocalSSHKeysReplaceAll ActionType = "localuser.sshkeys.replace_all"
+	ActionLocalSSHKeysSet        ActionType = "localuser.sshkeys.set"
 	// The groups of an account decide what it may do on the host: a
 	// membership in sudo or docker is root by another name, so the set
 	// operation ranks critical when such a group is in the list.
@@ -412,6 +422,30 @@ type Spec struct {
 	Rollback       RollbackClass   `json:"rollback"`
 	Verification   Verification    `json:"verification"`
 	ResourceClaims []ResourceClaim `json:"resource_claims"`
+	// Verifier names the read of the host that confirms the change after
+	// the apply; only it turns the change into a success. OnUnverified
+	// says whether a failed verifier makes the host put the previous
+	// state back or only report.
+	Verifier     Verifier         `json:"verifier"`
+	OnUnverified UnverifiedPolicy `json:"on_unverified"`
+	// ReplacedBy names the operation that took this one's place. A
+	// deprecated operation still runs for one release, so an order placed
+	// before the upgrade is not lost; the catalogue says where new orders
+	// go.
+	ReplacedBy ActionType `json:"replaced_by,omitempty"`
+}
+
+// replacedActions lists the deprecated operations and their successors.
+// An entry stays for one release after the panel stopped issuing the old
+// name; then both the entry and the old operation go.
+var replacedActions = map[ActionType]ActionType{
+	ActionLocalSSHKeysSet: ActionLocalSSHKeysReplaceAll,
+}
+
+// ReplacedBy returns the operation that took this one's place, or an empty
+// type for an operation that is current.
+func (a ActionType) ReplacedBy() ActionType {
+	return replacedActions[a]
 }
 
 // Describe returns the full contract of an operation.
@@ -419,6 +453,7 @@ func (a ActionType) Describe() Spec {
 	spec := actionSpecs[a]
 	declared := a.Contract()
 	return Spec{
+		ReplacedBy:     replacedActions[a],
 		Action:         a,
 		Version:        ActionVersion,
 		Capability:     spec.capability,
@@ -437,6 +472,8 @@ func (a ActionType) Describe() Spec {
 		Rollback:       declared.Rollback,
 		Verification:   declared.Verification,
 		ResourceClaims: declared.ResourceClaims,
+		Verifier:       a.Verifier(),
+		OnUnverified:   a.OnUnverified(),
 	}
 }
 
@@ -553,32 +590,34 @@ func ConfirmationTarget(action ActionType, payload Payload, host string) string 
 	return host
 }
 
-// PrivilegedGroups lists the groups whose membership is root by another
-// name: sudo and wheel give root directly, docker gives it through the
-// engine socket, adm reads every log, root and admin are what they say.
-var PrivilegedGroups = []string{"sudo", "wheel", "docker", "adm", "root", "admin"}
-
-// PrivilegedGroupsIn returns the privileged groups the list names.
+// PrivilegedGroupsIn returns the privileged groups the list names: the
+// ones the installation treats as root by another name (sudo, wheel,
+// docker, lxd by default; FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS). The list
+// lives in the accounts module so the classifier is one for the control
+// plane and the panel's description of it.
 func PrivilegedGroupsIn(groups []string) []string {
-	var found []string
-	for _, group := range groups {
-		for _, privileged := range PrivilegedGroups {
-			if group == privileged {
-				found = append(found, group)
-			}
-		}
+	return accounts.PrivilegedGroupsIn(groups)
+}
+
+// PutsIntoPrivilegedGroup says whether one order creates an account in,
+// or moves an account into, a privileged group. Both are a grant of root
+// by another name and are judged the same way: the compound permission,
+// the critical risk and the approval that comes with it.
+func PutsIntoPrivilegedGroup(action ActionType, payload Payload) bool {
+	if action != ActionLocalUserCreate && action != ActionLocalUserGroupsSet {
+		return false
 	}
-	return found
+	return payload.LocalUser != nil && len(PrivilegedGroupsIn(payload.LocalUser.Groups)) > 0
 }
 
 // PayloadRisk returns the risk of one order: the registry's level for the
 // operation, raised where the content of the order calls for it. A groups
 // change that puts an account into sudo is a critical change of access even
-// though the same operation without such a group is not.
+// though the same operation without such a group is not, and so is an
+// account created straight into it.
 func PayloadRisk(action ActionType, payload Payload) RiskLevel {
 	risk := action.Risk()
-	if action == ActionLocalUserGroupsSet && payload.LocalUser != nil &&
-		len(PrivilegedGroupsIn(payload.LocalUser.Groups)) > 0 {
+	if PutsIntoPrivilegedGroup(action, payload) {
 		return RiskCritical
 	}
 	return risk
@@ -596,6 +635,12 @@ const (
 	// lacks the validator the order relies on. Without it a missing
 	// validator refuses the write.
 	PermissionFileWriteUnvalidated = "file.write.unvalidated"
+	// PermissionPrivilegedGroups lets an account be created in, or moved
+	// into, a group that is root by another name. Creating accounts and
+	// granting root are two levels of trust (security remediation, chapter
+	// 14.1), so the grant is compound: the operation's own permission and
+	// this one, both in the scope of the host.
+	PermissionPrivilegedGroups = "accounts.privileged_groups"
 )
 
 // PayloadPermissions returns the permissions the content of one order
@@ -611,6 +656,9 @@ func PayloadPermissions(action ActionType, payload Payload) []string {
 	if (action == ActionFileEnsure || action == ActionFileRollback) &&
 		payload.File != nil && payload.File.AllowMissingValidator {
 		required = append(required, PermissionFileWriteUnvalidated)
+	}
+	if PutsIntoPrivilegedGroup(action, payload) {
+		required = append(required, PermissionPrivilegedGroups)
 	}
 	return required
 }
@@ -666,6 +714,12 @@ type actionSpec struct {
 	lockClass      string
 	maxOutputBytes uint64
 	requiresPlan   bool
+	// verifier is the read that confirms a mutation after the apply; a
+	// mutating operation declares it (ValidateVerifiers), a read never.
+	// onUnverified is what a failed verifier makes the host do; empty
+	// means report.
+	verifier     Verifier
+	onUnverified UnverifiedPolicy
 }
 
 // The risk levels and lock classes follow chapters 6.1 and 8 of the
@@ -674,32 +728,32 @@ type actionSpec struct {
 // The lock class says which operations must not run at once on the same host.
 var actionSpecs = map[ActionType]actionSpec{
 	ActionUnitStart: {mutating: true, capability: "systemd", permission: "unit.start",
-		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierUnitState},
 	// Stopping a service interrupts it, so it ranks higher than starting.
 	ActionUnitStop: {mutating: true, capability: "systemd", permission: "unit.stop",
-		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierUnitState},
 	ActionUnitRestart: {mutating: true, capability: "systemd", permission: "unit.restart",
-		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierUnitState},
 	ActionUnitReload: {mutating: true, capability: "systemd", permission: "unit.reload",
-		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierUnitState},
 	// Clearing the failed state runs nothing and stops nothing; it is a
 	// change of the record, so it ranks with starting a unit.
 	ActionUnitResetFailed: {mutating: true, capability: "systemd", permission: "unit.reset_failed",
-		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierUnitState},
 	ActionReadJournal: {mutating: false, capability: "journald", permission: "journal.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// Creating a scheduled entry means something will run without the
 	// operator - including when nobody is watching.
 	ActionScheduleEnsure: {mutating: true, capability: "schedules", permission: "schedule.write",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierScheduleEntry},
 	// Disabling leaves the content on the host and is reversible.
 	ActionScheduleDisable: {mutating: true, capability: "schedules", permission: "schedule.disable",
-		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierScheduleEntry},
 	ActionScheduleRemove: {mutating: true, capability: "schedules", permission: "schedule.remove",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierScheduleEntry},
 	// Running now executes the same command outside the schedule.
 	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
-		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierNone},
 	// A preview of the next runs of an expression, computed on the host in
 	// its time zone. The panel could compute the dates itself, but it knows
 	// neither the host's zone nor its clock; the numbers come from the host.
@@ -714,20 +768,20 @@ var actionSpecs = map[ActionType]actionSpec{
 	// on: a wrongly set address cuts the host off and no further order will
 	// ever arrive.
 	ActionNetworkProfileApply: {mutating: true, capability: "network.write", permission: "network.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
 	// Routes are a separate permission: changing the default route redirects
 	// all of the host's traffic, not just its address.
 	ActionNetworkRouteEnsure: {mutating: true, capability: "network.write", permission: "network.route.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
 	// MTU has its own permission, because it is a change of a different
 	// weight from rewriting an address: a wrong MTU breaks large packets, a
 	// wrong address cuts the host off.
 	ActionNetworkMTUSet: {mutating: true, capability: "network.write", permission: "network.mtu.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork, verifier: VerifierNetworkState},
 	// A rollback on request returns to the state from before the change, so
 	// it is itself a network change - and just as risky as the one it undoes.
 	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork, verifier: VerifierNetworkState},
 
 	// The name resolution test asks from the host, because the panel's answer
 	// says nothing about what the host will see. The query changes nothing.
@@ -742,7 +796,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	// and therefore from logging in - the effect is wider than the one name
 	// that will not resolve.
 	ActionDNSHostApply: {mutating: true, capability: "dns.write", permission: "dns.host.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierResolver},
 
 	// Reading the ruleset before a change. The plan does not touch the host.
 	ActionFirewallPlan: {mutating: false, capability: "firewall", permission: "firewall.read",
@@ -751,17 +805,17 @@ var actionSpecs = map[ActionType]actionSpec{
 	// to undo the change with, so every firewall change is an operation of
 	// the highest risk.
 	ActionFirewallRuleEnsure: {mutating: true, capability: "firewall.write", permission: "firewall.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 	ActionFirewallRuleRemove: {mutating: true, capability: "firewall.write", permission: "firewall.rule.remove",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 	// firewalld zones describe access differently from rules: the question is
 	// "what is open", not "which rule matches first".
 	ActionFirewallZonePort: {mutating: true, capability: "firewall.zones", permission: "firewall.zone.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 	ActionFirewallZoneService: {mutating: true, capability: "firewall.zones", permission: "firewall.service.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 	ActionFirewallRulesetRestore: {mutating: true, capability: "firewall.write", permission: "firewall.restore",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 
 	// Reading the topology on request. The inventory carries it anyway, but
 	// before a change the operator wants the state of this moment, not the
@@ -771,12 +825,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Mounting is reversible, but the fstab entry decides whether the host
 	// comes back from a reboot the way it stands now.
 	ActionMountEnsure: {mutating: true, capability: "storage", permission: "storage.mount.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
 	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
 	// A filesystem check takes long and requires that nobody is using it.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
-		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage},
+		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierNone},
 	// The SMART read changes nothing and takes no lock: the tool asks the
 	// device for its own log. It has its own permission rather than the
 	// topology read's, because every operation has one.
@@ -787,15 +841,15 @@ var actionSpecs = map[ActionType]actionSpec{
 	// shrinking requires getting the data below a boundary nobody planned
 	// for. Hence the critical risk, even though nothing is deleted.
 	ActionLVMExtend: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.write",
-		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockStorage},
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionFilesystemResize: {mutating: true, capability: "storage", permission: "storage.filesystem.write",
-		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockStorage},
+		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	// Formatting and wiping destroy data irreversibly: they require fresh
 	// authentication, typing the target name and the consent of two people.
 	ActionFilesystemCreate: {mutating: true, capability: "storage", permission: "storage.destructive",
-		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
-		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage},
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 
 	// Reading the sshd configuration before a change. The plan does not touch
 	// the host.
@@ -804,12 +858,12 @@ var actionSpecs = map[ActionType]actionSpec{
 	// A bad sshd configuration cuts off administration of the host and there
 	// is nothing to fix it with remotely - exactly like a bad firewall rule.
 	ActionSSHConfigApply: {mutating: true, capability: "sshd", permission: "ssh.config.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierSSHDConfig},
 	// Replacing the host key changes the identity every client sees: everyone
 	// gets a known_hosts warning, and automation based on the fingerprint
 	// stops working.
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierSSHHostKey},
 
 	// The scan does not change the host, but it collects reconnaissance
 	// material: a list of what the host exposes to the outside, together with
@@ -821,17 +875,17 @@ var actionSpecs = map[ActionType]actionSpec{
 	// immediately. The change is reversible, but in the meantime it protects
 	// nothing.
 	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone, verifier: VerifierMACMode},
 	// The composite carries no adapter requirement and no lock of its own:
 	// both belong to the steps. Its risk is the highest, because one order
 	// changes many hosts through operations that may each cut off access;
 	// the permission adds to those of the steps rather than replacing them.
 	ActionSecurityRemediate: {mutating: true, capability: "", permission: "security.remediate",
-		timeoutSeconds: 3600, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 3600, risk: RiskCritical, lockClass: LockNone, verifier: VerifierNone},
 	// Reloading the audit rules changes what the host records. It is
 	// reversible and local, but it is not a read.
 	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
-		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits},
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierAuditRules},
 
 	// The scan looks at the files it is pointed at and does not change the
 	// host. The result carries dates and names that the certificate shows to
@@ -853,18 +907,18 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Trusting an authority is a decision wider than one file: from that
 	// moment the host accepts every certificate this authority signs.
 	ActionCertificateTrustEnsure: {mutating: true, capability: "certificates", permission: "certificate.trust.write",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates, verifier: VerifierTrustAnchor},
 	// Withdrawing trust breaks connections nobody changed, if the authority
 	// still signs anything. The host checks that at its own end.
 	ActionCertificateTrustRemove: {mutating: true, capability: "certificates", permission: "certificate.trust.remove",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockCertificates, verifier: VerifierTrustAnchor},
 	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierCertificate},
 	// A renewal ends the same way a deployment does: with a new file and a
 	// service that reads it. The host's daemon does it, but the effect is the
 	// same.
 	ActionCertificateRenew: {mutating: true, capability: "certificates.renew", permission: "certificate.renew",
-		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierCertificate},
 
 	// The synchronisation test does not change the host, but it sends packets
 	// from it to the named servers: that is the only way to say anything
@@ -880,11 +934,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	// tokens and certificates see time that went backwards. The unit lock is
 	// needed here because the change ends with restarting the daemon.
 	ActionTimeConfigApply: {mutating: true, capability: "time", permission: "time.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierTimeSource},
 	// The timezone changes what the host shows to people and writes to the
 	// journal; it does not change the moment the host lives in.
 	ActionTimezoneSet: {mutating: true, capability: "time", permission: "time.timezone.write",
-		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockNone},
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockNone, verifier: VerifierTimezone},
 
 	// Reading kernel settings. The profile plus the keys named in the order;
 	// the whole of /proc/sys has a few thousand entries and enumerating it
@@ -894,9 +948,9 @@ var actionSpecs = map[ActionType]actionSpec{
 	// A kernel setting changes the behaviour of the whole host, but it can be
 	// undone the same way it was set.
 	ActionSysctlEnsure: {mutating: true, capability: "kernel", permission: "kernel.sysctl.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone, verifier: VerifierSysctl, onUnverified: UnverifiedRollback},
 	ActionKernelModuleLoad: {mutating: true, capability: "kernel", permission: "kernel.module.write",
-		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone},
+		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNone, verifier: VerifierKernelModule},
 	// The module blacklist plan: the difference between the blacklist found
 	// and the one requested. It does not touch the host.
 	ActionKernelModulePlan: {mutating: false, capability: "kernel", permission: "kernel.module.plan",
@@ -905,7 +959,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	// from the initramfs also after it is rebuilt: the effect shows up when
 	// the host comes back.
 	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
-		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone, verifier: VerifierKernelModule},
 
 	// Reading a configuration file reaches for content that is often
 	// sensitive even when the file itself is not a secret: addresses, account
@@ -917,20 +971,20 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Writing a configuration file changes the behaviour of a service once it
 	// is reloaded - including when nobody planned for that.
 	ActionFileEnsure: {mutating: true, capability: "files.managed", permission: "file.write",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone, verifier: VerifierFileContent, onUnverified: UnverifiedRollback},
 	ActionFileRemove: {mutating: true, capability: "files.managed", permission: "file.remove",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone, verifier: VerifierFileContent},
 	// Going back to an earlier version is a write of content that was once on
 	// the host - but it is still a write.
 	ActionFileRollback: {mutating: true, capability: "files.managed", permission: "file.rollback",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone, verifier: VerifierFileContent, onUnverified: UnverifiedRollback},
 
 	ActionProcessList: {mutating: false, capability: "", permission: "process.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
 	// Sending a signal stops somebody's work: a signal has no before and
 	// after state that could be undone.
 	ActionProcessSignal: {mutating: true, capability: "", permission: "process.signal",
-		timeoutSeconds: 30, risk: RiskHigh},
+		timeoutSeconds: 30, risk: RiskHigh, verifier: VerifierNone},
 	// A live view keeps a process on the host for the whole time it lasts, so
 	// it ranks higher than a one-off read and has its own permission.
 	ActionFollowJournal: {mutating: false, capability: "journald", permission: "journal.follow",
@@ -954,9 +1008,9 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockPackages},
 	// A package transaction is the riskiest operation in the system.
 	ActionPackageUpgrade: {mutating: true, capability: "packages", permission: "packages.upgrade",
-		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true, verifier: VerifierPackageVersions},
 	ActionAgentUpgrade: {mutating: true, capability: "packages", permission: "agent.upgrade",
-		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages},
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, verifier: VerifierAgentVersion},
 
 	// A repair changes the state of the host and can touch packages of great
 	// importance, the bootloader included, so it has its own permission and
@@ -967,20 +1021,20 @@ var actionSpecs = map[ActionType]actionSpec{
 	// host that does not have it has to say so when the operation is ordered,
 	// not after the task has been delivered.
 	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair",
-		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages},
+		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages, verifier: VerifierPackageDatabase},
 	// An install adds software to the host that will start running right
 	// away.
 	ActionPackageInstall: {mutating: true, capability: "packages", permission: "packages.install",
-		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true},
+		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true, verifier: VerifierPackageVersions},
 	// A removal takes the package away together with everything that depends
 	// on it, and it cannot be undone by restoring state: what disappeared has
 	// to be downloaded again.
 	ActionPackageRemove: {mutating: true, capability: "packages", permission: "packages.remove",
-		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockPackages, requiresPlan: true},
+		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockPackages, requiresPlan: true, verifier: VerifierPackageVersions},
 	// A hold freezes the package version. It is reversible and local, but a
 	// held package will not get security fixes either.
 	ActionPackageHoldSet: {mutating: true, capability: "packages", permission: "packages.hold.write",
-		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages},
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages, verifier: VerifierPackageHold},
 	// A reboot is a separate, approved campaign phase, not a side effect of
 	// an upgrade. Cutting the host off for the duration of the reboot makes
 	// it critical.
@@ -1000,54 +1054,54 @@ var actionSpecs = map[ActionType]actionSpec{
 	// repository. It does not change the host, but it costs its disk, its CPU
 	// and its link - and it takes time.
 	ActionBackupRun: {mutating: true, capability: "backup", permission: "backup.run",
-		timeoutSeconds: 7200, risk: RiskHigh, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+		timeoutSeconds: 7200, risk: RiskHigh, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierBackupRun},
 	// Verification reads the repository and does not change the host; with
 	// the data read it costs as much as restoring part of a copy.
 	ActionBackupVerify: {mutating: true, capability: "backup", permission: "backup.verify",
-		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierNone},
 	// A restore unpacks old state onto a running system. It requires naming
 	// the target and an overwrite plan, and the panel does not allow aiming
 	// at system directories: what comes back from a restored directory to its
 	// place is a separate decision and a separate operation.
 	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore",
-		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10},
+		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierRestoreTarget},
 
 	// A package source is a decision about trust, not about a version: from
 	// that moment the host takes software from there as well. The package
 	// lock is necessary here, because the write ends with refreshing the
 	// metadata.
 	ActionRepositorySet: {mutating: true, capability: "packages", permission: "packages.repository.write",
-		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockPackages},
+		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockPackages, verifier: VerifierRepository},
 
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
-		timeoutSeconds: 120, risk: RiskCritical},
+		timeoutSeconds: 120, risk: RiskCritical, verifier: VerifierReboot},
 	// Shutting a host down ends in a state the panel cannot undo: nobody will
 	// power this machine on remotely. The unit lock is needed here so that no
 	// other operation starts at the moment the host is going down.
 	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierReboot},
 	// A rename changes the host's identity towards everything that knows it
 	// by name. The panel keeps its own by identifier, so the management
 	// channel survives - but Kerberos, service certificates and the other
 	// hosts' entries do not follow by themselves. Critical, and the whole
 	// host is the lock: nothing else is to land on a host mid-rename.
 	ActionSystemHostnameSet: {mutating: true, capability: "systemd", permission: "system.hostname.write",
-		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockHost},
+		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockHost, verifier: VerifierHostname},
 	// Reading unit state is non-mutating and serves campaign health checks.
 	ActionUnitStatus: {mutating: false, capability: "systemd", permission: "unit.status",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 1 << 20},
 	// Enabling a unit changes the behaviour of the host after every following
 	// reboot, so it ranks higher than starting it now.
 	ActionUnitEnableSet: {mutating: true, capability: "systemd", permission: "unit.enable.write",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierUnitState},
 	// Masking takes away a unit's ability to start even manually and survives
 	// a reboot of the host - the furthest-reaching change in this module.
 	ActionUnitMaskSet: {mutating: true, capability: "systemd", permission: "unit.mask.write",
-		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockUnits},
+		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierUnitState},
 
 	// Joining a domain changes authentication for the whole host.
 	ActionDomainEnroll: {mutating: true, capability: "systemd", permission: "identity.host.enroll",
-		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity, verifier: VerifierDomainMembership},
 	// Preflight changes nothing, so it needs no approval.
 	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockIdentity},
@@ -1056,14 +1110,14 @@ var actionSpecs = map[ActionType]actionSpec{
 	// host at once. The same risk, the same lock and a permission of its
 	// own - the right to bring hosts in is not the right to take them out.
 	ActionDomainLeave: {mutating: true, capability: "systemd", permission: "identity.host.leave",
-		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity},
+		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity, verifier: VerifierDomainMembership},
 	// A keytab renewal replaces the credential a service authenticates
 	// with: until it lands, the service the principal names cannot prove
 	// who it is. Critical, the identity lock, and the rotation's own
 	// permission - the same one the directory half of the change asks for,
 	// so nobody holds one half without the other.
 	ActionIdentityKeytabRenew: {mutating: true, capability: "systemd", permission: "identity.keytab.rotate",
-		timeoutSeconds: 180, risk: RiskCritical, lockClass: LockIdentity},
+		timeoutSeconds: 180, risk: RiskCritical, lockClass: LockIdentity, verifier: VerifierKeytab},
 
 	// Local accounts depend neither on systemd nor on a directory: the module
 	// works also where the customer stays with plain SSH authorisation.
@@ -1071,27 +1125,42 @@ var actionSpecs = map[ActionType]actionSpec{
 	// incident, cutting an account off is sometimes allowed where restoring
 	// access is not.
 	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create",
-		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockAccounts},
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalUserLock: {mutating: true, capability: "", permission: "localuser.lock",
-		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockAccounts},
+		timeoutSeconds: 60, risk: RiskMedium, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	// Restoring access is always more serious than taking it away.
 	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
+	// Adding a key grants access and ranks high; removing one takes it
+	// away and ranks high too, because the account may have been left with
+	// no way in. Replacing the whole list is critical: it is the operation
+	// that cut accounts off by accident, and it asks for fresh
+	// authentication, the list the operator saw and - in production - a
+	// second person, like every critical change.
+	ActionLocalSSHKeysAdd: {mutating: true, capability: "", permission: "localuser.sshkeys.add",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
+	ActionLocalSSHKeysRemove: {mutating: true, capability: "", permission: "localuser.sshkeys.remove",
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
+	ActionLocalSSHKeysReplaceAll: {mutating: true, capability: "", permission: "localuser.sshkeys.replace",
+		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockAccounts, verifier: VerifierLocalAccount},
+	// The previous name of the replace, deprecated: same semantics and the
+	// same risk, the expected list optional. It goes away one release after
+	// the panel started issuing replace_all.
 	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	// The registry lists the base risk of a groups change. The risk of one
 	// order depends on its content: a membership in a privileged group is
 	// root by another name, and PayloadRisk raises such an order to
 	// critical.
 	ActionLocalUserGroupsSet: {mutating: true, capability: "", permission: "localuser.groups.write",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalUserExpirySet: {mutating: true, capability: "", permission: "localuser.expiry.write",
-		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts},
+		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	// Deleting an account is irreversible: a removed home directory does not
 	// come back, and neither does the UID's ownership of what it left
 	// behind. The operator types the account name before it starts.
 	ActionLocalUserDelete: {mutating: true, capability: "", permission: "localuser.delete",
-		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockAccounts},
+		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 
 	// Reading containers changes nothing, but it can be heavy: the full list
 	// of images on a build host is megabytes, so it has its own resource
@@ -1109,22 +1178,22 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Starting a container restores a service; stopping interrupts one, so
 	// stop and restart rank higher than start.
 	ActionDockerStart: {mutating: true, capability: "docker", permission: "docker.container.start",
-		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockContainers},
+		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockContainers, verifier: VerifierContainerState},
 	ActionDockerStop: {mutating: true, capability: "docker", permission: "docker.container.stop",
-		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockContainers},
+		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockContainers, verifier: VerifierContainerState},
 	ActionDockerRestart: {mutating: true, capability: "docker", permission: "docker.container.restart",
-		timeoutSeconds: 180, risk: RiskHigh, lockClass: LockContainers},
+		timeoutSeconds: 180, risk: RiskHigh, lockClass: LockContainers, verifier: VerifierContainerState},
 	// Removing a container is irreversible: data outside volumes dies with
 	// it, so the operator types the target name before the operation starts.
 	ActionDockerRemove: {mutating: true, capability: "docker", permission: "docker.container.remove",
-		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockContainers},
+		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockContainers, verifier: VerifierContainerState},
 	// Pulling an image changes what will come up at the next start, but by
 	// itself it does not touch running containers.
 	ActionDockerPull: {mutating: true, capability: "docker", permission: "docker.image.pull",
-		timeoutSeconds: 1800, risk: RiskMedium, lockClass: LockContainers},
+		timeoutSeconds: 1800, risk: RiskMedium, lockClass: LockContainers, verifier: VerifierImagePresent},
 	// Pruning removes data for good and by default does not run in bulk.
 	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
-		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers},
+		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers, verifier: VerifierNone},
 	// The event journal changes nothing and takes no container lock: a read
 	// lasting the follow window must not hold back the restart the operator
 	// is asking for - and that restart is exactly what they want to see in
@@ -1148,7 +1217,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionComposeDeploy: {mutating: true, capability: "docker.compose",
 		permission: "docker.compose.deploy", timeoutSeconds: 1800,
 		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
-		maxOutputBytes: 1 << 20},
+		maxOutputBytes: 1 << 20, verifier: VerifierComposeServices},
 }
 
 // AllActions returns a sorted list of the supported operations.
@@ -2510,9 +2579,9 @@ type LocalUserPayload struct {
 	Gecos  string   `json:"gecos,omitempty"`
 	Shell  string   `json:"shell,omitempty"`
 	Groups []string `json:"groups,omitempty"`
-	// SSHKeys is the complete, intended list of keys. An empty list in a
-	// key-setting operation takes access away and is a deliberate change, not
-	// missing data.
+	// SSHKeys is the complete, intended list of keys of a create or a
+	// replace. An empty list in a replace takes access away and is a
+	// deliberate change, not missing data.
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	CreateHome bool     `json:"create_home,omitempty"`
 	// ExpiresAt is the expiry date as YYYY-MM-DD. Empty in an expiry
@@ -2521,6 +2590,49 @@ type LocalUserPayload struct {
 	// RemoveHome concerns deletion only: the home directory goes with the
 	// account only when the operator says so.
 	RemoveHome bool `json:"remove_home,omitempty"`
+
+	// The key operations of chapter 14.1 of the security remediation.
+	//
+	// Keys are the keys an add appends: each one the file does not carry
+	// yet, by fingerprint, so the same order twice adds nothing twice.
+	Keys []SSHKeyInput `json:"keys,omitempty"`
+	// Fingerprints names the keys a remove takes away and nothing else.
+	// A fingerprint the account does not have refuses the order unless
+	// IgnoreMissing says the key may already be gone.
+	Fingerprints  []string `json:"fingerprints,omitempty"`
+	IgnoreMissing bool     `json:"ignore_missing,omitempty"`
+	// ExpectedFingerprints is what the operator saw when they ordered a
+	// replace: the list of keys the account has now. A key added or taken
+	// away in between makes the replace stale, and the host refuses it
+	// rather than overwrite what nobody reviewed. A replace requires the
+	// list; the deprecated set takes it when given.
+	ExpectedFingerprints []string `json:"expected_fingerprints,omitempty"`
+	// AllowLockout permits taking the last key of an account that has no
+	// password login: after it nobody enters as that account. The same
+	// explicit consent the sshd module asks for before a lockout.
+	AllowLockout bool `json:"allow_lockout,omitempty"`
+	// ManagedFile edits the panel's own key file under
+	// /etc/ssh/authorized_keys.d instead of the user's authorized_keys;
+	// the host refuses when sshd does not read that file.
+	ManagedFile bool `json:"managed_file,omitempty"`
+	// System says the order means a system account - one outside the
+	// UID range of people in the host's login.defs - and, on a create,
+	// that the account is to be allocated below that range. Without it a
+	// system account is refused on the host.
+	System bool `json:"system,omitempty"`
+	// Inactive acknowledges that a created account has no way in: no key
+	// and, since the panel sets no passwords, no password. A create with
+	// neither is refused without it, so an account nobody can enter is a
+	// decision and not an oversight.
+	Inactive bool `json:"inactive,omitempty"`
+}
+
+// SSHKeyInput is a key an add appends: the public key as the file takes
+// it, options included, and an optional comment appended when the key
+// carries none.
+type SSHKeyInput struct {
+	PublicKey string `json:"public_key"`
+	Comment   string `json:"comment,omitempty"`
 }
 
 // HostnamePayload describes a rename of the host.
@@ -2623,12 +2735,16 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionLocalUserCreate, ActionLocalUserLock, ActionLocalUserUnlock, ActionLocalSSHKeysSet,
+		ActionLocalSSHKeysAdd, ActionLocalSSHKeysRemove, ActionLocalSSHKeysReplaceAll,
 		ActionLocalUserGroupsSet, ActionLocalUserExpirySet, ActionLocalUserDelete:
 		if payload.LocalUser == nil {
 			return fmt.Errorf("the operation %s requires a local_user payload", action)
 		}
 		if !localUserNamePattern.MatchString(payload.LocalUser.Name) {
 			return fmt.Errorf("invalid account name %q", payload.LocalUser.Name)
+		}
+		if err := validateLocalUserKeyFields(action, payload.LocalUser); err != nil {
+			return err
 		}
 		// The accounts below the user range and the account the agent runs
 		// under are refused already here: the host refuses them too, but a
@@ -3584,6 +3700,110 @@ func protectedAccount(name string) bool {
 func validateExpiryDate(value string) error {
 	if _, err := time.Parse("2006-01-02", value); err != nil {
 		return fmt.Errorf("invalid expiry date %q; expected YYYY-MM-DD", value)
+	}
+	return nil
+}
+
+// RefusalAccountWithoutCredential refuses a create that gives the account
+// no way in without saying so.
+const RefusalAccountWithoutCredential = "account_without_credential"
+
+// fingerprintPattern is the form sshd and ssh-keygen print: SHA256: and
+// the digest in base64 without padding.
+var fingerprintPattern = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
+
+// validateLocalUserKeyFields checks the fields of the key operations of
+// chapter 14.1 against the operation they arrived with. Each field
+// belongs to one operation; a field on another operation is an order the
+// panel did not compose, and it is refused rather than ignored, because
+// an ignored field is a decision the operator thought they had made.
+func validateLocalUserKeyFields(action ActionType, user *LocalUserPayload) error {
+	if len(user.Keys) > 0 && action != ActionLocalSSHKeysAdd {
+		return fmt.Errorf("the operation %s takes no keys to add; use %s", action, ActionLocalSSHKeysAdd)
+	}
+	if len(user.Fingerprints) > 0 && action != ActionLocalSSHKeysRemove {
+		return fmt.Errorf("the operation %s takes no fingerprints to remove; use %s", action, ActionLocalSSHKeysRemove)
+	}
+	if user.IgnoreMissing && action != ActionLocalSSHKeysRemove {
+		return fmt.Errorf("ignore_missing belongs to %s", ActionLocalSSHKeysRemove)
+	}
+	if len(user.ExpectedFingerprints) > 0 && action != ActionLocalSSHKeysReplaceAll && action != ActionLocalSSHKeysSet {
+		return fmt.Errorf("expected_fingerprints belongs to %s", ActionLocalSSHKeysReplaceAll)
+	}
+	if user.AllowLockout && action != ActionLocalSSHKeysRemove &&
+		action != ActionLocalSSHKeysReplaceAll && action != ActionLocalSSHKeysSet {
+		return fmt.Errorf("allow_lockout belongs to a key removal or a replace")
+	}
+	if user.ManagedFile && action != ActionLocalSSHKeysAdd && action != ActionLocalSSHKeysRemove &&
+		action != ActionLocalSSHKeysReplaceAll && action != ActionLocalSSHKeysSet && action != ActionLocalUserCreate {
+		return fmt.Errorf("managed_file belongs to a key operation")
+	}
+	if user.Inactive && action != ActionLocalUserCreate {
+		return fmt.Errorf("inactive belongs to %s", ActionLocalUserCreate)
+	}
+	if len(user.SSHKeys) > 0 && action != ActionLocalUserCreate &&
+		action != ActionLocalSSHKeysReplaceAll && action != ActionLocalSSHKeysSet {
+		return fmt.Errorf("the operation %s takes no full key list", action)
+	}
+
+	switch action {
+	case ActionLocalSSHKeysAdd:
+		if len(user.Keys) == 0 {
+			return fmt.Errorf("an add names at least one key")
+		}
+		if len(user.Keys) > 64 {
+			return fmt.Errorf("too many keys: %d", len(user.Keys))
+		}
+		for _, key := range user.Keys {
+			if err := validatePublicKeyShape(key.PublicKey); err != nil {
+				return err
+			}
+			if strings.ContainsAny(key.Comment, "\n\r") {
+				return fmt.Errorf("a key comment must not contain a newline")
+			}
+		}
+	case ActionLocalSSHKeysRemove:
+		if len(user.Fingerprints) == 0 {
+			return fmt.Errorf("a removal names at least one fingerprint")
+		}
+		if len(user.Fingerprints) > 64 {
+			return fmt.Errorf("too many fingerprints: %d", len(user.Fingerprints))
+		}
+		for _, fingerprint := range user.Fingerprints {
+			if !fingerprintPattern.MatchString(strings.TrimSpace(fingerprint)) {
+				return fmt.Errorf("invalid fingerprint %q; expected SHA256:<digest>", fingerprint)
+			}
+		}
+	case ActionLocalSSHKeysReplaceAll, ActionLocalSSHKeysSet:
+		// The replace is bound to the list the operator saw. An absent
+		// list on the new operation is an order composed blind; an empty
+		// list says the account had no keys, which is a picture too. The
+		// deprecated name takes the list when it comes and runs blind
+		// otherwise - that was its contract.
+		if action == ActionLocalSSHKeysReplaceAll && user.ExpectedFingerprints == nil {
+			return fmt.Errorf("a replace carries expected_fingerprints: the keys the account has now, an empty list for none")
+		}
+		if len(user.ExpectedFingerprints) > 256 {
+			return fmt.Errorf("too many expected fingerprints: %d", len(user.ExpectedFingerprints))
+		}
+		for _, fingerprint := range user.ExpectedFingerprints {
+			if !fingerprintPattern.MatchString(strings.TrimSpace(fingerprint)) {
+				return fmt.Errorf("invalid expected fingerprint %q", fingerprint)
+			}
+		}
+	case ActionLocalUserCreate:
+		// An account with no key has no way in: the panel sets no
+		// password. That is allowed only when the order says the account
+		// is to be inactive, so nobody creates an unreachable account by
+		// forgetting the key.
+		if len(user.SSHKeys) == 0 && !user.Inactive {
+			return &RefusalError{Code: RefusalAccountWithoutCredential, Err: fmt.Errorf(
+				"the account would have no key and no password, so nobody could log in; " +
+					"give it a key or say inactive: true to create it without a way in")}
+		}
+		if user.Inactive && len(user.SSHKeys) > 0 {
+			return fmt.Errorf("an inactive account takes no keys; leave the list empty or drop inactive")
+		}
 	}
 	return nil
 }

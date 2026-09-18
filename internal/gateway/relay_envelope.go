@@ -41,6 +41,12 @@ type RelayPeer struct {
 type RelayRefusal struct {
 	Code   string
 	Detail string
+	// Redelivery marks a relay_sequence_replayed that is no replay at
+	// all: the sequence is one the same session spent already, so the
+	// message is one the panel consumed and the relay carried again
+	// because the acknowledgement never reached it. The caller drops the
+	// message, acknowledges it once more and writes nothing on the host.
+	Redelivery bool
 }
 
 func (r *RelayRefusal) Error() string { return r.Code + ": " + r.Detail }
@@ -67,9 +73,11 @@ type hostRecords interface {
 }
 
 // sequenceRecords accepts a sequence of a session once and refuses it the
-// second time.
+// second time. The last sequence the session accepted comes back with the
+// refusal, so that the caller can tell a message consumed before - the
+// relay carrying its spool again - from a number the session never took.
 type sequenceRecords interface {
-	Accept(ctx context.Context, hostID, sessionID string, sequence uint64) (bool, error)
+	Accept(ctx context.Context, hostID, sessionID string, sequence uint64) (accepted bool, last uint64, err error)
 }
 
 // RelayVerifier checks the inner identity envelope of a relayed message
@@ -217,11 +225,23 @@ func (v *RelayVerifier) verify(ctx context.Context, peer RelayPeer, envelope *ag
 		if _, err := uuid.Parse(envelope.GetSessionId()); err != nil {
 			return nil, invalid("the session identifier is not a UUID")
 		}
-		accepted, err := v.sequences.Accept(ctx, peer.HostID, envelope.GetSessionId(), envelope.GetSequence())
+		accepted, last, err := v.sequences.Accept(ctx, peer.HostID, envelope.GetSessionId(), envelope.GetSequence())
 		if err != nil {
 			return nil, err
 		}
 		if !accepted {
+			// A number at or below the one the same session last spent is
+			// a message this panel consumed already: the relay holds it in
+			// its spool until an acknowledgement arrives, and a link that
+			// broke in between means it sends it once more. That is the
+			// spool working, not a host or a relay to suspect. Anything
+			// else under this code is a sequence the session never took.
+			if envelope.GetSequence() <= last {
+				return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed, Redelivery: true,
+					Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
+						" of session " + envelope.GetSessionId() + " was consumed before (the session is at " +
+						strconv.FormatUint(last, 10) + ")"}
+			}
 			return nil, &RelayRefusal{Code: hosts.RefusalRelaySequenceReplayed,
 				Detail: "sequence " + strconv.FormatUint(envelope.GetSequence(), 10) +
 					" of session " + envelope.GetSessionId() + " was accepted before"}
@@ -263,19 +283,35 @@ type relaySequences struct {
 
 // Accept records the sequence when it is greater than the last one of the
 // session, in one statement: two gateways serving a host's buffered
-// messages at once cannot both accept the same number.
-func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string, sequence uint64) (bool, error) {
-	tag, err := r.pool.Exec(ctx, `
-		insert into relay_host_sequences (host_id, session_id, last_sequence, updated_at)
-		values ($1, $2, $3, now())
-		on conflict (host_id, session_id) do update
-		   set last_sequence = excluded.last_sequence, updated_at = now()
-		 where relay_host_sequences.last_sequence < excluded.last_sequence`,
-		hostID, sessionID, int64(sequence))
+// messages at once cannot both accept the same number. The number the
+// session stood at before the statement comes back with the answer: the
+// write of the common table expression is not visible to the rest of the
+// query, so the read gives the state the message met rather than the one
+// it left behind. A session nobody has spoken in stands at zero.
+func (r relaySequences) Accept(ctx context.Context, hostID, sessionID string,
+	sequence uint64) (bool, uint64, error) {
+	var accepted bool
+	var last int64
+	err := r.pool.QueryRow(ctx, `
+		with taken as (
+			insert into relay_host_sequences (host_id, session_id, last_sequence, updated_at)
+			values ($1, $2, $3, now())
+			on conflict (host_id, session_id) do update
+			   set last_sequence = excluded.last_sequence, updated_at = now()
+			 where relay_host_sequences.last_sequence < excluded.last_sequence
+			returning last_sequence
+		)
+		select exists (select 1 from taken),
+		       coalesce((select last_sequence from relay_host_sequences
+		                  where host_id = $1 and session_id = $2), 0)`,
+		hostID, sessionID, int64(sequence)).Scan(&accepted, &last)
 	if err != nil {
-		return false, fmt.Errorf("recording the sequence: %w", err)
+		return false, 0, fmt.Errorf("recording the sequence: %w", err)
 	}
-	return tag.RowsAffected() > 0, nil
+	if last < 0 {
+		last = 0
+	}
+	return accepted, uint64(last), nil
 }
 
 // sequenceRetention is how long a session's last sequence is kept after

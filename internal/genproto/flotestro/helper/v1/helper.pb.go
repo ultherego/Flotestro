@@ -37,29 +37,42 @@ const (
 	LocalUserActionRequest_OPERATION_SET_EXPIRY LocalUserActionRequest_Operation = 6
 	// Deleting the account, optionally with its home directory.
 	LocalUserActionRequest_OPERATION_DELETE LocalUserActionRequest_Operation = 7
+	// The keys edited one at a time: an add appends what is not there, a
+	// remove takes named fingerprints away, a replace writes the list
+	// anew bound to the fingerprints the operator saw. SET_SSH_KEYS is
+	// the replace under its old name, kept one release.
+	LocalUserActionRequest_OPERATION_ADD_SSH_KEYS     LocalUserActionRequest_Operation = 8
+	LocalUserActionRequest_OPERATION_REMOVE_SSH_KEYS  LocalUserActionRequest_Operation = 9
+	LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS LocalUserActionRequest_Operation = 10
 )
 
 // Enum value maps for LocalUserActionRequest_Operation.
 var (
 	LocalUserActionRequest_Operation_name = map[int32]string{
-		0: "OPERATION_UNSPECIFIED",
-		1: "OPERATION_CREATE",
-		2: "OPERATION_LOCK",
-		3: "OPERATION_UNLOCK",
-		4: "OPERATION_SET_SSH_KEYS",
-		5: "OPERATION_SET_GROUPS",
-		6: "OPERATION_SET_EXPIRY",
-		7: "OPERATION_DELETE",
+		0:  "OPERATION_UNSPECIFIED",
+		1:  "OPERATION_CREATE",
+		2:  "OPERATION_LOCK",
+		3:  "OPERATION_UNLOCK",
+		4:  "OPERATION_SET_SSH_KEYS",
+		5:  "OPERATION_SET_GROUPS",
+		6:  "OPERATION_SET_EXPIRY",
+		7:  "OPERATION_DELETE",
+		8:  "OPERATION_ADD_SSH_KEYS",
+		9:  "OPERATION_REMOVE_SSH_KEYS",
+		10: "OPERATION_REPLACE_SSH_KEYS",
 	}
 	LocalUserActionRequest_Operation_value = map[string]int32{
-		"OPERATION_UNSPECIFIED":  0,
-		"OPERATION_CREATE":       1,
-		"OPERATION_LOCK":         2,
-		"OPERATION_UNLOCK":       3,
-		"OPERATION_SET_SSH_KEYS": 4,
-		"OPERATION_SET_GROUPS":   5,
-		"OPERATION_SET_EXPIRY":   6,
-		"OPERATION_DELETE":       7,
+		"OPERATION_UNSPECIFIED":      0,
+		"OPERATION_CREATE":           1,
+		"OPERATION_LOCK":             2,
+		"OPERATION_UNLOCK":           3,
+		"OPERATION_SET_SSH_KEYS":     4,
+		"OPERATION_SET_GROUPS":       5,
+		"OPERATION_SET_EXPIRY":       6,
+		"OPERATION_DELETE":           7,
+		"OPERATION_ADD_SSH_KEYS":     8,
+		"OPERATION_REMOVE_SSH_KEYS":  9,
+		"OPERATION_REPLACE_SSH_KEYS": 10,
 	}
 )
 
@@ -150,7 +163,7 @@ func (x PackageActionRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use PackageActionRequest_Operation.Descriptor instead.
 func (PackageActionRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{14, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{15, 0}
 }
 
 type UnitActionRequest_Operation int32
@@ -223,7 +236,7 @@ func (x UnitActionRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use UnitActionRequest_Operation.Descriptor instead.
 func (UnitActionRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{16, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{17, 0}
 }
 
 type SystemRequest_Fact int32
@@ -276,7 +289,7 @@ func (x SystemRequest_Fact) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SystemRequest_Fact.Descriptor instead.
 func (SystemRequest_Fact) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{18, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{19, 0}
 }
 
 type DockerReadRequest_Scope int32
@@ -327,7 +340,7 @@ func (x DockerReadRequest_Scope) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DockerReadRequest_Scope.Descriptor instead.
 func (DockerReadRequest_Scope) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{20, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{21, 0}
 }
 
 type DockerActionRequest_Operation int32
@@ -388,7 +401,7 @@ func (x DockerActionRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DockerActionRequest_Operation.Descriptor instead.
 func (DockerActionRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{21, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{22, 0}
 }
 
 type ScheduleRequest_Operation int32
@@ -447,7 +460,7 @@ func (x ScheduleRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ScheduleRequest_Operation.Descriptor instead.
 func (ScheduleRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{23, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{24, 0}
 }
 
 type NetworkRequest_Operation int32
@@ -518,7 +531,7 @@ func (x NetworkRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use NetworkRequest_Operation.Descriptor instead.
 func (NetworkRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{25, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26, 0}
 }
 
 type DnsRequest_Operation int32
@@ -568,7 +581,7 @@ func (x DnsRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use DnsRequest_Operation.Descriptor instead.
 func (DnsRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{27, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{28, 0}
 }
 
 type FirewallRequest_Operation int32
@@ -639,7 +652,7 @@ func (x FirewallRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FirewallRequest_Operation.Descriptor instead.
 func (FirewallRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{29, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{30, 0}
 }
 
 type StorageRequest_Operation int32
@@ -723,7 +736,7 @@ func (x StorageRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use StorageRequest_Operation.Descriptor instead.
 func (StorageRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{31, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{32, 0}
 }
 
 type SshRequest_Operation int32
@@ -780,7 +793,7 @@ func (x SshRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SshRequest_Operation.Descriptor instead.
 func (SshRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{33, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{34, 0}
 }
 
 type SecurityRequest_Operation int32
@@ -838,7 +851,7 @@ func (x SecurityRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SecurityRequest_Operation.Descriptor instead.
 func (SecurityRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{35, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{36, 0}
 }
 
 // Fact enumerates what cannot be read without root. The rest of the
@@ -895,7 +908,7 @@ func (x SecurityRequest_Fact) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SecurityRequest_Fact.Descriptor instead.
 func (SecurityRequest_Fact) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{35, 1}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{36, 1}
 }
 
 type BackupRequest_Operation int32
@@ -950,7 +963,7 @@ func (x BackupRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BackupRequest_Operation.Descriptor instead.
 func (BackupRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{37, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{38, 0}
 }
 
 type CertificateRequest_Operation int32
@@ -1022,7 +1035,7 @@ func (x CertificateRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CertificateRequest_Operation.Descriptor instead.
 func (CertificateRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{42, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{43, 0}
 }
 
 // Fact enumerates what cannot be read without root.
@@ -1075,7 +1088,7 @@ func (x CertificateRequest_Fact) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use CertificateRequest_Fact.Descriptor instead.
 func (CertificateRequest_Fact) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{42, 1}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{43, 1}
 }
 
 type TimeRequest_Operation int32
@@ -1128,7 +1141,7 @@ func (x TimeRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use TimeRequest_Operation.Descriptor instead.
 func (TimeRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{44, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{45, 0}
 }
 
 type KernelRequest_Operation int32
@@ -1187,7 +1200,7 @@ func (x KernelRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use KernelRequest_Operation.Descriptor instead.
 func (KernelRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{46, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{47, 0}
 }
 
 type FileRequest_Operation int32
@@ -1249,7 +1262,7 @@ func (x FileRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FileRequest_Operation.Descriptor instead.
 func (FileRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{48, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{49, 0}
 }
 
 type ComposeRequest_Operation int32
@@ -1298,7 +1311,7 @@ func (x ComposeRequest_Operation) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ComposeRequest_Operation.Descriptor instead.
 func (ComposeRequest_Operation) EnumDescriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{54, 0}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{55, 0}
 }
 
 // PROTOCOL_VERSION changes at every incompatible change of the contract.
@@ -2476,15 +2489,37 @@ type LocalUserActionRequest struct {
 	Gecos     string                           `protobuf:"bytes,3,opt,name=gecos,proto3" json:"gecos,omitempty"`
 	Shell     string                           `protobuf:"bytes,4,opt,name=shell,proto3" json:"shell,omitempty"`
 	Groups    []string                         `protobuf:"bytes,5,rep,name=groups,proto3" json:"groups,omitempty"`
-	// Public keys in full form. A private key never reaches the system, and
-	// passwords are not sent at all.
+	// Public keys in full form for a create or a replace. A private key
+	// never reaches the system, and passwords are not sent at all.
 	SshKeys []string `protobuf:"bytes,6,rep,name=ssh_keys,json=sshKeys,proto3" json:"ssh_keys,omitempty"`
 	// CreateHome creates the home directory when creating the account.
 	CreateHome bool `protobuf:"varint,7,opt,name=create_home,json=createHome,proto3" json:"create_home,omitempty"`
 	// ExpiresAt is the expiry date as YYYY-MM-DD; empty clears the expiry.
 	ExpiresAt string `protobuf:"bytes,8,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	// RemoveHome deletes the home directory together with the account.
-	RemoveHome    bool `protobuf:"varint,9,opt,name=remove_home,json=removeHome,proto3" json:"remove_home,omitempty"`
+	RemoveHome bool `protobuf:"varint,9,opt,name=remove_home,json=removeHome,proto3" json:"remove_home,omitempty"`
+	// Keys are the keys an add appends.
+	Keys []*LocalSSHKeyInput `protobuf:"bytes,10,rep,name=keys,proto3" json:"keys,omitempty"`
+	// Fingerprints names the keys a remove takes away.
+	Fingerprints []string `protobuf:"bytes,11,rep,name=fingerprints,proto3" json:"fingerprints,omitempty"`
+	// IgnoreMissing lets a remove pass over a fingerprint the account does
+	// not have.
+	IgnoreMissing bool `protobuf:"varint,12,opt,name=ignore_missing,json=ignoreMissing,proto3" json:"ignore_missing,omitempty"`
+	// ExpectedFingerprints is the list the operator saw when ordering a
+	// replace; a replace is refused as stale when the account has another
+	// list. The old SET_SSH_KEYS verifies it only when it is not empty.
+	ExpectedFingerprints []string `protobuf:"bytes,13,rep,name=expected_fingerprints,json=expectedFingerprints,proto3" json:"expected_fingerprints,omitempty"`
+	// AllowLockout permits taking the last key of an account with no
+	// password login.
+	AllowLockout bool `protobuf:"varint,14,opt,name=allow_lockout,json=allowLockout,proto3" json:"allow_lockout,omitempty"`
+	// ManagedFile edits the panel's file under /etc/ssh/authorized_keys.d;
+	// refused when sshd does not read it.
+	ManagedFile bool `protobuf:"varint,15,opt,name=managed_file,json=managedFile,proto3" json:"managed_file,omitempty"`
+	// System says the order means a system account; without it an account
+	// outside the UID range of people is refused.
+	System bool `protobuf:"varint,16,opt,name=system,proto3" json:"system,omitempty"`
+	// Inactive: a create with no key, made locked so nobody enters.
+	Inactive      bool `protobuf:"varint,17,opt,name=inactive,proto3" json:"inactive,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2582,6 +2617,115 @@ func (x *LocalUserActionRequest) GetRemoveHome() bool {
 	return false
 }
 
+func (x *LocalUserActionRequest) GetKeys() []*LocalSSHKeyInput {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
+func (x *LocalUserActionRequest) GetFingerprints() []string {
+	if x != nil {
+		return x.Fingerprints
+	}
+	return nil
+}
+
+func (x *LocalUserActionRequest) GetIgnoreMissing() bool {
+	if x != nil {
+		return x.IgnoreMissing
+	}
+	return false
+}
+
+func (x *LocalUserActionRequest) GetExpectedFingerprints() []string {
+	if x != nil {
+		return x.ExpectedFingerprints
+	}
+	return nil
+}
+
+func (x *LocalUserActionRequest) GetAllowLockout() bool {
+	if x != nil {
+		return x.AllowLockout
+	}
+	return false
+}
+
+func (x *LocalUserActionRequest) GetManagedFile() bool {
+	if x != nil {
+		return x.ManagedFile
+	}
+	return false
+}
+
+func (x *LocalUserActionRequest) GetSystem() bool {
+	if x != nil {
+		return x.System
+	}
+	return false
+}
+
+func (x *LocalUserActionRequest) GetInactive() bool {
+	if x != nil {
+		return x.Inactive
+	}
+	return false
+}
+
+// LocalSSHKeyInput is one key to add.
+type LocalSSHKeyInput struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	PublicKey     string                 `protobuf:"bytes,1,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Comment       string                 `protobuf:"bytes,2,opt,name=comment,proto3" json:"comment,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LocalSSHKeyInput) Reset() {
+	*x = LocalSSHKeyInput{}
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LocalSSHKeyInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LocalSSHKeyInput) ProtoMessage() {}
+
+func (x *LocalSSHKeyInput) ProtoReflect() protoreflect.Message {
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LocalSSHKeyInput.ProtoReflect.Descriptor instead.
+func (*LocalSSHKeyInput) Descriptor() ([]byte, []int) {
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *LocalSSHKeyInput) GetPublicKey() string {
+	if x != nil {
+		return x.PublicKey
+	}
+	return ""
+}
+
+func (x *LocalSSHKeyInput) GetComment() string {
+	if x != nil {
+		return x.Comment
+	}
+	return ""
+}
+
 // DomainEnrollRequest joins the host to the domain. Requires root, because
 // it changes the SSSD, Kerberos and PAM configuration.
 type DomainEnrollRequest struct {
@@ -2598,7 +2742,7 @@ type DomainEnrollRequest struct {
 
 func (x *DomainEnrollRequest) Reset() {
 	*x = DomainEnrollRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[8]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2610,7 +2754,7 @@ func (x *DomainEnrollRequest) String() string {
 func (*DomainEnrollRequest) ProtoMessage() {}
 
 func (x *DomainEnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[8]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2623,7 +2767,7 @@ func (x *DomainEnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainEnrollRequest.ProtoReflect.Descriptor instead.
 func (*DomainEnrollRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{8}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *DomainEnrollRequest) GetDomain() string {
@@ -2682,7 +2826,7 @@ type DomainLeaveRequest struct {
 
 func (x *DomainLeaveRequest) Reset() {
 	*x = DomainLeaveRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[9]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2694,7 +2838,7 @@ func (x *DomainLeaveRequest) String() string {
 func (*DomainLeaveRequest) ProtoMessage() {}
 
 func (x *DomainLeaveRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[9]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2707,7 +2851,7 @@ func (x *DomainLeaveRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainLeaveRequest.ProtoReflect.Descriptor instead.
 func (*DomainLeaveRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{9}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DomainLeaveRequest) GetDomain() string {
@@ -2736,7 +2880,7 @@ type IdentityProbeRequest struct {
 
 func (x *IdentityProbeRequest) Reset() {
 	*x = IdentityProbeRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[10]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2748,7 +2892,7 @@ func (x *IdentityProbeRequest) String() string {
 func (*IdentityProbeRequest) ProtoMessage() {}
 
 func (x *IdentityProbeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[10]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2761,7 +2905,7 @@ func (x *IdentityProbeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityProbeRequest.ProtoReflect.Descriptor instead.
 func (*IdentityProbeRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{10}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *IdentityProbeRequest) GetDomain() string {
@@ -2782,7 +2926,7 @@ type RebootRequest struct {
 
 func (x *RebootRequest) Reset() {
 	*x = RebootRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[11]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2794,7 +2938,7 @@ func (x *RebootRequest) String() string {
 func (*RebootRequest) ProtoMessage() {}
 
 func (x *RebootRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[11]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2807,7 +2951,7 @@ func (x *RebootRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RebootRequest.ProtoReflect.Descriptor instead.
 func (*RebootRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{11}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RebootRequest) GetDelaySeconds() uint32 {
@@ -2838,7 +2982,7 @@ type ShutdownRequest struct {
 
 func (x *ShutdownRequest) Reset() {
 	*x = ShutdownRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[12]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2850,7 +2994,7 @@ func (x *ShutdownRequest) String() string {
 func (*ShutdownRequest) ProtoMessage() {}
 
 func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[12]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2863,7 +3007,7 @@ func (x *ShutdownRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShutdownRequest.ProtoReflect.Descriptor instead.
 func (*ShutdownRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{12}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ShutdownRequest) GetDelaySeconds() uint32 {
@@ -2906,7 +3050,7 @@ type PowerResult struct {
 
 func (x *PowerResult) Reset() {
 	*x = PowerResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[13]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2918,7 +3062,7 @@ func (x *PowerResult) String() string {
 func (*PowerResult) ProtoMessage() {}
 
 func (x *PowerResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[13]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2931,7 +3075,7 @@ func (x *PowerResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PowerResult.ProtoReflect.Descriptor instead.
 func (*PowerResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{13}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *PowerResult) GetSnapshot() []byte {
@@ -3007,7 +3151,7 @@ type PackageActionRequest struct {
 
 func (x *PackageActionRequest) Reset() {
 	*x = PackageActionRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[14]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3019,7 +3163,7 @@ func (x *PackageActionRequest) String() string {
 func (*PackageActionRequest) ProtoMessage() {}
 
 func (x *PackageActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[14]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3032,7 +3176,7 @@ func (x *PackageActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageActionRequest.ProtoReflect.Descriptor instead.
 func (*PackageActionRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{14}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *PackageActionRequest) GetOperation() PackageActionRequest_Operation {
@@ -3151,7 +3295,7 @@ type PackageExactSpec struct {
 
 func (x *PackageExactSpec) Reset() {
 	*x = PackageExactSpec{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[15]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3163,7 +3307,7 @@ func (x *PackageExactSpec) String() string {
 func (*PackageExactSpec) ProtoMessage() {}
 
 func (x *PackageExactSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[15]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3176,7 +3320,7 @@ func (x *PackageExactSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageExactSpec.ProtoReflect.Descriptor instead.
 func (*PackageExactSpec) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{15}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *PackageExactSpec) GetName() string {
@@ -3231,7 +3375,7 @@ type UnitActionRequest struct {
 
 func (x *UnitActionRequest) Reset() {
 	*x = UnitActionRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[16]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3243,7 +3387,7 @@ func (x *UnitActionRequest) String() string {
 func (*UnitActionRequest) ProtoMessage() {}
 
 func (x *UnitActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[16]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3256,7 +3400,7 @@ func (x *UnitActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnitActionRequest.ProtoReflect.Descriptor instead.
 func (*UnitActionRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{16}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UnitActionRequest) GetUnit() string {
@@ -3335,7 +3479,7 @@ type HelperResponse struct {
 
 func (x *HelperResponse) Reset() {
 	*x = HelperResponse{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[17]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3347,7 +3491,7 @@ func (x *HelperResponse) String() string {
 func (*HelperResponse) ProtoMessage() {}
 
 func (x *HelperResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[17]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3360,7 +3504,7 @@ func (x *HelperResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HelperResponse.ProtoReflect.Descriptor instead.
 func (*HelperResponse) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{17}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *HelperResponse) GetAccepted() bool {
@@ -3690,7 +3834,7 @@ type SystemRequest struct {
 
 func (x *SystemRequest) Reset() {
 	*x = SystemRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[18]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3702,7 +3846,7 @@ func (x *SystemRequest) String() string {
 func (*SystemRequest) ProtoMessage() {}
 
 func (x *SystemRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[18]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3715,7 +3859,7 @@ func (x *SystemRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemRequest.ProtoReflect.Descriptor instead.
 func (*SystemRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{18}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SystemRequest) GetFacts() []SystemRequest_Fact {
@@ -3737,7 +3881,7 @@ type SystemResult struct {
 
 func (x *SystemResult) Reset() {
 	*x = SystemResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[19]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3749,7 +3893,7 @@ func (x *SystemResult) String() string {
 func (*SystemResult) ProtoMessage() {}
 
 func (x *SystemResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[19]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3762,7 +3906,7 @@ func (x *SystemResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SystemResult.ProtoReflect.Descriptor instead.
 func (*SystemResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{19}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *SystemResult) GetDmi() []byte {
@@ -3791,7 +3935,7 @@ type DockerReadRequest struct {
 
 func (x *DockerReadRequest) Reset() {
 	*x = DockerReadRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[20]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3803,7 +3947,7 @@ func (x *DockerReadRequest) String() string {
 func (*DockerReadRequest) ProtoMessage() {}
 
 func (x *DockerReadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[20]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3816,7 +3960,7 @@ func (x *DockerReadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerReadRequest.ProtoReflect.Descriptor instead.
 func (*DockerReadRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{20}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *DockerReadRequest) GetScope() DockerReadRequest_Scope {
@@ -3847,7 +3991,7 @@ type DockerActionRequest struct {
 
 func (x *DockerActionRequest) Reset() {
 	*x = DockerActionRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[21]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3859,7 +4003,7 @@ func (x *DockerActionRequest) String() string {
 func (*DockerActionRequest) ProtoMessage() {}
 
 func (x *DockerActionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[21]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3872,7 +4016,7 @@ func (x *DockerActionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerActionRequest.ProtoReflect.Descriptor instead.
 func (*DockerActionRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{21}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DockerActionRequest) GetOperation() DockerActionRequest_Operation {
@@ -3946,7 +4090,7 @@ type DockerActionResult struct {
 
 func (x *DockerActionResult) Reset() {
 	*x = DockerActionResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[22]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3958,7 +4102,7 @@ func (x *DockerActionResult) String() string {
 func (*DockerActionResult) ProtoMessage() {}
 
 func (x *DockerActionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[22]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3971,7 +4115,7 @@ func (x *DockerActionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerActionResult.ProtoReflect.Descriptor instead.
 func (*DockerActionResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{22}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DockerActionResult) GetBefore() []byte {
@@ -4029,7 +4173,7 @@ type ScheduleRequest struct {
 
 func (x *ScheduleRequest) Reset() {
 	*x = ScheduleRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[23]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4041,7 +4185,7 @@ func (x *ScheduleRequest) String() string {
 func (*ScheduleRequest) ProtoMessage() {}
 
 func (x *ScheduleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[23]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4054,7 +4198,7 @@ func (x *ScheduleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleRequest.ProtoReflect.Descriptor instead.
 func (*ScheduleRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{23}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *ScheduleRequest) GetOperation() ScheduleRequest_Operation {
@@ -4125,7 +4269,7 @@ type ScheduleResult struct {
 
 func (x *ScheduleResult) Reset() {
 	*x = ScheduleResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[24]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4137,7 +4281,7 @@ func (x *ScheduleResult) String() string {
 func (*ScheduleResult) ProtoMessage() {}
 
 func (x *ScheduleResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[24]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4150,7 +4294,7 @@ func (x *ScheduleResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduleResult.ProtoReflect.Descriptor instead.
 func (*ScheduleResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{24}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ScheduleResult) GetSnapshot() []byte {
@@ -4203,7 +4347,7 @@ type NetworkRequest struct {
 
 func (x *NetworkRequest) Reset() {
 	*x = NetworkRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[25]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4215,7 +4359,7 @@ func (x *NetworkRequest) String() string {
 func (*NetworkRequest) ProtoMessage() {}
 
 func (x *NetworkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[25]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4228,7 +4372,7 @@ func (x *NetworkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkRequest.ProtoReflect.Descriptor instead.
 func (*NetworkRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{25}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *NetworkRequest) GetOperation() NetworkRequest_Operation {
@@ -4337,7 +4481,7 @@ type NetworkResult struct {
 
 func (x *NetworkResult) Reset() {
 	*x = NetworkResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[26]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4349,7 +4493,7 @@ func (x *NetworkResult) String() string {
 func (*NetworkResult) ProtoMessage() {}
 
 func (x *NetworkResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[26]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4362,7 +4506,7 @@ func (x *NetworkResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkResult.ProtoReflect.Descriptor instead.
 func (*NetworkResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{26}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *NetworkResult) GetProfiles() []byte {
@@ -4433,7 +4577,7 @@ type DnsRequest struct {
 
 func (x *DnsRequest) Reset() {
 	*x = DnsRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[27]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4445,7 +4589,7 @@ func (x *DnsRequest) String() string {
 func (*DnsRequest) ProtoMessage() {}
 
 func (x *DnsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[27]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4458,7 +4602,7 @@ func (x *DnsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DnsRequest.ProtoReflect.Descriptor instead.
 func (*DnsRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{27}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *DnsRequest) GetOperation() DnsRequest_Operation {
@@ -4525,7 +4669,7 @@ type DnsResult struct {
 
 func (x *DnsResult) Reset() {
 	*x = DnsResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[28]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4537,7 +4681,7 @@ func (x *DnsResult) String() string {
 func (*DnsResult) ProtoMessage() {}
 
 func (x *DnsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[28]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4550,7 +4694,7 @@ func (x *DnsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DnsResult.ProtoReflect.Descriptor instead.
 func (*DnsResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{28}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DnsResult) GetProfiles() []byte {
@@ -4636,7 +4780,7 @@ type FirewallRequest struct {
 
 func (x *FirewallRequest) Reset() {
 	*x = FirewallRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[29]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4648,7 +4792,7 @@ func (x *FirewallRequest) String() string {
 func (*FirewallRequest) ProtoMessage() {}
 
 func (x *FirewallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[29]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4661,7 +4805,7 @@ func (x *FirewallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirewallRequest.ProtoReflect.Descriptor instead.
 func (*FirewallRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{29}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *FirewallRequest) GetOperation() FirewallRequest_Operation {
@@ -4808,7 +4952,7 @@ type FirewallResult struct {
 
 func (x *FirewallResult) Reset() {
 	*x = FirewallResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[30]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4820,7 +4964,7 @@ func (x *FirewallResult) String() string {
 func (*FirewallResult) ProtoMessage() {}
 
 func (x *FirewallResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[30]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4833,7 +4977,7 @@ func (x *FirewallResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FirewallResult.ProtoReflect.Descriptor instead.
 func (*FirewallResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{30}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *FirewallResult) GetSnapshot() []byte {
@@ -4930,7 +5074,7 @@ type StorageRequest struct {
 
 func (x *StorageRequest) Reset() {
 	*x = StorageRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[31]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4942,7 +5086,7 @@ func (x *StorageRequest) String() string {
 func (*StorageRequest) ProtoMessage() {}
 
 func (x *StorageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[31]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4955,7 +5099,7 @@ func (x *StorageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageRequest.ProtoReflect.Descriptor instead.
 func (*StorageRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{31}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *StorageRequest) GetOperation() StorageRequest_Operation {
@@ -5093,7 +5237,7 @@ type StorageResult struct {
 
 func (x *StorageResult) Reset() {
 	*x = StorageResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[32]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5105,7 +5249,7 @@ func (x *StorageResult) String() string {
 func (*StorageResult) ProtoMessage() {}
 
 func (x *StorageResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[32]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5118,7 +5262,7 @@ func (x *StorageResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StorageResult.ProtoReflect.Descriptor instead.
 func (*StorageResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{32}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StorageResult) GetSnapshot() []byte {
@@ -5181,7 +5325,7 @@ type SshRequest struct {
 
 func (x *SshRequest) Reset() {
 	*x = SshRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[33]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5193,7 +5337,7 @@ func (x *SshRequest) String() string {
 func (*SshRequest) ProtoMessage() {}
 
 func (x *SshRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[33]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5206,7 +5350,7 @@ func (x *SshRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SshRequest.ProtoReflect.Descriptor instead.
 func (*SshRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{33}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *SshRequest) GetOperation() SshRequest_Operation {
@@ -5317,7 +5461,7 @@ type SshResult struct {
 
 func (x *SshResult) Reset() {
 	*x = SshResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[34]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5329,7 +5473,7 @@ func (x *SshResult) String() string {
 func (*SshResult) ProtoMessage() {}
 
 func (x *SshResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[34]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5342,7 +5486,7 @@ func (x *SshResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SshResult.ProtoReflect.Descriptor instead.
 func (*SshResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{34}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *SshResult) GetSnapshot() []byte {
@@ -5390,7 +5534,7 @@ type SecurityRequest struct {
 
 func (x *SecurityRequest) Reset() {
 	*x = SecurityRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[35]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5402,7 +5546,7 @@ func (x *SecurityRequest) String() string {
 func (*SecurityRequest) ProtoMessage() {}
 
 func (x *SecurityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[35]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5415,7 +5559,7 @@ func (x *SecurityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecurityRequest.ProtoReflect.Descriptor instead.
 func (*SecurityRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{35}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *SecurityRequest) GetOperation() SecurityRequest_Operation {
@@ -5450,7 +5594,7 @@ type SecurityResult struct {
 
 func (x *SecurityResult) Reset() {
 	*x = SecurityResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[36]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5462,7 +5606,7 @@ func (x *SecurityResult) String() string {
 func (*SecurityResult) ProtoMessage() {}
 
 func (x *SecurityResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[36]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5475,7 +5619,7 @@ func (x *SecurityResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SecurityResult.ProtoReflect.Descriptor instead.
 func (*SecurityResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{36}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *SecurityResult) GetFacts() []byte {
@@ -5537,7 +5681,7 @@ type BackupRequest struct {
 
 func (x *BackupRequest) Reset() {
 	*x = BackupRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[37]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5549,7 +5693,7 @@ func (x *BackupRequest) String() string {
 func (*BackupRequest) ProtoMessage() {}
 
 func (x *BackupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[37]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5562,7 +5706,7 @@ func (x *BackupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupRequest.ProtoReflect.Descriptor instead.
 func (*BackupRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{37}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *BackupRequest) GetOperation() BackupRequest_Operation {
@@ -5743,7 +5887,7 @@ type BackupResult struct {
 
 func (x *BackupResult) Reset() {
 	*x = BackupResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[38]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5755,7 +5899,7 @@ func (x *BackupResult) String() string {
 func (*BackupResult) ProtoMessage() {}
 
 func (x *BackupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[38]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5768,7 +5912,7 @@ func (x *BackupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BackupResult.ProtoReflect.Descriptor instead.
 func (*BackupResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{38}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *BackupResult) GetState() []byte {
@@ -5839,7 +5983,7 @@ type RepositoryRequest struct {
 
 func (x *RepositoryRequest) Reset() {
 	*x = RepositoryRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[39]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5851,7 +5995,7 @@ func (x *RepositoryRequest) String() string {
 func (*RepositoryRequest) ProtoMessage() {}
 
 func (x *RepositoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[39]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5864,7 +6008,7 @@ func (x *RepositoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepositoryRequest.ProtoReflect.Descriptor instead.
 func (*RepositoryRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{39}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *RepositoryRequest) GetId() string {
@@ -5977,7 +6121,7 @@ type RepositoryResult struct {
 
 func (x *RepositoryResult) Reset() {
 	*x = RepositoryResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[40]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5989,7 +6133,7 @@ func (x *RepositoryResult) String() string {
 func (*RepositoryResult) ProtoMessage() {}
 
 func (x *RepositoryResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[40]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6002,7 +6146,7 @@ func (x *RepositoryResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepositoryResult.ProtoReflect.Descriptor instead.
 func (*RepositoryResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{40}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *RepositoryResult) GetSnapshot() []byte {
@@ -6046,7 +6190,7 @@ type CertificateTarget struct {
 
 func (x *CertificateTarget) Reset() {
 	*x = CertificateTarget{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[41]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6058,7 +6202,7 @@ func (x *CertificateTarget) String() string {
 func (*CertificateTarget) ProtoMessage() {}
 
 func (x *CertificateTarget) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[41]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6071,7 +6215,7 @@ func (x *CertificateTarget) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateTarget.ProtoReflect.Descriptor instead.
 func (*CertificateTarget) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{41}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *CertificateTarget) GetPath() string {
@@ -6143,7 +6287,7 @@ type CertificateRequest struct {
 
 func (x *CertificateRequest) Reset() {
 	*x = CertificateRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[42]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6155,7 +6299,7 @@ func (x *CertificateRequest) String() string {
 func (*CertificateRequest) ProtoMessage() {}
 
 func (x *CertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[42]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6168,7 +6312,7 @@ func (x *CertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateRequest.ProtoReflect.Descriptor instead.
 func (*CertificateRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{42}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *CertificateRequest) GetOperation() CertificateRequest_Operation {
@@ -6318,7 +6462,7 @@ type CertificateResult struct {
 
 func (x *CertificateResult) Reset() {
 	*x = CertificateResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[43]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6330,7 +6474,7 @@ func (x *CertificateResult) String() string {
 func (*CertificateResult) ProtoMessage() {}
 
 func (x *CertificateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[43]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6343,7 +6487,7 @@ func (x *CertificateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateResult.ProtoReflect.Descriptor instead.
 func (*CertificateResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{43}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *CertificateResult) GetFacts() []byte {
@@ -6428,7 +6572,7 @@ type TimeRequest struct {
 
 func (x *TimeRequest) Reset() {
 	*x = TimeRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[44]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6440,7 +6584,7 @@ func (x *TimeRequest) String() string {
 func (*TimeRequest) ProtoMessage() {}
 
 func (x *TimeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[44]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6453,7 +6597,7 @@ func (x *TimeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimeRequest.ProtoReflect.Descriptor instead.
 func (*TimeRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{44}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *TimeRequest) GetOperation() TimeRequest_Operation {
@@ -6511,7 +6655,7 @@ type TimeResult struct {
 
 func (x *TimeResult) Reset() {
 	*x = TimeResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[45]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6523,7 +6667,7 @@ func (x *TimeResult) String() string {
 func (*TimeResult) ProtoMessage() {}
 
 func (x *TimeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[45]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6536,7 +6680,7 @@ func (x *TimeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TimeResult.ProtoReflect.Descriptor instead.
 func (*TimeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{45}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *TimeResult) GetSnapshot() []byte {
@@ -6590,7 +6734,7 @@ type KernelRequest struct {
 
 func (x *KernelRequest) Reset() {
 	*x = KernelRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[46]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6602,7 +6746,7 @@ func (x *KernelRequest) String() string {
 func (*KernelRequest) ProtoMessage() {}
 
 func (x *KernelRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[46]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6615,7 +6759,7 @@ func (x *KernelRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KernelRequest.ProtoReflect.Descriptor instead.
 func (*KernelRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{46}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *KernelRequest) GetOperation() KernelRequest_Operation {
@@ -6678,7 +6822,7 @@ type KernelResult struct {
 
 func (x *KernelResult) Reset() {
 	*x = KernelResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[47]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6690,7 +6834,7 @@ func (x *KernelResult) String() string {
 func (*KernelResult) ProtoMessage() {}
 
 func (x *KernelResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[47]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6703,7 +6847,7 @@ func (x *KernelResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KernelResult.ProtoReflect.Descriptor instead.
 func (*KernelResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{47}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *KernelResult) GetSnapshot() []byte {
@@ -6772,7 +6916,7 @@ type FileRequest struct {
 
 func (x *FileRequest) Reset() {
 	*x = FileRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[48]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6784,7 +6928,7 @@ func (x *FileRequest) String() string {
 func (*FileRequest) ProtoMessage() {}
 
 func (x *FileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[48]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6797,7 +6941,7 @@ func (x *FileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
 func (*FileRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{48}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *FileRequest) GetOperation() FileRequest_Operation {
@@ -6892,7 +7036,7 @@ type FileResult struct {
 
 func (x *FileResult) Reset() {
 	*x = FileResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[49]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6904,7 +7048,7 @@ func (x *FileResult) String() string {
 func (*FileResult) ProtoMessage() {}
 
 func (x *FileResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[49]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6917,7 +7061,7 @@ func (x *FileResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileResult.ProtoReflect.Descriptor instead.
 func (*FileResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{49}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *FileResult) GetSnapshot() []byte {
@@ -6982,7 +7126,7 @@ type ProcessSignalRequest struct {
 
 func (x *ProcessSignalRequest) Reset() {
 	*x = ProcessSignalRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[50]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6994,7 +7138,7 @@ func (x *ProcessSignalRequest) String() string {
 func (*ProcessSignalRequest) ProtoMessage() {}
 
 func (x *ProcessSignalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[50]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7007,7 +7151,7 @@ func (x *ProcessSignalRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessSignalRequest.ProtoReflect.Descriptor instead.
 func (*ProcessSignalRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{50}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *ProcessSignalRequest) GetPid() int32 {
@@ -7041,7 +7185,7 @@ type ProcessSignalResult struct {
 
 func (x *ProcessSignalResult) Reset() {
 	*x = ProcessSignalResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[51]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7053,7 +7197,7 @@ func (x *ProcessSignalResult) String() string {
 func (*ProcessSignalResult) ProtoMessage() {}
 
 func (x *ProcessSignalResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[51]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7066,7 +7210,7 @@ func (x *ProcessSignalResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessSignalResult.ProtoReflect.Descriptor instead.
 func (*ProcessSignalResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{51}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ProcessSignalResult) GetPid() int32 {
@@ -7096,7 +7240,7 @@ type LogFileRequest struct {
 
 func (x *LogFileRequest) Reset() {
 	*x = LogFileRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[52]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7108,7 +7252,7 @@ func (x *LogFileRequest) String() string {
 func (*LogFileRequest) ProtoMessage() {}
 
 func (x *LogFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[52]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7121,7 +7265,7 @@ func (x *LogFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogFileRequest.ProtoReflect.Descriptor instead.
 func (*LogFileRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{52}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *LogFileRequest) GetPath() string {
@@ -7153,7 +7297,7 @@ type LogFileResult struct {
 
 func (x *LogFileResult) Reset() {
 	*x = LogFileResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[53]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7165,7 +7309,7 @@ func (x *LogFileResult) String() string {
 func (*LogFileResult) ProtoMessage() {}
 
 func (x *LogFileResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[53]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7178,7 +7322,7 @@ func (x *LogFileResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogFileResult.ProtoReflect.Descriptor instead.
 func (*LogFileResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{53}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *LogFileResult) GetPath() string {
@@ -7234,7 +7378,7 @@ type ComposeRequest struct {
 
 func (x *ComposeRequest) Reset() {
 	*x = ComposeRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[54]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7246,7 +7390,7 @@ func (x *ComposeRequest) String() string {
 func (*ComposeRequest) ProtoMessage() {}
 
 func (x *ComposeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[54]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7259,7 +7403,7 @@ func (x *ComposeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComposeRequest.ProtoReflect.Descriptor instead.
 func (*ComposeRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{54}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *ComposeRequest) GetOperation() ComposeRequest_Operation {
@@ -7309,7 +7453,7 @@ type ComposeResult struct {
 
 func (x *ComposeResult) Reset() {
 	*x = ComposeResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[55]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7321,7 +7465,7 @@ func (x *ComposeResult) String() string {
 func (*ComposeResult) ProtoMessage() {}
 
 func (x *ComposeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[55]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7334,7 +7478,7 @@ func (x *ComposeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComposeResult.ProtoReflect.Descriptor instead.
 func (*ComposeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{55}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *ComposeResult) GetPayload() []byte {
@@ -7366,7 +7510,7 @@ type DockerEventsRequest struct {
 
 func (x *DockerEventsRequest) Reset() {
 	*x = DockerEventsRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[56]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7378,7 +7522,7 @@ func (x *DockerEventsRequest) String() string {
 func (*DockerEventsRequest) ProtoMessage() {}
 
 func (x *DockerEventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[56]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7391,7 +7535,7 @@ func (x *DockerEventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerEventsRequest.ProtoReflect.Descriptor instead.
 func (*DockerEventsRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{56}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *DockerEventsRequest) GetSinceSeconds() uint32 {
@@ -7434,7 +7578,7 @@ type DockerEventsResult struct {
 
 func (x *DockerEventsResult) Reset() {
 	*x = DockerEventsResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[57]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7446,7 +7590,7 @@ func (x *DockerEventsResult) String() string {
 func (*DockerEventsResult) ProtoMessage() {}
 
 func (x *DockerEventsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[57]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7459,7 +7603,7 @@ func (x *DockerEventsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerEventsResult.ProtoReflect.Descriptor instead.
 func (*DockerEventsResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{57}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *DockerEventsResult) GetEvents() []byte {
@@ -7505,7 +7649,7 @@ type DockerLogsRequest struct {
 
 func (x *DockerLogsRequest) Reset() {
 	*x = DockerLogsRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[58]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7517,7 +7661,7 @@ func (x *DockerLogsRequest) String() string {
 func (*DockerLogsRequest) ProtoMessage() {}
 
 func (x *DockerLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[58]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7530,7 +7674,7 @@ func (x *DockerLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerLogsRequest.ProtoReflect.Descriptor instead.
 func (*DockerLogsRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{58}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *DockerLogsRequest) GetContainerId() string {
@@ -7575,7 +7719,7 @@ type DockerLogsResult struct {
 
 func (x *DockerLogsResult) Reset() {
 	*x = DockerLogsResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[59]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7587,7 +7731,7 @@ func (x *DockerLogsResult) String() string {
 func (*DockerLogsResult) ProtoMessage() {}
 
 func (x *DockerLogsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[59]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7600,7 +7744,7 @@ func (x *DockerLogsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerLogsResult.ProtoReflect.Descriptor instead.
 func (*DockerLogsResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{59}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *DockerLogsResult) GetContainerId() string {
@@ -7657,7 +7801,7 @@ type HostnameRequest struct {
 
 func (x *HostnameRequest) Reset() {
 	*x = HostnameRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[60]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7669,7 +7813,7 @@ func (x *HostnameRequest) String() string {
 func (*HostnameRequest) ProtoMessage() {}
 
 func (x *HostnameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[60]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7682,7 +7826,7 @@ func (x *HostnameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostnameRequest.ProtoReflect.Descriptor instead.
 func (*HostnameRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{60}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *HostnameRequest) GetHostname() string {
@@ -7711,7 +7855,7 @@ type HostnameResult struct {
 
 func (x *HostnameResult) Reset() {
 	*x = HostnameResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[61]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7723,7 +7867,7 @@ func (x *HostnameResult) String() string {
 func (*HostnameResult) ProtoMessage() {}
 
 func (x *HostnameResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[61]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7736,7 +7880,7 @@ func (x *HostnameResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostnameResult.ProtoReflect.Descriptor instead.
 func (*HostnameResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{61}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *HostnameResult) GetPrevious() string {
@@ -7782,7 +7926,7 @@ type FinalWipeRequest struct {
 
 func (x *FinalWipeRequest) Reset() {
 	*x = FinalWipeRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[62]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7794,7 +7938,7 @@ func (x *FinalWipeRequest) String() string {
 func (*FinalWipeRequest) ProtoMessage() {}
 
 func (x *FinalWipeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[62]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7807,7 +7951,7 @@ func (x *FinalWipeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalWipeRequest.ProtoReflect.Descriptor instead.
 func (*FinalWipeRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{62}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *FinalWipeRequest) GetReason() string {
@@ -7829,7 +7973,7 @@ type FinalWipeResult struct {
 
 func (x *FinalWipeResult) Reset() {
 	*x = FinalWipeResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[63]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7841,7 +7985,7 @@ func (x *FinalWipeResult) String() string {
 func (*FinalWipeResult) ProtoMessage() {}
 
 func (x *FinalWipeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[63]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7854,7 +7998,7 @@ func (x *FinalWipeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FinalWipeResult.ProtoReflect.Descriptor instead.
 func (*FinalWipeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{63}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *FinalWipeResult) GetRemoved() []string {
@@ -7893,7 +8037,7 @@ type KeytabRenewRequest struct {
 
 func (x *KeytabRenewRequest) Reset() {
 	*x = KeytabRenewRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[64]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7905,7 +8049,7 @@ func (x *KeytabRenewRequest) String() string {
 func (*KeytabRenewRequest) ProtoMessage() {}
 
 func (x *KeytabRenewRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[64]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7918,7 +8062,7 @@ func (x *KeytabRenewRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeytabRenewRequest.ProtoReflect.Descriptor instead.
 func (*KeytabRenewRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{64}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{65}
 }
 
 func (x *KeytabRenewRequest) GetPrincipal() string {
@@ -7945,7 +8089,7 @@ type KeytabRenewResult struct {
 
 func (x *KeytabRenewResult) Reset() {
 	*x = KeytabRenewResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[65]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -7957,7 +8101,7 @@ func (x *KeytabRenewResult) String() string {
 func (*KeytabRenewResult) ProtoMessage() {}
 
 func (x *KeytabRenewResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[65]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -7970,7 +8114,7 @@ func (x *KeytabRenewResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use KeytabRenewResult.ProtoReflect.Descriptor instead.
 func (*KeytabRenewResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{65}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *KeytabRenewResult) GetPrincipal() string {
@@ -8025,7 +8169,7 @@ type SmartResult struct {
 
 func (x *SmartResult) Reset() {
 	*x = SmartResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[66]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8037,7 +8181,7 @@ func (x *SmartResult) String() string {
 func (*SmartResult) ProtoMessage() {}
 
 func (x *SmartResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[66]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8050,7 +8194,7 @@ func (x *SmartResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SmartResult.ProtoReflect.Descriptor instead.
 func (*SmartResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{66}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *SmartResult) GetDevice() string {
@@ -8167,7 +8311,7 @@ type SmartAttribute struct {
 
 func (x *SmartAttribute) Reset() {
 	*x = SmartAttribute{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[67]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8179,7 +8323,7 @@ func (x *SmartAttribute) String() string {
 func (*SmartAttribute) ProtoMessage() {}
 
 func (x *SmartAttribute) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[67]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8192,7 +8336,7 @@ func (x *SmartAttribute) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SmartAttribute.ProtoReflect.Descriptor instead.
 func (*SmartAttribute) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{67}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{68}
 }
 
 func (x *SmartAttribute) GetId() uint32 {
@@ -8266,7 +8410,7 @@ type DockerReadResult struct {
 
 func (x *DockerReadResult) Reset() {
 	*x = DockerReadResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[68]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8278,7 +8422,7 @@ func (x *DockerReadResult) String() string {
 func (*DockerReadResult) ProtoMessage() {}
 
 func (x *DockerReadResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[68]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8291,7 +8435,7 @@ func (x *DockerReadResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DockerReadResult.ProtoReflect.Descriptor instead.
 func (*DockerReadResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{68}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *DockerReadResult) GetSnapshot() []byte {
@@ -8330,7 +8474,7 @@ type TaskProgress struct {
 
 func (x *TaskProgress) Reset() {
 	*x = TaskProgress{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[69]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8342,7 +8486,7 @@ func (x *TaskProgress) String() string {
 func (*TaskProgress) ProtoMessage() {}
 
 func (x *TaskProgress) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[69]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8355,7 +8499,7 @@ func (x *TaskProgress) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskProgress.ProtoReflect.Descriptor instead.
 func (*TaskProgress) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{69}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{70}
 }
 
 func (x *TaskProgress) GetStep() uint32 {
@@ -8396,7 +8540,7 @@ type LocalAccountsResult struct {
 
 func (x *LocalAccountsResult) Reset() {
 	*x = LocalAccountsResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[70]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8408,7 +8552,7 @@ func (x *LocalAccountsResult) String() string {
 func (*LocalAccountsResult) ProtoMessage() {}
 
 func (x *LocalAccountsResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[70]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8421,7 +8565,7 @@ func (x *LocalAccountsResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalAccountsResult.ProtoReflect.Descriptor instead.
 func (*LocalAccountsResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{70}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *LocalAccountsResult) GetAccounts() []*LocalAccountDetail {
@@ -8453,7 +8597,7 @@ type LocalAccountDetail struct {
 
 func (x *LocalAccountDetail) Reset() {
 	*x = LocalAccountDetail{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[71]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8465,7 +8609,7 @@ func (x *LocalAccountDetail) String() string {
 func (*LocalAccountDetail) ProtoMessage() {}
 
 func (x *LocalAccountDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[71]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8478,7 +8622,7 @@ func (x *LocalAccountDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalAccountDetail.ProtoReflect.Descriptor instead.
 func (*LocalAccountDetail) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{71}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *LocalAccountDetail) GetName() string {
@@ -8517,17 +8661,20 @@ func (x *LocalAccountDetail) GetExpiresAt() string {
 }
 
 type LocalSSHKey struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Fingerprint   string                 `protobuf:"bytes,1,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Comment       string                 `protobuf:"bytes,3,opt,name=comment,proto3" json:"comment,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	Fingerprint string                 `protobuf:"bytes,1,opt,name=fingerprint,proto3" json:"fingerprint,omitempty"`
+	Type        string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Comment     string                 `protobuf:"bytes,3,opt,name=comment,proto3" json:"comment,omitempty"`
+	// Source says which file carries the key: authorized_keys (the user's
+	// own file) or managed (the panel's file under /etc/ssh/authorized_keys.d).
+	Source        string `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *LocalSSHKey) Reset() {
 	*x = LocalSSHKey{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[72]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8539,7 +8686,7 @@ func (x *LocalSSHKey) String() string {
 func (*LocalSSHKey) ProtoMessage() {}
 
 func (x *LocalSSHKey) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[72]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8552,7 +8699,7 @@ func (x *LocalSSHKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LocalSSHKey.ProtoReflect.Descriptor instead.
 func (*LocalSSHKey) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{72}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{73}
 }
 
 func (x *LocalSSHKey) GetFingerprint() string {
@@ -8576,6 +8723,13 @@ func (x *LocalSSHKey) GetComment() string {
 	return ""
 }
 
+func (x *LocalSSHKey) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
 type DomainEnrollResult struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Checks        []*EnrollCheck         `protobuf:"bytes,1,rep,name=checks,proto3" json:"checks,omitempty"`
@@ -8588,7 +8742,7 @@ type DomainEnrollResult struct {
 
 func (x *DomainEnrollResult) Reset() {
 	*x = DomainEnrollResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[73]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8600,7 +8754,7 @@ func (x *DomainEnrollResult) String() string {
 func (*DomainEnrollResult) ProtoMessage() {}
 
 func (x *DomainEnrollResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[73]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8613,7 +8767,7 @@ func (x *DomainEnrollResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DomainEnrollResult.ProtoReflect.Descriptor instead.
 func (*DomainEnrollResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{73}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *DomainEnrollResult) GetChecks() []*EnrollCheck {
@@ -8656,7 +8810,7 @@ type EnrollCheck struct {
 
 func (x *EnrollCheck) Reset() {
 	*x = EnrollCheck{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[74]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8668,7 +8822,7 @@ func (x *EnrollCheck) String() string {
 func (*EnrollCheck) ProtoMessage() {}
 
 func (x *EnrollCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[74]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8681,7 +8835,7 @@ func (x *EnrollCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollCheck.ProtoReflect.Descriptor instead.
 func (*EnrollCheck) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{74}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{75}
 }
 
 func (x *EnrollCheck) GetName() string {
@@ -8731,7 +8885,7 @@ type IdentityProbeResult struct {
 
 func (x *IdentityProbeResult) Reset() {
 	*x = IdentityProbeResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[75]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8743,7 +8897,7 @@ func (x *IdentityProbeResult) String() string {
 func (*IdentityProbeResult) ProtoMessage() {}
 
 func (x *IdentityProbeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[75]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8756,7 +8910,7 @@ func (x *IdentityProbeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdentityProbeResult.ProtoReflect.Descriptor instead.
 func (*IdentityProbeResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{75}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{76}
 }
 
 func (x *IdentityProbeResult) GetHostPrincipal() string {
@@ -8842,7 +8996,7 @@ type SssdOfflinePolicy struct {
 
 func (x *SssdOfflinePolicy) Reset() {
 	*x = SssdOfflinePolicy{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[76]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8854,7 +9008,7 @@ func (x *SssdOfflinePolicy) String() string {
 func (*SssdOfflinePolicy) ProtoMessage() {}
 
 func (x *SssdOfflinePolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[76]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8867,7 +9021,7 @@ func (x *SssdOfflinePolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SssdOfflinePolicy.ProtoReflect.Descriptor instead.
 func (*SssdOfflinePolicy) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{76}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *SssdOfflinePolicy) GetCacheCredentials() bool {
@@ -8946,7 +9100,7 @@ type PackageActionResult struct {
 
 func (x *PackageActionResult) Reset() {
 	*x = PackageActionResult{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[77]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -8958,7 +9112,7 @@ func (x *PackageActionResult) String() string {
 func (*PackageActionResult) ProtoMessage() {}
 
 func (x *PackageActionResult) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[77]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -8971,7 +9125,7 @@ func (x *PackageActionResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageActionResult.ProtoReflect.Descriptor instead.
 func (*PackageActionResult) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{77}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *PackageActionResult) GetManager() string {
@@ -9067,7 +9221,7 @@ type PackageEffectOutcome struct {
 
 func (x *PackageEffectOutcome) Reset() {
 	*x = PackageEffectOutcome{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[78]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9079,7 +9233,7 @@ func (x *PackageEffectOutcome) String() string {
 func (*PackageEffectOutcome) ProtoMessage() {}
 
 func (x *PackageEffectOutcome) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[78]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9092,7 +9246,7 @@ func (x *PackageEffectOutcome) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageEffectOutcome.ProtoReflect.Descriptor instead.
 func (*PackageEffectOutcome) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{78}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *PackageEffectOutcome) GetKind() string {
@@ -9142,7 +9296,7 @@ type PackageRepairRequest struct {
 
 func (x *PackageRepairRequest) Reset() {
 	*x = PackageRepairRequest{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[79]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9154,7 +9308,7 @@ func (x *PackageRepairRequest) String() string {
 func (*PackageRepairRequest) ProtoMessage() {}
 
 func (x *PackageRepairRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[79]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9167,7 +9321,7 @@ func (x *PackageRepairRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageRepairRequest.ProtoReflect.Descriptor instead.
 func (*PackageRepairRequest) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{79}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *PackageRepairRequest) GetAnswers() []*DebconfSelection {
@@ -9189,7 +9343,7 @@ type DebconfSelection struct {
 
 func (x *DebconfSelection) Reset() {
 	*x = DebconfSelection{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[80]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9201,7 +9355,7 @@ func (x *DebconfSelection) String() string {
 func (*DebconfSelection) ProtoMessage() {}
 
 func (x *DebconfSelection) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[80]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9214,7 +9368,7 @@ func (x *DebconfSelection) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DebconfSelection.ProtoReflect.Descriptor instead.
 func (*DebconfSelection) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{80}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *DebconfSelection) GetPackage() string {
@@ -9257,7 +9411,7 @@ type PackageRepairResponse struct {
 
 func (x *PackageRepairResponse) Reset() {
 	*x = PackageRepairResponse{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[81]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9269,7 +9423,7 @@ func (x *PackageRepairResponse) String() string {
 func (*PackageRepairResponse) ProtoMessage() {}
 
 func (x *PackageRepairResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[81]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9282,7 +9436,7 @@ func (x *PackageRepairResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageRepairResponse.ProtoReflect.Descriptor instead.
 func (*PackageRepairResponse) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{81}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{82}
 }
 
 func (x *PackageRepairResponse) GetManager() string {
@@ -9324,7 +9478,7 @@ type BlockedPackageDetail struct {
 
 func (x *BlockedPackageDetail) Reset() {
 	*x = BlockedPackageDetail{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[82]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9336,7 +9490,7 @@ func (x *BlockedPackageDetail) String() string {
 func (*BlockedPackageDetail) ProtoMessage() {}
 
 func (x *BlockedPackageDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[82]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9349,7 +9503,7 @@ func (x *BlockedPackageDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BlockedPackageDetail.ProtoReflect.Descriptor instead.
 func (*BlockedPackageDetail) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{82}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *BlockedPackageDetail) GetName() string {
@@ -9384,7 +9538,7 @@ type DebconfQuestionDetail struct {
 
 func (x *DebconfQuestionDetail) Reset() {
 	*x = DebconfQuestionDetail{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[83]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9396,7 +9550,7 @@ func (x *DebconfQuestionDetail) String() string {
 func (*DebconfQuestionDetail) ProtoMessage() {}
 
 func (x *DebconfQuestionDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[83]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9409,7 +9563,7 @@ func (x *DebconfQuestionDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DebconfQuestionDetail.ProtoReflect.Descriptor instead.
 func (*DebconfQuestionDetail) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{83}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{84}
 }
 
 func (x *DebconfQuestionDetail) GetName() string {
@@ -9444,7 +9598,7 @@ type PackageVersionChange struct {
 
 func (x *PackageVersionChange) Reset() {
 	*x = PackageVersionChange{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[84]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9456,7 +9610,7 @@ func (x *PackageVersionChange) String() string {
 func (*PackageVersionChange) ProtoMessage() {}
 
 func (x *PackageVersionChange) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[84]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9469,7 +9623,7 @@ func (x *PackageVersionChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PackageVersionChange.ProtoReflect.Descriptor instead.
 func (*PackageVersionChange) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{84}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *PackageVersionChange) GetName() string {
@@ -9509,7 +9663,7 @@ type UnitState struct {
 
 func (x *UnitState) Reset() {
 	*x = UnitState{}
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[85]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -9521,7 +9675,7 @@ func (x *UnitState) String() string {
 func (*UnitState) ProtoMessage() {}
 
 func (x *UnitState) ProtoReflect() protoreflect.Message {
-	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[85]
+	mi := &file_flotestro_helper_v1_helper_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -9534,7 +9688,7 @@ func (x *UnitState) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnitState.ProtoReflect.Descriptor instead.
 func (*UnitState) Descriptor() ([]byte, []int) {
-	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{85}
+	return file_flotestro_helper_v1_helper_proto_rawDescGZIP(), []int{86}
 }
 
 func (x *UnitState) GetName() string {
@@ -9686,7 +9840,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\akey_ids\x18\x02 \x03(\tR\x06keyIds\x12\x18\n" +
 	"\achanged\x18\x03 \x01(\bR\achanged\",\n" +
 	"\x14LocalAccountsRequest\x12\x14\n" +
-	"\x05names\x18\x01 \x03(\tR\x05names\"\x90\x04\n" +
+	"\x05names\x18\x01 \x03(\tR\x05names\"\xa2\a\n" +
 	"\x16LocalUserActionRequest\x12S\n" +
 	"\toperation\x18\x01 \x01(\x0e25.flotestro.helper.v1.LocalUserActionRequest.OperationR\toperation\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x14\n" +
@@ -9699,7 +9853,16 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\b \x01(\tR\texpiresAt\x12\x1f\n" +
 	"\vremove_home\x18\t \x01(\bR\n" +
-	"removeHome\"\xcc\x01\n" +
+	"removeHome\x129\n" +
+	"\x04keys\x18\n" +
+	" \x03(\v2%.flotestro.helper.v1.LocalSSHKeyInputR\x04keys\x12\"\n" +
+	"\ffingerprints\x18\v \x03(\tR\ffingerprints\x12%\n" +
+	"\x0eignore_missing\x18\f \x01(\bR\rignoreMissing\x123\n" +
+	"\x15expected_fingerprints\x18\r \x03(\tR\x14expectedFingerprints\x12#\n" +
+	"\rallow_lockout\x18\x0e \x01(\bR\fallowLockout\x12!\n" +
+	"\fmanaged_file\x18\x0f \x01(\bR\vmanagedFile\x12\x16\n" +
+	"\x06system\x18\x10 \x01(\bR\x06system\x12\x1a\n" +
+	"\binactive\x18\x11 \x01(\bR\binactive\"\xa7\x02\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10OPERATION_CREATE\x10\x01\x12\x12\n" +
@@ -9708,7 +9871,15 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x16OPERATION_SET_SSH_KEYS\x10\x04\x12\x18\n" +
 	"\x14OPERATION_SET_GROUPS\x10\x05\x12\x18\n" +
 	"\x14OPERATION_SET_EXPIRY\x10\x06\x12\x14\n" +
-	"\x10OPERATION_DELETE\x10\a\"\xca\x01\n" +
+	"\x10OPERATION_DELETE\x10\a\x12\x1a\n" +
+	"\x16OPERATION_ADD_SSH_KEYS\x10\b\x12\x1d\n" +
+	"\x19OPERATION_REMOVE_SSH_KEYS\x10\t\x12\x1e\n" +
+	"\x1aOPERATION_REPLACE_SSH_KEYS\x10\n" +
+	"\"K\n" +
+	"\x10LocalSSHKeyInput\x12\x1d\n" +
+	"\n" +
+	"public_key\x18\x01 \x01(\tR\tpublicKey\x12\x18\n" +
+	"\acomment\x18\x02 \x01(\tR\acomment\"\xca\x01\n" +
 	"\x13DomainEnrollRequest\x12\x16\n" +
 	"\x06domain\x18\x01 \x01(\tR\x06domain\x12\x14\n" +
 	"\x05realm\x18\x02 \x01(\tR\x05realm\x12\x16\n" +
@@ -10405,11 +10576,12 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
 	"expires_at\x18\x05 \x01(\tR\texpiresAtB\t\n" +
 	"\a_lockedB\x0f\n" +
-	"\r_password_set\"]\n" +
+	"\r_password_set\"u\n" +
 	"\vLocalSSHKey\x12 \n" +
 	"\vfingerprint\x18\x01 \x01(\tR\vfingerprint\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
-	"\acomment\x18\x03 \x01(\tR\acomment\"\xd9\x01\n" +
+	"\acomment\x18\x03 \x01(\tR\acomment\x12\x16\n" +
+	"\x06source\x18\x04 \x01(\tR\x06source\"\xd9\x01\n" +
 	"\x12DomainEnrollResult\x128\n" +
 	"\x06checks\x18\x01 \x03(\v2 .flotestro.helper.v1.EnrollCheckR\x06checks\x12\x1a\n" +
 	"\benrolled\x18\x02 \x01(\bR\benrolled\x12%\n" +
@@ -10515,7 +10687,7 @@ func file_flotestro_helper_v1_helper_proto_rawDescGZIP() []byte {
 }
 
 var file_flotestro_helper_v1_helper_proto_enumTypes = make([]protoimpl.EnumInfo, 21)
-var file_flotestro_helper_v1_helper_proto_msgTypes = make([]protoimpl.MessageInfo, 89)
+var file_flotestro_helper_v1_helper_proto_msgTypes = make([]protoimpl.MessageInfo, 90)
 var file_flotestro_helper_v1_helper_proto_goTypes = []any{
 	(LocalUserActionRequest_Operation)(0), // 0: flotestro.helper.v1.LocalUserActionRequest.Operation
 	(PackageActionRequest_Operation)(0),   // 1: flotestro.helper.v1.PackageActionRequest.Operation
@@ -10546,207 +10718,209 @@ var file_flotestro_helper_v1_helper_proto_goTypes = []any{
 	(*HelperTrustResult)(nil),             // 26: flotestro.helper.v1.HelperTrustResult
 	(*LocalAccountsRequest)(nil),          // 27: flotestro.helper.v1.LocalAccountsRequest
 	(*LocalUserActionRequest)(nil),        // 28: flotestro.helper.v1.LocalUserActionRequest
-	(*DomainEnrollRequest)(nil),           // 29: flotestro.helper.v1.DomainEnrollRequest
-	(*DomainLeaveRequest)(nil),            // 30: flotestro.helper.v1.DomainLeaveRequest
-	(*IdentityProbeRequest)(nil),          // 31: flotestro.helper.v1.IdentityProbeRequest
-	(*RebootRequest)(nil),                 // 32: flotestro.helper.v1.RebootRequest
-	(*ShutdownRequest)(nil),               // 33: flotestro.helper.v1.ShutdownRequest
-	(*PowerResult)(nil),                   // 34: flotestro.helper.v1.PowerResult
-	(*PackageActionRequest)(nil),          // 35: flotestro.helper.v1.PackageActionRequest
-	(*PackageExactSpec)(nil),              // 36: flotestro.helper.v1.PackageExactSpec
-	(*UnitActionRequest)(nil),             // 37: flotestro.helper.v1.UnitActionRequest
-	(*HelperResponse)(nil),                // 38: flotestro.helper.v1.HelperResponse
-	(*SystemRequest)(nil),                 // 39: flotestro.helper.v1.SystemRequest
-	(*SystemResult)(nil),                  // 40: flotestro.helper.v1.SystemResult
-	(*DockerReadRequest)(nil),             // 41: flotestro.helper.v1.DockerReadRequest
-	(*DockerActionRequest)(nil),           // 42: flotestro.helper.v1.DockerActionRequest
-	(*DockerActionResult)(nil),            // 43: flotestro.helper.v1.DockerActionResult
-	(*ScheduleRequest)(nil),               // 44: flotestro.helper.v1.ScheduleRequest
-	(*ScheduleResult)(nil),                // 45: flotestro.helper.v1.ScheduleResult
-	(*NetworkRequest)(nil),                // 46: flotestro.helper.v1.NetworkRequest
-	(*NetworkResult)(nil),                 // 47: flotestro.helper.v1.NetworkResult
-	(*DnsRequest)(nil),                    // 48: flotestro.helper.v1.DnsRequest
-	(*DnsResult)(nil),                     // 49: flotestro.helper.v1.DnsResult
-	(*FirewallRequest)(nil),               // 50: flotestro.helper.v1.FirewallRequest
-	(*FirewallResult)(nil),                // 51: flotestro.helper.v1.FirewallResult
-	(*StorageRequest)(nil),                // 52: flotestro.helper.v1.StorageRequest
-	(*StorageResult)(nil),                 // 53: flotestro.helper.v1.StorageResult
-	(*SshRequest)(nil),                    // 54: flotestro.helper.v1.SshRequest
-	(*SshResult)(nil),                     // 55: flotestro.helper.v1.SshResult
-	(*SecurityRequest)(nil),               // 56: flotestro.helper.v1.SecurityRequest
-	(*SecurityResult)(nil),                // 57: flotestro.helper.v1.SecurityResult
-	(*BackupRequest)(nil),                 // 58: flotestro.helper.v1.BackupRequest
-	(*BackupResult)(nil),                  // 59: flotestro.helper.v1.BackupResult
-	(*RepositoryRequest)(nil),             // 60: flotestro.helper.v1.RepositoryRequest
-	(*RepositoryResult)(nil),              // 61: flotestro.helper.v1.RepositoryResult
-	(*CertificateTarget)(nil),             // 62: flotestro.helper.v1.CertificateTarget
-	(*CertificateRequest)(nil),            // 63: flotestro.helper.v1.CertificateRequest
-	(*CertificateResult)(nil),             // 64: flotestro.helper.v1.CertificateResult
-	(*TimeRequest)(nil),                   // 65: flotestro.helper.v1.TimeRequest
-	(*TimeResult)(nil),                    // 66: flotestro.helper.v1.TimeResult
-	(*KernelRequest)(nil),                 // 67: flotestro.helper.v1.KernelRequest
-	(*KernelResult)(nil),                  // 68: flotestro.helper.v1.KernelResult
-	(*FileRequest)(nil),                   // 69: flotestro.helper.v1.FileRequest
-	(*FileResult)(nil),                    // 70: flotestro.helper.v1.FileResult
-	(*ProcessSignalRequest)(nil),          // 71: flotestro.helper.v1.ProcessSignalRequest
-	(*ProcessSignalResult)(nil),           // 72: flotestro.helper.v1.ProcessSignalResult
-	(*LogFileRequest)(nil),                // 73: flotestro.helper.v1.LogFileRequest
-	(*LogFileResult)(nil),                 // 74: flotestro.helper.v1.LogFileResult
-	(*ComposeRequest)(nil),                // 75: flotestro.helper.v1.ComposeRequest
-	(*ComposeResult)(nil),                 // 76: flotestro.helper.v1.ComposeResult
-	(*DockerEventsRequest)(nil),           // 77: flotestro.helper.v1.DockerEventsRequest
-	(*DockerEventsResult)(nil),            // 78: flotestro.helper.v1.DockerEventsResult
-	(*DockerLogsRequest)(nil),             // 79: flotestro.helper.v1.DockerLogsRequest
-	(*DockerLogsResult)(nil),              // 80: flotestro.helper.v1.DockerLogsResult
-	(*HostnameRequest)(nil),               // 81: flotestro.helper.v1.HostnameRequest
-	(*HostnameResult)(nil),                // 82: flotestro.helper.v1.HostnameResult
-	(*FinalWipeRequest)(nil),              // 83: flotestro.helper.v1.FinalWipeRequest
-	(*FinalWipeResult)(nil),               // 84: flotestro.helper.v1.FinalWipeResult
-	(*KeytabRenewRequest)(nil),            // 85: flotestro.helper.v1.KeytabRenewRequest
-	(*KeytabRenewResult)(nil),             // 86: flotestro.helper.v1.KeytabRenewResult
-	(*SmartResult)(nil),                   // 87: flotestro.helper.v1.SmartResult
-	(*SmartAttribute)(nil),                // 88: flotestro.helper.v1.SmartAttribute
-	(*DockerReadResult)(nil),              // 89: flotestro.helper.v1.DockerReadResult
-	(*TaskProgress)(nil),                  // 90: flotestro.helper.v1.TaskProgress
-	(*LocalAccountsResult)(nil),           // 91: flotestro.helper.v1.LocalAccountsResult
-	(*LocalAccountDetail)(nil),            // 92: flotestro.helper.v1.LocalAccountDetail
-	(*LocalSSHKey)(nil),                   // 93: flotestro.helper.v1.LocalSSHKey
-	(*DomainEnrollResult)(nil),            // 94: flotestro.helper.v1.DomainEnrollResult
-	(*EnrollCheck)(nil),                   // 95: flotestro.helper.v1.EnrollCheck
-	(*IdentityProbeResult)(nil),           // 96: flotestro.helper.v1.IdentityProbeResult
-	(*SssdOfflinePolicy)(nil),             // 97: flotestro.helper.v1.SssdOfflinePolicy
-	(*PackageActionResult)(nil),           // 98: flotestro.helper.v1.PackageActionResult
-	(*PackageEffectOutcome)(nil),          // 99: flotestro.helper.v1.PackageEffectOutcome
-	(*PackageRepairRequest)(nil),          // 100: flotestro.helper.v1.PackageRepairRequest
-	(*DebconfSelection)(nil),              // 101: flotestro.helper.v1.DebconfSelection
-	(*PackageRepairResponse)(nil),         // 102: flotestro.helper.v1.PackageRepairResponse
-	(*BlockedPackageDetail)(nil),          // 103: flotestro.helper.v1.BlockedPackageDetail
-	(*DebconfQuestionDetail)(nil),         // 104: flotestro.helper.v1.DebconfQuestionDetail
-	(*PackageVersionChange)(nil),          // 105: flotestro.helper.v1.PackageVersionChange
-	(*UnitState)(nil),                     // 106: flotestro.helper.v1.UnitState
-	nil,                                   // 107: flotestro.helper.v1.BackupRequest.EnvEntry
-	nil,                                   // 108: flotestro.helper.v1.KernelRequest.SettingsEntry
-	nil,                                   // 109: flotestro.helper.v1.ComposeRequest.ImageDigestsEntry
-	(*timestamppb.Timestamp)(nil),         // 110: google.protobuf.Timestamp
+	(*LocalSSHKeyInput)(nil),              // 29: flotestro.helper.v1.LocalSSHKeyInput
+	(*DomainEnrollRequest)(nil),           // 30: flotestro.helper.v1.DomainEnrollRequest
+	(*DomainLeaveRequest)(nil),            // 31: flotestro.helper.v1.DomainLeaveRequest
+	(*IdentityProbeRequest)(nil),          // 32: flotestro.helper.v1.IdentityProbeRequest
+	(*RebootRequest)(nil),                 // 33: flotestro.helper.v1.RebootRequest
+	(*ShutdownRequest)(nil),               // 34: flotestro.helper.v1.ShutdownRequest
+	(*PowerResult)(nil),                   // 35: flotestro.helper.v1.PowerResult
+	(*PackageActionRequest)(nil),          // 36: flotestro.helper.v1.PackageActionRequest
+	(*PackageExactSpec)(nil),              // 37: flotestro.helper.v1.PackageExactSpec
+	(*UnitActionRequest)(nil),             // 38: flotestro.helper.v1.UnitActionRequest
+	(*HelperResponse)(nil),                // 39: flotestro.helper.v1.HelperResponse
+	(*SystemRequest)(nil),                 // 40: flotestro.helper.v1.SystemRequest
+	(*SystemResult)(nil),                  // 41: flotestro.helper.v1.SystemResult
+	(*DockerReadRequest)(nil),             // 42: flotestro.helper.v1.DockerReadRequest
+	(*DockerActionRequest)(nil),           // 43: flotestro.helper.v1.DockerActionRequest
+	(*DockerActionResult)(nil),            // 44: flotestro.helper.v1.DockerActionResult
+	(*ScheduleRequest)(nil),               // 45: flotestro.helper.v1.ScheduleRequest
+	(*ScheduleResult)(nil),                // 46: flotestro.helper.v1.ScheduleResult
+	(*NetworkRequest)(nil),                // 47: flotestro.helper.v1.NetworkRequest
+	(*NetworkResult)(nil),                 // 48: flotestro.helper.v1.NetworkResult
+	(*DnsRequest)(nil),                    // 49: flotestro.helper.v1.DnsRequest
+	(*DnsResult)(nil),                     // 50: flotestro.helper.v1.DnsResult
+	(*FirewallRequest)(nil),               // 51: flotestro.helper.v1.FirewallRequest
+	(*FirewallResult)(nil),                // 52: flotestro.helper.v1.FirewallResult
+	(*StorageRequest)(nil),                // 53: flotestro.helper.v1.StorageRequest
+	(*StorageResult)(nil),                 // 54: flotestro.helper.v1.StorageResult
+	(*SshRequest)(nil),                    // 55: flotestro.helper.v1.SshRequest
+	(*SshResult)(nil),                     // 56: flotestro.helper.v1.SshResult
+	(*SecurityRequest)(nil),               // 57: flotestro.helper.v1.SecurityRequest
+	(*SecurityResult)(nil),                // 58: flotestro.helper.v1.SecurityResult
+	(*BackupRequest)(nil),                 // 59: flotestro.helper.v1.BackupRequest
+	(*BackupResult)(nil),                  // 60: flotestro.helper.v1.BackupResult
+	(*RepositoryRequest)(nil),             // 61: flotestro.helper.v1.RepositoryRequest
+	(*RepositoryResult)(nil),              // 62: flotestro.helper.v1.RepositoryResult
+	(*CertificateTarget)(nil),             // 63: flotestro.helper.v1.CertificateTarget
+	(*CertificateRequest)(nil),            // 64: flotestro.helper.v1.CertificateRequest
+	(*CertificateResult)(nil),             // 65: flotestro.helper.v1.CertificateResult
+	(*TimeRequest)(nil),                   // 66: flotestro.helper.v1.TimeRequest
+	(*TimeResult)(nil),                    // 67: flotestro.helper.v1.TimeResult
+	(*KernelRequest)(nil),                 // 68: flotestro.helper.v1.KernelRequest
+	(*KernelResult)(nil),                  // 69: flotestro.helper.v1.KernelResult
+	(*FileRequest)(nil),                   // 70: flotestro.helper.v1.FileRequest
+	(*FileResult)(nil),                    // 71: flotestro.helper.v1.FileResult
+	(*ProcessSignalRequest)(nil),          // 72: flotestro.helper.v1.ProcessSignalRequest
+	(*ProcessSignalResult)(nil),           // 73: flotestro.helper.v1.ProcessSignalResult
+	(*LogFileRequest)(nil),                // 74: flotestro.helper.v1.LogFileRequest
+	(*LogFileResult)(nil),                 // 75: flotestro.helper.v1.LogFileResult
+	(*ComposeRequest)(nil),                // 76: flotestro.helper.v1.ComposeRequest
+	(*ComposeResult)(nil),                 // 77: flotestro.helper.v1.ComposeResult
+	(*DockerEventsRequest)(nil),           // 78: flotestro.helper.v1.DockerEventsRequest
+	(*DockerEventsResult)(nil),            // 79: flotestro.helper.v1.DockerEventsResult
+	(*DockerLogsRequest)(nil),             // 80: flotestro.helper.v1.DockerLogsRequest
+	(*DockerLogsResult)(nil),              // 81: flotestro.helper.v1.DockerLogsResult
+	(*HostnameRequest)(nil),               // 82: flotestro.helper.v1.HostnameRequest
+	(*HostnameResult)(nil),                // 83: flotestro.helper.v1.HostnameResult
+	(*FinalWipeRequest)(nil),              // 84: flotestro.helper.v1.FinalWipeRequest
+	(*FinalWipeResult)(nil),               // 85: flotestro.helper.v1.FinalWipeResult
+	(*KeytabRenewRequest)(nil),            // 86: flotestro.helper.v1.KeytabRenewRequest
+	(*KeytabRenewResult)(nil),             // 87: flotestro.helper.v1.KeytabRenewResult
+	(*SmartResult)(nil),                   // 88: flotestro.helper.v1.SmartResult
+	(*SmartAttribute)(nil),                // 89: flotestro.helper.v1.SmartAttribute
+	(*DockerReadResult)(nil),              // 90: flotestro.helper.v1.DockerReadResult
+	(*TaskProgress)(nil),                  // 91: flotestro.helper.v1.TaskProgress
+	(*LocalAccountsResult)(nil),           // 92: flotestro.helper.v1.LocalAccountsResult
+	(*LocalAccountDetail)(nil),            // 93: flotestro.helper.v1.LocalAccountDetail
+	(*LocalSSHKey)(nil),                   // 94: flotestro.helper.v1.LocalSSHKey
+	(*DomainEnrollResult)(nil),            // 95: flotestro.helper.v1.DomainEnrollResult
+	(*EnrollCheck)(nil),                   // 96: flotestro.helper.v1.EnrollCheck
+	(*IdentityProbeResult)(nil),           // 97: flotestro.helper.v1.IdentityProbeResult
+	(*SssdOfflinePolicy)(nil),             // 98: flotestro.helper.v1.SssdOfflinePolicy
+	(*PackageActionResult)(nil),           // 99: flotestro.helper.v1.PackageActionResult
+	(*PackageEffectOutcome)(nil),          // 100: flotestro.helper.v1.PackageEffectOutcome
+	(*PackageRepairRequest)(nil),          // 101: flotestro.helper.v1.PackageRepairRequest
+	(*DebconfSelection)(nil),              // 102: flotestro.helper.v1.DebconfSelection
+	(*PackageRepairResponse)(nil),         // 103: flotestro.helper.v1.PackageRepairResponse
+	(*BlockedPackageDetail)(nil),          // 104: flotestro.helper.v1.BlockedPackageDetail
+	(*DebconfQuestionDetail)(nil),         // 105: flotestro.helper.v1.DebconfQuestionDetail
+	(*PackageVersionChange)(nil),          // 106: flotestro.helper.v1.PackageVersionChange
+	(*UnitState)(nil),                     // 107: flotestro.helper.v1.UnitState
+	nil,                                   // 108: flotestro.helper.v1.BackupRequest.EnvEntry
+	nil,                                   // 109: flotestro.helper.v1.KernelRequest.SettingsEntry
+	nil,                                   // 110: flotestro.helper.v1.ComposeRequest.ImageDigestsEntry
+	(*timestamppb.Timestamp)(nil),         // 111: google.protobuf.Timestamp
 }
 var file_flotestro_helper_v1_helper_proto_depIdxs = []int32{
-	110, // 0: flotestro.helper.v1.HelperRequest.expires_at:type_name -> google.protobuf.Timestamp
-	37,  // 1: flotestro.helper.v1.HelperRequest.unit_action:type_name -> flotestro.helper.v1.UnitActionRequest
-	35,  // 2: flotestro.helper.v1.HelperRequest.package_action:type_name -> flotestro.helper.v1.PackageActionRequest
-	32,  // 3: flotestro.helper.v1.HelperRequest.reboot:type_name -> flotestro.helper.v1.RebootRequest
-	31,  // 4: flotestro.helper.v1.HelperRequest.identity_probe:type_name -> flotestro.helper.v1.IdentityProbeRequest
-	29,  // 5: flotestro.helper.v1.HelperRequest.domain_enroll:type_name -> flotestro.helper.v1.DomainEnrollRequest
+	111, // 0: flotestro.helper.v1.HelperRequest.expires_at:type_name -> google.protobuf.Timestamp
+	38,  // 1: flotestro.helper.v1.HelperRequest.unit_action:type_name -> flotestro.helper.v1.UnitActionRequest
+	36,  // 2: flotestro.helper.v1.HelperRequest.package_action:type_name -> flotestro.helper.v1.PackageActionRequest
+	33,  // 3: flotestro.helper.v1.HelperRequest.reboot:type_name -> flotestro.helper.v1.RebootRequest
+	32,  // 4: flotestro.helper.v1.HelperRequest.identity_probe:type_name -> flotestro.helper.v1.IdentityProbeRequest
+	30,  // 5: flotestro.helper.v1.HelperRequest.domain_enroll:type_name -> flotestro.helper.v1.DomainEnrollRequest
 	27,  // 6: flotestro.helper.v1.HelperRequest.local_accounts:type_name -> flotestro.helper.v1.LocalAccountsRequest
 	28,  // 7: flotestro.helper.v1.HelperRequest.local_user_action:type_name -> flotestro.helper.v1.LocalUserActionRequest
-	100, // 8: flotestro.helper.v1.HelperRequest.package_repair:type_name -> flotestro.helper.v1.PackageRepairRequest
-	41,  // 9: flotestro.helper.v1.HelperRequest.docker_read:type_name -> flotestro.helper.v1.DockerReadRequest
-	77,  // 10: flotestro.helper.v1.HelperRequest.docker_events:type_name -> flotestro.helper.v1.DockerEventsRequest
-	42,  // 11: flotestro.helper.v1.HelperRequest.docker_action:type_name -> flotestro.helper.v1.DockerActionRequest
-	75,  // 12: flotestro.helper.v1.HelperRequest.compose:type_name -> flotestro.helper.v1.ComposeRequest
-	73,  // 13: flotestro.helper.v1.HelperRequest.log_file:type_name -> flotestro.helper.v1.LogFileRequest
-	71,  // 14: flotestro.helper.v1.HelperRequest.process_signal:type_name -> flotestro.helper.v1.ProcessSignalRequest
-	44,  // 15: flotestro.helper.v1.HelperRequest.schedule:type_name -> flotestro.helper.v1.ScheduleRequest
-	46,  // 16: flotestro.helper.v1.HelperRequest.network:type_name -> flotestro.helper.v1.NetworkRequest
-	48,  // 17: flotestro.helper.v1.HelperRequest.dns:type_name -> flotestro.helper.v1.DnsRequest
-	50,  // 18: flotestro.helper.v1.HelperRequest.firewall:type_name -> flotestro.helper.v1.FirewallRequest
-	52,  // 19: flotestro.helper.v1.HelperRequest.storage:type_name -> flotestro.helper.v1.StorageRequest
-	54,  // 20: flotestro.helper.v1.HelperRequest.ssh:type_name -> flotestro.helper.v1.SshRequest
-	67,  // 21: flotestro.helper.v1.HelperRequest.kernel:type_name -> flotestro.helper.v1.KernelRequest
-	69,  // 22: flotestro.helper.v1.HelperRequest.file:type_name -> flotestro.helper.v1.FileRequest
-	65,  // 23: flotestro.helper.v1.HelperRequest.time:type_name -> flotestro.helper.v1.TimeRequest
-	33,  // 24: flotestro.helper.v1.HelperRequest.shutdown:type_name -> flotestro.helper.v1.ShutdownRequest
-	56,  // 25: flotestro.helper.v1.HelperRequest.security:type_name -> flotestro.helper.v1.SecurityRequest
-	63,  // 26: flotestro.helper.v1.HelperRequest.certificate:type_name -> flotestro.helper.v1.CertificateRequest
-	60,  // 27: flotestro.helper.v1.HelperRequest.repository:type_name -> flotestro.helper.v1.RepositoryRequest
-	58,  // 28: flotestro.helper.v1.HelperRequest.backup:type_name -> flotestro.helper.v1.BackupRequest
-	79,  // 29: flotestro.helper.v1.HelperRequest.docker_logs:type_name -> flotestro.helper.v1.DockerLogsRequest
-	81,  // 30: flotestro.helper.v1.HelperRequest.hostname:type_name -> flotestro.helper.v1.HostnameRequest
-	83,  // 31: flotestro.helper.v1.HelperRequest.final_wipe:type_name -> flotestro.helper.v1.FinalWipeRequest
-	30,  // 32: flotestro.helper.v1.HelperRequest.domain_leave:type_name -> flotestro.helper.v1.DomainLeaveRequest
-	39,  // 33: flotestro.helper.v1.HelperRequest.system:type_name -> flotestro.helper.v1.SystemRequest
-	85,  // 34: flotestro.helper.v1.HelperRequest.keytab_renew:type_name -> flotestro.helper.v1.KeytabRenewRequest
+	101, // 8: flotestro.helper.v1.HelperRequest.package_repair:type_name -> flotestro.helper.v1.PackageRepairRequest
+	42,  // 9: flotestro.helper.v1.HelperRequest.docker_read:type_name -> flotestro.helper.v1.DockerReadRequest
+	78,  // 10: flotestro.helper.v1.HelperRequest.docker_events:type_name -> flotestro.helper.v1.DockerEventsRequest
+	43,  // 11: flotestro.helper.v1.HelperRequest.docker_action:type_name -> flotestro.helper.v1.DockerActionRequest
+	76,  // 12: flotestro.helper.v1.HelperRequest.compose:type_name -> flotestro.helper.v1.ComposeRequest
+	74,  // 13: flotestro.helper.v1.HelperRequest.log_file:type_name -> flotestro.helper.v1.LogFileRequest
+	72,  // 14: flotestro.helper.v1.HelperRequest.process_signal:type_name -> flotestro.helper.v1.ProcessSignalRequest
+	45,  // 15: flotestro.helper.v1.HelperRequest.schedule:type_name -> flotestro.helper.v1.ScheduleRequest
+	47,  // 16: flotestro.helper.v1.HelperRequest.network:type_name -> flotestro.helper.v1.NetworkRequest
+	49,  // 17: flotestro.helper.v1.HelperRequest.dns:type_name -> flotestro.helper.v1.DnsRequest
+	51,  // 18: flotestro.helper.v1.HelperRequest.firewall:type_name -> flotestro.helper.v1.FirewallRequest
+	53,  // 19: flotestro.helper.v1.HelperRequest.storage:type_name -> flotestro.helper.v1.StorageRequest
+	55,  // 20: flotestro.helper.v1.HelperRequest.ssh:type_name -> flotestro.helper.v1.SshRequest
+	68,  // 21: flotestro.helper.v1.HelperRequest.kernel:type_name -> flotestro.helper.v1.KernelRequest
+	70,  // 22: flotestro.helper.v1.HelperRequest.file:type_name -> flotestro.helper.v1.FileRequest
+	66,  // 23: flotestro.helper.v1.HelperRequest.time:type_name -> flotestro.helper.v1.TimeRequest
+	34,  // 24: flotestro.helper.v1.HelperRequest.shutdown:type_name -> flotestro.helper.v1.ShutdownRequest
+	57,  // 25: flotestro.helper.v1.HelperRequest.security:type_name -> flotestro.helper.v1.SecurityRequest
+	64,  // 26: flotestro.helper.v1.HelperRequest.certificate:type_name -> flotestro.helper.v1.CertificateRequest
+	61,  // 27: flotestro.helper.v1.HelperRequest.repository:type_name -> flotestro.helper.v1.RepositoryRequest
+	59,  // 28: flotestro.helper.v1.HelperRequest.backup:type_name -> flotestro.helper.v1.BackupRequest
+	80,  // 29: flotestro.helper.v1.HelperRequest.docker_logs:type_name -> flotestro.helper.v1.DockerLogsRequest
+	82,  // 30: flotestro.helper.v1.HelperRequest.hostname:type_name -> flotestro.helper.v1.HostnameRequest
+	84,  // 31: flotestro.helper.v1.HelperRequest.final_wipe:type_name -> flotestro.helper.v1.FinalWipeRequest
+	31,  // 32: flotestro.helper.v1.HelperRequest.domain_leave:type_name -> flotestro.helper.v1.DomainLeaveRequest
+	40,  // 33: flotestro.helper.v1.HelperRequest.system:type_name -> flotestro.helper.v1.SystemRequest
+	86,  // 34: flotestro.helper.v1.HelperRequest.keytab_renew:type_name -> flotestro.helper.v1.KeytabRenewRequest
 	25,  // 35: flotestro.helper.v1.HelperRequest.trust_update:type_name -> flotestro.helper.v1.HelperTrustUpdateRequest
 	22,  // 36: flotestro.helper.v1.HelperRequest.capability:type_name -> flotestro.helper.v1.HelperCapability
 	23,  // 37: flotestro.helper.v1.HelperTrustBundle.keys:type_name -> flotestro.helper.v1.HelperTrustKey
 	24,  // 38: flotestro.helper.v1.HelperTrustUpdateRequest.bundle:type_name -> flotestro.helper.v1.HelperTrustBundle
 	0,   // 39: flotestro.helper.v1.LocalUserActionRequest.operation:type_name -> flotestro.helper.v1.LocalUserActionRequest.Operation
-	1,   // 40: flotestro.helper.v1.PackageActionRequest.operation:type_name -> flotestro.helper.v1.PackageActionRequest.Operation
-	36,  // 41: flotestro.helper.v1.PackageActionRequest.exact_specs:type_name -> flotestro.helper.v1.PackageExactSpec
-	2,   // 42: flotestro.helper.v1.UnitActionRequest.operation:type_name -> flotestro.helper.v1.UnitActionRequest.Operation
-	106, // 43: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
-	106, // 44: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
-	98,  // 45: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
-	96,  // 46: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
-	94,  // 47: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
-	91,  // 48: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
-	102, // 49: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
-	90,  // 50: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
-	89,  // 51: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
-	43,  // 52: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
-	76,  // 53: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
-	74,  // 54: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
-	72,  // 55: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
-	45,  // 56: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
-	47,  // 57: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
-	49,  // 58: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
-	51,  // 59: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
-	53,  // 60: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
-	55,  // 61: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
-	68,  // 62: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
-	70,  // 63: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
-	66,  // 64: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
-	34,  // 65: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
-	57,  // 66: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
-	64,  // 67: flotestro.helper.v1.HelperResponse.certificate_result:type_name -> flotestro.helper.v1.CertificateResult
-	61,  // 68: flotestro.helper.v1.HelperResponse.repository_result:type_name -> flotestro.helper.v1.RepositoryResult
-	59,  // 69: flotestro.helper.v1.HelperResponse.backup_result:type_name -> flotestro.helper.v1.BackupResult
-	78,  // 70: flotestro.helper.v1.HelperResponse.docker_events_result:type_name -> flotestro.helper.v1.DockerEventsResult
-	80,  // 71: flotestro.helper.v1.HelperResponse.docker_logs_result:type_name -> flotestro.helper.v1.DockerLogsResult
-	82,  // 72: flotestro.helper.v1.HelperResponse.hostname_result:type_name -> flotestro.helper.v1.HostnameResult
-	87,  // 73: flotestro.helper.v1.HelperResponse.smart_result:type_name -> flotestro.helper.v1.SmartResult
-	84,  // 74: flotestro.helper.v1.HelperResponse.final_wipe_result:type_name -> flotestro.helper.v1.FinalWipeResult
-	40,  // 75: flotestro.helper.v1.HelperResponse.system_result:type_name -> flotestro.helper.v1.SystemResult
-	86,  // 76: flotestro.helper.v1.HelperResponse.keytab_renew_result:type_name -> flotestro.helper.v1.KeytabRenewResult
-	26,  // 77: flotestro.helper.v1.HelperResponse.trust_result:type_name -> flotestro.helper.v1.HelperTrustResult
-	3,   // 78: flotestro.helper.v1.SystemRequest.facts:type_name -> flotestro.helper.v1.SystemRequest.Fact
-	4,   // 79: flotestro.helper.v1.DockerReadRequest.scope:type_name -> flotestro.helper.v1.DockerReadRequest.Scope
-	5,   // 80: flotestro.helper.v1.DockerActionRequest.operation:type_name -> flotestro.helper.v1.DockerActionRequest.Operation
-	6,   // 81: flotestro.helper.v1.ScheduleRequest.operation:type_name -> flotestro.helper.v1.ScheduleRequest.Operation
-	7,   // 82: flotestro.helper.v1.NetworkRequest.operation:type_name -> flotestro.helper.v1.NetworkRequest.Operation
-	8,   // 83: flotestro.helper.v1.DnsRequest.operation:type_name -> flotestro.helper.v1.DnsRequest.Operation
-	9,   // 84: flotestro.helper.v1.FirewallRequest.operation:type_name -> flotestro.helper.v1.FirewallRequest.Operation
-	10,  // 85: flotestro.helper.v1.StorageRequest.operation:type_name -> flotestro.helper.v1.StorageRequest.Operation
-	11,  // 86: flotestro.helper.v1.SshRequest.operation:type_name -> flotestro.helper.v1.SshRequest.Operation
-	12,  // 87: flotestro.helper.v1.SecurityRequest.operation:type_name -> flotestro.helper.v1.SecurityRequest.Operation
-	13,  // 88: flotestro.helper.v1.SecurityRequest.facts:type_name -> flotestro.helper.v1.SecurityRequest.Fact
-	14,  // 89: flotestro.helper.v1.BackupRequest.operation:type_name -> flotestro.helper.v1.BackupRequest.Operation
-	107, // 90: flotestro.helper.v1.BackupRequest.env:type_name -> flotestro.helper.v1.BackupRequest.EnvEntry
-	15,  // 91: flotestro.helper.v1.CertificateRequest.operation:type_name -> flotestro.helper.v1.CertificateRequest.Operation
-	16,  // 92: flotestro.helper.v1.CertificateRequest.facts:type_name -> flotestro.helper.v1.CertificateRequest.Fact
-	62,  // 93: flotestro.helper.v1.CertificateRequest.targets:type_name -> flotestro.helper.v1.CertificateTarget
-	17,  // 94: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
-	18,  // 95: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
-	108, // 96: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
-	19,  // 97: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
-	20,  // 98: flotestro.helper.v1.ComposeRequest.operation:type_name -> flotestro.helper.v1.ComposeRequest.Operation
-	109, // 99: flotestro.helper.v1.ComposeRequest.image_digests:type_name -> flotestro.helper.v1.ComposeRequest.ImageDigestsEntry
-	88,  // 100: flotestro.helper.v1.SmartResult.attributes:type_name -> flotestro.helper.v1.SmartAttribute
-	92,  // 101: flotestro.helper.v1.LocalAccountsResult.accounts:type_name -> flotestro.helper.v1.LocalAccountDetail
-	93,  // 102: flotestro.helper.v1.LocalAccountDetail.ssh_keys:type_name -> flotestro.helper.v1.LocalSSHKey
-	95,  // 103: flotestro.helper.v1.DomainEnrollResult.checks:type_name -> flotestro.helper.v1.EnrollCheck
-	95,  // 104: flotestro.helper.v1.DomainEnrollResult.verifications:type_name -> flotestro.helper.v1.EnrollCheck
-	97,  // 105: flotestro.helper.v1.IdentityProbeResult.sssd_offline_policy:type_name -> flotestro.helper.v1.SssdOfflinePolicy
-	105, // 106: flotestro.helper.v1.PackageActionResult.applied:type_name -> flotestro.helper.v1.PackageVersionChange
-	99,  // 107: flotestro.helper.v1.PackageActionResult.effects_achieved:type_name -> flotestro.helper.v1.PackageEffectOutcome
-	99,  // 108: flotestro.helper.v1.PackageActionResult.effects_missed:type_name -> flotestro.helper.v1.PackageEffectOutcome
-	101, // 109: flotestro.helper.v1.PackageRepairRequest.answers:type_name -> flotestro.helper.v1.DebconfSelection
-	103, // 110: flotestro.helper.v1.PackageRepairResponse.still_blocked:type_name -> flotestro.helper.v1.BlockedPackageDetail
-	104, // 111: flotestro.helper.v1.BlockedPackageDetail.questions:type_name -> flotestro.helper.v1.DebconfQuestionDetail
-	112, // [112:112] is the sub-list for method output_type
-	112, // [112:112] is the sub-list for method input_type
-	112, // [112:112] is the sub-list for extension type_name
-	112, // [112:112] is the sub-list for extension extendee
-	0,   // [0:112] is the sub-list for field type_name
+	29,  // 40: flotestro.helper.v1.LocalUserActionRequest.keys:type_name -> flotestro.helper.v1.LocalSSHKeyInput
+	1,   // 41: flotestro.helper.v1.PackageActionRequest.operation:type_name -> flotestro.helper.v1.PackageActionRequest.Operation
+	37,  // 42: flotestro.helper.v1.PackageActionRequest.exact_specs:type_name -> flotestro.helper.v1.PackageExactSpec
+	2,   // 43: flotestro.helper.v1.UnitActionRequest.operation:type_name -> flotestro.helper.v1.UnitActionRequest.Operation
+	107, // 44: flotestro.helper.v1.HelperResponse.state_before:type_name -> flotestro.helper.v1.UnitState
+	107, // 45: flotestro.helper.v1.HelperResponse.state_after:type_name -> flotestro.helper.v1.UnitState
+	99,  // 46: flotestro.helper.v1.HelperResponse.package_result:type_name -> flotestro.helper.v1.PackageActionResult
+	97,  // 47: flotestro.helper.v1.HelperResponse.identity_result:type_name -> flotestro.helper.v1.IdentityProbeResult
+	95,  // 48: flotestro.helper.v1.HelperResponse.enroll_result:type_name -> flotestro.helper.v1.DomainEnrollResult
+	92,  // 49: flotestro.helper.v1.HelperResponse.accounts_result:type_name -> flotestro.helper.v1.LocalAccountsResult
+	103, // 50: flotestro.helper.v1.HelperResponse.repair_result:type_name -> flotestro.helper.v1.PackageRepairResponse
+	91,  // 51: flotestro.helper.v1.HelperResponse.progress:type_name -> flotestro.helper.v1.TaskProgress
+	90,  // 52: flotestro.helper.v1.HelperResponse.docker_result:type_name -> flotestro.helper.v1.DockerReadResult
+	44,  // 53: flotestro.helper.v1.HelperResponse.docker_action_result:type_name -> flotestro.helper.v1.DockerActionResult
+	77,  // 54: flotestro.helper.v1.HelperResponse.compose_result:type_name -> flotestro.helper.v1.ComposeResult
+	75,  // 55: flotestro.helper.v1.HelperResponse.log_file_result:type_name -> flotestro.helper.v1.LogFileResult
+	73,  // 56: flotestro.helper.v1.HelperResponse.process_signal_result:type_name -> flotestro.helper.v1.ProcessSignalResult
+	46,  // 57: flotestro.helper.v1.HelperResponse.schedule_result:type_name -> flotestro.helper.v1.ScheduleResult
+	48,  // 58: flotestro.helper.v1.HelperResponse.network_result:type_name -> flotestro.helper.v1.NetworkResult
+	50,  // 59: flotestro.helper.v1.HelperResponse.dns_result:type_name -> flotestro.helper.v1.DnsResult
+	52,  // 60: flotestro.helper.v1.HelperResponse.firewall_result:type_name -> flotestro.helper.v1.FirewallResult
+	54,  // 61: flotestro.helper.v1.HelperResponse.storage_result:type_name -> flotestro.helper.v1.StorageResult
+	56,  // 62: flotestro.helper.v1.HelperResponse.ssh_result:type_name -> flotestro.helper.v1.SshResult
+	69,  // 63: flotestro.helper.v1.HelperResponse.kernel_result:type_name -> flotestro.helper.v1.KernelResult
+	71,  // 64: flotestro.helper.v1.HelperResponse.file_result:type_name -> flotestro.helper.v1.FileResult
+	67,  // 65: flotestro.helper.v1.HelperResponse.time_result:type_name -> flotestro.helper.v1.TimeResult
+	35,  // 66: flotestro.helper.v1.HelperResponse.power_result:type_name -> flotestro.helper.v1.PowerResult
+	58,  // 67: flotestro.helper.v1.HelperResponse.security_result:type_name -> flotestro.helper.v1.SecurityResult
+	65,  // 68: flotestro.helper.v1.HelperResponse.certificate_result:type_name -> flotestro.helper.v1.CertificateResult
+	62,  // 69: flotestro.helper.v1.HelperResponse.repository_result:type_name -> flotestro.helper.v1.RepositoryResult
+	60,  // 70: flotestro.helper.v1.HelperResponse.backup_result:type_name -> flotestro.helper.v1.BackupResult
+	79,  // 71: flotestro.helper.v1.HelperResponse.docker_events_result:type_name -> flotestro.helper.v1.DockerEventsResult
+	81,  // 72: flotestro.helper.v1.HelperResponse.docker_logs_result:type_name -> flotestro.helper.v1.DockerLogsResult
+	83,  // 73: flotestro.helper.v1.HelperResponse.hostname_result:type_name -> flotestro.helper.v1.HostnameResult
+	88,  // 74: flotestro.helper.v1.HelperResponse.smart_result:type_name -> flotestro.helper.v1.SmartResult
+	85,  // 75: flotestro.helper.v1.HelperResponse.final_wipe_result:type_name -> flotestro.helper.v1.FinalWipeResult
+	41,  // 76: flotestro.helper.v1.HelperResponse.system_result:type_name -> flotestro.helper.v1.SystemResult
+	87,  // 77: flotestro.helper.v1.HelperResponse.keytab_renew_result:type_name -> flotestro.helper.v1.KeytabRenewResult
+	26,  // 78: flotestro.helper.v1.HelperResponse.trust_result:type_name -> flotestro.helper.v1.HelperTrustResult
+	3,   // 79: flotestro.helper.v1.SystemRequest.facts:type_name -> flotestro.helper.v1.SystemRequest.Fact
+	4,   // 80: flotestro.helper.v1.DockerReadRequest.scope:type_name -> flotestro.helper.v1.DockerReadRequest.Scope
+	5,   // 81: flotestro.helper.v1.DockerActionRequest.operation:type_name -> flotestro.helper.v1.DockerActionRequest.Operation
+	6,   // 82: flotestro.helper.v1.ScheduleRequest.operation:type_name -> flotestro.helper.v1.ScheduleRequest.Operation
+	7,   // 83: flotestro.helper.v1.NetworkRequest.operation:type_name -> flotestro.helper.v1.NetworkRequest.Operation
+	8,   // 84: flotestro.helper.v1.DnsRequest.operation:type_name -> flotestro.helper.v1.DnsRequest.Operation
+	9,   // 85: flotestro.helper.v1.FirewallRequest.operation:type_name -> flotestro.helper.v1.FirewallRequest.Operation
+	10,  // 86: flotestro.helper.v1.StorageRequest.operation:type_name -> flotestro.helper.v1.StorageRequest.Operation
+	11,  // 87: flotestro.helper.v1.SshRequest.operation:type_name -> flotestro.helper.v1.SshRequest.Operation
+	12,  // 88: flotestro.helper.v1.SecurityRequest.operation:type_name -> flotestro.helper.v1.SecurityRequest.Operation
+	13,  // 89: flotestro.helper.v1.SecurityRequest.facts:type_name -> flotestro.helper.v1.SecurityRequest.Fact
+	14,  // 90: flotestro.helper.v1.BackupRequest.operation:type_name -> flotestro.helper.v1.BackupRequest.Operation
+	108, // 91: flotestro.helper.v1.BackupRequest.env:type_name -> flotestro.helper.v1.BackupRequest.EnvEntry
+	15,  // 92: flotestro.helper.v1.CertificateRequest.operation:type_name -> flotestro.helper.v1.CertificateRequest.Operation
+	16,  // 93: flotestro.helper.v1.CertificateRequest.facts:type_name -> flotestro.helper.v1.CertificateRequest.Fact
+	63,  // 94: flotestro.helper.v1.CertificateRequest.targets:type_name -> flotestro.helper.v1.CertificateTarget
+	17,  // 95: flotestro.helper.v1.TimeRequest.operation:type_name -> flotestro.helper.v1.TimeRequest.Operation
+	18,  // 96: flotestro.helper.v1.KernelRequest.operation:type_name -> flotestro.helper.v1.KernelRequest.Operation
+	109, // 97: flotestro.helper.v1.KernelRequest.settings:type_name -> flotestro.helper.v1.KernelRequest.SettingsEntry
+	19,  // 98: flotestro.helper.v1.FileRequest.operation:type_name -> flotestro.helper.v1.FileRequest.Operation
+	20,  // 99: flotestro.helper.v1.ComposeRequest.operation:type_name -> flotestro.helper.v1.ComposeRequest.Operation
+	110, // 100: flotestro.helper.v1.ComposeRequest.image_digests:type_name -> flotestro.helper.v1.ComposeRequest.ImageDigestsEntry
+	89,  // 101: flotestro.helper.v1.SmartResult.attributes:type_name -> flotestro.helper.v1.SmartAttribute
+	93,  // 102: flotestro.helper.v1.LocalAccountsResult.accounts:type_name -> flotestro.helper.v1.LocalAccountDetail
+	94,  // 103: flotestro.helper.v1.LocalAccountDetail.ssh_keys:type_name -> flotestro.helper.v1.LocalSSHKey
+	96,  // 104: flotestro.helper.v1.DomainEnrollResult.checks:type_name -> flotestro.helper.v1.EnrollCheck
+	96,  // 105: flotestro.helper.v1.DomainEnrollResult.verifications:type_name -> flotestro.helper.v1.EnrollCheck
+	98,  // 106: flotestro.helper.v1.IdentityProbeResult.sssd_offline_policy:type_name -> flotestro.helper.v1.SssdOfflinePolicy
+	106, // 107: flotestro.helper.v1.PackageActionResult.applied:type_name -> flotestro.helper.v1.PackageVersionChange
+	100, // 108: flotestro.helper.v1.PackageActionResult.effects_achieved:type_name -> flotestro.helper.v1.PackageEffectOutcome
+	100, // 109: flotestro.helper.v1.PackageActionResult.effects_missed:type_name -> flotestro.helper.v1.PackageEffectOutcome
+	102, // 110: flotestro.helper.v1.PackageRepairRequest.answers:type_name -> flotestro.helper.v1.DebconfSelection
+	104, // 111: flotestro.helper.v1.PackageRepairResponse.still_blocked:type_name -> flotestro.helper.v1.BlockedPackageDetail
+	105, // 112: flotestro.helper.v1.BlockedPackageDetail.questions:type_name -> flotestro.helper.v1.DebconfQuestionDetail
+	113, // [113:113] is the sub-list for method output_type
+	113, // [113:113] is the sub-list for method input_type
+	113, // [113:113] is the sub-list for extension type_name
+	113, // [113:113] is the sub-list for extension extendee
+	0,   // [0:113] is the sub-list for field type_name
 }
 
 func init() { file_flotestro_helper_v1_helper_proto_init() }
@@ -10791,21 +10965,21 @@ func file_flotestro_helper_v1_helper_proto_init() {
 		(*HelperRequest_KeytabRenew)(nil),
 		(*HelperRequest_TrustUpdate)(nil),
 	}
-	file_flotestro_helper_v1_helper_proto_msgTypes[22].OneofWrappers = []any{}
-	file_flotestro_helper_v1_helper_proto_msgTypes[66].OneofWrappers = []any{}
-	file_flotestro_helper_v1_helper_proto_msgTypes[69].OneofWrappers = []any{}
-	file_flotestro_helper_v1_helper_proto_msgTypes[71].OneofWrappers = []any{}
-	file_flotestro_helper_v1_helper_proto_msgTypes[74].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[23].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[67].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[70].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[72].OneofWrappers = []any{}
 	file_flotestro_helper_v1_helper_proto_msgTypes[75].OneofWrappers = []any{}
 	file_flotestro_helper_v1_helper_proto_msgTypes[76].OneofWrappers = []any{}
-	file_flotestro_helper_v1_helper_proto_msgTypes[83].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[77].OneofWrappers = []any{}
+	file_flotestro_helper_v1_helper_proto_msgTypes[84].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_flotestro_helper_v1_helper_proto_rawDesc), len(file_flotestro_helper_v1_helper_proto_rawDesc)),
 			NumEnums:      21,
-			NumMessages:   89,
+			NumMessages:   90,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

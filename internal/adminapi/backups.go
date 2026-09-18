@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"sort"
 	"strconv"
 	"time"
 
@@ -13,7 +12,6 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	backupstore "github.com/ultherego/flotestro/internal/backup"
 	"github.com/ultherego/flotestro/internal/budgets"
-	"github.com/ultherego/flotestro/internal/hosts"
 	backupmodule "github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/secrets"
 )
@@ -351,12 +349,52 @@ type fleetBackup struct {
 	Unverified    bool       `json:"unverified"`
 }
 
+// fleetBackupOf judges one definition at the moment now, the way the
+// host tab judges it.
+func fleetBackupOf(row backupstore.FleetRow, now time.Time) fleetBackup {
+	item := fleetBackup{
+		HostID: row.HostID, Hostname: row.Hostname, Definition: row.Definition,
+		Tool: row.Tool, Repository: row.Repository, LastSuccessAt: row.LastSuccessAt,
+		LastRestoreAt: row.RestoredAt,
+	}
+	item.Status = backupstore.State(item.LastSuccessAt, now)
+	if item.LastSuccessAt != nil {
+		age := now.Sub(*item.LastSuccessAt).Hours()
+		item.AgeHours = &age
+	}
+	item.Unverified = backupstore.Unverified(row.VerifiedAt, now)
+	return item
+}
+
+// fleetBackupsView is the answer of the fleet screen: the coverage of
+// the fleet, the counts over every definition in scope, the backends and
+// one page of the list.
+type fleetBackupsView struct {
+	fleetCoverage
+	Items      []fleetBackup  `json:"items"`
+	Count      int            `json:"count"`
+	Total      int            `json:"total"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+	Counts     map[string]int `json:"counts"`
+	Unverified int            `json:"unverified"`
+	// NeverRestored counts the definitions nobody has ever restored: a
+	// copy nobody has read back is hope, not a copy.
+	NeverRestored int              `json:"never_restored"`
+	Repositories  []repositoryLoad `json:"repositories"`
+	// HostsTotal keeps the name the screen read before the coverage head.
+	HostsTotal int            `json:"hosts_total"`
+	Thresholds map[string]int `json:"thresholds"`
+}
+
 // handleFleetBackups returns the backup state of the whole visible fleet.
 //
 // This is the basic mode of this module. Backups break quietly: nobody
 // notices there has been no new copy for three weeks until it has to be
 // restored. The only defence is a list on which the age of all the copies
-// stands side by side.
+// stands side by side. The ages are judged by the database over every
+// definition in scope, and the list comes a page at a time, the worst
+// first; a host without a definition is an unknown host - the panel does
+// not know whether anything copies it - not a host without backups.
 func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermBackupRead, "fleet")
 	if !ok {
@@ -366,137 +404,61 @@ func (s *Server) handleFleetBackups(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	list, err := s.hosts.List(r.Context(), hosts.ListFilter{Limit: 500})
-	if err != nil {
-		s.fail(w, err)
+	limit, cursorText, ok := parseFleetPage(w, r)
+	if !ok {
 		return
 	}
-	names := map[string]string{}
-	ids := make([]string, 0, len(list))
-	for _, host := range list {
-		if principal.Can(authz.PermBackupRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
-			names[host.ID] = host.Hostname
-			ids = append(ids, host.ID)
-		}
-	}
-
-	definitions, err := s.backups.FleetDefinitions(r.Context(), ids)
+	cursor, err := backupstore.ParseFleetCursor(cursorText)
 	if err != nil {
-		s.fail(w, err)
+		invalidCursor(w, err)
 		return
 	}
-	plans, err := s.backups.LatestInFleet(r.Context(), ids, backupmodule.OperationPlan)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	verifications, err := s.backups.LatestInFleet(r.Context(), ids, backupmodule.OperationVerify)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	backupRuns, err := s.backups.LatestInFleet(r.Context(), ids, backupmodule.OperationBackup)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-	// A copy nobody has ever restored is hope, not a copy. The panel does
-	// not force a restore attempt, but is meant to say when the last one was
-	// - and when there never was one.
-	restores, err := s.backups.LatestInFleet(r.Context(), ids, backupmodule.OperationRestore)
-	if err != nil {
-		s.fail(w, err)
-		return
-	}
-
-	key := func(hostID, definition string) string { return hostID + "\x1f" + definition }
-	latestPlan := map[string]backupstore.Run{}
-	for _, plan := range plans {
-		latestPlan[key(plan.HostID, plan.Definition)] = plan
-	}
-	latestVerification := map[string]backupstore.Run{}
-	for _, verification := range verifications {
-		latestVerification[key(verification.HostID, verification.Definition)] = verification
-	}
-	latestRun := map[string]backupstore.Run{}
-	for _, run := range backupRuns {
-		latestRun[key(run.HostID, run.Definition)] = run
-	}
-	latestRestore := map[string]backupstore.Run{}
-	for _, restore := range restores {
-		latestRestore[key(restore.HostID, restore.Definition)] = restore
-	}
-
+	scopes := principal.ScopesFor(authz.PermBackupRead)
 	now := time.Now().UTC()
-	neverRestored := 0
-	items := make([]fleetBackup, 0, len(definitions))
-	counts := map[string]int{}
-	unverified := 0
-	for _, definition := range definitions {
-		item := fleetBackup{
-			HostID: definition.HostID, Hostname: names[definition.HostID],
-			Definition: definition.Name, Tool: definition.Tool,
-			Repository: definition.Repository,
-		}
-		id := key(definition.HostID, definition.Name)
-		if plan, known := latestPlan[id]; known {
-			item.LastSuccessAt = plan.LastSuccessAt
-		}
-		if item.LastSuccessAt == nil {
-			if run, present := latestRun[id]; present {
-				moment := run.RecordedAt.UTC()
-				item.LastSuccessAt = &moment
-			}
-		}
-		var verified *time.Time
-		if verification, present := latestVerification[id]; present {
-			moment := verification.RecordedAt.UTC()
-			verified = &moment
-		}
-		item.Status = backupstore.State(item.LastSuccessAt, now)
-		if item.LastSuccessAt != nil {
-			age := now.Sub(*item.LastSuccessAt).Hours()
-			item.AgeHours = &age
-		}
-		item.Unverified = backupstore.Unverified(verified, now)
-		if item.Unverified {
-			unverified++
-		}
-		if restore, present := latestRestore[id]; present {
-			moment := restore.RecordedAt.UTC()
-			item.LastRestoreAt = &moment
-		} else {
-			neverRestored++
-		}
-		counts[item.Status]++
-		items = append(items, item)
-	}
-
-	// The worst on top: a list that starts with a month-old copy answers
-	// the operator's question without scrolling.
-	sort.SliceStable(items, func(i, j int) bool {
-		if items[i].Status != items[j].Status {
-			return backupstore.Worse(items[i].Status, items[j].Status) == items[i].Status
-		}
-		if (items[i].LastSuccessAt == nil) != (items[j].LastSuccessAt == nil) {
-			return items[i].LastSuccessAt == nil
-		}
-		if items[i].LastSuccessAt == nil {
-			return items[i].Hostname < items[j].Hostname
-		}
-		return items[i].LastSuccessAt.Before(*items[j].LastSuccessAt)
-	})
-
 	if asCSV {
-		s.writeBackupsCSV(w, r, items, now)
+		s.writeBackupsCSV(w, r, scopes, now)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": items, "counts": counts, "unverified": unverified,
-		"never_restored": neverRestored,
-		"repositories":   s.repositoryLoads(r.Context(), items),
-		"hosts_total":    len(ids),
-		"thresholds": map[string]int{
+	// The pages after the first are judged at the moment of the first, so
+	// a copy keeps its state from one page to the next.
+	if cursor.Set {
+		now = cursor.Now
+	}
+	summary, err := s.backups.FleetSummary(r.Context(), scopes, now)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	rows, next, err := s.backups.FleetPage(r.Context(), scopes, cursor, limit, now)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	items := make([]fleetBackup, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, fleetBackupOf(row, now))
+	}
+	loads, err := s.backups.RepositoryLoads(r.Context(), scopes, now)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+
+	coverage := fleetCoverage{
+		TotalHosts: summary.Hosts, EvaluatedHosts: summary.HostsWithDefinitions,
+		UnknownHosts:   max(summary.Hosts-summary.HostsWithDefinitions, 0),
+		UnknownReasons: map[string]int{},
+	}
+	if coverage.UnknownHosts > 0 {
+		coverage.UnknownReasons[unknownNoDefinition] = coverage.UnknownHosts
+	}
+	writeJSON(w, http.StatusOK, fleetBackupsView{
+		fleetCoverage: coverage,
+		Items:         items, Count: len(items), Total: summary.Definitions, NextCursor: next,
+		Counts: summary.Counts, Unverified: summary.Unverified, NeverRestored: summary.NeverRestored,
+		Repositories: s.repositoryLoads(r.Context(), loads),
+		HostsTotal:   summary.Hosts,
+		Thresholds: map[string]int{
 			"warning_hours":     int(backupstore.WarningThreshold.Hours()),
 			"critical_hours":    int(backupstore.CriticalThreshold.Hours()),
 			"verification_days": int(backupstore.VerificationThreshold.Hours() / 24),
@@ -512,17 +474,30 @@ var backupsCSVColumns = []string{
 }
 
 // writeBackupsCSV streams every backup definition of the visible fleet,
-// the worst first as the screen sorts them. The rows are the ones the
-// screen shows, so the two agree; an empty last_success_at is a copy that
-// never ran, and an empty last_restore_at one nobody has ever read back.
-func (s *Server) writeBackupsCSV(w http.ResponseWriter, r *http.Request, items []fleetBackup, now time.Time) {
+// the worst first as the screen sorts them, a page at a time from the
+// same cursor the screen pages with, so the two agree; an empty
+// last_success_at is a copy that never ran, and an empty last_restore_at
+// one nobody has ever read back.
+func (s *Server) writeBackupsCSV(w http.ResponseWriter, r *http.Request, scopes []authz.Scope, now time.Time) {
 	s.writeCSV(w, r, exportFileName("backups", now), backupsCSVColumns, func(yield func([]string) bool) error {
-		for _, item := range items {
-			if !yield(fleetBackupCSVRow(item)) {
+		cursor := backupstore.FleetCursor{}
+		for {
+			rows, next, err := s.backups.FleetPage(r.Context(), scopes, cursor, backupstore.MaxPage, now)
+			if err != nil {
+				return err
+			}
+			for _, row := range rows {
+				if !yield(fleetBackupCSVRow(fleetBackupOf(row, now))) {
+					return nil
+				}
+			}
+			if next == "" {
 				return nil
 			}
+			if cursor, err = backupstore.ParseFleetCursor(next); err != nil {
+				return err
+			}
 		}
-		return nil
 	})
 }
 
@@ -556,41 +531,23 @@ type repositoryLoad struct {
 	Claimants *int   `json:"claimants,omitempty"`
 }
 
-// repositoryLoads groups the fleet copies by backend and attaches the
-// budget.
+// repositoryLoads attaches the budget of every backend the database
+// grouped the fleet copies by.
 //
 // The copy list says which host has an old copy. It does not say which
 // backend is the bottleneck - and that is what decides how many copies can
 // go at once. Without it the operator sees a slow campaign and does not
 // know what holds it.
-func (s *Server) repositoryLoads(ctx context.Context,
-	items []fleetBackup) []repositoryLoad {
-	order := []string{}
-	by := map[string]*repositoryLoad{}
-	for _, item := range items {
-		if item.Repository == "" {
-			continue
-		}
-		entry, present := by[item.Repository]
-		if !present {
-			entry = &repositoryLoad{
-				Repository: item.Repository,
-				BudgetKey:  budgets.BackendKey(item.Repository),
-			}
-			by[item.Repository] = entry
-			order = append(order, item.Repository)
-		}
-		entry.Hosts++
-		if item.Unverified {
-			entry.Unverified++
-		}
-		if item.AgeHours != nil && (entry.OldestAgeHours == nil || *item.AgeHours > *entry.OldestAgeHours) {
-			age := *item.AgeHours
-			entry.OldestAgeHours = &age
-		}
+func (s *Server) repositoryLoads(ctx context.Context, grouped []backupstore.RepositoryLoad) []repositoryLoad {
+	loads := make([]repositoryLoad, 0, len(grouped))
+	for _, group := range grouped {
+		loads = append(loads, repositoryLoad{
+			Repository: group.Repository, BudgetKey: budgets.BackendKey(group.Repository),
+			Hosts: group.Definitions, Unverified: group.Unverified, OldestAgeHours: group.OldestAgeHours,
+		})
 	}
-	if len(order) == 0 {
-		return []repositoryLoad{}
+	if len(loads) == 0 {
+		return loads
 	}
 
 	// Budgets are optional: an installation without them still shows the
@@ -601,7 +558,8 @@ func (s *Server) repositoryLoads(ctx context.Context,
 			for _, state := range states {
 				byKey[state.Key] = state
 			}
-			for _, entry := range by {
+			for i := range loads {
+				entry := &loads[i]
 				state, present := byKey[entry.BudgetKey]
 				if !present {
 					// The default policy for all backends counts the same as one
@@ -616,21 +574,5 @@ func (s *Server) repositoryLoads(ctx context.Context,
 			}
 		}
 	}
-
-	// The backends with the oldest copy first: they are the ones that need
-	// attention.
-	loads := make([]repositoryLoad, 0, len(order))
-	for _, repository := range order {
-		loads = append(loads, *by[repository])
-	}
-	sort.SliceStable(loads, func(i, j int) bool {
-		if (loads[i].OldestAgeHours == nil) != (loads[j].OldestAgeHours == nil) {
-			return loads[j].OldestAgeHours == nil
-		}
-		if loads[i].OldestAgeHours == nil {
-			return loads[i].Repository < loads[j].Repository
-		}
-		return *loads[i].OldestAgeHours > *loads[j].OldestAgeHours
-	})
 	return loads
 }

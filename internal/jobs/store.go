@@ -145,7 +145,14 @@ type Attempt struct {
 	UnitStateBefore json.RawMessage `json:"unit_state_before,omitempty"`
 	UnitStateAfter  json.RawMessage `json:"unit_state_after,omitempty"`
 	Detail          json.RawMessage `json:"detail,omitempty"`
-	DispatchedAt    *time.Time      `json:"dispatched_at,omitempty"`
+	// Verification is the read of the host after the change, as the host
+	// reported it: {verifier, verified, expected, observed, reason}. Empty
+	// for a read, for an operation whose verifier the panel settles on the
+	// host's return, and for an agent from before the verifiers - which is
+	// not the same as a change nobody confirmed, so the screens say which
+	// of the three it is rather than showing a silent success.
+	Verification json.RawMessage `json:"verification,omitempty"`
+	DispatchedAt *time.Time      `json:"dispatched_at,omitempty"`
 	// AcceptedAt is when the agent said it holds the task, and StartedAt
 	// when it said the operation is starting on the host. Both come from
 	// the agent's acknowledgement; an attempt without them was never heard
@@ -443,12 +450,13 @@ func (s *Store) CancelUndelivered(ctx context.Context, tx pgx.Tx, hostID, actor,
 func (s *Store) OpenTasksOfAction(ctx context.Context, hostID,
 	action string) ([]OpenTask, error) {
 	const query = `
-		select j.id::text, coalesce(a.id::text, ''), j.payload
+		select j.id::text, coalesce(a.id::text, ''), j.payload, coalesce(s.boot_id, '')
 		from jobs j
 		left join lateral (
-			select id from job_attempts where job_id = j.id
+			select id, session_id from job_attempts where job_id = j.id
 			order by attempt_number desc limit 1
 		) a on true
+		left join agent_sessions s on s.id = a.session_id
 		where j.host_id = $1::uuid and j.action_type = $2
 		  and j.state in ('queued', 'leased', 'dispatched', 'running', 'cancel_requested')
 		order by j.created_at`
@@ -461,7 +469,7 @@ func (s *Store) OpenTasksOfAction(ctx context.Context, hostID,
 	var tasks []OpenTask
 	for rows.Next() {
 		var task OpenTask
-		if err := rows.Scan(&task.JobID, &task.AttemptID, &task.Payload); err != nil {
+		if err := rows.Scan(&task.JobID, &task.AttemptID, &task.Payload, &task.SessionBootID); err != nil {
 			return nil, err
 		}
 		tasks = append(tasks, task)
@@ -474,6 +482,13 @@ type OpenTask struct {
 	JobID     string
 	AttemptID string
 	Payload   json.RawMessage
+	// SessionBootID is the boot identifier of the host in the session that
+	// carried the last attempt out - the boot the operation was ordered
+	// under. A settlement that has to see the host come back another boot
+	// (a reboot) compares against it, and never against the host's record,
+	// which the Hello has already moved on. Empty when the attempt never
+	// went out over a session; an empty one proves no return.
+	SessionBootID string
 }
 
 // LeasedJob joins a task with the attempt carrying it out.
@@ -957,6 +972,11 @@ type Result struct {
 	UnitStateAfter  json.RawMessage
 	// Detail is the result specific to the operation type, e.g. an upgrade plan.
 	Detail json.RawMessage
+	// Verification is the host's reading of itself after the change, as the
+	// contract's verifier made it. It goes onto the attempt exactly as it
+	// came: it carries a state word, a digest or a version, never the
+	// content of a file or a secret.
+	Verification json.RawMessage
 }
 
 // RecordResult records the result of an attempt and moves the task to a final
@@ -1058,13 +1078,14 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 			status = $2, exit_code = $3, error_code = $4, message = $5,
 			stdout = $6, stderr = $7, output_truncated = $8, replayed = $9,
 			unit_state_before = $10, unit_state_after = $11, result_detail = $12,
+			verification = $13,
 			finished_at = now(), lease_expires_at = null
 		where id = $1
 		returning extract(epoch from now() - dispatched_at)::float8`,
 		attemptID, result.Status, result.ExitCode, nullable(result.ErrorCode), nullable(result.Message),
 		string(result.Stdout), string(result.Stderr), result.OutputTruncated, result.Replayed,
 		nullableJSON(result.UnitStateBefore), nullableJSON(result.UnitStateAfter),
-		nullableJSON(result.Detail)).Scan(&elapsed); err != nil {
+		nullableJSON(result.Detail), nullableJSON(result.Verification)).Scan(&elapsed); err != nil {
 		return false, err
 	}
 	if elapsed != nil {
@@ -1139,9 +1160,28 @@ func staleReason(code string) bool {
 	return false
 }
 
+// RebootReturnGrace is how much longer than its lease a restart of a host
+// is waited for.
+//
+// The attempt of a reboot goes quiet the moment the host goes down: there
+// is no process left to renew its lease, and the lease is the panel's only
+// clock. Five minutes of silence is an ordinary reboot on a slow machine,
+// so the grace is added on top of the lease before the panel gives up -
+// and it gives up rather than queueing the task again, because a reboot
+// delivered a second time restarts a machine somebody is already waiting
+// for. A host that comes back later reconnects and settles nothing: the
+// job is closed, and the trail says the return was never observed.
+const RebootReturnGrace = 10 * time.Minute
+
 // ReclaimExpiredLeases returns tasks whose lease expired to the queue. A
 // gateway can disappear without closing its session, so time is the only
 // certain signal that an attempt failed.
+//
+// A reboot is the one operation that is not given back to the queue: its
+// result is settled by the panel on the host's return (opspec.VerifierReboot),
+// so an attempt without a result is a return nobody saw, and repeating the
+// order would restart the host again. It ends failed with
+// reboot_not_observed instead.
 func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	const query = `
 		with expired as (
@@ -1150,7 +1190,9 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			join jobs j on j.id = a.job_id
 			where a.finished_at is null
 			  and a.lease_expires_at is not null
-			  and a.lease_expires_at < now()
+			  and a.lease_expires_at < case when j.action_type = $1
+			                                then now() - make_interval(secs => $2)
+			                                else now() end
 			  and j.state in ('leased', 'dispatched', 'running')
 			for update of a skip locked
 		),
@@ -1159,16 +1201,31 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 			                        lease_expires_at = null
 			where id in (select attempt_id from expired)
 			returning job_id
+		),
+		settled as (
+			update jobs set state = 'failed', result_status = 'failed',
+			                result_error_code = $3, result_message = $4,
+			                wait_reason = '', finished_at = now(), updated_at = now()
+			where id in (select job_id from closed) and action_type = $1
+			returning id
+		),
+		requeued as (
+			update jobs set state = 'queued', wait_reason = '', updated_at = now()
+			where id in (select job_id from closed) and action_type <> $1
+			returning id
 		)
-		update jobs set state = 'queued', wait_reason = '', updated_at = now()
-		where id in (select job_id from closed)
-		returning id`
+		select id from settled
+		union all
+		select id from requeued`
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	reclaimed, err := collectIDs(tx.Query(ctx, query))
+	reclaimed, err := collectIDs(tx.Query(ctx, query,
+		string(opspec.ActionSystemReboot), RebootReturnGrace.Seconds(),
+		opspec.ErrorRebootNotObserved,
+		"the host did not come back with a new boot identifier within the wait"))
 	if err != nil {
 		return 0, err
 	}
@@ -1583,7 +1640,7 @@ func (s *Store) Attempts(ctx context.Context, jobID string) ([]Attempt, error) {
 		select id, job_id, attempt_number, coalesce(gateway_id, ''), session_id,
 		       coalesce(status, ''), exit_code, coalesce(error_code, ''), coalesce(message, ''),
 		       coalesce(stdout, ''), coalesce(stderr, ''), output_truncated, replayed,
-		       unit_state_before, unit_state_after, result_detail,
+		       unit_state_before, unit_state_after, result_detail, verification,
 		       dispatched_at, accepted_at, started_at, finished_at, created_at
 		from job_attempts
 		where job_id = $1
@@ -1600,7 +1657,7 @@ func (s *Store) Attempts(ctx context.Context, jobID string) ([]Attempt, error) {
 		if err := rows.Scan(&a.ID, &a.JobID, &a.Number, &a.GatewayID, &a.SessionID,
 			&a.Status, &a.ExitCode, &a.ErrorCode, &a.Message,
 			&a.Stdout, &a.Stderr, &a.OutputTruncated, &a.Replayed,
-			&a.UnitStateBefore, &a.UnitStateAfter, &a.Detail,
+			&a.UnitStateBefore, &a.UnitStateAfter, &a.Detail, &a.Verification,
 			&a.DispatchedAt, &a.AcceptedAt, &a.StartedAt, &a.FinishedAt, &a.CreatedAt); err != nil {
 			return nil, err
 		}

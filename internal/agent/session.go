@@ -549,6 +549,17 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			case *agentv1.ServerMessage_InventoryRequest:
 				inventory.request()
 
+			case *agentv1.ServerMessage_MessageAck:
+				// The acknowledgement of a consumed message is between the
+				// panel and the relay: it says a record may leave the
+				// relay's spool. A relay strips it from the stream, so the
+				// agent normally never sees one - and when it does, over a
+				// path without a relay or through one from before the
+				// spool, it is nothing for the agent to do. Named all the
+				// same rather than left to the default: a message the
+				// agent does not understand must not cost the host its
+				// session.
+
 			case *agentv1.ServerMessage_Task:
 				// A task runs next to the receive loop: a unit restart takes time,
 				// and the heartbeat and the next tasks must not wait for it.
@@ -604,6 +615,15 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 					// answer went out as progress, and the result belongs to the
 					// execution it waits on.
 					if result.GetErrorCode() == StatusInProgress {
+						return
+					}
+					// A restart has no result to send back either: its
+					// verifier is the host coming up on another boot, and
+					// this process goes down before that can be observed.
+					// The panel settles the job from the next Hello.
+					if result.GetErrorCode() == StatusAwaitingReturn {
+						opts.Log.Info("the restart is in flight",
+							"task_id", task.GetTaskId(), "description", result.GetMessage())
 						return
 					}
 					opts.Log.Info("the task finished",

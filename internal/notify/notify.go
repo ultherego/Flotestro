@@ -9,12 +9,17 @@
 // trail, with a cursor of its own, so the legacy webhook and the channels
 // move independently and neither holds the other back.
 //
-// Two rules hold throughout. A mail password never lies in a channel: the
-// configuration names a secret of the secret store and the sender reads
-// it when it sends. And a receiver that is down is a fact the panel
-// records in the delivery log, never a reason to stop the trail: the
-// router moves on after its attempts, and the log says what did not
-// arrive.
+// Three rules hold throughout. A credential never lies in a channel: the
+// address of an incoming webhook, the key a webhook is signed with and a
+// mail password are versions of the secret store, and the API shows only
+// that one is set and when it was last replaced. A receiver that is down
+// is a fact the queue records, never a reason to lose the message: the
+// router writes one durable row per event and channel, a worker sends it
+// under a lease and retries with a growing pause, and a row whose
+// attempts ran out is a dead letter an operator can send again - the
+// trail's cursor is never the only record of what was sent. And a
+// channel of one site is told nothing it cannot be sure is that site's:
+// an event that names no site reaches only a channel of the whole fleet.
 package notify
 
 import (
@@ -47,6 +52,14 @@ type Subject struct {
 	Description string `json:"description"`
 }
 
+// SubjectSecurity is the subject of the security alerts of the whole
+// installation: a duplicate identity, a helper that refused a signature,
+// a relay envelope that did not verify. They are global by nature - the
+// installation's, not a site's - so a silence bound to a host or a rule
+// never keeps them back; only a global silence does, and writing one
+// needs the global permission.
+const SubjectSecurity = "security.alert"
+
 // Subjects is the catalogue of what a channel can carry.
 var Subjects = []Subject{
 	{Name: "alert.fired", Description: "an alert rule fired on a host"},
@@ -57,6 +70,7 @@ var Subjects = []Subject{
 	{Name: "enrollment.completed", Description: "a host completed its enrollment"},
 	{Name: "host.offline", Description: "a host that was online stopped answering"},
 	{Name: "policy.drift", Description: "a policy found a rule out of its declared state on a host"},
+	{Name: SubjectSecurity, Description: "a security alert of the installation; a silence of one host never keeps it back"},
 }
 
 // subjectOfEvent maps a type of the trail to the subject it belongs to.
@@ -78,9 +92,16 @@ var subjectOfEvent = map[string]string{
 	"policy.drift":                   "policy.drift",
 }
 
+// securityEventPrefix marks the events of the trail that are security
+// alerts of the installation, whatever their exact type.
+const securityEventPrefix = "security."
+
 // SubjectOf returns the subject an event of the trail belongs to, and
 // false for an event no channel can carry.
 func SubjectOf(eventType string) (string, bool) {
+	if strings.HasPrefix(eventType, securityEventPrefix) {
+		return SubjectSecurity, true
+	}
 	subject, ok := subjectOfEvent[eventType]
 	return subject, ok
 }
@@ -114,11 +135,21 @@ type Filter struct {
 	// events that are not alerts have no severity and pass.
 	SeverityMin string `json:"severity_min,omitempty"`
 	// Site and Environment narrow to the events of one part of the fleet.
-	// An event that names no host - a campaign's end - passes: it is news
-	// of the whole fleet, and a channel of one site is told of it rather
-	// than left to find out.
+	// Both empty is the explicitly global channel: it carries the events
+	// of every site and the ones that name no site - a campaign's end,
+	// a security alert of the installation. A channel that names a site
+	// is told only what is known to be that site's: an event whose site
+	// is unknown fails the filter rather than passing it, because "we do
+	// not know where this happened" is no reason to tell one site.
 	Site        string `json:"site,omitempty"`
 	Environment string `json:"environment,omitempty"`
+}
+
+// Global says whether the filter names no part of the fleet: the channel
+// of the whole installation, the only kind an event of unknown place
+// reaches.
+func (f Filter) Global() bool {
+	return f.Site == "" && f.Environment == ""
 }
 
 // Scope is what an event says about where it happened and how serious it
@@ -129,16 +160,20 @@ type Scope struct {
 	Severity    string
 }
 
-// Matches says whether an event of the scope passes the filter.
+// Matches says whether an event of the scope passes the filter. The
+// place is fail-closed: a filter that names a site or an environment
+// wants the event to name the same one, and an event that names none
+// fails. The severity is not: an event that is not an alert has no
+// severity by nature, and the filter on severity speaks of alerts alone.
 func (f Filter) Matches(scope Scope) bool {
 	if f.SeverityMin != "" && scope.Severity != "" &&
 		severityRank(scope.Severity) < severityRank(f.SeverityMin) {
 		return false
 	}
-	if f.Site != "" && scope.Site != "" && scope.Site != f.Site {
+	if f.Site != "" && scope.Site != f.Site {
 		return false
 	}
-	if f.Environment != "" && scope.Environment != "" && scope.Environment != f.Environment {
+	if f.Environment != "" && scope.Environment != f.Environment {
 		return false
 	}
 	return true
@@ -156,19 +191,46 @@ type Channel struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
-	// Config is the configuration of the kind with the secrets reduced to
-	// "set": what the API shows. The store keeps the whole one.
-	Config    json.RawMessage `json:"config"`
-	Events    []string        `json:"events"`
-	Filter    Filter          `json:"filter"`
-	Enabled   bool            `json:"enabled"`
-	CreatedBy string          `json:"created_by"`
-	Reason    string          `json:"reason"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
-	// LastDelivery is the newest row of the log, so the list says at a
+	// Config is the configuration of the kind without its credential:
+	// what the API shows and takes. The credential travels in it only on
+	// the way in - a typed secret, a typed address - and is moved to the
+	// secret store before the row is written; on the way out the store
+	// leaves the flags secret_set and url_set in its place.
+	Config json.RawMessage `json:"config"`
+	// PublicConfig is the summary of the address the API shows beside the
+	// configuration: the host of an incoming webhook, the relay of a
+	// mailbox. Nothing in it is a credential.
+	PublicConfig json.RawMessage `json:"public_config"`
+	// SecretConfigured says the channel has its credential in the secret
+	// store; SecretRotatedAt is when it was last set or replaced.
+	SecretConfigured bool       `json:"secret_configured"`
+	SecretRotatedAt  *time.Time `json:"secret_last_rotated_at,omitempty"`
+	// Revision is raised on every write of the channel.
+	Revision  int64     `json:"revision"`
+	Events    []string  `json:"events"`
+	Filter    Filter    `json:"filter"`
+	Enabled   bool      `json:"enabled"`
+	CreatedBy string    `json:"created_by"`
+	Reason    string    `json:"reason"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	// LastDelivery is the newest row of the queue, so the list says at a
 	// glance whether the channel works.
-	LastDelivery *Delivery `json:"last_delivery,omitempty"`
+	LastDelivery *DeliverySummary `json:"last_delivery,omitempty"`
+
+	// secret is the credential read from the store for one send; it is
+	// never encoded and never kept past the send. secretRef is the
+	// identifier of the secret that holds it.
+	secret    string
+	secretRef string
+}
+
+// DeliverySummary is what a channel says about its newest delivery.
+type DeliverySummary struct {
+	ID        string    `json:"id"`
+	State     string    `json:"state"`
+	At        time.Time `json:"at"`
+	ErrorCode string    `json:"error_code,omitempty"`
 }
 
 // Subscribes says whether the channel carries the subject.
@@ -181,13 +243,33 @@ func (c Channel) Subscribes(subject string) bool {
 	return false
 }
 
+// WithSecret returns the channel with its credential in hand, for a
+// sender. Tests build channels this way; the worker reads the store.
+func (c Channel) WithSecret(secret string) Channel {
+	c.secret = secret
+	return c
+}
+
+// ChannelSecretPrefix starts the name of every secret the panel holds for
+// a channel. The name is the channel's identifier under this prefix, so
+// a secret of the store reads as the channel's at a glance, and the
+// scheduler can refuse to issue one to a host: a credential of the panel
+// is not a task's to carry.
+const ChannelSecretPrefix = "panel.notification."
+
+// ChannelSecretName is the name of the secret that holds a channel's
+// credential.
+func ChannelSecretName(channelID string) string {
+	return ChannelSecretPrefix + channelID
+}
+
 // WebhookConfig is the address of a webhook of the installation's own.
 // The deliveries are signed the way the legacy webhook signs them, so a
 // receiver written for one reads the other.
 type WebhookConfig struct {
 	URL string `json:"url"`
 	// Secret signs the deliveries; empty means unsigned, and the API says
-	// so on the channel.
+	// so on the channel. It is in the configuration only on the way in.
 	Secret string `json:"secret,omitempty"`
 	// SecretSet is what the API shows in place of the secret.
 	SecretSet bool `json:"secret_set,omitempty"`
@@ -202,7 +284,8 @@ type EmailConfig struct {
 	To       []string `json:"to"`
 	Username string   `json:"username,omitempty"`
 	// PasswordSecret names the secret of the store that holds the
-	// password; the row never holds the password.
+	// password; the row never holds the password. The channel's
+	// secret_ref points at the same secret.
 	PasswordSecret string `json:"password_secret,omitempty"`
 }
 
@@ -210,8 +293,10 @@ type EmailConfig struct {
 // its shape - Mattermost, Rocket.Chat, Discord's Slack endpoint.
 type SlackConfig struct {
 	// URL is the incoming webhook. It carries the token that lets anybody
-	// post to the channel, so it is a secret: the API never shows it back
-	// and an edit without retyping it keeps the stored one.
+	// post to the channel, so it is the credential: it is in the
+	// configuration only on the way in, the store keeps it as a secret,
+	// the API never shows it back and an edit without retyping it keeps
+	// the stored one.
 	URL string `json:"url,omitempty"`
 	// URLSet is what the API shows in place of the address.
 	URLSet bool `json:"url_set,omitempty"`
@@ -227,6 +312,9 @@ func (e Error) Error() string { return e.Message }
 
 // ErrNotFound means there is no such channel.
 var ErrNotFound = errors.New("there is no such notification channel")
+
+// ErrDeliveryNotFound means there is no such row of the queue.
+var ErrDeliveryNotFound = errors.New("there is no such notification delivery")
 
 // The bounds of a channel.
 const (
@@ -291,7 +379,12 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		if err := checkHTTPURL(config.URL); err != nil {
 			return nil, err
 		}
-		config.SecretSet = false
+		// A typed secret replaces the stored one; "the secret is set" with
+		// none typed keeps it; neither clears it. The store reads the
+		// flag, so it survives here.
+		if config.Secret != "" {
+			config.SecretSet = false
+		}
 		return config, nil
 	case KindSlackWebhook:
 		var config SlackConfig
@@ -300,8 +393,9 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		}
 		config.URL = strings.TrimSpace(config.URL)
 		// An edit that says "the address is set" and types none keeps the
-		// stored address; the store fills it in and refuses a channel that
-		// ends up with none. Every other case has to carry an address.
+		// stored address; the store checks that one is stored and refuses
+		// a channel that ends up with none. Every other case has to carry
+		// an address.
 		if config.URL == "" && config.URLSet {
 			return config, nil
 		}
@@ -352,6 +446,9 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		if config.PasswordSecret != "" && !secretName.MatchString(config.PasswordSecret) {
 			return nil, Error{Code: "invalid_config", Message: "password_secret has to be the name of a secret of the store"}
 		}
+		if strings.HasPrefix(config.PasswordSecret, ChannelSecretPrefix) {
+			return nil, Error{Code: "invalid_config", Message: "password_secret cannot name a secret the panel holds for a channel"}
+		}
 		if config.Username != "" && config.PasswordSecret == "" {
 			return nil, Error{Code: "invalid_config", Message: "a username needs the name of the secret that holds its password"}
 		}
@@ -372,26 +469,198 @@ func checkHTTPURL(address string) error {
 	return nil
 }
 
-// Delivery is one attempt of one channel.
+// displayHost is the host of an address, for the public summary of a
+// channel: enough to tell hooks.slack.com from a mistyped address,
+// nothing of the path that carries the token.
+func displayHost(address string) string {
+	parsed, err := url.Parse(address)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
+}
+
+// publicConfigOf is the summary of an address the API shows beside the
+// configuration. It is computed from the configuration as it goes in,
+// once, and stored: what the API shows is a column, not a redaction that
+// could be forgotten.
+func publicConfigOf(kind string, config any, secretAddress string) json.RawMessage {
+	summary := map[string]any{}
+	switch c := config.(type) {
+	case WebhookConfig:
+		summary["display_host"] = displayHost(c.URL)
+		summary["url"] = c.URL
+		summary["signed"] = c.Secret != "" || c.SecretSet
+	case SlackConfig:
+		address := c.URL
+		if address == "" {
+			address = secretAddress
+		}
+		summary["display_host"] = displayHost(address)
+	case EmailConfig:
+		summary["display_host"] = fmt.Sprintf("%s:%d", c.Host, c.Port)
+		summary["from"] = c.From
+		summary["recipients"] = len(c.To)
+		summary["starttls"] = c.StartTLS
+		summary["authenticated"] = c.Username != ""
+	}
+	encoded, err := json.Marshal(summary)
+	if err != nil {
+		return json.RawMessage("{}")
+	}
+	return encoded
+}
+
+// The states of a row of the queue, as the schema names them.
+const (
+	StatePending    = "pending"
+	StateLeased     = "leased"
+	StateDelivered  = "delivered"
+	StateRetryWait  = "retry_wait"
+	StateDeadLetter = "dead_letter"
+	StateSuppressed = "suppressed"
+)
+
+// States lists the states of a row of the queue.
+var States = []string{StatePending, StateLeased, StateDelivered, StateRetryWait, StateDeadLetter, StateSuppressed}
+
+// KnownState says whether the name is a state of the queue.
+func KnownState(name string) bool {
+	for _, state := range States {
+		if state == name {
+			return true
+		}
+	}
+	return false
+}
+
+// The typed reasons of a suppressed row.
+const (
+	// SuppressedBySilence: a silence of the host, the rule or both kept
+	// the row; policy_id names it.
+	SuppressedBySilence = "silence"
+	// SuppressedByMaintenance: the host is inside a maintenance window.
+	SuppressedByMaintenance = "maintenance_window"
+	// SuppressedFireKept: the resolve of an alert whose fire the channel
+	// never got, because a silence kept it; a resolve of nothing said is
+	// nothing to say.
+	SuppressedFireKept = "fired_suppressed"
+)
+
+// The codes a dead letter carries, as the document names them, beside
+// the transport codes of a failed attempt.
+const (
+	// CodeCredentialsRejected: the receiver answered 401 or 403, or the
+	// mail relay refused the login. Retrying with the same credential
+	// cannot help; an operator replaces it and retries.
+	CodeCredentialsRejected = "channel_credentials_rejected"
+	// CodePermanentHTTP: the receiver answered a status that is neither a
+	// success nor a failure that passes - a 404, a 400 - so the address
+	// or the body is wrong for it.
+	CodePermanentHTTP = "permanent_http_error"
+	// CodePermanentSMTP: the mail relay refused the message with a
+	// permanent reply.
+	CodePermanentSMTP = "permanent_smtp_error"
+	// CodeAttemptsExhausted: the receiver kept failing in a way that
+	// passes until the attempts ran out.
+	CodeAttemptsExhausted = "delivery_attempts_exhausted"
+	// CodeChannelMisconfigured: the channel cannot send as it is - no
+	// sender for its kind, a configuration that does not read.
+	CodeChannelMisconfigured = "channel_misconfigured"
+)
+
+// Delivery is one row of the queue: one event for one channel, with the
+// attempts counted on it and the outcome so far.
 type Delivery struct {
-	ID          int64  `json:"id"`
+	ID          string `json:"id"`
 	ChannelID   string `json:"channel_id"`
 	ChannelName string `json:"channel_name,omitempty"`
-	// EventID is the row of the trail; zero for a test message.
-	EventID   int64     `json:"event_id"`
-	EventType string    `json:"event_type"`
-	Attempt   int       `json:"attempt"`
+	// EventID is the row of the trail; zero for a test message and for a
+	// summary after a silence.
+	EventID   int64  `json:"event_id"`
+	EventType string `json:"event_type"`
+	// Title is the first line of the message, so the log reads without
+	// the trail.
+	Title   string `json:"title,omitempty"`
+	State   string `json:"state"`
+	Attempt int    `json:"attempt"`
+	// NextAttemptAt is when the worker takes the row again; it means
+	// something for pending and retry_wait.
+	NextAttemptAt time.Time  `json:"next_attempt_at"`
+	LeaseOwner    string     `json:"lease_owner,omitempty"`
+	LeaseUntil    *time.Time `json:"lease_until,omitempty"`
+	LastErrorCode string     `json:"last_error_code"`
+	LastError     string     `json:"last_error"`
+	// PolicyID and SuppressionReason say what kept a suppressed row.
+	PolicyID          string     `json:"policy_id,omitempty"`
+	SuppressionReason string     `json:"suppression_reason,omitempty"`
+	DeliveredAt       *time.Time `json:"delivered_at,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at"`
+
+	// The fields below are the names of the previous release, kept for
+	// the readers that know them: status sent or failed, the code and
+	// the sentence of the failure, and the moment of the row.
 	Status    string    `json:"status"`
 	ErrorCode string    `json:"error_code"`
 	Error     string    `json:"error"`
 	SentAt    time.Time `json:"sent_at"`
+
+	// aggregateID, message and channelRevision are the row's own: what
+	// the event is about, the composed message as JSON, and the revision
+	// of the channel the row was queued under.
+	aggregateID     string
+	message         []byte
+	channelRevision int64
 }
 
-// The statuses of a delivery.
+// WithMessage returns the row with its composed message; the queue keeps
+// it with the row and the worker sends it as it is.
+func (d Delivery) WithMessage(message Message) (Delivery, error) {
+	encoded, err := json.Marshal(message)
+	if err != nil {
+		return d, err
+	}
+	d.message = encoded
+	d.aggregateID = message.AggregateID
+	d.Title = message.Title
+	return d, nil
+}
+
+// Message decodes the composed message of the row.
+func (d Delivery) Message() (Message, error) {
+	var message Message
+	if len(d.message) == 0 {
+		return message, errors.New("the row carries no message")
+	}
+	err := json.Unmarshal(d.message, &message)
+	return message, err
+}
+
+// The statuses of the previous release's log, derived from the state.
 const (
 	StatusSent   = "sent"
 	StatusFailed = "failed"
 )
 
-// DeliveryRetention is how long the log keeps a row.
+// legacyStatus reads a state as the previous release's status: delivered
+// is sent, a dead letter or a wait for the next attempt is failed, and
+// the rest - queued, in hand, suppressed - has no word in that vocabulary
+// and reads as the state itself.
+func legacyStatus(state string) string {
+	switch state {
+	case StateDelivered:
+		return StatusSent
+	case StateDeadLetter, StateRetryWait:
+		return StatusFailed
+	}
+	return state
+}
+
+// Summary is what a channel shows of the delivery.
+func (d Delivery) Summary() *DeliverySummary {
+	return &DeliverySummary{ID: d.ID, State: d.State, At: d.UpdatedAt, ErrorCode: d.LastErrorCode}
+}
+
+// DeliveryRetention is how long the queue keeps a settled row.
 const DeliveryRetention = 30 * 24 * time.Hour

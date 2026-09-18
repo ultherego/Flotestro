@@ -1,6 +1,10 @@
 package opspec
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/ultherego/flotestro/internal/modules/accounts"
+)
 
 // A container log read takes a name as well as an identifier: it is a read,
 // and the name is what the operator has in front of them. The value still
@@ -100,7 +104,7 @@ func TestPrivilegedGroupsRaiseTheRisk(t *testing.T) {
 	if PayloadRequiresFreshAuth(ActionLocalUserGroupsSet, plain) {
 		t.Error("plain groups require fresh authentication")
 	}
-	for _, group := range PrivilegedGroups {
+	for _, group := range accounts.PrivilegedGroups() {
 		raised := Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"developers", group}}}
 		if risk := PayloadRisk(ActionLocalUserGroupsSet, raised); risk != RiskCritical {
 			t.Errorf("group %s gives the risk %s, expected critical", group, risk)
@@ -117,10 +121,15 @@ func TestPrivilegedGroupsRaiseTheRisk(t *testing.T) {
 	if err := Validate(ActionLocalUserGroupsSet, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"su do"}}}); err == nil {
 		t.Error("an invalid group name was accepted")
 	}
-	// The registry's own risk stays high for other operations regardless
-	// of the groups in the payload.
-	if risk := PayloadRisk(ActionLocalUserCreate, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"sudo"}}}); risk != RiskHigh {
-		t.Errorf("creating an account has the risk %s", risk)
+	// An account created straight into a privileged group is the same
+	// grant of root as moving one into it, so the create carries the
+	// raised risk too; a create without such a group keeps the risk of
+	// the operation.
+	if risk := PayloadRisk(ActionLocalUserCreate, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"sudo"}}}); risk != RiskCritical {
+		t.Errorf("creating an account in sudo has the risk %s, expected critical", risk)
+	}
+	if risk := PayloadRisk(ActionLocalUserCreate, Payload{LocalUser: &LocalUserPayload{Name: "smith", Groups: []string{"developers"}}}); risk != RiskHigh {
+		t.Errorf("creating an ordinary account has the risk %s, expected high", risk)
 	}
 }
 

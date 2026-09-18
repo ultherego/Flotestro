@@ -69,9 +69,15 @@ type Sampler struct {
 	// previous is the CPU counter snapshot the next sample is measured
 	// against.
 	previous *cpuCounters
+	// Release hands the pages the agent no longer uses back to the host.
+	// The default asks the runtime; a test replaces it to count the calls.
+	Release func()
+
 	// previousProcess is the agent's own CPU snapshot, measured the same
 	// way.
 	previousProcess *processCPU
+	// releasedAt is when the pages were last handed back.
+	releasedAt time.Time
 }
 
 // NewSampler returns a sampler reading the real host.

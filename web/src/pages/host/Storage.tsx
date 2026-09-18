@@ -10,6 +10,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, usageTone, useHost, useModule, useModuleRefresh, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 export type Device = {
@@ -198,6 +199,11 @@ export function destructiveRefusal(device: Device, devices: Device[]): { code: s
  * The difference between the two is usually the reason somebody opens this
  * tab.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const STORAGE_CHANGES = [
+  "mount.ensure", "mount.remove", "filesystem.check", "filesystem.resize", "filesystem.create", "disk.wipe", "lvm.extend",
+];
+
 export function Storage() {
   const t = useT();
   const host = useHost();
@@ -248,19 +254,24 @@ export function Storage() {
         description={t("Devices from the kernel, mounts from mountinfo, persistence from fstab — kept apart on purpose: the file says what should be mounted after a reboot, not what is mounted now.")}
         actions={
           <>
-            <button className="secondary" onClick={() => setWizard((open) => !open)}>
-              {wizard ? t("Cancel") : t("Mount a filesystem")}
-            </button>
-            <button
-              onClick={() => request.mutate({ action: "storage.plan", payload: { storage: {} } })}
-              disabled={request.isPending || host.connection_state !== "online"}
-            >
-              {t("Read from host")}
-            </button>
+            <ActionGuard action="mount.ensure" host={host.id}>
+              <button className="secondary" onClick={() => setWizard((open) => !open)}>
+                {wizard ? t("Cancel") : t("Mount a filesystem")}
+              </button>
+            </ActionGuard>
+            <ActionGuard action="storage.plan" host={host.id} explain>
+              <button
+                onClick={() => request.mutate({ action: "storage.plan", payload: { storage: {} } })}
+                disabled={request.isPending || host.connection_state !== "online"}
+              >
+                {t("Read from host")}
+              </button>
+            </ActionGuard>
           </>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={STORAGE_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -269,7 +280,7 @@ export function Storage() {
         </p>
       )}
 
-      {wizard && <MountWizard onIntent={setIntent} />}
+      {wizard && <ActionGuard action="mount.ensure" host={host.id}><MountWizard onIntent={setIntent} /></ActionGuard>}
 
       <Widgets>
       {/* The mounts by what they will look like after a reboot, and the ones
@@ -374,19 +385,21 @@ export function Storage() {
                 <td>{mount.managed ? "Flotestro" : <span className="badge unknown">{t("host admin")}</span>}</td>
                 <td>
                   {mount.managed && mount.mounted && (
-                    <button
-                      className="hm-danger"
-                      onClick={() =>
-                        setIntent({
-                          action: "mount.remove",
-                          label: t("Unmount"),
-                          description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: mount.target }),
-                          payload: { storage: { target: mount.target } },
-                        })
-                      }
-                    >
-                      {t("Unmount")}
-                    </button>
+                    <ActionGuard action="mount.remove" host={host.id}>
+                      <button
+                        className="hm-danger"
+                        onClick={() =>
+                          setIntent({
+                            action: "mount.remove",
+                            label: t("Unmount"),
+                            description: t("{target} will be unmounted and its fstab entry removed. Processes holding it are checked first.", { target: mount.target }),
+                            payload: { storage: { target: mount.target } },
+                          })
+                        }
+                      >
+                        {t("Unmount")}
+                      </button>
+                    </ActionGuard>
                   )}
                 </td>
               </tr>
@@ -468,32 +481,36 @@ export function Storage() {
                   {!deviceInUse(device, devices) && (
                     <div className="operations">
                       {device.fs_type && (
-                        <button
-                          onClick={() =>
-                            setIntent({
-                              action: "filesystem.check",
-                              label: t("Check filesystem"),
-                              description: t("{device} will be checked read-only. The check refuses to run if the filesystem is mounted.", { device: device.path }),
-                              payload: { storage: { device: device.path } },
-                            })
-                          }
-                        >
-                          {t("Check")}
-                        </button>
+                        <ActionGuard action="filesystem.check" host={host.id}>
+                          <button
+                            onClick={() =>
+                              setIntent({
+                                action: "filesystem.check",
+                                label: t("Check filesystem"),
+                                description: t("{device} will be checked read-only. The check refuses to run if the filesystem is mounted.", { device: device.path }),
+                                payload: { storage: { device: device.path } },
+                              })
+                            }
+                          >
+                            {t("Check")}
+                          </button>
+                        </ActionGuard>
                       )}
                       {device.fs_type && (
-                        <button
-                          onClick={() =>
-                            setIntent({
-                              action: "filesystem.resize",
-                              label: t("Grow filesystem"),
-                              description: t("The filesystem on {device} will grow to fill the device ({size}).", { device: device.path, size: bytes(device.size_bytes) }),
-                              payload: { storage: identity(device) },
-                            })
-                          }
-                        >
-                          {t("Grow")}
-                        </button>
+                        <ActionGuard action="filesystem.resize" host={host.id}>
+                          <button
+                            onClick={() =>
+                              setIntent({
+                                action: "filesystem.resize",
+                                label: t("Grow filesystem"),
+                                description: t("The filesystem on {device} will grow to fill the device ({size}).", { device: device.path, size: bytes(device.size_bytes) }),
+                                payload: { storage: identity(device) },
+                              })
+                            }
+                          >
+                            {t("Grow")}
+                          </button>
+                        </ActionGuard>
                       )}
                       {/* Formatting and wiping carry the device identity from
                           this row - the by-id link, the WWN, the serial - and
@@ -510,37 +527,41 @@ export function Storage() {
                         </span>
                       ) : (
                         <>
-                          <button
-                            className="hm-danger"
-                            onClick={() =>
-                              setIntent({
-                                action: "filesystem.create",
-                                label: t("Format device"),
-                                description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
-                                  device: device.path,
-                                  details: `${bytes(device.size_bytes)}, ${byIdName(device)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
-                                }),
-                                payload: {
-                                  storage: { ...identity(device), fs_type: "ext4" },
-                                },
-                              })
-                            }
-                          >
-                            {t("Format")}
-                          </button>
-                          <button
-                            className="hm-danger"
-                            onClick={() =>
-                              setIntent({
-                                action: "disk.wipe",
-                                label: t("Wipe signatures"),
-                                description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
-                                payload: { storage: identity(device) },
-                              })
-                            }
-                          >
-                            {t("Wipe")}
-                          </button>
+                          <ActionGuard action="filesystem.create" host={host.id}>
+                            <button
+                              className="hm-danger"
+                              onClick={() =>
+                                setIntent({
+                                  action: "filesystem.create",
+                                  label: t("Format device"),
+                                  description: t("Everything on {device} ({details}) will be destroyed and a new ext4 filesystem created. This needs two approvals.", {
+                                    device: device.path,
+                                    details: `${bytes(device.size_bytes)}, ${byIdName(device)}${device.serial ? `, ${t("serial")} ${device.serial}` : ""}`,
+                                  }),
+                                  payload: {
+                                    storage: { ...identity(device), fs_type: "ext4" },
+                                  },
+                                })
+                              }
+                            >
+                              {t("Format")}
+                            </button>
+                          </ActionGuard>
+                          <ActionGuard action="disk.wipe" host={host.id}>
+                            <button
+                              className="hm-danger"
+                              onClick={() =>
+                                setIntent({
+                                  action: "disk.wipe",
+                                  label: t("Wipe signatures"),
+                                  description: t("Filesystem signatures on {device} will be removed, so the host stops recognising what is on it. The contents are not overwritten. This needs two approvals.", { device: device.path }),
+                                  payload: { storage: identity(device) },
+                                })
+                              }
+                            >
+                              {t("Wipe")}
+                            </button>
+                          </ActionGuard>
                         </>
                       )}
                     </div>
@@ -603,19 +624,21 @@ export function Storage() {
                     {/* We extend upwards only and together with the
                         filesystem: a volume bigger than its filesystem gives
                         not a single byte. */}
-                    <button
-                      className="secondary"
-                      onClick={() =>
-                        setIntent({
-                          action: "lvm.extend",
-                          label: t("Extend volume"),
-                          description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
-                          payload: { storage: { device: volume.path, size: "+512M" } },
-                        })
-                      }
-                    >
-                      {t("Extend by 512M")}
-                    </button>
+                    <ActionGuard action="lvm.extend" host={host.id}>
+                      <button
+                        className="secondary"
+                        onClick={() =>
+                          setIntent({
+                            action: "lvm.extend",
+                            label: t("Extend volume"),
+                            description: t("{volume} will grow by 512M together with its filesystem, if the group has room.", { volume: volume.path }),
+                            payload: { storage: { device: volume.path, size: "+512M" } },
+                          })
+                        }
+                      >
+                        {t("Extend by 512M")}
+                      </button>
+                    </ActionGuard>
                   </td>
                 </tr>
               ))}
@@ -680,9 +703,11 @@ function SmartReport({ device, onClose }: { device: Device; onClose: () => void 
       span={12}
       tools={
         <>
-          <button onClick={() => read.order({ action: "storage.smart.read", payload: { storage: { device: device.path } } })} disabled={read.busy || host.connection_state !== "online"}>
-            {read.busy ? t("Reading…") : read.ordered ? t("Read again") : t("Read SMART")}
-          </button>
+          <ActionGuard action="storage.smart.read" host={host.id} explain>
+            <button onClick={() => read.order({ action: "storage.smart.read", payload: { storage: { device: device.path } } })} disabled={read.busy || host.connection_state !== "online"}>
+              {read.busy ? t("Reading…") : read.ordered ? t("Read again") : t("Read SMART")}
+            </button>
+          </ActionGuard>
           <button className="secondary" onClick={onClose}>{t("Close")}</button>
         </>
       }

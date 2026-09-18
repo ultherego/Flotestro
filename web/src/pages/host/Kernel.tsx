@@ -10,6 +10,7 @@ import {
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Setting = {
@@ -52,6 +53,9 @@ const MODULE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
  * the profile and what the panel wrote itself; the rest can be read on
  * request.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const KERNEL_CHANGES = ["sysctl.ensure", "kernel.module.blacklist", "kernel.module.load"];
+
 export function Kernel() {
   const t = useT();
   const host = useHost();
@@ -98,6 +102,7 @@ export function Kernel() {
         description={t("A profile of settings, not all of /proc/sys — there are thousands of keys there and most answer no question anyone asks. Anything the panel wrote is listed too, with the value the kernel currently applies.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={KERNEL_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -172,40 +177,42 @@ export function Kernel() {
             ))}
           </tbody>
         </Table>
-        <div className="hm-section-body">
-          {/* What the form does is said before the first keystroke: the
-              key goes to the panel's own file and is applied at once. */}
-          <Form>
-            <Fields>
-              <Field
-                label={t("Key")}
-                help={t("A sysctl key. It is written to {path} and applied now; a key that is not in the profile above joins it.", { path: snapshot?.managed_path || "/etc/sysctl.d" })}
-              >
-                <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="vm.swappiness" />
-              </Field>
-              <Field label={t("Value")} narrow help={t("As sysctl takes it.")}>
-                <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="10" />
-              </Field>
-            </Fields>
-            <FormActions>
-              <button
-                onClick={() =>
-                  setIntent({
-                    action: "sysctl.ensure",
-                    label: t("Set kernel setting"),
-                    description: t("{key} will be set to {value} on {host}, both now and after reboot. If the kernel does not take it immediately, the result says so.", {
-                      key, value, host: host.hostname,
-                    }),
-                    payload: { kernel: { settings: { [key]: value } } },
-                  })
-                }
-                disabled={!key || !value}
-              >
-                {t("Set")}
-              </button>
-            </FormActions>
-          </Form>
-        </div>
+        <ActionGuard action="sysctl.ensure" host={host.id}>
+          <div className="hm-section-body">
+            {/* What the form does is said before the first keystroke: the
+                key goes to the panel's own file and is applied at once. */}
+            <Form>
+              <Fields>
+                <Field
+                  label={t("Key")}
+                  help={t("A sysctl key. It is written to {path} and applied now; a key that is not in the profile above joins it.", { path: snapshot?.managed_path || "/etc/sysctl.d" })}
+                >
+                  <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="vm.swappiness" />
+                </Field>
+                <Field label={t("Value")} narrow help={t("As sysctl takes it.")}>
+                  <input value={value} onChange={(e) => setValue(e.target.value)} placeholder="10" />
+                </Field>
+              </Fields>
+              <FormActions>
+                <button
+                  onClick={() =>
+                    setIntent({
+                      action: "sysctl.ensure",
+                      label: t("Set kernel setting"),
+                      description: t("{key} will be set to {value} on {host}, both now and after reboot. If the kernel does not take it immediately, the result says so.", {
+                        key, value, host: host.hostname,
+                      }),
+                      payload: { kernel: { settings: { [key]: value } } },
+                    })
+                  }
+                  disabled={!key || !value}
+                >
+                  {t("Set")}
+                </button>
+              </FormActions>
+            </Form>
+          </div>
+        </ActionGuard>
       </Section>
 
       <Section
@@ -234,21 +241,23 @@ export function Kernel() {
                 <td className="hm-mono">{(entry.used_by ?? []).join(", ") || "—"}</td>
                 <td>{entry.blacklisted ? <span className="badge warn">{t("blocked by Flotestro")}</span> : t("loaded")}</td>
                 <td>
-                  <button
-                    className={entry.blacklisted ? "secondary" : "hm-danger"}
-                    onClick={() =>
-                      setIntent({
-                        action: "kernel.module.blacklist",
-                        label: entry.blacklisted ? t("Unblock module") : t("Block module"),
-                        description: entry.blacklisted
-                          ? t("{module} will be allowed to load again.", { module: entry.name })
-                          : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
-                        payload: { kernel: { module: entry.name, blacklist: !entry.blacklisted } },
-                      })
-                    }
-                  >
-                    {entry.blacklisted ? t("Unblock") : t("Block")}
-                  </button>
+                  <ActionGuard action="kernel.module.blacklist" host={host.id}>
+                    <button
+                      className={entry.blacklisted ? "secondary" : "hm-danger"}
+                      onClick={() =>
+                        setIntent({
+                          action: "kernel.module.blacklist",
+                          label: entry.blacklisted ? t("Unblock module") : t("Block module"),
+                          description: entry.blacklisted
+                            ? t("{module} will be allowed to load again.", { module: entry.name })
+                            : t("{module} will be blocked from loading. A module already loaded stays loaded until reboot, and one pulled in by the initramfs needs that rebuilt too.", { module: entry.name }),
+                          payload: { kernel: { module: entry.name, blacklist: !entry.blacklisted } },
+                        })
+                      }
+                    >
+                      {entry.blacklisted ? t("Unblock") : t("Block")}
+                    </button>
+                  </ActionGuard>
                 </td>
               </tr>
             ))}
@@ -261,33 +270,35 @@ export function Kernel() {
             now, without waiting for whatever would pull it in. A blocked
             module is not loaded by this - modprobe honours the blacklist
             file the panel wrote - so the form says so first. */}
-        <div className="hm-section-body">
-          <Form>
-            <Fields>
-              <Field label={t("Module to load")} help={t("The name as modprobe takes it, e.g. br_netfilter. A module blocked by the panel has to be unblocked first.")}>
-                <input value={moduleName} onChange={(e) => setModuleName(e.target.value)} placeholder="br_netfilter" />
-              </Field>
-            </Fields>
-            <FormActions>
-              <button
-                className="secondary"
-                disabled={!MODULE_PATTERN.test(moduleName.trim()) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
-                onClick={() =>
-                  setIntent({
-                    action: "kernel.module.load",
-                    label: t("Load module"),
-                    description: t("{module} will be loaded on {host} now. It stays loaded until the next reboot; whether it comes back then depends on what pulls it in.", {
-                      module: moduleName.trim(), host: host.hostname,
-                    }),
-                    payload: { kernel: { module: moduleName.trim() } },
-                  })
-                }
-              >
-                {t("Load module")}
-              </button>
-            </FormActions>
-          </Form>
-        </div>
+        <ActionGuard action="kernel.module.load" host={host.id}>
+          <div className="hm-section-body">
+            <Form>
+              <Fields>
+                <Field label={t("Module to load")} help={t("The name as modprobe takes it, e.g. br_netfilter. A module blocked by the panel has to be unblocked first.")}>
+                  <input value={moduleName} onChange={(e) => setModuleName(e.target.value)} placeholder="br_netfilter" />
+                </Field>
+              </Fields>
+              <FormActions>
+                <button
+                  className="secondary"
+                  disabled={!MODULE_PATTERN.test(moduleName.trim()) || (snapshot?.blacklist ?? []).includes(moduleName.trim())}
+                  onClick={() =>
+                    setIntent({
+                      action: "kernel.module.load",
+                      label: t("Load module"),
+                      description: t("{module} will be loaded on {host} now. It stays loaded until the next reboot; whether it comes back then depends on what pulls it in.", {
+                        module: moduleName.trim(), host: host.hostname,
+                      }),
+                      payload: { kernel: { module: moduleName.trim() } },
+                    })
+                  }
+                >
+                  {t("Load module")}
+                </button>
+              </FormActions>
+            </Form>
+          </div>
+        </ActionGuard>
       </Section>
       </Widgets>
 

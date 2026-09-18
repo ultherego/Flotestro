@@ -10,6 +10,7 @@ import {
   ModulePage, Section, Table, Unknown, useHost, useModule, useReadOperation,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 /**
@@ -37,6 +38,9 @@ type IdentityState = {
   sssd_offline_policy?: SssdOfflinePolicy;
 };
 
+/** The changes this page offers; when every one is refused, the page says so once. */
+const IDENTITY_CHANGES = ["identity.host.enroll", "identity.keytab.renew", "identity.host.leave"];
+
 export function Identity() {
   const t = useT();
   const host = useHost();
@@ -54,6 +58,7 @@ export function Identity() {
         description={t("Domain membership and the directory client, as the host last checked them.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={IDENTITY_CHANGES} />
 
       <Section title={t("Domain")} flush>
         <Facts>
@@ -202,28 +207,35 @@ function JoinDomain({ host }: { host: Host }) {
           <Message text={t("The domain and the host name must be fully qualified names, and the realm must not be empty.")} error />
         )}
         <FormActions>
+          {/* The preview of the host's actions decides in the scope of the
+              host; the permission list of the session, checked above, is
+              the cheaper first gate. */}
           {mayPreflight && (
-            <button
-              className="secondary"
-              disabled={!valid || preflight.busy || host.connection_state !== "online"}
-              title={!valid
-                ? t("Fill in the domain, the realm and the fully qualified host name first.")
-                : host.connection_state !== "online"
-                  ? t("The host is not online; a preflight needs an answer from it.")
-                  : t("The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.")}
-              onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
-            >
-              {preflight.busy ? t("Checking…") : t("Preflight first")}
-            </button>
+            <ActionGuard action="identity.host.preflight" host={host.id} explain>
+              <button
+                className="secondary"
+                disabled={!valid || preflight.busy || host.connection_state !== "online"}
+                title={!valid
+                  ? t("Fill in the domain, the realm and the fully qualified host name first.")
+                  : host.connection_state !== "online"
+                    ? t("The host is not online; a preflight needs an answer from it.")
+                    : t("The host checks DNS, the clock and the reach of the directory before anything changes; nothing is joined.")}
+                onClick={() => preflight.order({ action: "identity.host.preflight", payload })}
+              >
+                {preflight.busy ? t("Checking…") : t("Preflight first")}
+              </button>
+            </ActionGuard>
           )}
           {mayJoin && (
-            <button
-              disabled={!valid || confirming || request.isPending}
-              title={!valid ? t("Fill in the domain, the realm and the fully qualified host name first.") : undefined}
-              onClick={() => setConfirming(true)}
-            >
-              {t("Join the domain…")}
-            </button>
+            <ActionGuard action="identity.host.enroll" host={host.id}>
+              <button
+                disabled={!valid || confirming || request.isPending}
+                title={!valid ? t("Fill in the domain, the realm and the fully qualified host name first.") : undefined}
+                onClick={() => setConfirming(true)}
+              >
+                {t("Join the domain…")}
+              </button>
+            </ActionGuard>
           )}
         </FormActions>
         <Message text={preflight.message} error />
@@ -357,9 +369,11 @@ function RenewKeytab({ host }: { host: Host }) {
           <Message text={t("This is not a service principal: expected service/host.example.test, and not host/.")} error />
         )}
         <FormActions>
-          <button disabled={!valid || confirming || request.isPending} onClick={() => setConfirming(true)}>
-            {t("Renew the keytab…")}
-          </button>
+          <ActionGuard action="identity.keytab.renew" host={host.id}>
+            <button disabled={!valid || confirming || request.isPending} onClick={() => setConfirming(true)}>
+              {t("Renew the keytab…")}
+            </button>
+          </ActionGuard>
         </FormActions>
         <Message text={message} error />
         {job && <JobNotice job={job} hostID={host.id} />}
@@ -447,7 +461,9 @@ function LeaveDomain({ host }: { host: Host }) {
         />
       ) : (
         <FormActions>
-          <button className="secondary" onClick={() => setConfirming(true)}>{t("Leave domain")}</button>
+          <ActionGuard action="identity.host.leave" host={host.id}>
+            <button className="secondary" onClick={() => setConfirming(true)}>{t("Leave domain")}</button>
+          </ActionGuard>
         </FormActions>
       )}
     </Section>

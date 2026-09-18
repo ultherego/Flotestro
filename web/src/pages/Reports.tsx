@@ -230,6 +230,10 @@ type ComplianceReport = Envelope & {
     by_severity: ({ severity: string; checks: number } & SecurityCounts)[];
     checks: ({ check_id: string; title: string; severity: string } & SecurityCounts)[];
     evaluated_at: string;
+    // The sweep stops at its time budget on a large fleet; then the
+    // numbers describe the hosts it reached and say so.
+    partial?: boolean;
+    partial_reason?: string;
   } | null;
 };
 
@@ -740,6 +744,14 @@ function ComplianceCard({ report, error, ready, params }: { report?: ComplianceR
                     hosts: security.hosts, failing: security.hosts_with_findings,
                   })}
                 </p>
+                {security.partial && (
+                  <p className="warning" data-testid="report-security-partial">
+                    <span>
+                      {t("The sweep did not reach every host: these numbers describe the hosts it read.")}
+                      {security.partial_reason ? ` ${security.partial_reason}` : ""}
+                    </span>
+                  </p>
+                )}
                 <table data-testid="report-security">
                   <thead>
                     <tr>

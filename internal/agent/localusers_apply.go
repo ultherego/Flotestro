@@ -28,6 +28,10 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 	// The refusal concerning a system account belongs to the helper, which sees
 	// /etc/passwd and NSS. The agent does not repeat that decision so that there
 	// are not two different security boundaries for the same operation.
+	keys := make([]*helperv1.LocalSSHKeyInput, 0, len(payload.Keys))
+	for _, key := range payload.Keys {
+		keys = append(keys, &helperv1.LocalSSHKeyInput{PublicKey: key.PublicKey, Comment: key.Comment})
+	}
 	response, err := e.helper.Call(callCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		ExpiresAt:      task.GetExpiresAt(),
@@ -35,15 +39,23 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 		MaxOutputBytes: task.GetLimits().GetMaxOutputBytes(),
 		Action: &helperv1.HelperRequest_LocalUserAction{
 			LocalUserAction: &helperv1.LocalUserActionRequest{
-				Operation:  helperUserOperations[action],
-				Name:       payload.Name,
-				Gecos:      payload.Gecos,
-				Shell:      payload.Shell,
-				Groups:     payload.Groups,
-				SshKeys:    payload.SSHKeys,
-				CreateHome: payload.CreateHome,
-				ExpiresAt:  payload.ExpiresAt,
-				RemoveHome: payload.RemoveHome,
+				Operation:            helperUserOperations[action],
+				Name:                 payload.Name,
+				Gecos:                payload.Gecos,
+				Shell:                payload.Shell,
+				Groups:               payload.Groups,
+				SshKeys:              payload.SSHKeys,
+				CreateHome:           payload.CreateHome,
+				ExpiresAt:            payload.ExpiresAt,
+				RemoveHome:           payload.RemoveHome,
+				Keys:                 keys,
+				Fingerprints:         payload.Fingerprints,
+				IgnoreMissing:        payload.IgnoreMissing,
+				ExpectedFingerprints: payload.ExpectedFingerprints,
+				AllowLockout:         payload.AllowLockout,
+				ManagedFile:          payload.ManagedFile,
+				System:               payload.System,
+				Inactive:             payload.Inactive,
 			},
 		},
 	}, timeout)
@@ -65,13 +77,65 @@ func (e *TaskExecutor) applyLocalUser(ctx context.Context, task *agentv1.TaskEnv
 	if after != nil {
 		detail.Account = localAccountsToProto([]LocalAccount{*after})[0]
 	}
+	// The result of a key operation names the keys on both sides of the
+	// change and the difference, as the host reads them back - not as the
+	// order described them. An idempotent repeat shows an empty difference.
+	if keyOperation(action) {
+		detail.FingerprintsBefore = fingerprintsOrEmpty(before)
+		detail.FingerprintsAfter = fingerprintsOrEmpty(after)
+		detail.KeysAdded = difference(detail.FingerprintsAfter, detail.FingerprintsBefore)
+		detail.KeysRemoved = difference(detail.FingerprintsBefore, detail.FingerprintsAfter)
+	}
 
+	// An account created with no way in is confirmed as such: the plan
+	// and the panel name the outcome "no login" rather than "created",
+	// because an account nobody can enter is the point of such an order.
+	message := localUserMessages[action]
+	if action == opspec.ActionLocalUserCreate && payload.Inactive {
+		message = "the local account was created locked, with no way to log in"
+	}
 	return &agentv1.TaskResult{
 		Status:   agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode: 0,
-		Message:  localUserMessages[action],
+		Message:  message,
 		Detail:   &agentv1.TaskResult_LocalUser{LocalUser: detail},
 	}
+}
+
+// keyOperation says whether the operation edits the keys of an account.
+func keyOperation(action opspec.ActionType) bool {
+	switch action {
+	case opspec.ActionLocalSSHKeysAdd, opspec.ActionLocalSSHKeysRemove,
+		opspec.ActionLocalSSHKeysReplaceAll, opspec.ActionLocalSSHKeysSet:
+		return true
+	}
+	return false
+}
+
+// fingerprintsOrEmpty lists the keys of an account; a missing account
+// has none. The list is never nil so the result says "no keys" in so
+// many words rather than leaving the field out.
+func fingerprintsOrEmpty(account *LocalAccount) []string {
+	if account == nil {
+		return []string{}
+	}
+	return append([]string{}, fingerprintsOf(account)...)
+}
+
+// difference returns the entries of left that right does not have, in
+// the order of left.
+func difference(left, right []string) []string {
+	present := map[string]bool{}
+	for _, item := range right {
+		present[item] = true
+	}
+	result := []string{}
+	for _, item := range left {
+		if !present[item] {
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 // readSingleAccount returns the state of one account together with the
@@ -154,6 +218,11 @@ var helperUserOperations = map[opspec.ActionType]helperv1.LocalUserActionRequest
 	opspec.ActionLocalUserLock:   helperv1.LocalUserActionRequest_OPERATION_LOCK,
 	opspec.ActionLocalUserUnlock: helperv1.LocalUserActionRequest_OPERATION_UNLOCK,
 	opspec.ActionLocalSSHKeysSet: helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS,
+	// The keys one at a time: an add, a remove by fingerprint, a replace
+	// bound to the list the operator saw.
+	opspec.ActionLocalSSHKeysAdd:        helperv1.LocalUserActionRequest_OPERATION_ADD_SSH_KEYS,
+	opspec.ActionLocalSSHKeysRemove:     helperv1.LocalUserActionRequest_OPERATION_REMOVE_SSH_KEYS,
+	opspec.ActionLocalSSHKeysReplaceAll: helperv1.LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS,
 	// The groups, the expiry date and the deletion of an account.
 	opspec.ActionLocalUserGroupsSet: helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS,
 	opspec.ActionLocalUserExpirySet: helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY,
@@ -161,10 +230,13 @@ var helperUserOperations = map[opspec.ActionType]helperv1.LocalUserActionRequest
 }
 
 var localUserMessages = map[opspec.ActionType]string{
-	opspec.ActionLocalUserCreate: "the local account was created",
-	opspec.ActionLocalUserLock:   "the local account was locked",
-	opspec.ActionLocalUserUnlock: "the local account was unlocked",
-	opspec.ActionLocalSSHKeysSet: "the SSH keys were set",
+	opspec.ActionLocalUserCreate:        "the local account was created",
+	opspec.ActionLocalUserLock:          "the local account was locked",
+	opspec.ActionLocalUserUnlock:        "the local account was unlocked",
+	opspec.ActionLocalSSHKeysSet:        "the SSH keys were replaced",
+	opspec.ActionLocalSSHKeysAdd:        "the SSH keys were added",
+	opspec.ActionLocalSSHKeysRemove:     "the SSH keys were removed",
+	opspec.ActionLocalSSHKeysReplaceAll: "the SSH keys were replaced",
 	// The groups, the expiry date and the deletion of an account.
 	opspec.ActionLocalUserGroupsSet: "the groups of the local account were set",
 	opspec.ActionLocalUserExpirySet: "the expiry of the local account was set",

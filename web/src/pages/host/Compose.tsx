@@ -8,6 +8,7 @@ import {
   Field, Fields, Form, FormActions, FormNote, JobNotice, Message, ModuleHeader, ModulePage, Section, Summary, Table, Widgets,
   countWhere, useHost,
 } from "./shared";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type ProjectVersion = {
@@ -48,6 +49,9 @@ export type ProjectPlan = {
  * bound to that plan and refuses when the base state changed since the
  * approval.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const COMPOSE_CHANGES = ["docker.compose.deploy"];
+
 export function Compose() {
   const t = useT();
   const host = useHost();
@@ -139,6 +143,7 @@ export function Compose() {
         title={t("Compose")}
         description={t("Docker Compose projects deployed from the panel: plan first, then deploy exactly that plan.")}
       />
+      <ReadOnlyModuleNotice host={host.id} actions={COMPOSE_CHANGES} />
       <Message text={message} />
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
@@ -192,12 +197,14 @@ export function Compose() {
             </Field>
           </Fields>
           <FormActions>
-            <button
-              onClick={() => planProject.mutate()}
-              disabled={planProject.isPending || !project || !manifest}
-            >
-              {planProject.isPending ? t("Planning…") : t("Plan")}
-            </button>
+            <ActionGuard action="docker.compose.plan" host={host.id} explain>
+              <button
+                onClick={() => planProject.mutate()}
+                disabled={planProject.isPending || !project || !manifest}
+              >
+                {planProject.isPending ? t("Planning…") : t("Plan")}
+              </button>
+            </ActionGuard>
           </FormActions>
           {/* The manifest is stored in the panel together with the version
               history, so a password typed into it stops being a secret. */}
@@ -305,10 +312,12 @@ export function Compose() {
             </Table>
           </Section>
 
-          <DeployConfirmation
-            busy={deploy.isPending}
-            onDeploy={(reason) => deploy.mutate({ manifest, digest: plan.digest, imageDigests: planImageDigests(plan), reason })}
-          />
+          <ActionGuard action="docker.compose.deploy" host={host.id}>
+            <DeployConfirmation
+              busy={deploy.isPending}
+              onDeploy={(reason) => deploy.mutate({ manifest, digest: plan.digest, imageDigests: planImageDigests(plan), reason })}
+            />
+          </ActionGuard>
         </>
       )}
       </Widgets>

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -16,10 +17,13 @@ import (
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 
+	"github.com/google/uuid"
+
 	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/pki"
+	"github.com/ultherego/flotestro/internal/relay/spool"
 )
 
 // The headers the relay attests a host's session with. The host is named
@@ -72,10 +76,14 @@ type Options struct {
 	// TrustPool verifies both the centre and the certificates of the agents:
 	// one CA of the fleet covers both sides.
 	TrustPool *x509.CertPool
-	// BufferBytes limits the memory given to the results waiting for the link
-	// to come back.
-	BufferBytes int
-	Log         *slog.Logger
+	// SpoolDir is the directory of the durable spool: the messages of the
+	// agents the centre has not yet confirmed it consumed. Root-owned and
+	// private; a relay without one does not come up.
+	SpoolDir string
+	// Spool bounds the spool and its classes. Site is the site of the
+	// relay, named on every record.
+	Spool spool.Options
+	Log   *slog.Logger
 }
 
 // Relay mediates between the agents of a site and the centre.
@@ -88,8 +96,11 @@ type Relay struct {
 	// current is the address of the gateway the relay speaks to now. It
 	// changes on a switch, so it cannot be kept in options.
 	current atomic.Pointer[string]
-	buffer  *Buffer
-	log     *slog.Logger
+	spool   *spool.Spool
+	// instanceID names this process of the relay: a fresh identifier at
+	// every start, so that the panel reads a restart off its change.
+	instanceID string
+	log        *slog.Logger
 
 	mu sync.RWMutex
 	// sessions hold the cancel functions. Once the link is back, a session
@@ -101,7 +112,10 @@ type Relay struct {
 	identity atomic.Pointer[relayMaterial]
 }
 
-func New(options Options) *Relay {
+// New assembles the relay. The spool is opened here: a relay that cannot
+// write its spool must not take the messages of a site, because it would
+// lose them at the first break.
+func New(options Options) (*Relay, error) {
 	log := options.Log
 	if log == nil {
 		log = slog.Default()
@@ -110,11 +124,19 @@ func New(options Options) *Relay {
 	if len(addresses) == 0 {
 		addresses = []string{options.UpstreamURL}
 	}
+	if options.SpoolDir == "" {
+		return nil, errors.New("the relay needs a spool directory")
+	}
+	store, err := spool.Open(options.SpoolDir, options.Spool)
+	if err != nil {
+		return nil, fmt.Errorf("the spool of the relay: %w", err)
+	}
 	relay := &Relay{
 		options: options, log: log,
-		gateways: endpoints.New(addresses, endpoints.MinBackoff, endpoints.MaxBackoff),
-		buffer:   NewBuffer(options.BufferBytes),
-		sessions: map[string]context.CancelFunc{},
+		gateways:   endpoints.New(addresses, endpoints.MinBackoff, endpoints.MaxBackoff),
+		spool:      store,
+		instanceID: uuid.NewString(),
+		sessions:   map[string]context.CancelFunc{},
 	}
 	first := addresses[0]
 	relay.current.Store(&first)
@@ -124,8 +146,18 @@ func New(options Options) *Relay {
 	relay.client_.Store(&centreClient{
 		client: clientToCentre(first, options.Identity, options.TrustPool),
 	})
-	return relay
+	if stats := store.Stats(); stats.Items > 0 {
+		log.Info("the spool holds messages from before the start; they go out with the sessions of their hosts",
+			"items", stats.Items, "bytes", stats.BytesUsed, "hosts", len(store.Hosts()))
+	}
+	return relay, nil
 }
+
+// Close flushes and closes the spool.
+func (r *Relay) Close() error { return r.spool.Close() }
+
+// InstanceID names this process of the relay.
+func (r *Relay) InstanceID() string { return r.instanceID }
 
 // relayMaterial holds the current certificate of the relay towards the
 // centre.
@@ -326,7 +358,16 @@ func (r *Relay) Ping(ctx context.Context,
 // The identity of the host comes from the certificate of the agent verified in
 // the TLS handshake on the side of the relay and is attached to the connection
 // upwards. The relay does not look into the content of the jobs; its role ends
-// at forwarding and buffering.
+// at forwarding and keeping.
+//
+// Keeping is the spool. A message of a durable class - control, job
+// result, inventory - is written to the spool before it goes up, so a
+// restart of the relay between the send and the panel's commit loses
+// nothing; it leaves the spool on the panel's acknowledgement alone,
+// never on the write to the socket. Metrics and logs go up live and are
+// spooled only while the link is down. Whatever waits in the spool for a
+// host goes out in that host's session, after its Hello, by priority and
+// then by sequence, and again after the acknowledgement timeout.
 func (r *Relay) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
 	cert, ok := clientCertificate(ctx)
@@ -337,11 +378,25 @@ func (r *Relay) Connect(ctx context.Context,
 	if err != nil {
 		return connect.NewError(connect.CodeUnauthenticated, err)
 	}
+	// A spool in its reserve while the centre is out of reach takes no new
+	// session: the session would only bring what the spool cannot keep,
+	// and the records already there are worth more than a session that
+	// resumes on its own. With the centre reachable a session drains the
+	// spool, so it is let in.
+	if !r.upstream.Load() && r.spool.Critical() {
+		r.log.Warn("a session was refused: the spool is in its reserve and the centre is out of reach",
+			"host_id", hostID)
+		return connect.NewError(connect.CodeResourceExhausted,
+			errors.New("relay_spool_critical: the spool of the relay is full"))
+	}
 
 	sessionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	r.trackSession(hostID, cancel)
 	defer r.trackSession(hostID, nil)
+	// Whatever the session sent and did not see acknowledged goes out
+	// again in the next one, at once rather than after the timeout.
+	defer r.spool.Unsend(hostID)
 
 	upstream := r.centre().Connect(sessionCtx)
 	attestHost(upstream.RequestHeader(), hostID, cert)
@@ -360,7 +415,7 @@ func (r *Relay) Connect(ctx context.Context,
 		r.upstream.Store(false)
 		once.Do(func() { close(lost) })
 		if err != nil && ctx.Err() == nil {
-			r.log.Warn("the connection to the centre broke, switching to buffering",
+			r.log.Warn("the connection to the centre broke, switching to the spool",
 				"host_id", hostID, "err", err)
 		}
 	}()
@@ -370,7 +425,7 @@ func (r *Relay) Connect(ctx context.Context,
 	// The reception from the agent goes in a goroutine of its own so that the
 	// loop can react to the cancellation of the session. Receive blocks on the
 	// context of the request and does not see our cancellation: without this a
-	// session switched to buffering would stay in that mode for good even
+	// session switched to the spool would stay in that mode for good even
 	// though the centre answers again.
 	received := make(chan *agentv1.AgentMessage)
 	errors_ := make(chan error, 1)
@@ -389,8 +444,14 @@ func (r *Relay) Connect(ctx context.Context,
 		}
 	}()
 
-	// A session starts with Hello; only after it may what waited in the buffer
-	// be sent back - the centre rejects a stream that starts otherwise.
+	// The resend of what the panel did not acknowledge in time runs on a
+	// tick of the session: the records come back as due from the spool
+	// once the timeout passed, and the same session sends them again.
+	resend := time.NewTicker(r.ackTimeout() / 2)
+	defer resend.Stop()
+
+	// A session starts with Hello; only after it may what waits in the spool
+	// be sent - the centre rejects a stream that starts otherwise.
 	first := true
 	for {
 		var message *agentv1.AgentMessage
@@ -401,36 +462,143 @@ func (r *Relay) Connect(ctx context.Context,
 			return nil
 		case err := <-errors_:
 			return err
+		case <-resend.C:
+			select {
+			case <-lost:
+			default:
+				if !first {
+					r.flush(hostID, upstream, &once, lost)
+				}
+			}
+			continue
 		case message = <-received:
 		}
 
 		select {
 		case <-lost:
-			// The centre is unreachable: the message waits in the buffer
+			// The centre is unreachable: the message waits in the spool
 			// instead of being lost. A lost result looks to the panel like a
 			// job that is still running and blocks the host for the TTL.
-			r.bufferMessage(hostID, message)
+			r.keep(hostID, message)
 		default:
-			if sendErr := upstream.Send(message); sendErr != nil {
-				r.upstream.Store(false)
-				once.Do(func() { close(lost) })
-				r.bufferMessage(hostID, message)
-				continue
-			}
-			if first {
+			if r.forward(hostID, message, upstream, &once, lost) && first {
 				first = false
-				r.flushBuffer(hostID, upstream)
+				r.flush(hostID, upstream, &once, lost)
 			}
 		}
 	}
 }
 
-// buffer_ sets a message aside and reports an overflow. A full buffer is an
-// operational event: from that moment the site loses results.
-func (r *Relay) bufferMessage(hostID string, message *agentv1.AgentMessage) {
-	if err := r.buffer.Add(hostID, message); err != nil {
-		r.log.Error("the buffer of the relay is full, the result was dropped",
-			"host_id", hostID, "err", err, "state", r.buffer.Stats())
+// ackTimeout is the acknowledgement timeout of the spool.
+func (r *Relay) ackTimeout() time.Duration {
+	if r.options.Spool.AckTimeout > 0 {
+		return r.options.Spool.AckTimeout
+	}
+	return spool.DefaultAckTimeout
+}
+
+// forward sends a live message up: through the spool first for a durable
+// class, straight for the rest. It returns whether the send went through;
+// a failed send marks the link lost and leaves the message in the spool.
+func (r *Relay) forward(hostID string, message *agentv1.AgentMessage,
+	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage],
+	once *sync.Once, lost chan struct{}) bool {
+	var record *spool.Record
+	if message.GetHello() == nil && spool.Durable(spool.Classify(message)) {
+		record = r.keep(hostID, message)
+	}
+	if err := upstream.Send(message); err != nil {
+		r.upstream.Store(false)
+		once.Do(func() { close(lost) })
+		if record == nil {
+			r.keep(hostID, message)
+		}
+		return false
+	}
+	if record != nil {
+		r.spool.MarkSent(record.ID)
+		if record.Sequence == 0 {
+			// A message of an agent from before the envelope has no
+			// sequence for the panel to acknowledge; the send is its
+			// confirmation, as it was before the spool.
+			_ = r.spool.Delete(record.ID)
+		}
+	}
+	return true
+}
+
+// keep writes a message to the spool by the policy of its class and says
+// which record it became; nil when the class refused it. A refusal is an
+// operational event: from that moment the site loses something, and the
+// code says what.
+func (r *Relay) keep(hostID string, message *agentv1.AgentMessage) *spool.Record {
+	if message.GetHello() != nil {
+		// Hello opens a session and is never carried into another one.
+		return nil
+	}
+	record, err := spool.FromMessage(r.options.Spool.Site, hostID, message, time.Now())
+	if err != nil {
+		r.log.Error("the message could not be encoded for the spool", "host_id", hostID, "err", err)
+		return nil
+	}
+	if err := r.spool.Append(record); err != nil {
+		switch {
+		case errors.Is(err, spool.ErrExhausted):
+			r.log.Warn("the spool refused a message of a light class; the stream is cut with resource_exhausted",
+				"host_id", hostID, "stream", record.Stream, "err", err, "state", r.spool.Stats())
+		case errors.Is(err, spool.ErrCritical):
+			r.log.Error("the spool is full; a message of a durable class was dropped",
+				"host_id", hostID, "stream", record.Stream, "err", err, "state", r.spool.Stats())
+		default:
+			r.log.Error("the spool did not take a message", "host_id", hostID, "stream", record.Stream, "err", err)
+		}
+		return nil
+	}
+	return record
+}
+
+// flush sends the records of the host that are due: what waited through
+// an outage, what a previous session sent without an acknowledgement, and
+// what the timeout brought back. The spool gives them by priority and
+// then by sequence, so a queue of samples never stands before a result.
+func (r *Relay) flush(hostID string,
+	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage],
+	once *sync.Once, lost chan struct{}) {
+	sent := 0
+	for {
+		records, err := r.spool.Next(hostID, 0)
+		if err != nil {
+			r.log.Error("the spool could not be read", "host_id", hostID, "err", err)
+			return
+		}
+		if len(records) == 0 {
+			break
+		}
+		for _, record := range records {
+			message, err := record.Message()
+			if err != nil {
+				// A record the relay cannot decode cannot be delivered; it
+				// is removed so that it does not stand before the rest.
+				r.log.Error("a spooled message could not be decoded and was dropped",
+					"host_id", hostID, "record", record.ID, "err", err)
+				_ = r.spool.Delete(record.ID)
+				continue
+			}
+			if err := upstream.Send(message); err != nil {
+				r.upstream.Store(false)
+				once.Do(func() { close(lost) })
+				r.spool.Unsend(hostID)
+				r.log.Warn("the spool was not sent back", "host_id", hostID, "err", err)
+				return
+			}
+			if record.Sequence == 0 {
+				_ = r.spool.Delete(record.ID)
+			}
+			sent++
+		}
+	}
+	if sent > 0 {
+		r.log.Info("the spooled messages were sent", "host_id", hostID, "messages", sent)
 	}
 }
 
@@ -440,6 +608,10 @@ func (r *Relay) bufferMessage(hostID string, message *agentv1.AgentMessage) {
 // the relay buffers results but does not carry a job out after its TTL - and
 // forwarding an expired job is exactly ordering work nobody is asking for any
 // more.
+//
+// The acknowledgement of a message is the relay's alone: it deletes the
+// spooled record and is not forwarded. An agent from before the message
+// would ignore it, but the relay is the one that asked.
 func (r *Relay) pumpDown(ctx context.Context, hostID string,
 	to *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage],
 	from *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]) error {
@@ -447,6 +619,10 @@ func (r *Relay) pumpDown(ctx context.Context, hostID string,
 		message, err := from.Receive()
 		if err != nil {
 			return err
+		}
+		if ack := message.GetMessageAck(); ack != nil {
+			r.acknowledge(hostID, ack)
+			continue
 		}
 		if task := message.GetTask(); task != nil && expired(task) {
 			r.log.Warn("the job was skipped after its TTL ran out",
@@ -457,6 +633,30 @@ func (r *Relay) pumpDown(ctx context.Context, hostID string,
 		if err := to.Send(message); err != nil {
 			return err
 		}
+	}
+}
+
+// acknowledge deletes the record the panel consumed. The host of the
+// acknowledgement has to be the host of the session it came down on: the
+// centre binds a stream to one identity, and a record of another host is
+// not this session's to confirm.
+func (r *Relay) acknowledge(hostID string, ack *agentv1.MessageAck) {
+	if ack.GetHostId() != "" && ack.GetHostId() != hostID {
+		r.log.Warn("an acknowledgement named another host than the session's and was ignored",
+			"host_id", hostID, "named", ack.GetHostId())
+		return
+	}
+	found, err := r.spool.Ack(hostID, ack.GetSessionId(), ack.GetSequence())
+	if err != nil {
+		r.log.Error("the acknowledged record was not deleted", "host_id", hostID,
+			"session_id", ack.GetSessionId(), "sequence", ack.GetSequence(), "err", err)
+		return
+	}
+	if !found {
+		// A message forwarded live without the spool - a sample, a log
+		// line - or one deleted already: nothing to do, and nothing wrong.
+		r.log.Debug("an acknowledgement found no record", "host_id", hostID,
+			"session_id", ack.GetSessionId(), "sequence", ack.GetSequence())
 	}
 }
 
@@ -489,21 +689,66 @@ func (r *Relay) resetSessions() int {
 	return len(r.sessions)
 }
 
+// Stats describes the fill of the spool for the heartbeat, the state file
+// and the diagnostics. The names of the first four fields are the ones the
+// heartbeat and the state file have carried since the memory buffer; the
+// rest is what the spool adds.
+type Stats struct {
+	Messages int
+	Bytes    int
+	MaxBytes int
+	Dropped  int
+	// DiskBytes is what the segment files take on disk.
+	DiskBytes int
+	// Inflight counts the records sent and not yet acknowledged.
+	Inflight int
+	// Expired counts the records cut for their age.
+	Expired int
+	// Critical says the spool is in its reserve for control and results.
+	Critical bool
+}
+
 // Stats describes the state of the relay for the metrics and the diagnostics.
 func (r *Relay) Stats() (sessions int, buffer_ Stats, upstreamOK bool) {
 	r.mu.RLock()
 	sessions = len(r.sessions)
 	r.mu.RUnlock()
-	return sessions, r.buffer.Stats(), r.upstream.Load()
+	state := r.spool.Stats()
+	return sessions, Stats{
+		Messages: state.Items, Bytes: int(state.BytesUsed), MaxBytes: int(state.BytesLimit),
+		Dropped: int(state.DroppedTotal), DiskBytes: int(state.DiskBytes),
+		Inflight: state.Inflight, Expired: int(state.ExpiredTotal), Critical: state.Critical,
+	}, r.upstream.Load()
+}
+
+// The states of the link as the heartbeat names them.
+const (
+	UpstreamConnected    = "connected"
+	UpstreamBuffering    = "buffering"
+	UpstreamReconnecting = "reconnecting"
+)
+
+// UpstreamState names how the relay sees its link to the centre: connected
+// while it forwards live, buffering while the spool holds what the link
+// cannot carry, reconnecting while the link is down and the spool is
+// empty.
+func (r *Relay) UpstreamState() string {
+	if r.upstream.Load() {
+		return UpstreamConnected
+	}
+	if r.spool.Stats().Items > 0 {
+		return UpstreamBuffering
+	}
+	return UpstreamReconnecting
 }
 
 // WatchUpstream probes the connectivity with the centre while the relay works
-// in the buffering mode.
+// in the spool mode.
 //
 // The probe goes as a separate call without side effects. An earlier version
 // checked the link by sending the buffered messages over a separate stream -
 // and lost them, because the session of an agent starts with Hello and a
-// stream without Hello is rejected by the centre. The buffer is to protect the
+// stream without Hello is rejected by the centre. The spool is to protect the
 // results rather than lose them.
 func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
@@ -537,12 +782,12 @@ func (r *Relay) WatchUpstream(ctx context.Context, interval time.Duration) {
 			r.gateways.Success(gateway.URL, time.Now())
 			r.upstream.Store(true)
 			r.log.Info("the connectivity with the centre was confirmed", "gateway", gateway.URL)
-			// The sessions working in the buffering mode are ended: the agent
-			// connects again within seconds and we then send its buffer back
+			// The sessions working in the spool mode are ended: the agent
+			// connects again within seconds and we then send its records
 			// in the same session, which starts with Hello.
 			if ended := r.resetSessions(); ended > 0 {
 				r.log.Info("the connectivity with the centre is back, the sessions will resume",
-					"sessions", ended, "buffer", r.buffer.Stats().Messages)
+					"sessions", ended, "spooled", r.spool.Stats().Items)
 			}
 		}
 	}
@@ -568,27 +813,4 @@ func WithClientCertificate(next http.Handler) http.Handler {
 func clientCertificate(ctx context.Context) (*x509.Certificate, bool) {
 	cert, ok := ctx.Value(certKey{}).(*x509.Certificate)
 	return cert, ok
-}
-
-// flushBuffer sends the buffered messages of a host back in its live session.
-// A message disappears from the buffer only after it has been sent, so a break
-// halfway means another attempt rather than a lost result.
-func (r *Relay) flushBuffer(hostID string,
-	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage]) {
-	sent := 0
-	for {
-		message, ok := r.buffer.TakeFor(hostID)
-		if !ok {
-			break
-		}
-		if err := upstream.Send(message); err != nil {
-			r.log.Warn("the buffer was not sent back", "host_id", hostID, "err", err)
-			return
-		}
-		r.buffer.CommitFor(hostID)
-		sent++
-	}
-	if sent > 0 {
-		r.log.Info("the buffered messages were sent back", "host_id", hostID, "messages", sent)
-	}
 }

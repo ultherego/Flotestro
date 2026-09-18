@@ -115,6 +115,18 @@ message RelayPingRequest {
   // Sessions counts the agents connected to the relay as it sees them; the
   // answer carries the count as the centre sees it.
   uint32 sessions = 6;
+  // InstanceID names the process of the relay: a fresh identifier at
+  // every start. The panel reads a restart of the relay off a change of
+  // it, which the version and the address do not show.
+  string instance_id = 7;
+  // UpstreamState says how the relay sees its link to the centre at the
+  // moment of the report: connected, buffering (the link was lost and the
+  // spool takes the results) or reconnecting. Informational, like the rest.
+  string upstream_state = 8;
+  // SpoolBytesLimit is the room the spool of the relay may take on disk;
+  // buffer_bytes counts against it. Zero for a relay from before the spool,
+  // which reported the memory buffer in buffer_max_bytes alone.
+  uint64 spool_bytes_limit = 9;
 }
 
 message RelayPingResponse {
@@ -300,7 +312,24 @@ message ServerMessage {
     // the order that ends the host's work.
     FinalTask final_task = 5;
     FinalCommit final_commit = 6;
+    // The application acknowledgement of a relayed message: the gateway
+    // sends it after the transaction that consumed the message committed.
+    // The relay deletes the spooled copy on it and does not forward it; an
+    // agent that receives one all the same ignores it.
+    MessageAck message_ack = 8;
   }
+}
+
+// MessageAck names a message of a relayed session the panel has consumed:
+// the host, the session the host signed it in and the sequence of the
+// envelope. A relay keeps a spooled message until this arrives - a
+// successful write to the socket says nothing about the panel having
+// committed it - and a message delivered a second time after a restart of
+// the relay is answered with the same acknowledgement without effect.
+message MessageAck {
+  string host_id = 1;
+  string session_id = 2;
+  uint64 sequence = 3;
 }
 
 // Hello is the first message in the stream. The gateway rejects a stream
@@ -950,14 +979,24 @@ message LocalUserAction {
     OPERATION_SET_EXPIRY = 6;
     // Deleting the account, optionally with its home directory.
     OPERATION_DELETE = 7;
+    // The keys of an account edited one at a time (security remediation,
+    // chapter 14.1): an add appends the keys the file does not carry yet,
+    // a remove takes the named fingerprints away and nothing else, and a
+    // replace writes the list anew - bound to the fingerprints the
+    // operator saw. OPERATION_SET_SSH_KEYS is the replace under its old
+    // name, kept one release.
+    OPERATION_ADD_SSH_KEYS = 8;
+    OPERATION_REMOVE_SSH_KEYS = 9;
+    OPERATION_REPLACE_SSH_KEYS = 10;
   }
   Operation operation = 1;
   string name = 2;
   string gecos = 3;
   string shell = 4;
   repeated string groups = 5;
-  // The full, intended list of public keys. The operation is declarative: an
-  // empty list revokes access, it does not mean "do not change".
+  // The full, intended list of public keys of a create or a replace. The
+  // replace is declarative: an empty list revokes access, it does not
+  // mean "do not change".
   repeated string ssh_keys = 6;
   bool create_home = 7;
   // ExpiresAt is the expiry date as YYYY-MM-DD. Empty on an expiry operation
@@ -965,6 +1004,36 @@ message LocalUserAction {
   string expires_at = 8;
   // RemoveHome deletes the home directory together with the account.
   bool remove_home = 9;
+  // Keys are the keys an add appends, each with an optional comment.
+  repeated SSHKeyInput keys = 10;
+  // Fingerprints names the keys a remove takes away (SHA256:...).
+  repeated string fingerprints = 11;
+  // IgnoreMissing lets a remove pass over a fingerprint the account does
+  // not have; without it the host refuses with key_not_found.
+  bool ignore_missing = 12;
+  // ExpectedFingerprints is the list the operator saw when ordering a
+  // replace; the host refuses with stale_plan when the account has
+  // another list by now.
+  repeated string expected_fingerprints = 13;
+  // AllowLockout permits taking the last key of an account with no
+  // password login; without it the host refuses with last_key_lockout.
+  bool allow_lockout = 14;
+  // ManagedFile edits the panel's file under /etc/ssh/authorized_keys.d
+  // instead of the user's authorized_keys.
+  bool managed_file = 15;
+  // System says the order means a system account (outside the UID range
+  // of people); a create allocates the account below that range.
+  bool system = 16;
+  // Inactive acknowledges a create with no key: the account gets no way
+  // in and is created locked.
+  bool inactive = 17;
+}
+
+// SSHKeyInput is one key to add: the public key as the file takes it and
+// an optional comment appended when the key carries none.
+message SSHKeyInput {
+  string public_key = 1;
+  string comment = 2;
 }
 
 message LocalUserResult {
@@ -974,6 +1043,13 @@ message LocalUserResult {
   // Account is the account state after the operation. Empty when the
   // account does not exist.
   LocalAccount account = 3;
+  // The keys of the account before and after a key operation, by
+  // fingerprint, and the difference: what the plan named and what the
+  // host did. A repeat of an add has an empty added list.
+  repeated string fingerprints_before = 4;
+  repeated string fingerprints_after = 5;
+  repeated string keys_added = 6;
+  repeated string keys_removed = 7;
 }
 
 // PackagesRepair unblocks package operations on the host.
@@ -1227,6 +1303,34 @@ message TaskResult {
   DockerLogsResult docker_logs_result = 51;
   HostnameResult hostname_result = 52;
   KeytabRenewResult keytab_renew_result = 53;
+  // The verifier's word on a mutation: the host was read after the apply
+  // and compared with what the payload or the plan promised. A change
+  // whose verifier failed ends STATUS_FAILED with the code
+  // applied_unverified; the verification says what was expected and what
+  // was found. Absent on a read, on a refusal and on a result from an
+  // agent from before the field.
+  Verification verification = 54;
+}
+
+// Verification is the read of the host after a change, compared with what
+// the operator asked for. Only a verified change is a success: an exit
+// code says a tool ran, the verification says the state is there.
+message Verification {
+  // The verifier of the operation contract (opspec.Verifier): unit_state,
+  // package_versions, file_content, mount_state, hostname, sysctl, ...
+  // "none" for an operation whose result is the observation.
+  string verifier = 1;
+  // Whether the observed state is the expected one.
+  bool verified = 2;
+  // Why it did not verify, or what the verifier could not read; on a
+  // rollback the reason says the previous state was put back. Empty on
+  // a verified change.
+  string reason = 3;
+  // The state found, in the words of the verifier: "active (running)",
+  // "sha256:...", "absent". Never the content of a file or a secret.
+  string observed = 4;
+  // The state the payload or the plan promised, in the same words.
+  string expected = 5;
 }
 
 // InventoryRefreshResult carries the proof of the refresh.

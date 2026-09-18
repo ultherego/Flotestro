@@ -9,6 +9,7 @@ import {
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type HostKey = { type: string; bits: number; fingerprint: string; path: string };
@@ -54,6 +55,9 @@ export function effectiveConfigurationMissing(snapshot: Pick<Snapshot, "ports" |
  * server itself reports it - in sshd the first value wins, so assembling it
  * from file contents would give a picture the host does not confirm.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const SSH_CHANGES = ["ssh.config.apply", "ssh.hostkey.rotate"];
+
 export function SshServer() {
   const t = useT();
   const host = useHost();
@@ -107,12 +111,15 @@ export function SshServer() {
         title={t("SSH")}
         description={t("Effective configuration as sshd itself reports it. The panel writes only its own file in sshd_config.d — the main config belongs to the distribution and to whoever runs this host.")}
         actions={
-          <button onClick={() => setEditor((open) => !open)}>
-            {editor ? t("Cancel") : t("Change configuration")}
-          </button>
+          <ActionGuard action="ssh.config.apply" host={host.id}>
+            <button onClick={() => setEditor((open) => !open)}>
+              {editor ? t("Cancel") : t("Change configuration")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={SSH_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -171,7 +178,11 @@ export function SshServer() {
         </Facts>
       </Section>
 
-      {editor && <SshEditor state={snapshot} onIntent={setIntent} />}
+      {editor && (
+        <ActionGuard action="ssh.config.apply" host={host.id}>
+          <SshEditor state={snapshot} onIntent={setIntent} />
+        </ActionGuard>
+      )}
 
       {/* The facts and the short method table share a row; the keys and
           the drop-in below share the next one. */}
@@ -218,6 +229,7 @@ export function SshServer() {
                 <td className="hm-num">{key.bits}</td>
                 <td className="source hm-mono">{key.fingerprint}</td>
                 <td>
+                  <ActionGuard action="ssh.hostkey.rotate" host={host.id}>
                   <button
                     className="hm-danger"
                     onClick={() =>
@@ -233,6 +245,7 @@ export function SshServer() {
                   >
                     {t("Rotate")}
                   </button>
+                  </ActionGuard>
                 </td>
               </tr>
             ))}

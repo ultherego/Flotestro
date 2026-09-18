@@ -111,9 +111,55 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 			message.Text += fields.Reason
 		}
 		message.Link = link("/policies/" + event.AggregateID)
+	case SubjectSecurity:
+		// A security alert is critical by nature: it is never below a
+		// channel's least severity.
+		message.Severity = "critical"
+		message.Title = "[security] " + strings.ReplaceAll(strings.TrimPrefix(event.Type, securityEventPrefix), "_", " ")
+		if host != "" {
+			message.Title += " on " + host
+		}
+		message.Text = fields.Detail
+		if fields.Reason != "" {
+			if message.Text != "" {
+				message.Text += "\n"
+			}
+			message.Text += fields.Reason
+		}
+		message.Link = link("/security")
 	}
 	return message, true
 }
+
+// SummaryMessage is the one message a channel gets when a silence with
+// send_summary ends: how many messages the silence kept back and their
+// titles, so the on-call knows what happened without the flood of every
+// one of them. The kept messages themselves are never sent.
+func SummaryMessage(kept []string, until time.Time, reason string, publicURL string) Message {
+	message := Message{
+		Subject:    "alert.summary",
+		EventType:  "alert.summary",
+		Title:      fmt.Sprintf("%d notifications kept back by a silence that ended", len(kept)),
+		OccurredAt: until,
+	}
+	lines := []string{fmt.Sprintf("silence until %s: %s", until.UTC().Format(time.RFC3339), reason), ""}
+	shown := kept
+	if len(shown) > MaxSummaryLines {
+		shown = shown[:MaxSummaryLines]
+	}
+	lines = append(lines, shown...)
+	if len(kept) > len(shown) {
+		lines = append(lines, fmt.Sprintf("... and %d more", len(kept)-len(shown)))
+	}
+	message.Text = strings.Join(lines, "\n")
+	if publicURL != "" {
+		message.Link = strings.TrimRight(publicURL, "/") + "/monitoring"
+	}
+	return message
+}
+
+// MaxSummaryLines bounds the titles a summary lists; the rest is a count.
+const MaxSummaryLines = 50
 
 func alertText(fields payload) string {
 	text := fields.Metric

@@ -11,6 +11,7 @@ import {
   useHost,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type ManagedFile = {
@@ -55,6 +56,9 @@ type Intent = { action: string; label: string; description: string; payload: Rec
  * rules are not editable here at all - each of those things has a module of
  * its own.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const FILE_CHANGES = ["file.ensure", "file.remove", "file.rollback"];
+
 export function Files() {
   const t = useT();
   const host = useHost();
@@ -104,11 +108,14 @@ export function Files() {
         title={t("Files")}
         description={t("Files the panel manages, with the content it expects and the content the host actually has. Paths are limited by the host's own allowlist, and password files, private keys and sudo rules are never editable here.")}
         actions={
-          <button onClick={() => setAdding((open) => !open)}>
-            {adding ? t("Cancel") : t("Manage a file")}
-          </button>
+          <ActionGuard action="file.ensure" host={host.id}>
+            <button onClick={() => setAdding((open) => !open)}>
+              {adding ? t("Cancel") : t("Manage a file")}
+            </button>
+          </ActionGuard>
         }
       />
+      <ReadOnlyModuleNotice host={host.id} actions={FILE_CHANGES} />
       <Message text={message} error />
       {ordered && <JobNotice job={ordered} hostID={host.id} />}
 
@@ -154,13 +161,13 @@ export function Files() {
       </>
       )}
 
-      {adding && <NewFile onIntent={setIntent} />}
+      {adding && <ActionGuard action="file.ensure" host={host.id}><NewFile onIntent={setIntent} /></ActionGuard>}
 
       <Section title={t("Files")} count={known ? list.length : undefined} span={12} flush>
         {!files.data ? (
           <Empty>{t("Loading…")}</Empty>
         ) : !list.length ? (
-          <EmptyState action={!adding && <button onClick={() => setAdding(true)}>{t("Manage a file")}</button>}>
+          <EmptyState action={!adding && <ActionGuard action="file.ensure" host={host.id}><button onClick={() => setAdding(true)}>{t("Manage a file")}</button></ActionGuard>}>
             {t("The panel does not manage any file on this host yet. A managed file is written from here, compared with what the host has at every report, and kept in versions.")}
           </EmptyState>
         ) : (
@@ -212,31 +219,35 @@ export function Files() {
                   </td>
                   <td>
                     <div className="operations">
-                      <button
-                        className="secondary"
-                        title={t("Ask the host for the file as it is now: its checksum, mode and owner refresh in this list once the job reports back.")}
-                        onClick={() =>
-                          request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
-                        }
-                      >
-                        {t("Read from host")}
-                      </button>
-                      <button
-                        className="hm-danger"
-                        title={t("Deletes the file on the host and stops managing it; the versions stay in the history.")}
-                        onClick={() =>
-                          setIntent({
-                            action: "file.remove",
-                            label: t("Stop managing and remove"),
-                            description: t("{path} will be removed from {host} and the panel will stop tracking it. Its history stays.", { path: file.path, host: host.hostname }),
-                            payload: {
-                              file: { path: file.path, expected_sha256: file.observed_sha256 ?? "" },
-                            },
-                          })
-                        }
-                      >
-                        {t("Remove")}
-                      </button>
+                      <ActionGuard action="file.read" host={host.id} explain>
+                        <button
+                          className="secondary"
+                          title={t("Ask the host for the file as it is now: its checksum, mode and owner refresh in this list once the job reports back.")}
+                          onClick={() =>
+                            request.mutate({ action: "file.read", payload: { file: { path: file.path } } })
+                          }
+                        >
+                          {t("Read from host")}
+                        </button>
+                      </ActionGuard>
+                      <ActionGuard action="file.remove" host={host.id}>
+                        <button
+                          className="hm-danger"
+                          title={t("Deletes the file on the host and stops managing it; the versions stay in the history.")}
+                          onClick={() =>
+                            setIntent({
+                              action: "file.remove",
+                              label: t("Stop managing and remove"),
+                              description: t("{path} will be removed from {host} and the panel will stop tracking it. Its history stays.", { path: file.path, host: host.hostname }),
+                              payload: {
+                                file: { path: file.path, expected_sha256: file.observed_sha256 ?? "" },
+                              },
+                            })
+                          }
+                        >
+                          {t("Remove")}
+                        </button>
+                      </ActionGuard>
                     </div>
                   </td>
                 </tr>
@@ -339,29 +350,31 @@ function History({
                     <button className="secondary" onClick={() => setComparison(version.sha256 ?? "")} disabled={!version.sha256}>
                       {t("Compare")}
                     </button>
-                    <button
-                      className="secondary"
-                      disabled={!version.sha256 || (version.sha256 === file.desired_sha256 && !file.drift)}
-                      onClick={() =>
-                        onIntent({
-                          action: "file.rollback",
-                          label: t("Roll back file"),
-                          description: t("{path} on {host} goes back to version {version} from {when}.", {
-                            path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: absoluteTime(version.applied_at),
-                          }),
-                          payload: {
-                            file: {
-                              path: file.path,
-                              version_sha256: version.sha256,
-                              expected_sha256: file.observed_sha256 ?? "",
-                              mode: file.mode ?? "",
+                    <ActionGuard action="file.rollback" host={hostID}>
+                      <button
+                        className="secondary"
+                        disabled={!version.sha256 || (version.sha256 === file.desired_sha256 && !file.drift)}
+                        onClick={() =>
+                          onIntent({
+                            action: "file.rollback",
+                            label: t("Roll back file"),
+                            description: t("{path} on {host} goes back to version {version} from {when}.", {
+                              path: file.path, host: hostname, version: (version.sha256 ?? "").slice(0, 12), when: absoluteTime(version.applied_at),
+                            }),
+                            payload: {
+                              file: {
+                                path: file.path,
+                                version_sha256: version.sha256,
+                                expected_sha256: file.observed_sha256 ?? "",
+                                mode: file.mode ?? "",
+                              },
                             },
-                          },
-                        })
-                      }
-                    >
-                      {t("Roll back")}
-                    </button>
+                          })
+                        }
+                      >
+                        {t("Roll back")}
+                      </button>
+                    </ActionGuard>
                   </div>
                 </td>
               </tr>

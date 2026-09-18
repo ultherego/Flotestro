@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterRows, heldCount, packageRows, packageVersion, planExpired, type InstalledPackage, type PlanChange } from "./Packages";
+import { changePayload, filterRows, heldCount, packageRows, packageVersion, planBinding, planExpired, planMode, type InstalledPackage, type PlanChange } from "./Packages";
 
 /* The table joins three answers of the host - the installed list, the
    holds and the last upgrade plan - and the join decides what a row says
@@ -104,5 +104,73 @@ describe("heldCount", () => {
     expect(heldCount({ holds_known: false, holds_unavailable_reason: "apt-mark showhold: code 1" })).toBeUndefined();
     expect(heldCount({})).toBeUndefined();
     expect(heldCount(undefined)).toBeUndefined();
+  });
+});
+
+/* Plan, then apply: the screen reads the plan out of the plan job and
+   binds the change to it. A change with no plan behind it has no payload
+   at all - that is how the button stops existing. */
+describe("planBinding", () => {
+  it("reads the digest, the header and the approved elements", () => {
+    const bound = planBinding({
+      kind: "package_plan", plan_hash: "abc123", planner_version: "0.54.0", schema_version: 2,
+      inventory_revision: "rev-9", resource_revision: "res-3", expires_at: "2026-09-18T12:00:00Z",
+      changes: [{ name: "curl", current_version: "8.5", candidate_version: "8.6" }],
+    });
+    expect(bound?.plan_hash).toBe("abc123");
+    expect(bound?.planner_version).toBe("0.54.0");
+    expect(bound?.changes?.[0].candidate_version).toBe("8.6");
+  });
+
+  it("gives nothing for a result that is not a package plan or carries no digest", () => {
+    expect(planBinding(undefined)).toBeNull();
+    expect(planBinding({ kind: "package_apply", plan_hash: "abc" })).toBeNull();
+    expect(planBinding({ kind: "package_plan" })).toBeNull();
+    expect(planBinding({ kind: "package_plan", plan_hash: "" })).toBeNull();
+  });
+});
+
+describe("changePayload", () => {
+  const plan = {
+    plan_hash: "abc123", planner_version: "0.54.0", schema_version: 2,
+    inventory_revision: "rev-9", resource_revision: "res-3", expires_at: "2026-09-18T12:00:00Z",
+    changes: [{ name: "curl", candidate_version: "8.6" }],
+  };
+
+  it("binds an install to its plan, under the field the API takes", () => {
+    const payload = changePayload("packages.install", ["curl"], plan) as {
+      package_change: { packages: string[]; plan_hash: string; plan: { planner_version: string } };
+    };
+    expect(payload.package_change.packages).toEqual(["curl"]);
+    expect(payload.package_change.plan_hash).toBe("abc123");
+    expect(payload.package_change.plan.planner_version).toBe("0.54.0");
+  });
+
+  it("binds an upgrade under its own field", () => {
+    const payload = changePayload("packages.upgrade", ["curl"], plan) as {
+      package_upgrade: { plan_hash: string };
+    };
+    expect(payload.package_upgrade.plan_hash).toBe("abc123");
+  });
+
+  it("sends the digest alone for a host whose planner builds no envelope", () => {
+    const payload = changePayload("packages.install", ["curl"], { plan_hash: "abc123" }) as {
+      package_change: { plan_hash: string; plan?: unknown };
+    };
+    expect(payload.package_change.plan_hash).toBe("abc123");
+    expect(payload.package_change.plan).toBeUndefined();
+  });
+
+  it("has no payload without a plan, without packages or for another operation", () => {
+    expect(changePayload("packages.install", ["curl"], null)).toBeNull();
+    expect(changePayload("packages.install", [], plan)).toBeNull();
+    expect(changePayload("packages.remove", ["curl"], plan)).toBeNull();
+  });
+});
+
+describe("planMode", () => {
+  it("asks for the plan of the change that is being prepared", () => {
+    expect(planMode("packages.install")).toBe("install");
+    expect(planMode("packages.upgrade")).toBe("upgrade");
   });
 });

@@ -115,6 +115,9 @@ type Server struct {
 	// Nil means an installation without notification channels.
 	notifications *notify.Store
 	notifier      *notify.Router
+	// notificationQueue is the worker of this instance, woken when an
+	// operator puts a dead letter back in the queue.
+	notificationQueue *notify.Worker
 	// relays is the registry of the site relays; the installation of a host
 	// in an isolated site goes through one of them. Nil means an
 	// installation without relays.
@@ -258,6 +261,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/enrollment-requests/{id}", s.handleGetEnrollmentRequest)
 	s.route(mux, "POST /api/v1/enrollment-requests/{id}/revoke", s.handleRevokeEnrollmentRequest)
 	s.route(mux, "POST /api/v1/enrollment-requests/{id}/replace", s.handleReplaceEnrollmentRequest)
+	s.route(mux, "GET /api/v1/hosts/{id}/actions", s.handleListHostActions)
 	// The ready configuration of an order: the same file the installation
 	// profile composes, without the token, fetchable as often as needed.
 	s.route(mux, "GET /api/v1/enrollment-requests/{id}/config", s.handleEnrollmentConfig)

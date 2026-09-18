@@ -15,6 +15,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
 // localUserNamePattern rejects names that cannot be a POSIX account. The name
@@ -39,12 +40,23 @@ const (
 	// symbolic link. The helper runs as root and a link placed by the user
 	// would point its writes at somebody else's files.
 	ErrorSymlink = "symlink_refused"
+	// The refusals of the key operations (security remediation, chapter
+	// 14.1): a removal of a key that is not there, the last key of an
+	// account with no password login, a managed file sshd does not read,
+	// material that is not a public key, and a replace whose list the
+	// operator saw is not the list the host has.
+	ErrorKeyNotFound        = "key_not_found"
+	ErrorLastKeyLockout     = "last_key_lockout"
+	ErrorManagedFileNotRead = "managed_file_not_read"
+	ErrorInvalidKey         = "invalid_ssh_key"
+	ErrorStaleKeyList       = "stale_plan"
 )
 
-// systemUIDCeiling separates service accounts from the accounts of people.
-// Accounts below this boundary belong to the system and the panel does not
-// change them.
-const systemUIDCeiling = 1000
+// uidRangeReader reads the UID range of people from the host's login.defs
+// right before a write: the same classifier the inventory uses, read
+// again root-side so a change of the file between the report and the
+// order is judged on what the host says now. A test replaces it.
+var uidRangeReader = accounts.LoadUIDRange
 
 // maxAuthorizedKeysBytes bounds the key file the helper reads back. A file
 // larger than this is not a list of keys.
@@ -124,17 +136,20 @@ func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.Hel
 	case helperv1.LocalUserActionRequest_OPERATION_CREATE:
 		return s.createLocalUser(operationCtx, request, action)
 	case helperv1.LocalUserActionRequest_OPERATION_LOCK:
-		return s.setLocalUserLock(operationCtx, name, true)
+		return s.setLocalUserLock(operationCtx, name, action.GetSystem(), true)
 	case helperv1.LocalUserActionRequest_OPERATION_UNLOCK:
-		return s.setLocalUserLock(operationCtx, name, false)
-	case helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS:
-		return s.setLocalUserKeys(operationCtx, name, action.GetSshKeys())
+		return s.setLocalUserLock(operationCtx, name, action.GetSystem(), false)
+	case helperv1.LocalUserActionRequest_OPERATION_SET_SSH_KEYS,
+		helperv1.LocalUserActionRequest_OPERATION_ADD_SSH_KEYS,
+		helperv1.LocalUserActionRequest_OPERATION_REMOVE_SSH_KEYS,
+		helperv1.LocalUserActionRequest_OPERATION_REPLACE_SSH_KEYS:
+		return s.editLocalUserKeys(operationCtx, request, action)
 	case helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS:
-		return s.setLocalUserGroups(operationCtx, name, action.GetGroups())
+		return s.setLocalUserGroups(operationCtx, name, action.GetSystem(), action.GetGroups())
 	case helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY:
-		return s.setLocalUserExpiry(operationCtx, name, action.GetExpiresAt())
+		return s.setLocalUserExpiry(operationCtx, name, action.GetSystem(), action.GetExpiresAt())
 	case helperv1.LocalUserActionRequest_OPERATION_DELETE:
-		return s.deleteLocalUser(operationCtx, request, name, action.GetRemoveHome())
+		return s.deleteLocalUser(operationCtx, request, name, action.GetSystem(), action.GetRemoveHome())
 	default:
 		return reject(ErrorUnknownAction, "unknown local account operation")
 	}
@@ -169,30 +184,72 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	if action.GetCreateHome() {
 		args = append(args, "--create-home")
 	}
-	// The account is created with password login disabled, not locked. useradd
-	// leaves an exclamation mark in shadow, which means "locked by the
-	// administrator"; for an account served by an SSH key that is a false state,
-	// and on top of that it makes a later unlock impossible.
-	args = append(args, "--password", "*")
+	// A service account is allocated below the range of people, as
+	// useradd --system does; the order has to say so, because an account
+	// in the wrong range is either invisible to the panel or a person's
+	// identifier taken by a daemon.
+	if action.GetSystem() {
+		args = append(args, "--system")
+	}
+	// The material has to parse before the account exists: an account
+	// created and then refused its keys would be an account with no way
+	// in that nobody asked for.
+	var keys []accounts.KeyInput
+	for _, key := range action.GetSshKeys() {
+		if err := validatePublicKey(key); err != nil {
+			return reject(ErrorInvalidKey, err.Error())
+		}
+		keys = append(keys, accounts.KeyInput{PublicKey: key})
+	}
+	lines, _, err := accounts.AddKeys(nil, keys)
+	if err != nil {
+		return reject(ErrorInvalidKey, err.Error())
+	}
+	if len(keys) == 0 && !action.GetInactive() {
+		// The panel refuses this earlier; the host refuses it too, because
+		// the host is the boundary that holds when the panel is not the
+		// one asking.
+		return reject(ErrorInvalidAccount,
+			"the account would have neither a key nor a password; say inactive to create it without a way in")
+	}
+	switch {
+	case action.GetInactive():
+		// An account nobody is to enter is created locked: the lock is a
+		// fact the inventory shows as such, and a key somebody drops into
+		// its home by hand opens nothing until an unlock is ordered.
+		args = append(args, "--password", "!*")
+	default:
+		// The account is created with password login disabled, not locked.
+		// useradd leaves an exclamation mark in shadow, which means "locked
+		// by the administrator"; for an account served by an SSH key that is
+		// a false state, and on top of that it makes a later unlock
+		// impossible.
+		args = append(args, "--password", "*")
+	}
 	args = append(args, name)
 
 	if _, stderr, err := s.tool()(ctx, 60*time.Second, "useradd", args...); err != nil {
 		return reject(ErrorExecFailed, "useradd: "+firstLineOf(stderr))
 	}
 
-	if keys := action.GetSshKeys(); len(keys) > 0 {
-		if response := s.setLocalUserKeys(ctx, name, keys); !response.GetAccepted() {
+	if len(lines) > 0 {
+		account, err := s.accounts()(name)
+		if err != nil {
+			return reject(ErrorExecFailed, "the account was created but cannot be resolved: "+err.Error())
+		}
+		if response := s.writeKeyFile(name, account, action.GetManagedFile(), accounts.Render(lines)); response != nil {
 			return response
 		}
 	}
 
 	s.log.Info("a local account was created",
-		"task_id", request.GetTaskId(), "account", name, "groups", len(action.GetGroups()))
+		"task_id", request.GetTaskId(), "account", name, "groups", len(action.GetGroups()),
+		"keys", len(lines), "inactive", action.GetInactive(), "system", action.GetSystem())
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-func (s *Server) setLocalUserLock(ctx context.Context, name string, lock bool) *helperv1.HelperResponse {
-	if _, response := s.requireLocalAccount(name); response != nil {
+func (s *Server) setLocalUserLock(ctx context.Context, name string, system, lock bool) *helperv1.HelperResponse {
+	if _, response := s.requireLocalAccount(name, system); response != nil {
 		return response
 	}
 	flag := "--unlock"
@@ -212,8 +269,8 @@ func (s *Server) setLocalUserLock(ctx context.Context, name string, lock bool) *
 // the state after the operation is the one in the order and nothing the
 // account collected earlier survives unseen. The primary group is not
 // touched.
-func (s *Server) setLocalUserGroups(ctx context.Context, name string, groups []string) *helperv1.HelperResponse {
-	if _, response := s.requireLocalAccount(name); response != nil {
+func (s *Server) setLocalUserGroups(ctx context.Context, name string, system bool, groups []string) *helperv1.HelperResponse {
+	if _, response := s.requireLocalAccount(name, system); response != nil {
 		return response
 	}
 	if err := validateGroupNames(groups); err != nil {
@@ -229,8 +286,8 @@ func (s *Server) setLocalUserGroups(ctx context.Context, name string, groups []s
 }
 
 // setLocalUserExpiry sets or clears the expiry date of the account.
-func (s *Server) setLocalUserExpiry(ctx context.Context, name, expiresAt string) *helperv1.HelperResponse {
-	if _, response := s.requireLocalAccount(name); response != nil {
+func (s *Server) setLocalUserExpiry(ctx context.Context, name string, system bool, expiresAt string) *helperv1.HelperResponse {
+	if _, response := s.requireLocalAccount(name, system); response != nil {
 		return response
 	}
 	// chage takes -1 as "no expiry"; the panel sends an empty date for it.
@@ -258,8 +315,8 @@ func (s *Server) setLocalUserExpiry(ctx context.Context, name, expiresAt string)
 // follow it as root and empty whatever it points at. A home that belongs to
 // somebody else is refused for the same reason.
 func (s *Server) deleteLocalUser(ctx context.Context, request *helperv1.HelperRequest,
-	name string, removeHome bool) *helperv1.HelperResponse {
-	account, response := s.requireLocalAccount(name)
+	name string, system, removeHome bool) *helperv1.HelperResponse {
+	account, response := s.requireLocalAccount(name, system)
 	if response != nil {
 		return response
 	}
@@ -306,32 +363,6 @@ func checkRemovableHome(account accountRecord) error {
 		return fmt.Errorf("the home directory %s belongs to UID %d, not to the account", home, owner)
 	}
 	return nil
-}
-
-// setLocalUserKeys sets the complete set of public keys of an account.
-func (s *Server) setLocalUserKeys(_ context.Context, name string, keys []string) *helperv1.HelperResponse {
-	account, response := s.requireLocalAccount(name)
-	if response != nil {
-		return response
-	}
-	for _, key := range keys {
-		if err := validatePublicKey(key); err != nil {
-			return reject(ErrorInvalidAccount, err.Error())
-		}
-	}
-	content := ""
-	for _, key := range keys {
-		content += strings.TrimSpace(key) + "\n"
-	}
-	if err := writeAuthorizedKeys(account.Home, account.UID, account.GID, content); err != nil {
-		var symlink *symlinkError
-		if errors.As(err, &symlink) {
-			return reject(ErrorSymlink, err.Error())
-		}
-		return reject(ErrorExecFailed, err.Error())
-	}
-	s.log.Info("the SSH keys of a local account were set", "account", name, "keys", len(keys))
-	return &helperv1.HelperResponse{Accepted: true}
 }
 
 // symlinkError marks a write refused because a link stood in its way.
@@ -506,7 +537,12 @@ func ownerOf(info os.FileInfo) (int, bool) {
 
 // requireLocalAccount rejects operations on system accounts, on accounts
 // that come from the directory and on the account of the agent itself.
-func (s *Server) requireLocalAccount(name string) (accountRecord, *helperv1.HelperResponse) {
+//
+// A system account is one outside the UID range of people in the host's
+// login.defs, read again here: the inventory classified the account with
+// the same file, and the order says with allowSystem that it means a
+// service account. Root and the agent's account are refused either way.
+func (s *Server) requireLocalAccount(name string, allowSystem bool) (accountRecord, *helperv1.HelperResponse) {
 	account, err := s.accounts()(name)
 	if err != nil {
 		return accountRecord{}, reject(ErrorAccountMissing, fmt.Sprintf("the account %s does not exist", name))
@@ -515,17 +551,26 @@ func (s *Server) requireLocalAccount(name string) (accountRecord, *helperv1.Help
 		return accountRecord{}, reject(ErrorShadowsDirectory, fmt.Sprintf(
 			"the account %s comes from the directory; changes belong to the directory, not to the host", name))
 	}
-	if account.UID < systemUIDCeiling {
-		// Service accounts belong to the packages that created them.
-		return accountRecord{}, reject(ErrorSystemAccount, fmt.Sprintf(
-			"the account %s is a system account (UID %d)", name, account.UID))
+	if account.UID == 0 {
+		return accountRecord{}, reject(ErrorProtectedAccount,
+			"the root account is not changed through the panel")
 	}
 	// The agent's own account is what the panel talks to the host through:
 	// locking, deleting or regrouping it would cut the host off from the
-	// panel with no way back.
+	// panel with no way back. It is judged before the UID range, because
+	// it is a system account as well and the operator is to read why the
+	// change is refused, not merely that the account is a service one.
 	if uint32(account.UID) == s.allowedUID {
 		return accountRecord{}, reject(ErrorProtectedAccount, fmt.Sprintf(
 			"the account %s is the agent's own account and is not changed through the panel", name))
+	}
+	uidRange := uidRangeReader()
+	if uidRange.IsSystem(int64(account.UID)) && !allowSystem {
+		// Service accounts belong to the packages that created them; an
+		// order that means one says so.
+		return accountRecord{}, reject(ErrorSystemAccount, fmt.Sprintf(
+			"the account %s is a system account (UID %d, outside %d-%d of %s); order the change with system: true if that is the intent",
+			name, account.UID, uidRange.Min, uidRange.Max, uidRange.Source))
 	}
 	return account, nil
 }

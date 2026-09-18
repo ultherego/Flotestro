@@ -9,9 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/ssh"
-
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
 // readLocalAccounts reads the account data that needs root: the lock state
@@ -29,7 +28,7 @@ func (s *Server) readLocalAccounts(ctx context.Context, request *helperv1.Helper
 	ctx, cancel := deadline(ctx, request, 2*time.Minute, 10*time.Minute)
 	defer cancel()
 
-	shadow, err := readShadowStates()
+	shadow, err := shadowReader()
 	if err != nil {
 		problems = append(problems, "shadow: "+err.Error())
 	}
@@ -86,6 +85,11 @@ func readShadowStates() (map[string]shadowState, error) {
 	return parseShadow("/etc/shadow")
 }
 
+// shadowReader is the read the handlers use; a test replaces it, because
+// the machine running the tests has no account of the test's in its
+// shadow file.
+var shadowReader = readShadowStates
+
 // parseShadow reads the password state from the given file. The path is a
 // parameter so that the meaning of the prefixes can be checked without access
 // to /etc/shadow.
@@ -131,14 +135,21 @@ func expiryDate(field string) string {
 	return time.Unix(0, 0).UTC().AddDate(0, 0, int(days)).Format("2006-01-02")
 }
 
+// The sources of a key, as the panel names them.
+const (
+	keySourceUserFile = "authorized_keys"
+	keySourceManaged  = "managed"
+)
+
 // readAuthorizedKeys returns the fingerprints of the public keys of an
-// account. The key content itself is not returned: the fingerprint is enough
-// to identify it.
+// account: the user's own authorized_keys and the panel's managed file,
+// each key with the source it came from. The key content itself is not
+// returned: the fingerprint is enough to identify it.
 //
-// The file is read without following a link anywhere on the way and parsed
-// here rather than handed to ssh-keygen by path: the helper runs as root,
-// and a link planted as ~/.ssh would otherwise make it read somebody else's
-// file.
+// The files are read without following a link anywhere on the way and
+// parsed here rather than handed to ssh-keygen by path: the helper runs as
+// root, and a link planted as ~/.ssh would otherwise make it read somebody
+// else's file.
 func readAuthorizedKeys(name string) ([]*helperv1.LocalSSHKey, error) {
 	home, err := homeDirectory(name)
 	if err != nil {
@@ -152,53 +163,39 @@ func readAuthorizedKeys(name string) ([]*helperv1.LocalSSHKey, error) {
 		// determined.
 		return nil, err
 	}
-	if content == nil {
-		// A missing file is a normal state, not an error.
-		return nil, nil
+	// A missing file is a normal state, not an error; the parser takes it
+	// as a file with no lines.
+	keys := parseAuthorizedKeys(content)
+	managed, err := readManagedKeysFile(name)
+	if err != nil {
+		return keys, err
 	}
-	return parseAuthorizedKeys(content), nil
+	for _, key := range accounts.ParseKeyFile(managed) {
+		if key.Fingerprint == "" {
+			continue
+		}
+		keys = append(keys, &helperv1.LocalSSHKey{
+			Fingerprint: key.Fingerprint, Type: key.Type, Comment: key.Comment, Source: keySourceManaged,
+		})
+	}
+	return keys, nil
 }
 
-// parseAuthorizedKeys turns the lines of a key file into fingerprints.
-// Lines that are not a key - comments, options without material, damaged
-// entries - are skipped: they grant no access, so they are not reported as
-// one.
+// parseAuthorizedKeys turns the lines of the user's key file into
+// fingerprints. Lines that are not a key - comments, options without
+// material, damaged entries - are skipped: they grant no access, so they
+// are not reported as one.
 func parseAuthorizedKeys(content []byte) []*helperv1.LocalSSHKey {
 	var keys []*helperv1.LocalSSHKey
-	rest := content
-	for len(rest) > 0 {
-		key, comment, _, remaining, err := ssh.ParseAuthorizedKey(rest)
-		if err != nil {
-			break
+	for _, line := range accounts.ParseKeyFile(content) {
+		if line.Fingerprint == "" {
+			continue
 		}
-		rest = remaining
 		keys = append(keys, &helperv1.LocalSSHKey{
-			Fingerprint: ssh.FingerprintSHA256(key),
-			Type:        keyTypeName(key.Type()),
-			Comment:     comment,
+			Fingerprint: line.Fingerprint, Type: line.Type, Comment: line.Comment, Source: keySourceUserFile,
 		})
 	}
 	return keys
-}
-
-// keyTypeName names the key type the way ssh-keygen -l does, which is the
-// way the panel has shown it since the read went through the tool.
-func keyTypeName(algorithm string) string {
-	switch algorithm {
-	case ssh.KeyAlgoED25519:
-		return "ED25519"
-	case ssh.KeyAlgoRSA:
-		return "RSA"
-	case ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521:
-		return "ECDSA"
-	case ssh.KeyAlgoSKED25519:
-		return "ED25519-SK"
-	case ssh.KeyAlgoSKECDSA256:
-		return "ECDSA-SK"
-	case ssh.KeyAlgoDSA:
-		return "DSA"
-	}
-	return algorithm
 }
 
 func homeDirectory(name string) (string, error) {

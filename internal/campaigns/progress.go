@@ -76,9 +76,13 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 		o.finishTarget(ctx, campaign, target, state, code, message)
 		return nil
 	}
-	detail, err := o.lastAttemptDetail(ctx, *target.JobID)
+	attempt, err := o.lastAttempt(ctx, *target.JobID)
 	if err != nil {
 		return err
+	}
+	var detail json.RawMessage
+	if attempt != nil {
+		detail = attempt.Detail
 	}
 	verdict.NoChange = resultNoChange(detail)
 	if state, _ := targetOutcome(verdict); state == TargetNoChange {
@@ -90,6 +94,25 @@ func (o *Orchestrator) afterMainJob(ctx context.Context, campaign Campaign, targ
 			stepOutcome{Key: StepExecute, State: StepSucceeded, Reason: why},
 			stepOutcome{Key: StepReboot, State: StepSkipped, Reason: why},
 			stepOutcome{Key: StepVerify, State: StepSkipped, Reason: why})
+		return nil
+	}
+
+	// The task says it succeeded; the host's own reading of itself after
+	// the change decides whether that is a success. A change nobody
+	// observed is not one, and it must not carry a wave forward as if it
+	// were: the host ends applied_unverified, and neither the reboot nor
+	// the unit check runs for it - both are answers to a change that
+	// landed.
+	if reason := unverifiedChange(opspec.ActionType(campaign.ActionType), attempt); reason != "" {
+		o.log.Warn("the task of a campaign host succeeded and the host does not show the state asked for",
+			"campaign_id", campaign.ID, "host_id", target.HostID, "job_id", *target.JobID, "reason", reason)
+		o.finishTargetSteps(ctx, campaign, target, TargetFailed, opspec.ErrorAppliedUnverified, reason,
+			stepOutcome{Key: StepExecute, State: StepFailed,
+				Reason: stepReason(opspec.ErrorAppliedUnverified, reason)},
+			stepOutcome{Key: StepReboot, State: StepSkipped,
+				Reason: "the change was not confirmed on the host"},
+			stepOutcome{Key: StepVerify, State: StepSkipped,
+				Reason: "the change was not confirmed on the host"})
 		return nil
 	}
 
@@ -275,9 +298,9 @@ func resultNoChange(detail json.RawMessage) bool {
 	return false
 }
 
-// lastAttemptDetail returns the typed result of the task's latest attempt;
-// empty when the task has none.
-func (o *Orchestrator) lastAttemptDetail(ctx context.Context, jobID string) (json.RawMessage, error) {
+// lastAttempt returns the task's latest attempt: its typed result and the
+// host's reading of itself after the change. Empty when the task has none.
+func (o *Orchestrator) lastAttempt(ctx context.Context, jobID string) (*jobs.Attempt, error) {
 	attempts, err := o.jobs.Attempts(ctx, jobID)
 	if err != nil {
 		return nil, err
@@ -285,7 +308,51 @@ func (o *Orchestrator) lastAttemptDetail(ctx context.Context, jobID string) (jso
 	if len(attempts) == 0 {
 		return nil, nil
 	}
-	return attempts[len(attempts)-1].Detail, nil
+	return &attempts[len(attempts)-1], nil
+}
+
+// unverifiedChange says why a task that reports success is not one, from
+// the verification the host sent with its result. An empty answer means
+// the host may be called changed.
+//
+// Three cases are a success. An operation whose verifier is none is its
+// own observation - a read, a plan, a signal delivered. An operation whose
+// verifier the panel settles on the host's return (a reboot, an agent
+// replacement) was confirmed by the panel before the job reached this
+// state at all. And a verification that says the state was observed is
+// exactly what the campaign was waiting for.
+//
+// A verification that says the state was not observed is a failure of the
+// change: the host is left applied_unverified with the verifier's own
+// reason. An attempt without a verification comes from an agent older than
+// the verifiers; the campaign cannot invent an observation for it, so the
+// host keeps the verdict of its task and the strip says nobody looked.
+func unverifiedChange(action opspec.ActionType, attempt *jobs.Attempt) string {
+	if attempt == nil || len(attempt.Verification) == 0 {
+		return ""
+	}
+	verifier := action.Verifier()
+	if verifier == opspec.VerifierNone || verifier.PanelSettled() {
+		return ""
+	}
+	var observation struct {
+		Verifier string `json:"verifier"`
+		Verified bool   `json:"verified"`
+		Expected string `json:"expected"`
+		Observed string `json:"observed"`
+		Reason   string `json:"reason"`
+	}
+	if err := json.Unmarshal(attempt.Verification, &observation); err != nil || observation.Verified {
+		return ""
+	}
+	reason := observation.Reason
+	if reason == "" {
+		reason = fmt.Sprintf("the verifier %s expected %s and found %s",
+			orDefault(observation.Verifier, string(verifier)),
+			orDefault(observation.Expected, "the state of the order"),
+			orDefault(observation.Observed, "something else"))
+	}
+	return "the change was made and the host does not show the state asked for: " + reason
 }
 
 // afterRemediation settles a host of a fleet remediation from the state of

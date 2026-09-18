@@ -10,6 +10,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Rule = {
@@ -74,6 +75,9 @@ function adapterLabel(adapter: string): string {
  * container start or service reload. The operator sees them but does not
  * edit them.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const FIREWALL_CHANGES = ["firewall.rule.ensure", "firewall.rule.remove", "firewall.zone.port", "firewall.zone.service"];
+
 export function Firewall() {
   const t = useT();
   const host = useHost();
@@ -134,16 +138,19 @@ export function Firewall() {
         title={t("Firewall")}
         description={t("Read from the kernel with nft. Flotestro owns one table of its own — docker, firewalld and iptables-nft rewrite theirs without asking, so a rule placed in those would vanish at the next container start or reload.")}
         actions={
-          <button
-            onClick={() => setWizard((open) => !open)}
-            disabled={!snapshot?.writable}
-            title={snapshot?.writable ? undefined : snapshot?.read_only_reason || t("The panel cannot write rules on this host.")}
-          >
-            {wizard ? t("Cancel") : t("New rule")}
-          </button>
+          <ActionGuard action="firewall.rule.ensure" host={host.id}>
+            <button
+              onClick={() => setWizard((open) => !open)}
+              disabled={!snapshot?.writable}
+              title={snapshot?.writable ? undefined : snapshot?.read_only_reason || t("The panel cannot write rules on this host.")}
+            >
+              {wizard ? t("Cancel") : t("New rule")}
+            </button>
+          </ActionGuard>
         }
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={FIREWALL_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -203,7 +210,11 @@ export function Firewall() {
         </Facts>
       </Section>
 
-      {wizard && <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />}
+      {wizard && (
+        <ActionGuard action="firewall.rule.ensure" host={host.id}>
+          <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />
+        </ActionGuard>
+      )}
 
       {snapshot?.zones?.length ? (
         <Section
@@ -230,8 +241,12 @@ export function Firewall() {
                   <td>{(zone.services ?? []).join(", ") || "—"}</td>
                   <td className="hm-mono">{(zone.ports ?? []).join(", ") || "—"}</td>
                   <td>
-                    <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
-                    <ZoneService zone={zone.name} services={zone.services ?? []} onIntent={setIntent} hostname={host.hostname} />
+                    <ActionGuard action="firewall.zone.port" host={host.id}>
+                      <ZonePort zone={zone.name} onIntent={setIntent} hostname={host.hostname} />
+                    </ActionGuard>
+                    <ActionGuard action="firewall.zone.service" host={host.id}>
+                      <ZoneService zone={zone.name} services={zone.services ?? []} onIntent={setIntent} hostname={host.hostname} />
+                    </ActionGuard>
                   </td>
                 </tr>
               ))}
@@ -302,19 +317,21 @@ export function Firewall() {
                   </td>
                   <td>
                     {rule.source === "managed" && (
-                      <button
-                        className="hm-danger"
-                        onClick={() =>
-                          setIntent({
-                            action: "firewall.rule.remove",
-                            label: t("Remove rule"),
-                            description: t("{rule} will be removed from {host}. The remaining Flotestro rules are rebuilt in order.", { rule: ruleName(rule), host: host.hostname }),
-                            payload: { firewall: { rule_id: ruleName(rule), rollback_seconds: 120 } },
-                          })
-                        }
-                      >
-                        {t("Remove")}
-                      </button>
+                      <ActionGuard action="firewall.rule.remove" host={host.id}>
+                        <button
+                          className="hm-danger"
+                          onClick={() =>
+                            setIntent({
+                              action: "firewall.rule.remove",
+                              label: t("Remove rule"),
+                              description: t("{rule} will be removed from {host}. The remaining Flotestro rules are rebuilt in order.", { rule: ruleName(rule), host: host.hostname }),
+                              payload: { firewall: { rule_id: ruleName(rule), rollback_seconds: 120 } },
+                            })
+                          }
+                        >
+                          {t("Remove")}
+                        </button>
+                      </ActionGuard>
                     )}
                   </td>
                 </tr>

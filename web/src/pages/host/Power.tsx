@@ -10,6 +10,7 @@ import {
   Section, Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Inhibitor = { who: string; user?: string; pid?: number; what?: string; why?: string; mode?: string };
@@ -71,6 +72,9 @@ function uptime(seconds: number) {
  * comes back with a new boot_id. A shutdown does not end at all: the panel
  * cannot power the machine back on, and the tab says so plainly.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const POWER_CHANGES = ["system.reboot", "system.shutdown"];
+
 export function Power() {
   const t = useT();
   const host = useHost();
@@ -112,6 +116,7 @@ export function Power() {
         description={t("A reboot is not finished when the command is sent — it is finished when the host comes back with a new boot ID. A shutdown never finishes here at all: nothing in this panel can power the machine back on.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={POWER_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -258,6 +263,7 @@ export function Power() {
             {t("override inhibitors")}
           </Check>
           <FormActions>
+            <ActionGuard action="system.reboot" host={host.id}>
             <button
               onClick={() =>
                 setIntent({
@@ -270,6 +276,8 @@ export function Power() {
             >
               {t("Reboot")}
             </button>
+            </ActionGuard>
+            <ActionGuard action="system.shutdown" host={host.id}>
             <button
               className="hm-danger"
               onClick={() =>
@@ -299,6 +307,7 @@ export function Power() {
             >
               {t("Shut down")}
             </button>
+            </ActionGuard>
           </FormActions>
         </Form>
       </Section>

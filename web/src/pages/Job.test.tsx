@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cancelAckLine, hasContent, outputFilename, payloadPairs } from "./Job";
+import { appliedUnverifiedNote, cancelAckLine, hasContent, outputFilename, payloadPairs, verificationLine } from "./Job";
 
 const t = (key: string, params?: Record<string, string | number>) =>
   key.replace(/\{(\w+)\}/g, (_, name: string) => String(params?.[name] ?? ""));
@@ -50,5 +50,43 @@ describe("outputFilename and hasContent", () => {
     expect(hasContent({})).toBe(false);
     expect(hasContent(null)).toBe(false);
     expect(hasContent({ os_family: "debian" })).toBe(true);
+  });
+});
+
+/* The host's reading of itself after the change, as the job page words
+   it: which verifier looked, what it expected, what it found, and the
+   reason when the two differ. */
+describe("verificationLine", () => {
+  it("names the verifier, the expectation and the observation", () => {
+    expect(verificationLine({ verifier: "unit_state", verified: true, expected: "active", observed: "active" }, t))
+      .toBe("unit_state: expected active, observed active");
+  });
+
+  it("adds the reason when the state was not observed", () => {
+    const line = verificationLine({
+      verifier: "unit_state", verified: false, expected: "active", observed: "failed",
+      reason: "the unit did not stay active",
+    }, t);
+    expect(line).toContain("expected active, observed failed");
+    expect(line).toContain("the unit did not stay active");
+  });
+
+  it("says unknown rather than nothing for a field the host left empty", () => {
+    expect(verificationLine({ verifier: "file_content", verified: false }, t)).toContain("unknown");
+  });
+});
+
+/* A job that failed with applied_unverified says in full words what
+   happened: the change landed and nobody saw the state that was ordered. */
+describe("appliedUnverifiedNote", () => {
+  it("speaks only for that code", () => {
+    expect(appliedUnverifiedNote({}, t)).toBe("");
+    expect(appliedUnverifiedNote({ result_error_code: "exec_failed" }, t)).toBe("");
+  });
+
+  it("says the change was made and the state was not observed", () => {
+    const note = appliedUnverifiedNote({ result_error_code: "applied_unverified" }, t);
+    expect(note).toContain("The change was made");
+    expect(note).toContain("did not show the state");
   });
 });

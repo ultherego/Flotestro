@@ -12,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"net/smtp"
+	"net/textproto"
+	"net/url"
 	"strconv"
 	"strings"
 	"syscall"
@@ -32,7 +34,10 @@ type Message struct {
 	Severity string `json:"severity,omitempty"`
 	// EventID and the fields after it are the row of the trail; zero and
 	// empty for a test message.
-	EventID     int64           `json:"event_id"`
+	EventID int64 `json:"event_id"`
+	// DeliveryID is the row of the queue the message travels as, so a
+	// receiver can name it back; empty for a test message.
+	DeliveryID  string          `json:"delivery_id,omitempty"`
 	EventType   string          `json:"event_type"`
 	Aggregate   string          `json:"aggregate_type,omitempty"`
 	AggregateID string          `json:"aggregate_id,omitempty"`
@@ -43,10 +48,13 @@ type Message struct {
 // SendError is a failure with a code the log keeps. The code is the kind
 // of failure - the address refused, the name unknown, the receiver
 // answering with a status - so an operator reading the log knows what to
-// fix without the sentence.
+// fix without the sentence. Status is the HTTP status of a receiver that
+// answered, or the reply code of a mail relay; zero when nothing
+// answered. The worker classifies the outcome by it.
 type SendError struct {
-	Code string
-	Err  error
+	Code   string
+	Status int
+	Err    error
 }
 
 func (e SendError) Error() string { return e.Code + ": " + e.Err.Error() }
@@ -70,10 +78,19 @@ const (
 // timeout whatever wrapped it, a DNS failure says the name was wrong
 // before any connection, and a refusal says the name was right and the
 // port closed.
+//
+// The sentence of the error is kept without the address: the HTTP client
+// puts the whole URL into its errors, and the URL of an incoming webhook
+// is the credential. The log shows the operation and the cause, never
+// the address.
 func classify(err error) SendError {
 	var sendErr SendError
 	if errors.As(err, &sendErr) {
 		return sendErr
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		err = fmt.Errorf("%s: %w", strings.ToLower(urlErr.Op), urlErr.Err)
 	}
 	var netErr net.Error
 	switch {
@@ -119,16 +136,37 @@ func (w WebhookSender) Send(ctx context.Context, channel Channel, message Messag
 	if err := json.Unmarshal(channel.Config, &config); err != nil {
 		return SendError{Code: CodeInvalidConfig, Err: err}
 	}
+	// The signing key is the channel's secret; a row from before the
+	// secret store, not yet moved, still carries it in the configuration.
+	secret := channel.secret
+	if secret == "" {
+		secret = config.Secret
+	}
 	body, err := json.Marshal(message)
 	if err != nil {
 		return err
 	}
 	headers := http.Header{}
-	headers.Set(outbox.DeliveryHeader, "notification-"+strconv.FormatInt(message.EventID, 10))
+	headers.Set(outbox.DeliveryHeader, deliveryIdentifier(message))
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 	headers.Set(outbox.TimestampHeader, timestamp)
-	headers.Set(outbox.SignatureHeader, outbox.Sign(config.Secret, body, timestamp))
+	headers.Set(outbox.SignatureHeader, outbox.Sign(secret, body, timestamp))
 	return post(ctx, w.Client, config.URL, body, headers)
+}
+
+// deliveryIdentifier is what the receiver deduplicates by: the event of
+// the trail, which is the same on every attempt of the same row, so a
+// receiver that took the first attempt and answered too late drops the
+// second. A message without an event - a test, a summary - carries its
+// own identifier.
+func deliveryIdentifier(message Message) string {
+	if message.EventID > 0 {
+		return "notification-" + strconv.FormatInt(message.EventID, 10)
+	}
+	if message.DeliveryID != "" {
+		return "notification-" + message.DeliveryID
+	}
+	return "notification-test-" + strconv.FormatInt(message.OccurredAt.UnixNano(), 10)
 }
 
 // SlackSender posts the message in the shape of an incoming webhook: a
@@ -142,6 +180,15 @@ func (s SlackSender) Send(ctx context.Context, channel Channel, message Message)
 	var config SlackConfig
 	if err := json.Unmarshal(channel.Config, &config); err != nil {
 		return SendError{Code: CodeInvalidConfig, Err: err}
+	}
+	// The address is the channel's secret; a row from before the secret
+	// store, not yet moved, still carries it in the configuration.
+	address := channel.secret
+	if address == "" {
+		address = config.URL
+	}
+	if address == "" {
+		return SendError{Code: CodeSecretUnavailable, Err: errors.New("the incoming webhook has no address in the secret store")}
 	}
 	text := "*" + message.Title + "*"
 	if message.Text != "" {
@@ -160,7 +207,7 @@ func (s SlackSender) Send(ctx context.Context, channel Channel, message Message)
 	if err != nil {
 		return err
 	}
-	return post(ctx, s.Client, config.URL, body, nil)
+	return post(ctx, s.Client, address, body, nil)
 }
 
 // post sends one body and reads the status. The answer is read and
@@ -190,7 +237,8 @@ func post(ctx context.Context, client *http.Client, address string, body []byte,
 	defer response.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64*1024))
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return SendError{Code: CodeReceiverStatus, Err: fmt.Errorf("the receiver answered %d", response.StatusCode)}
+		return SendError{Code: CodeReceiverStatus, Status: response.StatusCode,
+			Err: fmt.Errorf("the receiver answered %d", response.StatusCode)}
 	}
 	return nil
 }
@@ -217,8 +265,11 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 	if err := json.Unmarshal(channel.Config, &config); err != nil {
 		return SendError{Code: CodeInvalidConfig, Err: err}
 	}
-	password := ""
-	if config.Username != "" {
+	password := channel.secret
+	if config.Username != "" && password == "" {
+		// The worker hands the password over with the channel; a channel
+		// read without it - the test button of an older path - reads the
+		// named secret here, at the moment of sending.
 		if e.Secrets == nil {
 			return SendError{Code: CodeSecretUnavailable, Err: errors.New("this installation has no secret store")}
 		}
@@ -250,7 +301,7 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 	}
 	defer client.Close()
 	if err := client.Hello("flotestro"); err != nil {
-		return SendError{Code: CodeSMTPRejected, Err: err}
+		return smtpRejected(err)
 	}
 	if config.StartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
@@ -266,22 +317,22 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 		}
 	}
 	if err := client.Mail(config.From); err != nil {
-		return SendError{Code: CodeSMTPRejected, Err: err}
+		return smtpRejected(err)
 	}
 	for _, to := range config.To {
 		if err := client.Rcpt(to); err != nil {
-			return SendError{Code: CodeSMTPRejected, Err: fmt.Errorf("recipient %s: %w", to, err)}
+			return smtpRejected(fmt.Errorf("recipient %s: %w", to, err))
 		}
 	}
 	writer, err := client.Data()
 	if err != nil {
-		return SendError{Code: CodeSMTPRejected, Err: err}
+		return smtpRejected(err)
 	}
 	if _, err := writer.Write(mailBody(config, message)); err != nil {
 		return classify(err)
 	}
 	if err := writer.Close(); err != nil {
-		return SendError{Code: CodeSMTPRejected, Err: err}
+		return smtpRejected(err)
 	}
 	if err := client.Quit(); err != nil {
 		// The message was taken at the end of DATA; a failed goodbye
@@ -289,6 +340,17 @@ func (e EmailSender) Send(ctx context.Context, channel Channel, message Message)
 		return nil
 	}
 	return nil
+}
+
+// smtpRejected types a refusal of the mail relay with its reply code, so
+// the worker tells a relay that asks for another try (4xx) from one that
+// refuses the message for good (5xx).
+func smtpRejected(err error) SendError {
+	var protocol *textproto.Error
+	if errors.As(err, &protocol) {
+		return SendError{Code: CodeSMTPRejected, Status: protocol.Code, Err: err}
+	}
+	return SendError{Code: CodeSMTPRejected, Err: err}
 }
 
 // mailBody renders the message as a plain-text mail. The subject carries

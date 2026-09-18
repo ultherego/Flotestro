@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { capability } from "./modules";
 import { AlertStateBadge, SeverityBadge, duration, metricValue } from "../Monitoring";
+import { ActionGuard } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 const RANGES: { value: MetricRange; label: string }[] = [
@@ -574,23 +575,28 @@ function ProbeNow({ host }: { host: Host }) {
           )}
         </Fields>
         <FormActions>
-          <button
-            disabled={!valid || read.busy || host.connection_state !== "online"}
-            onClick={() =>
-              read.order({
-                action: "monitoring.probe.run",
-                payload: {
-                  monitoring: {
-                    kind, target: address,
-                    ...(kind === "http" && Number(expectStatus) ? { expect_status: Number(expectStatus) } : {}),
-                    ...(kind === "http" && expectBody.trim() ? { expect_body: expectBody.trim() } : {}),
+          {/* The one button of the section stays on the screen when the
+              probe is refused, with the reason: a form without its button
+              would read as broken. */}
+          <ActionGuard action="monitoring.probe.run" host={host.id} explain>
+            <button
+              disabled={!valid || read.busy || host.connection_state !== "online"}
+              onClick={() =>
+                read.order({
+                  action: "monitoring.probe.run",
+                  payload: {
+                    monitoring: {
+                      kind, target: address,
+                      ...(kind === "http" && Number(expectStatus) ? { expect_status: Number(expectStatus) } : {}),
+                      ...(kind === "http" && expectBody.trim() ? { expect_body: expectBody.trim() } : {}),
+                    },
                   },
-                },
-              })
-            }
-          >
-            {read.busy ? t("Probing…") : t("Run the probe")}
-          </button>
+                })
+              }
+            >
+              {read.busy ? t("Probing…") : t("Run the probe")}
+            </button>
+          </ActionGuard>
         </FormActions>
         <Message text={read.message} error />
         {refused && (

@@ -9,6 +9,8 @@ import {
   Summary, Table, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
+import { useModuleAccess } from "../../lib/actions";
 import { useT } from "../../i18n";
 
 type Address = {
@@ -100,9 +102,15 @@ type Intent = {
  * what the host has up and what somebody once wrote into a configuration
  * can drift apart - and the operator asks about the former.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const NETWORK_CHANGES = ["network.mtu.set", "network.route.ensure", "network.profile.apply"];
+
 export function Network() {
   const t = useT();
   const host = useHost();
+  // The interface editor gathers three changes; it opens when at least one
+  // of them may be ordered, and each of its buttons stands behind its own.
+  const access = useModuleAccess(host.id, NETWORK_CHANGES);
   const queryClient = useQueryClient();
   const module = useModule<Snapshot>(host.id, "network");
   const [intent, setIntent] = useState<Intent | null>(null);
@@ -152,6 +160,7 @@ export function Network() {
         description={t("Read from the kernel, not from configuration files: what the host has up and what someone once wrote into a config file can differ.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={NETWORK_CHANGES} />
       <Message text={message} />
 
       {snapshot?.unavailable_reason && (
@@ -284,9 +293,11 @@ export function Network() {
                     keep after a reboot. */}
                 {writable && (
                   <td>
-                    <button className="secondary" onClick={() => setEdited(iface)}>
-                      {t("Change")}
-                    </button>
+                    {access.anyAllowed && (
+                      <button className="secondary" onClick={() => setEdited(iface)}>
+                        {t("Change")}
+                      </button>
+                    )}
                   </td>
                 )}
               </tr>
@@ -297,6 +308,7 @@ export function Network() {
 
       {edited && (
         <InterfaceChange
+          hostID={host.id}
           iface={edited}
           management={edited.management}
           onIntent={setIntent}
@@ -370,8 +382,9 @@ export function Network() {
  * rollback window instead of hiding it as a detail.
  */
 function InterfaceChange({
-  iface, management, onIntent, onCancel,
+  hostID, iface, management, onIntent, onCancel,
 }: {
+  hostID: string;
   iface: Interface;
   management: boolean;
   onIntent: (intent: Intent) => void;
@@ -424,21 +437,23 @@ function InterfaceChange({
           </Field>
         </Fields>
         <FormActions>
-          <button
-            onClick={() =>
-              onIntent({
-                action: "network.mtu.set",
-                label: t("Set MTU on {iface}", { iface: iface.name }),
-                description: t("{iface} will use MTU {mtu}. The host rolls back after {seconds}s unless the agent confirms connectivity.", { iface: iface.name, mtu, seconds }),
-                payload: {
-                  network: { interface: iface.name, mtu, rollback_seconds: seconds },
-                },
-              })
-            }
-            disabled={!mtu}
-          >
-            {t("Set MTU")}
-          </button>
+          <ActionGuard action="network.mtu.set" host={hostID}>
+            <button
+              onClick={() =>
+                onIntent({
+                  action: "network.mtu.set",
+                  label: t("Set MTU on {iface}", { iface: iface.name }),
+                  description: t("{iface} will use MTU {mtu}. The host rolls back after {seconds}s unless the agent confirms connectivity.", { iface: iface.name, mtu, seconds }),
+                  payload: {
+                    network: { interface: iface.name, mtu, rollback_seconds: seconds },
+                  },
+                })
+              }
+              disabled={!mtu}
+            >
+              {t("Set MTU")}
+            </button>
+          </ActionGuard>
         </FormActions>
 
         <Fields>
@@ -451,26 +466,28 @@ function InterfaceChange({
           </Field>
         </Fields>
         <FormActions>
-          <button
-            onClick={() =>
-              onIntent({
-                action: "network.route.ensure",
-                label: t("Replace routes on {iface}", { iface: iface.name }),
-                description: t("{iface} will carry exactly these routes: {routes}. Routes not listed here are removed from the profile.", {
-                  iface: iface.name, routes: list(routes).join("; ") || t("none"),
-                }),
-                payload: {
-                  network: {
-                    interface: iface.name,
-                    routes: list(routes),
-                    rollback_seconds: seconds,
+          <ActionGuard action="network.route.ensure" host={hostID}>
+            <button
+              onClick={() =>
+                onIntent({
+                  action: "network.route.ensure",
+                  label: t("Replace routes on {iface}", { iface: iface.name }),
+                  description: t("{iface} will carry exactly these routes: {routes}. Routes not listed here are removed from the profile.", {
+                    iface: iface.name, routes: list(routes).join("; ") || t("none"),
+                  }),
+                  payload: {
+                    network: {
+                      interface: iface.name,
+                      routes: list(routes),
+                      rollback_seconds: seconds,
+                    },
                   },
-                },
-              })
-            }
-          >
-            {t("Replace routes")}
-          </button>
+                })
+              }
+            >
+              {t("Replace routes")}
+            </button>
+          </ActionGuard>
         </FormActions>
 
         <Fields>
@@ -496,33 +513,35 @@ function InterfaceChange({
           </Field>
         </Fields>
         <FormActions>
-          <button
-            onClick={() =>
-              onIntent({
-                action: "network.profile.apply",
-                label: t("Apply address profile to {iface}", { iface: iface.name }),
-                description:
-                  method === "auto"
-                    ? t("{iface} will take its address from DHCP. Its current address is dropped.", { iface: iface.name })
-                    : t("{iface} will use {addresses}{gateway}. Addresses not listed here are removed.", {
-                        iface: iface.name, addresses: list(addresses).join(", "), gateway: gateway ? ` ${t("via {gateway}", { gateway })}` : "",
-                      }),
-                payload: {
-                  network: {
-                    interface: iface.name,
-                    method,
-                    addresses: method === "auto" ? [] : list(addresses),
-                    gateway: method === "auto" ? "" : gateway,
-                    dns: method === "auto" ? [] : list(dns),
-                    rollback_seconds: seconds,
+          <ActionGuard action="network.profile.apply" host={hostID}>
+            <button
+              onClick={() =>
+                onIntent({
+                  action: "network.profile.apply",
+                  label: t("Apply address profile to {iface}", { iface: iface.name }),
+                  description:
+                    method === "auto"
+                      ? t("{iface} will take its address from DHCP. Its current address is dropped.", { iface: iface.name })
+                      : t("{iface} will use {addresses}{gateway}. Addresses not listed here are removed.", {
+                          iface: iface.name, addresses: list(addresses).join(", "), gateway: gateway ? ` ${t("via {gateway}", { gateway })}` : "",
+                        }),
+                  payload: {
+                    network: {
+                      interface: iface.name,
+                      method,
+                      addresses: method === "auto" ? [] : list(addresses),
+                      gateway: method === "auto" ? "" : gateway,
+                      dns: method === "auto" ? [] : list(dns),
+                      rollback_seconds: seconds,
+                    },
                   },
-                },
-              })
-            }
-            disabled={method === "manual" && list(addresses).length === 0}
-          >
-            {t("Apply profile")}
-          </button>
+                })
+              }
+              disabled={method === "manual" && list(addresses).length === 0}
+            >
+              {t("Apply profile")}
+            </button>
+          </ActionGuard>
         </FormActions>
       </Form>
     </Section>

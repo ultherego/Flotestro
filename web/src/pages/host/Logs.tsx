@@ -11,6 +11,7 @@ import {
 } from "./shared";
 import { useJournalPreview } from "../../lib/stream";
 import { readsPrefill } from "../Reads";
+import { ActionGuard } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type JournalResult = { lines?: string[]; truncated?: boolean };
@@ -551,25 +552,32 @@ export function Logs() {
           )}
 
           <FormActions>
-            <button
-              onClick={() => read.mutate()}
-              disabled={read.isPending || host.connection_state !== "online" || (source === "journal" && !!boot && !bootFilter.supported)}
-              title={source === "journal" && boot && !bootFilter.supported ? bootFilter.reason : undefined}
-            >
-              {read.isPending ? t("Reading…") : t("Read")}
-            </button>
+            {/* The read is the one button of the page: refused, it stays on
+                the screen disabled with the reason. The follow is a second
+                order of its own and simply goes away when it is refused. */}
+            <ActionGuard action={source === "journal" ? "journal.read" : "logfile.read"} host={host.id} explain>
+              <button
+                onClick={() => read.mutate()}
+                disabled={read.isPending || host.connection_state !== "online" || (source === "journal" && !!boot && !bootFilter.supported)}
+                title={source === "journal" && boot && !bootFilter.supported ? bootFilter.reason : undefined}
+              >
+                {read.isPending ? t("Reading…") : t("Read")}
+              </button>
+            </ActionGuard>
             {/* The live preview applies to the journal only: a file has no
                 events that could be followed without polling the host in a
                 loop. */}
             {source === "journal" && !preview && (
-              <button
-                className="secondary"
-                title={t("A live stream of the journal with these filters, for a bounded time; lines the host cannot send in time are dropped and counted.")}
-                onClick={() => follow.mutate()}
-                disabled={follow.isPending || host.connection_state !== "online"}
-              >
-                {follow.isPending ? t("Starting…") : t("Follow")}
-              </button>
+              <ActionGuard action="journal.follow" host={host.id}>
+                <button
+                  className="secondary"
+                  title={t("A live stream of the journal with these filters, for a bounded time; lines the host cannot send in time are dropped and counted.")}
+                  onClick={() => follow.mutate()}
+                  disabled={follow.isPending || host.connection_state !== "online"}
+                >
+                  {follow.isPending ? t("Starting…") : t("Follow")}
+                </button>
+              </ActionGuard>
             )}
             {preview && (
               <>

@@ -1,7 +1,8 @@
 import { Fragment, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
+import { api, loadedItems, LIST_PAGE } from "../lib/api";
+import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import type { RemediationOrder, RemediationPreview, Whoami } from "../lib/types";
 import { ErrorBox, Time, Empty } from "../components/ui";
 import { Actions, Card, Columns, Field, FieldGrid, PageHeader } from "../components/layout";
@@ -25,7 +26,23 @@ type Check = {
   hosts?: HostWithFinding[];
 };
 
-type View = { hosts: number; checks: Check[]; generated_at: string };
+/** The fleet answer: the coverage of the fleet, the checks counted over
+ *  every host the sweep reached, and a sample of the failing hosts under
+ *  each. The checks are judged in the panel from the inventory, so a
+ *  fleet big enough can run the sweep out of its time budget; the answer
+ *  then says so rather than passing a part of the fleet off as all of
+ *  it. */
+type View = Coverage & { hosts: number; checks: Check[]; generated_at: string };
+
+/** One page of the hosts failing one check, read with a cursor. */
+type CheckHostsPage = {
+  check_id: string;
+  items: HostWithFinding[];
+  count: number;
+  next_cursor?: string;
+  partial: boolean;
+  partial_reason?: string;
+};
 
 function severityBadge(severity: string, count: number) {
   if (count === 0) return <span className="badge ok">0</span>;
@@ -153,6 +170,7 @@ export function FleetSecurity() {
         description={t("Versioned checks over the facts hosts already report. One bad setting on a hundred hosts is one problem, not a hundred — and the fix is one campaign: every host gets its own plan of module jobs, one approval covers the whole set.")}
         actions={<ExportButton path="/api/v1/security" />}
       />
+      <FleetCoverage coverage={data} />
 
       <div className="widgets">
         {/* The fleet-wide sums, one segment per verdict: a finding on a
@@ -244,16 +262,9 @@ export function FleetSecurity() {
                       )}
                     </td>
                   </tr>
-                  {expanded === check.check_id &&
-                    (check.hosts ?? []).map((host) => (
-                      <tr key={`${check.check_id}-${host.host_id}`} className="detail-row">
-                        <td colSpan={remediates ? 3 : 2}>
-                          <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
-                        </td>
-                        <td colSpan={4} className="mono">{host.observed}</td>
-                        <td>{host.action ? <code>{host.action}</code> : <span className="source">—</span>}</td>
-                      </tr>
-                    ))}
+                  {expanded === check.check_id && (
+                    <CheckHosts check={check} columns={remediates ? 3 : 2} />
+                  )}
                 </Fragment>
               ))}
             </tbody>
@@ -286,6 +297,55 @@ export function FleetSecurity() {
           <FleetRemediation checks={data.checks} selected={selected} />
         )}
       </div>
+    </>
+  );
+}
+
+/**
+ * The hosts failing one check.
+ *
+ * The fleet answer carries a sample under each check, because a screen
+ * that printed every host of every check would be an inventory listing.
+ * The whole list is read here, a page at a time, with the cursor the
+ * server hands back: on a fleet of thousands the hosts failing one check
+ * are themselves a list, and a sample that quietly stops at fifty is the
+ * same plausible half-truth this screen exists to avoid.
+ */
+function CheckHosts({ check, columns }: { check: Check; columns: number }) {
+  const t = useT();
+  const list = useInfiniteQuery({
+    queryKey: ["security", "fleet", "check", check.check_id],
+    queryFn: ({ pageParam }) => api.get<CheckHostsPage>(
+      `/api/v1/security?check=${encodeURIComponent(check.check_id)}&limit=${LIST_PAGE}`
+      + (pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : "")),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+  });
+  // Until the first page arrives the sample the fleet answer carried is
+  // shown: it is the same rows, and an empty expander would read as "no
+  // host fails this".
+  const loaded = loadedItems<HostWithFinding>(list.data);
+  const hosts = list.data ? loaded : (check.hosts ?? []);
+  return (
+    <>
+      {hosts.map((host) => (
+        <tr key={`${check.check_id}-${host.host_id}`} className="detail-row">
+          <td colSpan={columns}>
+            <Link to={`/hosts/${host.host_id}/security`}>{host.hostname}</Link>
+          </td>
+          <td colSpan={4} className="mono">{host.observed}</td>
+          <td>{host.action ? <code>{host.action}</code> : <span className="source">—</span>}</td>
+        </tr>
+      ))}
+      {list.hasNextPage && (
+        <tr className="detail-row">
+          <td colSpan={columns + 5}>
+            <button className="secondary" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage}>
+              {t("Load more ({n} left)", { n: Math.max(0, check.failed - hosts.length) })}
+            </button>
+          </td>
+        </tr>
+      )}
     </>
   );
 }

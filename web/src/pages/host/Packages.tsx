@@ -13,6 +13,7 @@ import {
   ModulePage, RequestOperation, Section, Summary, Table, Unknown, Widgets, countWhere, useHost, useModule,
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
+import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
 type Repository = {
@@ -104,6 +105,84 @@ export type PlanChange = {
   architecture?: string;
   action?: string;
 };
+
+/**
+ * The plan an operator approved, as the panel carries it from the plan
+ * job to the change: the digest the host recomputes under its lock, the
+ * header it rebuilds the envelope from, and the elements that were
+ * approved, so a refusal can name the one that moved.
+ */
+export type ApprovedPlan = {
+  plan_hash: string;
+  planner_version?: string;
+  schema_version?: number;
+  inventory_revision?: string;
+  resource_revision?: string;
+  expires_at?: string;
+  changes?: PlanChange[];
+};
+
+/**
+ * The plan of a change out of the result of the plan job, or nothing.
+ *
+ * Nothing is the honest answer for a result that is not a package plan or
+ * carries no digest: there is then no plan to bind a change to, and a
+ * change with nothing to bind is exactly what this screen no longer
+ * offers.
+ */
+export function planBinding(detail: Record<string, unknown> | undefined): ApprovedPlan | null {
+  if (!detail || detail.kind !== "package_plan") return null;
+  const hash = typeof detail.plan_hash === "string" ? detail.plan_hash : "";
+  if (!hash) return null;
+  const text = (key: string) => (typeof detail[key] === "string" ? (detail[key] as string) : undefined);
+  return {
+    plan_hash: hash,
+    planner_version: text("planner_version"),
+    schema_version: typeof detail.schema_version === "number" ? detail.schema_version : undefined,
+    inventory_revision: text("inventory_revision"),
+    resource_revision: text("resource_revision"),
+    expires_at: text("expires_at"),
+    changes: Array.isArray(detail.changes) ? (detail.changes as PlanChange[]) : undefined,
+  };
+}
+
+/**
+ * The payload of a change bound to its plan: the digest always, and the
+ * envelope's header with the approved elements when the host's planner
+ * built one. An agent from before the envelope sends no planner version,
+ * and its change binds by the digest alone, as it always did.
+ *
+ * A change without a plan has no payload here at all: the screen plans
+ * first and applies second, and there is nothing to send in between.
+ */
+export function changePayload(action: string, packages: string[],
+  plan: ApprovedPlan | null): Record<string, unknown> | null {
+  if (!plan?.plan_hash || packages.length === 0) return null;
+  const bound: Record<string, unknown> = { packages, plan_hash: plan.plan_hash };
+  if (plan.planner_version) {
+    bound.plan = {
+      schema_version: plan.schema_version,
+      planner_version: plan.planner_version,
+      inventory_revision: plan.inventory_revision,
+      resource_revision: plan.resource_revision,
+      expires_at: plan.expires_at,
+      changes: plan.changes,
+    };
+  }
+  switch (action) {
+    case "packages.install":
+      return { package_change: bound };
+    case "packages.upgrade":
+      return { package_upgrade: bound };
+    default:
+      return null;
+  }
+}
+
+/** The mode of the plan job that prepares a change of this kind. */
+export function planMode(action: string): string {
+  return action === "packages.install" ? "install" : "upgrade";
+}
 
 /**
  * The header of the last upgrade plan: who made it and until when it
@@ -222,6 +301,12 @@ export function heldCount(packages: PackagesState | undefined): number | undefin
  * different decisions about the same host. A removal goes through a plan,
  * because one package can drag dozens of dependants along.
  */
+/** The changes this page offers; when every one is refused, the page says so once. */
+const PACKAGE_CHANGES = [
+  "packages.install", "packages.remove", "packages.upgrade", "packages.hold.set", "packages.repair",
+  "packages.repository.set", "agent.upgrade",
+];
+
 export function Packages() {
   const t = useT();
   const host = useHost();
@@ -329,6 +414,7 @@ export function Packages() {
         description={t("Installed software, its sources and the updates waiting for this host. A removal is planned before it runs.")}
       />
       <ModuleFreshness fragment={module.data} />
+      <ReadOnlyModuleNotice host={host.id} actions={PACKAGE_CHANGES} />
       <Message text={message} />
 
       <Widgets>
@@ -371,9 +457,11 @@ export function Packages() {
                         verdict is. Critical: it finishes a transaction
                         somebody interrupted, with a reason and an approval. */}
                     {" "}
-                    <button type="button" className="link" onClick={() => setRepairing(true)} disabled={repairing}>
-                      {t("Repair the package database…")}
-                    </button>
+                    <ActionGuard action="packages.repair" host={host.id}>
+                      <button type="button" className="link" onClick={() => setRepairing(true)} disabled={repairing}>
+                        {t("Repair the package database…")}
+                      </button>
+                    </ActionGuard>
                   </>
                 )
                 : <span className="badge ok">{t("healthy")}</span>}
@@ -397,6 +485,7 @@ export function Packages() {
       {/* The three things an operator does here are short forms; in one
           row they make a workbench, in a column a strip. The removal plan,
           when there is one, follows the row; the sources come last. */}
+      <ActionGuard action="packages.plan" host={host.id}>
       <RequestOperation
         host={host}
         description={pacman
@@ -407,6 +496,7 @@ export function Packages() {
         label={t("Plan updates")}
         span={4}
       />
+      </ActionGuard>
 
       <Section title={t("Install, remove or hold")} span={4}>
         <Form>
@@ -416,16 +506,24 @@ export function Packages() {
                      placeholder="nginx htop" />
             </Field>
           </Fields>
+          {/* An installation is planned on the host first: the operator
+              reads what would really be pulled in, and the change carries
+              the digest of that plan. There is no install button before
+              the plan - a change with nothing to bind it to is the false
+              success this screen no longer offers. */}
+          <ActionGuard action="packages.install" host={host.id}>
+            <PlanThenApply
+              host={host}
+              action="packages.install"
+              packages={list()}
+              planLabel={t("Plan install")}
+              applyLabel={t("Install the planned packages")}
+              busy={request.isPending || planRemoval.isPending}
+              onMessage={setMessage}
+            />
+          </ActionGuard>
           <FormActions>
-            <button
-              disabled={request.isPending || list().length === 0}
-              onClick={() => request.mutate({
-                action: "packages.install",
-                payload: { package_change: { packages: list() } },
-              })}
-            >
-              {t("Install")}
-            </button>
+            <ActionGuard action="packages.hold.set" host={host.id}>
             <button
               className="secondary"
               disabled={request.isPending || list().length === 0}
@@ -446,9 +544,12 @@ export function Packages() {
             >
               {t("Unhold")}
             </button>
+            </ActionGuard>
             {/* A removal does not go straight through: one package can drag
                 dozens of dependants along, and the operator is to see them
-                first. */}
+                first. The plan is a read, but it prepares a removal, so it
+                stands behind the right to remove. */}
+            <ActionGuard action="packages.remove" host={host.id}>
             <button
               className="hm-danger"
               disabled={planRemoval.isPending || list().length === 0}
@@ -456,6 +557,7 @@ export function Packages() {
             >
               {planRemoval.isPending ? t("Planning…") : t("Plan removal")}
             </button>
+            </ActionGuard>
           </FormActions>
         </Form>
       </Section>
@@ -497,6 +599,7 @@ export function Packages() {
             </Field>
           </Fields>
           <FormActions>
+            <ActionGuard action="agent.upgrade" host={host.id}>
             <button
               disabled={!agentVersion || agentVersion === host.agent_version}
               onClick={() =>
@@ -508,6 +611,7 @@ export function Packages() {
             >
               {t("Replace agent")}
             </button>
+            </ActionGuard>
           </FormActions>
         </Form>
       </Section>
@@ -543,9 +647,11 @@ export function Packages() {
                   {t("{n} package(s) would be removed. The host recomputes this set before removing; a difference cancels the operation.", { n: plan.plan.removals.length })}
                 </span>
                 {(!plan.plan.protected || plan.plan.protected.length === 0) && (
-                  <button className="danger" onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}>
-                    {t("Remove these packages")}
-                  </button>
+                  <ActionGuard action="packages.remove" host={host.id}>
+                    <button className="danger" onClick={() => setToRemove({ requested: plan.requested, removals: plan.plan.removals ?? [] })}>
+                      {t("Remove these packages")}
+                    </button>
+                  </ActionGuard>
                 )}
               </Foot>
             </>
@@ -564,9 +670,11 @@ export function Packages() {
           payload: { package_change: { packages: [name], hold } },
         })}
         onRemove={(name) => { setPlan(null); planRemoval.mutate([name]); }}
+        onMessage={setMessage}
       />
 
       <Repositories
+        hostID={host.id}
         view={packages?.repositories}
         manager={packages?.manager}
         onIntent={setSourceIntent}
@@ -634,6 +742,123 @@ export function Packages() {
   );
 }
 
+/**
+ * Plan, then apply - the two halves of every package change on this
+ * screen.
+ *
+ * A change is never ordered from what the panel believes about the host.
+ * The host computes the plan under its own lock, the operator reads what
+ * would really move, and the change carries the digest of that plan back;
+ * the host computes it once more right before the transaction and refuses
+ * one that no longer holds (stale_plan), so a repository that moved
+ * between the reading and the click changes nothing. Until a plan is
+ * there, the apply button is not there either - there is nothing to bind
+ * a change to.
+ *
+ * A plan belongs to the set it was computed for: changing the packages
+ * drops it, and the operator plans again rather than applying a plan made
+ * for something else.
+ */
+function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, onMessage }: {
+  host: Host;
+  action: string;
+  packages: string[];
+  planLabel: string;
+  applyLabel: string;
+  /** Whether another order of this screen is on its way. */
+  busy?: boolean;
+  onMessage: (text: string) => void;
+}) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [planned, setPlanned] = useState<{ for: string; plan: ApprovedPlan } | null>(null);
+  const key = packages.join(" ");
+  const plan = planned && planned.for === key ? planned.plan : null;
+
+  const planning = useMutation({
+    mutationFn: async () => {
+      const job = await api.post<Job>(`/api/v1/hosts/${host.id}/operations`, {
+        action: "packages.plan",
+        payload: { package_plan: { mode: planMode(action), only_packages: packages, refresh_metadata: true } },
+      });
+      const last = await awaitJob<Record<string, unknown>>(api, job.id);
+      if (!last) throw new Error(t("The plan did not arrive in time."));
+      if (last.status !== "succeeded") {
+        throw new Error(last.message || t("The host refused to plan the change."));
+      }
+      const bound = planBinding(last.detail);
+      if (!bound) throw new Error(t("The host computed no plan for this change; nothing will be applied."));
+      return { for: key, plan: bound };
+    },
+    onSuccess: (result) => { setPlanned(result); onMessage(""); },
+    onError: (error) => {
+      setPlanned(null);
+      onMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  const apply = useMutation({
+    mutationFn: (body: Record<string, unknown>) =>
+      api.post<Job>(`/api/v1/hosts/${host.id}/operations`, body),
+    onSuccess: (job) => {
+      onMessage(job.requires_approval
+        ? t("Job {id} is waiting for approval.", { id: job.id.slice(0, 8) })
+        : t("Job {id} has been queued.", { id: job.id.slice(0, 8) }));
+      setPlanned(null);
+      queryClient.invalidateQueries({ queryKey: ["jobs", host.id] });
+    },
+    onError: (error) => onMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const payload = changePayload(action, packages, plan);
+  return (
+    <>
+      <FormActions>
+        <button
+          className="secondary"
+          disabled={packages.length === 0 || planning.isPending || apply.isPending || busy}
+          onClick={() => planning.mutate()}
+        >
+          {planning.isPending ? t("Planning…") : planLabel}
+        </button>
+        {payload && (
+          <button disabled={apply.isPending || busy} onClick={() => apply.mutate(payload)}>
+            {apply.isPending ? t("Requesting…") : applyLabel}
+          </button>
+        )}
+      </FormActions>
+      {plan && (
+        <>
+          {plan.changes && plan.changes.length > 0 ? (
+            <Table>
+              <thead><tr><th>{t("Package")}</th><th>{t("From")}</th><th>{t("To")}</th></tr></thead>
+              <tbody>
+                {plan.changes.map((change) => (
+                  <tr key={`${change.name}/${change.architecture ?? ""}`}>
+                    <td className="hm-mono">{change.name}</td>
+                    <td>{change.current_version || "—"}</td>
+                    <td className="hm-mono">{change.candidate_version || "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          ) : (
+            <Empty>{t("The host would change nothing; there is nothing to apply.")}</Empty>
+          )}
+          <Foot>
+            <span>
+              {t("The plan {hash} binds this operation; the host computes it again before the transaction and refuses it if anything moved since.", {
+                hash: plan.plan_hash.slice(0, 12),
+              })}
+              {plan.expires_at && <> · {t("valid until")} <Time value={plan.expires_at} /></>}
+            </span>
+          </Foot>
+        </>
+      )}
+    </>
+  );
+}
+
 type SourceIntent = { label: string; description: string; payload: Record<string, unknown> };
 
 /** The height of a package row: one line of text, so the window arithmetic holds. */
@@ -652,7 +877,7 @@ const PACKAGE_ROW = 34;
  * the browser draws a screenful.
  */
 function InstalledPackages({
-  host, packages, busy, reading, onRead, onHold, onRemove,
+  host, packages, busy, reading, onRead, onHold, onRemove, onMessage,
 }: {
   host: Host;
   packages: PackagesState | undefined;
@@ -662,6 +887,8 @@ function InstalledPackages({
   onRead: () => void;
   onHold: (name: string, hold: boolean) => void;
   onRemove: (name: string) => void;
+  /** Where the plan and the change of one package say how they went. */
+  onMessage: (text: string) => void;
 }) {
   const t = useT();
   const [query, setQuery] = useState("");
@@ -749,9 +976,11 @@ function InstalledPackages({
             </Empty>
             <Foot>
               <span>{t("The read goes through a job and needs no root on the host.")}</span>
-              <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
-                {reading ? t("Requesting…") : t("Read the package list")}
-              </button>
+              <ActionGuard action="packages.list" host={host.id} explain>
+                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                  {reading ? t("Requesting…") : t("Read the package list")}
+                </button>
+              </ActionGuard>
             </Foot>
           </>
         ) : (
@@ -759,9 +988,11 @@ function InstalledPackages({
             {stale && (
               <p className="warning">
                 <span>{t("The host's own list has changed since the panel read it; the rows describe an earlier moment.")}</span>
-                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
-                  {reading ? t("Requesting…") : t("Read it again")}
-                </button>
+                <ActionGuard action="packages.list" host={host.id}>
+                  <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                    {reading ? t("Requesting…") : t("Read it again")}
+                  </button>
+                </ActionGuard>
               </p>
             )}
             {packages && packages.holds_known === false && (
@@ -840,9 +1071,11 @@ function InstalledPackages({
                     </>
                   : t("no upgrade plan yet; the upgrade column fills in after one")}
               </span>
-              <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
-                {reading ? t("Requesting…") : t("Read again")}
-              </button>
+              <ActionGuard action="packages.list" host={host.id}>
+                <button className="secondary" onClick={onRead} disabled={reading || host.connection_state !== "online"}>
+                  {reading ? t("Requesting…") : t("Read again")}
+                </button>
+              </ActionGuard>
             </Foot>
             {/* The actions of the selected package stand under the table,
                 with the target named once more: a hold and a release go
@@ -855,12 +1088,16 @@ function InstalledPackages({
                   {current.candidate && <> → <span className="hm-mono">{current.candidate}</span></>}
                   {current.held === true && <> · {t("held")}</>}
                 </span>
-                <button className="secondary" disabled={busy} onClick={() => onHold(current.name, current.held !== true)}>
-                  {current.held === true ? t("Unhold") : t("Hold")}
-                </button>
-                <button className="hm-danger" disabled={busy} onClick={() => onRemove(current.name)}>
-                  {t("Plan removal")}
-                </button>
+                <ActionGuard action="packages.hold.set" host={host.id}>
+                  <button className="secondary" disabled={busy} onClick={() => onHold(current.name, current.held !== true)}>
+                    {current.held === true ? t("Unhold") : t("Hold")}
+                  </button>
+                </ActionGuard>
+                <ActionGuard action="packages.remove" host={host.id}>
+                  <button className="hm-danger" disabled={busy} onClick={() => onRemove(current.name)}>
+                    {t("Plan removal")}
+                  </button>
+                </ActionGuard>
                 <button className="secondary" onClick={() => setSelected("")}>{t("Deselect")}</button>
               </Foot>
             )}
@@ -874,17 +1111,30 @@ function InstalledPackages({
           </p>
         </Section>
       ) : (
-        <RequestOperation
-          host={host}
+        <ActionGuard action="packages.upgrade" host={host.id}>
+        {/* The upgrade of one package is planned on the host and applied
+            with the digest of that plan: the column above shows what the
+            last plan of the whole host said, and that is not a consent to
+            move this package now. */}
+        <Section
+          title={t("Upgrade {name}", { name: current.name })}
           description={current.candidate
-            ? t("Upgrades {name} alone, from {from} to {to}, through a package transaction; the rest of the host stays as it is.", {
+            ? t("Upgrades {name} alone, from {from} to {to}, through a package transaction; the rest of the host stays as it is. The host plans the move first and the change carries that plan.", {
                 name: current.name, from: packageVersion(current), to: current.candidate,
               })
-            : t("Upgrades {name} alone through a package transaction; the last plan named no newer version, so the host may find nothing to do.", { name: current.name })}
-          action="packages.upgrade"
-          payload={{ package_upgrade: { packages: [current.name] } }}
-          label={t("Upgrade {name}", { name: current.name })}
-        />
+            : t("Upgrades {name} alone through a package transaction; the host plans the move first, and a plan that names no newer version leaves nothing to apply.", { name: current.name })}
+        >
+          <PlanThenApply
+            host={host}
+            action="packages.upgrade"
+            packages={[current.name]}
+            planLabel={t("Plan the upgrade")}
+            applyLabel={t("Upgrade {name}", { name: current.name })}
+            busy={busy}
+            onMessage={onMessage}
+          />
+        </Section>
+        </ActionGuard>
       ))}
     </>
   );
@@ -1049,8 +1299,9 @@ function AppliedCount({ jobId }: { jobId: string }) {
  * given as a value.
  */
 function Repositories({
-  view, manager, onIntent,
+  hostID, view, manager, onIntent,
 }: {
+  hostID: string;
   view?: RepositoryView;
   manager?: string;
   onIntent: (intent: SourceIntent) => void;
@@ -1066,9 +1317,11 @@ function Repositories({
         count={sources.length}
         description={t("Where this host takes software from. Adding a source installs nothing today; it decides whose packages the host will accept tomorrow, with their scripts running as root.")}
         tools={
-          <button className="secondary" onClick={() => setForm((open) => !open)}>
-            {form ? t("Cancel") : t("Add or change a source")}
-          </button>
+          <ActionGuard action="packages.repository.set" host={hostID}>
+            <button className="secondary" onClick={() => setForm((open) => !open)}>
+              {form ? t("Cancel") : t("Add or change a source")}
+            </button>
+          </ActionGuard>
         }
         flush
       >
@@ -1138,6 +1391,7 @@ function Repositories({
                   </td>
                   <td>
                     <div className="operations">
+                      <ActionGuard action="packages.repository.set" host={hostID}>
                       <button
                         className="secondary"
                         disabled={!source.managed}
@@ -1172,6 +1426,7 @@ function Repositories({
                       >
                         {t("Remove")}
                       </button>
+                      </ActionGuard>
                     </div>
                   </td>
                 </tr>
@@ -1180,7 +1435,11 @@ function Repositories({
           </Table>
         )}
       </Section>
-      {form && <SourceForm manager={manager} onIntent={onIntent} />}
+      {form && (
+        <ActionGuard action="packages.repository.set" host={hostID}>
+          <SourceForm manager={manager} onIntent={onIntent} />
+        </ActionGuard>
+      )}
     </>
   );
 }

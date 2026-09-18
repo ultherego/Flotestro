@@ -336,7 +336,7 @@ func TestAnExpiredPlanReferenceIsRefusedByTheAPI(t *testing.T) {
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/operations", map[string]any{
 		"action": "packages.upgrade", "reason": lifecycleReason,
 		"payload": map[string]any{"package_upgrade": map[string]any{
-			"packages": []string{"bash"},
+			"packages":  []string{"bash"},
 			"plan_hash": "0000000000000000000000000000000000000000000000000000000000000000",
 			"plan":      reference,
 		}},
