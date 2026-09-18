@@ -1884,6 +1884,16 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 		return fmt.Errorf("an order describes one object; this one describes %d", described)
 	}
 
+	// A description already says what the object is and what it is called,
+	// so an order that also writes the kind or the name in by hand carries
+	// the same fact twice - and the host, which rebuilds the order from the
+	// description, would rebuild something else. The redundant field is
+	// refused rather than quietly dropped.
+	if described > 0 && (payload.Kind != "" || payload.Name != "") {
+		return fmt.Errorf("the description already says what this object is and what it is called; " +
+			"the kind and the name travel by themselves only in a removal")
+	}
+
 	switch action {
 	case ActionDockerNetworkRemove, ActionDockerVolumeRemove:
 		// A removal names an object and describes none: there is nothing to

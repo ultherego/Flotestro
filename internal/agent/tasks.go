@@ -1935,10 +1935,18 @@ func dockerAction(action *agentv1.DockerAction) (opspec.ActionType, opspec.Paylo
 // unchanged is caught here and not carried out.
 func dockerDeclaration(action *agentv1.DockerEnsureAction) (opspec.ActionType, opspec.Payload, error) {
 	declaration := &opspec.DockerEnsurePayload{
-		Kind:       action.GetKind(),
-		Name:       action.GetName(),
 		PlanDigest: action.GetPlanDigest(),
 		Force:      action.GetForce(),
+	}
+	// The kind and the name are derived from the description where there is
+	// one, and only an order without a description carries them itself. The
+	// envelope always states them, because the host has to know what to act
+	// on before it reads the description - but writing them into the
+	// rebuilt payload as well would make it a different payload from the
+	// one the panel hashed, and the task would be refused as tampered.
+	if len(action.GetSpec()) == 0 {
+		declaration.Kind = action.GetKind()
+		declaration.Name = action.GetName()
 	}
 	if references := action.GetEnvSecrets(); len(references) > 0 {
 		declaration.EnvSecrets = make(map[string]opspec.SecretRef, len(references))
