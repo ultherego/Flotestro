@@ -1,6 +1,6 @@
 module github.com/ultherego/flotestro
 
-go 1.25.0
+go 1.25.13
 
 require (
 	connectrpc.com/connect v1.20.0
