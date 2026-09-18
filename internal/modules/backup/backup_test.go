@@ -199,3 +199,30 @@ func TestRunbookRefusesScriptWritableOutsideRoot(t *testing.T) {
 		t.Fatal("a non-existent runbook was accepted")
 	}
 }
+
+// A repository nobody has created yet is a state, not a failure to read
+// one: it holds no copies, so the first backup into it can be confirmed by
+// the copy that appears afterwards. Every other refusal leaves the state
+// unknown, and the panel must not read "unknown" as "empty".
+func TestARepositoryThatIsNotThereYetIsNamedAsSuch(t *testing.T) {
+	for _, output := range []string{
+		"Fatal: unable to open config file: stat /srv/backups/config: no such file or directory",
+		"Fatal: repository does not exist: unable to open config file",
+		"Repository /srv/backups does not exist.",
+		"Repository not found",
+	} {
+		if !repositoryAbsent(output) {
+			t.Errorf("the tool said the repository is not there and it was not recognised: %q", output)
+		}
+	}
+	for _, output := range []string{
+		"Fatal: wrong password or no key found",
+		"Fatal: unable to create lock in backend: repository is already locked",
+		"ssh: connect to host backup.example.test port 22: Connection refused",
+		"",
+	} {
+		if repositoryAbsent(output) {
+			t.Errorf("a refusal that leaves the state unknown was read as an empty repository: %q", output)
+		}
+	}
+}

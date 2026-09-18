@@ -222,6 +222,11 @@ func backupErrorCode(err error) string {
 	if errors.Is(err, backup.ErrInterrupted) {
 		return ErrorTimeout
 	}
+	// A repository that does not exist yet is named as such, so the caller
+	// can tell "no copies here" from "the copies could not be listed".
+	if errors.Is(err, backup.ErrRepositoryAbsent) {
+		return ErrorRepositoryAbsent
+	}
 	return ErrorExecFailed
 }
 

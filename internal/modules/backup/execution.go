@@ -22,6 +22,40 @@ import (
 // started, and the restore directory - half the files.
 var ErrInterrupted = errors.New("the operation was interrupted before completion")
 
+// ErrRepositoryAbsent means the repository is not there yet: the tool
+// found nothing to open at the address it was given.
+//
+// This is a state, not a failure to read one. A repository that does not
+// exist holds no copies, which is a different answer from "the copies
+// could not be listed" - and the difference decides whether the first
+// backup into a fresh repository can be confirmed afterwards. Everything
+// else the tool says about an address it could not open - a wrong
+// password, a refused connection, a broken lock - stays unknown.
+var ErrRepositoryAbsent = errors.New("the repository does not exist yet")
+
+// repositoryAbsent reads the tool's own words for "there is nothing here".
+// Neither restic nor borg gives this a code of its own, so the sentence is
+// what there is; the phrases below are the ones each tool prints, and a
+// sentence that is not one of them stays an unknown state.
+func repositoryAbsent(output string) bool {
+	text := strings.ToLower(output)
+	for _, phrase := range []string{
+		// restic
+		"unable to open config file",
+		"repository does not exist",
+		"config file does not exist",
+		// borg
+		"does not exist",
+		"repository not found",
+		"is not a valid repository",
+	} {
+		if strings.Contains(text, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // toolEnvironment assembles the variables for the tool process.
 //
 // The credentials go exactly this way, not in the arguments: the command

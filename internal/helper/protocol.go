@@ -42,6 +42,11 @@ const (
 	// refusal is better than pretending the operation ran.
 	ErrorUnsupported = "unsupported"
 	ErrorMalformed   = "malformed_request"
+	// ErrorRepositoryAbsent means a backup repository that is not there
+	// yet. A read of it is still a refusal - there is nothing to report -
+	// but it is a different refusal from one that leaves the state unknown,
+	// because a repository nobody has created holds no copies.
+	ErrorRepositoryAbsent = "repository_absent"
 	// ErrorPreconditionFailed means an order placed against a host state other
 	// than the one the host has now. This is neither a flaw of the order nor a
 	// failure of the execution: it is a change that happened in between.

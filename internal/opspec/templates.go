@@ -21,6 +21,17 @@ import (
 // template that carries certificate material cannot be valid as it stands -
 // TemplateNeedsMaterial names those, and the server refuses them until the
 // placeholder is replaced with real PEM.
+// placeholderDevice and placeholderVolume stand where a disk and a
+// logical volume go in a template. They name nothing: a template is the
+// shape of an order, and a shape carrying /dev/sdb1 is an order somebody
+// can send by mistake at a disk that really is called that on half the
+// fleet. The operator replaces them with what the host's storage page
+// shows, which is the only place the true name of a disk is.
+const (
+	placeholderDevice = "/dev/disk/by-id/name-the-disk"
+	placeholderVolume = "/dev/name-the-group/name-the-volume"
+)
+
 // placeholderInterface stands where an interface name goes in a template.
 // It is deliberately not a name any host has: a link is called whatever
 // its host calls it - enp2s0, ens192, eno1np0 - so an example name like
@@ -175,11 +186,11 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 	case ActionMountRemove:
 		return Payload{Storage: &StoragePayload{Target: "/mnt/example"}}, true
 	case ActionFilesystemCheck:
-		return Payload{Storage: &StoragePayload{Device: "/dev/sdb1"}}, true
+		return Payload{Storage: &StoragePayload{Device: placeholderDevice}}, true
 	case ActionFilesystemResize:
-		return Payload{Storage: &StoragePayload{Device: "/dev/sdb1"}}, true
+		return Payload{Storage: &StoragePayload{Device: placeholderDevice}}, true
 	case ActionLVMExtend:
-		return Payload{Storage: &StoragePayload{Device: "/dev/vg0/data", Size: "+1G"}}, true
+		return Payload{Storage: &StoragePayload{Device: placeholderVolume, Size: "+1G"}}, true
 
 	case ActionNetworkProfileApply:
 		return Payload{Network: &NetworkPayload{Interface: placeholderInterface, Method: "manual",

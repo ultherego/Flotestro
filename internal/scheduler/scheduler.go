@@ -423,6 +423,18 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 			}
 			return
 		}
+		// A secret that was retired or deleted never comes back, so a task
+		// that needs it is settled now with the reason instead of asking
+		// the store again every two seconds until its deadline runs out a
+		// day later. The operator sees which secret, and re-orders the task
+		// against a secret that exists.
+		if errors.Is(err, secrets.ErrRetired) || errors.Is(err, secrets.ErrNotFound) {
+			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
+				ErrorSecretGone, err.Error()); err != nil {
+				s.log.Error("the task without its secret was not settled", "job_id", item.Job.ID, "err", err)
+			}
+			return
+		}
 		if permanentFailure(err) {
 			// The same answer would come on every pass until the deadline;
 			// a task that cannot be assembled is settled now, with the
@@ -1548,6 +1560,13 @@ func (e unknownActionError) Error() string { return "unknown operation type: " +
 // Permanent: a payload that cannot be turned into an envelope does not
 // become one by waiting.
 func (e unknownActionError) Permanent() bool { return true }
+
+// ErrorSecretGone is the code a task ends with when the secret it needs
+// does not exist any more: retired by somebody, or deleted. Neither comes
+// back, so the task is settled rather than retried. It is not
+// secret_unavailable, which is the store being unreachable - that is worth
+// asking again about.
+const ErrorSecretGone = "secret_gone"
 
 // permanentFailure says whether an envelope error is one that a retry
 // cannot mend: an error that says so itself, or a payload that does not

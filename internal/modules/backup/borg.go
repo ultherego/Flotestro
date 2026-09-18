@@ -67,6 +67,11 @@ func (b *Borg) Plan(ctx context.Context, order Order) (State, error) {
 		b.environment(order), orderSecrets(order), nil)
 	if !result.Ran || result.ExitCode != 0 || result.Err != nil {
 		state.UnavailableReason = result.Reason()
+		// As with restic: a repository that is not there yet holds no
+		// archives, which is a state. Anything else stays unknown.
+		if result.Ran && repositoryAbsent(result.Stderr+"\n"+result.Stdout) {
+			return state, fmt.Errorf("borg list: %s: %w", result.Reason(), ErrRepositoryAbsent)
+		}
 		return state, fmt.Errorf("borg list: %s", result.Reason())
 	}
 	var list struct {

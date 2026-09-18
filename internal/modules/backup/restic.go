@@ -78,6 +78,12 @@ func (r *Restic) Plan(ctx context.Context, order Order) (State, error) {
 		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
 	if !result.Ran || result.ExitCode != 0 || result.Err != nil {
 		state.UnavailableReason = result.Reason()
+		// A repository nobody has created yet holds no copies, and that is
+		// an answer: the first backup into it can then be confirmed by the
+		// copy that appears. Any other refusal leaves the state unknown.
+		if result.Ran && repositoryAbsent(result.Stderr+"\n"+result.Stdout) {
+			return state, fmt.Errorf("restic snapshots: %s: %w", result.Reason(), ErrRepositoryAbsent)
+		}
 		return state, fmt.Errorf("restic snapshots: %s", result.Reason())
 	}
 

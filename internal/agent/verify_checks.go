@@ -2568,7 +2568,11 @@ func verifyBackupRun(ctx context.Context, readers *hostReaders, in verifyInput) 
 		return unreadable(expected, noReader("the backup repository"))
 	}
 	if in.before == nil || in.before.snapshots == nil {
-		return unreadable(expected, "the snapshots before the run were not read")
+		reason := "the snapshots before the run were not read"
+		if in.before != nil && in.before.snapshotsReason != "" {
+			reason += ": " + in.before.snapshotsReason
+		}
+		return unreadable(expected, reason)
 	}
 	state, err := readers.backupState(ctx, in.task, payload)
 	if err != nil {

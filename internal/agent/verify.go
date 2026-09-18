@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
+	"github.com/ultherego/flotestro/internal/helper"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/dns"
 	"github.com/ultherego/flotestro/internal/modules/docker"
@@ -265,6 +267,10 @@ func (e *TaskExecutor) readBackupRepository(ctx context.Context, task *agentv1.T
 		return backupRepositoryState{}, err
 	}
 	if !response.GetAccepted() {
+		if response.GetErrorCode() == helper.ErrorRepositoryAbsent {
+			return backupRepositoryState{}, fmt.Errorf("%s: %s: %w",
+				response.GetErrorCode(), response.GetMessage(), errRepositoryAbsent)
+		}
 		return backupRepositoryState{}, fmt.Errorf("%s: %s", response.GetErrorCode(), response.GetMessage())
 	}
 	var state struct {
@@ -343,9 +349,18 @@ type baseline struct {
 	// by path before an extension.
 	volumeSizes map[string]uint64
 	// snapshots are the identifiers the backup repository listed before a
-	// run.
-	snapshots map[string]bool
+	// run. An empty map is a repository with no copies in it - including
+	// one that did not exist yet - and nil is a repository that could not
+	// be read, which is a different answer; snapshotsReason says why.
+	snapshots       map[string]bool
+	snapshotsReason string
 }
+
+// errRepositoryAbsent means the host answered that the repository is not
+// there yet. It travels as an error because the read did refuse, and it is
+// typed because a repository nobody has created holds no copies, which a
+// verifier can work with.
+var errRepositoryAbsent = errors.New("the repository does not exist yet")
 
 type certificateBefore struct {
 	fingerprint string
@@ -428,11 +443,23 @@ func (e *TaskExecutor) observeBaseline(ctx context.Context, task *agentv1.TaskEn
 		if payload.Backup == nil || readers.backupState == nil {
 			return before
 		}
-		if state, err := readers.backupState(readCtx, task, payload.Backup); err == nil {
+		state, err := readers.backupState(readCtx, task, payload.Backup)
+		switch {
+		case err == nil:
 			before.snapshots = map[string]bool{}
 			for _, id := range state.snapshotIDs {
 				before.snapshots[id] = true
 			}
+		case errors.Is(err, errRepositoryAbsent):
+			// The first copy into a fresh repository: there was nothing
+			// there, so anything the run leaves behind is what it made.
+			// Without this the first backup of every host could be made and
+			// never confirmed.
+			before.snapshots = map[string]bool{}
+		default:
+			// The reason travels, so the verdict says why the host could
+			// not be read instead of only that it could not.
+			before.snapshotsReason = err.Error()
 		}
 	}
 	return before
