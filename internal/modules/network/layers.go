@@ -454,6 +454,10 @@ func ComputeLinkRemoval(snapshot Snapshot, adapter, name string) Plan {
 		return plan
 	}
 	if refusal := removalConflicts(snapshot, current); refusal != nil {
+		// A refused plan carries no desired state: what the panel shows
+		// beside the refusal must be what the host has, and a target state
+		// under a refusal reads as though something were about to happen.
+		plan.DesiredLink = nil
 		return plan.withTypedRefusal(refusal)
 	}
 	plan.Changes = []string{"the " + current.Kind + " " + name + " is removed" + freedMembers(current)}

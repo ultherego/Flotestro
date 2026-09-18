@@ -146,9 +146,24 @@ func TestLocalAccountLifecycle(t *testing.T) {
 		t.Errorf("the account stayed locked after the unlock: %+v", state)
 	}
 
-	// An empty key list is a deliberate revocation of access.
-	revocation, _ := accountOperation(h, host.ID, "localuser.sshkeys.set", map[string]any{
+	// An empty key list takes the last key of an account that has no
+	// password, so it cuts the account off entirely - and the host refuses
+	// it unless the order says that is the intention. The refusal comes
+	// first, by name, because an operator tidying keys must not lock
+	// somebody out by accident.
+	refused, attempts := accountOperation(h, host.ID, "localuser.sshkeys.set", map[string]any{
 		"name": name, "ssh_keys": []string{},
+	})
+	if refused.State == "succeeded" {
+		t.Fatal("the last key of an account with no password was taken without consent")
+	}
+	if len(attempts) == 0 || attempts[len(attempts)-1].ErrorCode != "last_key_lockout" {
+		t.Fatalf("refusal = %s, want last_key_lockout", lastMessage(attempts))
+	}
+
+	// With the consent it is a deliberate revocation of access.
+	revocation, _ := accountOperation(h, host.ID, "localuser.sshkeys.set", map[string]any{
+		"name": name, "ssh_keys": []string{}, "allow_lockout": true,
 	})
 	if revocation.State != "succeeded" {
 		t.Fatalf("revoking the keys ended in state %s", revocation.State)
@@ -171,8 +186,15 @@ func TestSystemAccountsAreProtected(t *testing.T) {
 			if job.State == "succeeded" {
 				t.Fatalf("locking the system account %s succeeded", name)
 			}
-			if len(attempts) > 0 && attempts[len(attempts)-1].ErrorCode != "system_account" {
-				t.Errorf("error code = %q, expected system_account", attempts[len(attempts)-1].ErrorCode)
+			// root has a refusal of its own: it is not merely a service
+			// account, it is the one the panel never changes, and the
+			// operator is to read which of the two rules stopped them.
+			want := "system_account"
+			if name == "root" {
+				want = "protected_account"
+			}
+			if len(attempts) > 0 && attempts[len(attempts)-1].ErrorCode != want {
+				t.Errorf("error code = %q, expected %s", attempts[len(attempts)-1].ErrorCode, want)
 			}
 		})
 	}
@@ -244,8 +266,12 @@ func TestAccountGroupsExpiryAndDeletion(t *testing.T) {
 		}
 	})
 
+	// An account with no key and no password could not be logged into, and
+	// the panel refuses to create one without being told that is the
+	// intention. This test is about groups and expiry, so it says so.
 	created, _ := accountOperation(h, host.ID, "localuser.create", map[string]any{
-		"name": name, "gecos": "Groups and expiry test", "shell": "/bin/bash", "create_home": true,
+		"name": name, "gecos": "Groups and expiry test", "shell": "/bin/bash",
+		"create_home": true, "inactive": true,
 	})
 	if created.State != "succeeded" {
 		t.Fatalf("creating the account ended in state %s", created.State)

@@ -245,11 +245,27 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	if err := showErr; err != nil {
 		switch {
 		case isNotFound(err):
+			// A directory hides what a bind may not read, so "there is no
+			// such permission" and "this account may not see it" arrive as
+			// the same answer. The report says both, because the two have
+			// different remedies and the operator knows which directory
+			// they are looking at.
 			report.record(permission, ProvisionMissing,
-				"the directory does not publish it, and it cannot be created through the API: "+
-					"a permission knows the rights read, search, compare, write, add and delete, "+
-					"and the move is a moddn")
+				"the connector cannot read it: either the directory does not publish it, "+
+					"or this service account may not read permissions. It cannot be created "+
+					"through the API either way: a permission knows the rights read, search, "+
+					"compare, write, add and delete, and the move is a moddn")
 			report.action(manualACI(c.config.Principal, c.config.Realm))
+			// The step goes on rather than stopping here. Reading a
+			// permission is an administrator's right, and a connector that
+			// may not read one may still have been bound to it by an
+			// administrator who ran the commands below: the closing
+			// verification asks the directory whether the move is allowed,
+			// which is the question that decides, and it must be asked
+			// even when the first read said nothing.
+			for _, command := range commands {
+				report.action(command)
+			}
 		case isAccessDenied(err):
 			// An account that may not even read the permission will not be
 			// able to bind anything to it either, so the whole sequence

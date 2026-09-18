@@ -325,9 +325,21 @@ func TestLayeredRefusalsComeBackNamedFromTheHost(t *testing.T) {
 				t.Fatalf("refusal code = %q (%s), wanted %q", code, reason, tc.code)
 			}
 			// A code without a reason leaves the operator guessing which of
-			// several interfaces was in the way.
-			if !strings.Contains(reason, tc.change["interface"].(string)) &&
-				!strings.Contains(reason, management) {
+			// several interfaces was in the way. The name that matters is
+			// whichever the refusal is about: the layer, the management
+			// interface, or the member that is missing or taken - the
+			// refusal names one of them, never none.
+			named := strings.Contains(reason, tc.change["interface"].(string)) ||
+				strings.Contains(reason, management)
+			if link, ok := tc.change["link"].(map[string]any); ok && !named {
+				for _, member := range interfaceNamesOf(link) {
+					if strings.Contains(reason, member) {
+						named = true
+						break
+					}
+				}
+			}
+			if !named {
 				t.Errorf("the refusal names nothing concrete: %s", reason)
 			}
 			// Nothing was written: a refused plan carries no desired state.
@@ -519,4 +531,17 @@ func TestVLANOnAFreeInterfaceIsBuiltAndRemoved(t *testing.T) {
 		}
 		time.Sleep(5 * time.Second)
 	}
+}
+
+// interfaceNamesOf lists every interface a layered order names: the
+// members of a bond or a bridge and the parent of a VLAN.
+func interfaceNamesOf(link map[string]any) []string {
+	var names []string
+	if parent, ok := link["parent"].(string); ok && parent != "" {
+		names = append(names, parent)
+	}
+	if members, ok := link["members"].([]string); ok {
+		names = append(names, members...)
+	}
+	return names
 }

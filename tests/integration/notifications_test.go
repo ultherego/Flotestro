@@ -23,9 +23,16 @@ type channelView struct {
 		SeverityMin string `json:"severity_min"`
 		Site        string `json:"site"`
 	} `json:"filter"`
-	CreatedBy    string        `json:"created_by"`
-	Reason       string        `json:"reason"`
-	LastDelivery *deliveryView `json:"last_delivery"`
+	CreatedBy string `json:"created_by"`
+	Reason    string `json:"reason"`
+	// The newest row of the queue for this channel: the queue's own state
+	// (delivered, retry_wait, dead_letter) and the reason of the last
+	// attempt, not the status of a single send.
+	LastDelivery *struct {
+		ID        string `json:"id"`
+		State     string `json:"state"`
+		ErrorCode string `json:"error_code"`
+	} `json:"last_delivery"`
 }
 
 type deliveryView struct {
@@ -161,7 +168,11 @@ func TestNotificationChannelKeepsItsSecretAndLogsTypedFailures(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/notifications/deliveries?status=lost", nil, nil, http.StatusBadRequest)
 	var fetched channelView
 	h.get("/api/v1/notifications/channels/"+webhook.ID, &fetched)
-	if fetched.LastDelivery == nil || fetched.LastDelivery.Status != "failed" {
+	// Nothing answered at that port, so the queue gave up on the row: the
+	// state says so and the code is the transport's own reason, which is
+	// what an operator acts on.
+	if fetched.LastDelivery == nil || fetched.LastDelivery.State != "dead_letter" ||
+		!connectionFailure(fetched.LastDelivery.ErrorCode) {
 		t.Errorf("the channel does not carry its last delivery: %+v", fetched.LastDelivery)
 	}
 

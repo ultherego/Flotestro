@@ -196,6 +196,22 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 			changes = append(changes, Change{Field: field, Current: was, Desired: wanted})
 		}
 	}
+	// A declaration is a statement about what it names, and some of what a
+	// container has comes from the image or from the engine rather than
+	// from anybody's order: the command baked into the image, the network
+	// the engine attaches when none is asked for. Comparing those against
+	// a description that says nothing would make the second run of the
+	// same declaration plan a replacement - the one thing a declaration
+	// must never do. They are compared only when the description states
+	// them. What the description is really about - the ports it publishes,
+	// the volumes it mounts, the limits it sets - stays compared as
+	// written, so an empty list there means none.
+	stated := func(field, was, wanted string) {
+		if wanted == "" {
+			return
+		}
+		add(field, was, wanted)
+	}
 
 	// The image is compared by digest, not by reference: two containers
 	// created from the same tag on different days run different images.
@@ -204,10 +220,10 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 			Field: "image", Current: shortID(detail.ImageID), Desired: shortID(desired.ImageDigest),
 		})
 	}
-	add("command", strings.Join(current.Command, " "), strings.Join(desired.Command, " "))
-	add("entrypoint", strings.Join(current.Entrypoint, " "), strings.Join(desired.Entrypoint, " "))
-	add("user", current.User, desired.User)
-	add("working_dir", current.WorkingDir, desired.WorkingDir)
+	stated("command", strings.Join(current.Command, " "), strings.Join(desired.Command, " "))
+	stated("entrypoint", strings.Join(current.Entrypoint, " "), strings.Join(desired.Entrypoint, " "))
+	stated("user", current.User, desired.User)
+	stated("working_dir", current.WorkingDir, desired.WorkingDir)
 	if desired.Hostname != "" {
 		add("hostname", current.Hostname, desired.Hostname)
 	}
@@ -215,7 +231,7 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 	add("restart_policy", restartText(current.Restart), restartText(desired.Restart))
 	add("ports", portsText(current.Ports), portsText(desired.Ports))
 	add("mounts", mountsText(current.Mounts), mountsText(desired.Mounts))
-	add("networks", networksText(current.Networks), networksText(desired.Networks))
+	stated("networks", networksText(current.Networks), networksText(desired.Networks))
 	add("resources", resourcesText(current.Resources), resourcesText(desired.Resources))
 	add("health", healthText(current.Health), healthText(desired.Health))
 	if desired.StopTimeoutSeconds > 0 {
