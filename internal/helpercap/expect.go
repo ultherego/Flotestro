@@ -168,6 +168,24 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 			return mutating("docker.prune", opspec.ActionDockerPrune)
 		}
 		return mutating("docker.unknown")
+	case *helperv1.HelperRequest_DockerEnsure:
+		switch action.DockerEnsure.GetOperation() {
+		case helperv1.DockerEnsureRequest_OPERATION_PLAN:
+			// The plan of a declared object reads the engine and asks the
+			// registry what the image tag means today; it writes nothing.
+			return read("docker.declare.plan")
+		case helperv1.DockerEnsureRequest_OPERATION_CONTAINER_ENSURE:
+			return mutating("docker.container.ensure", opspec.ActionDockerContainerEnsure)
+		case helperv1.DockerEnsureRequest_OPERATION_NETWORK_ENSURE:
+			return mutating("docker.network.ensure", opspec.ActionDockerNetworkEnsure)
+		case helperv1.DockerEnsureRequest_OPERATION_NETWORK_REMOVE:
+			return mutating("docker.network.remove", opspec.ActionDockerNetworkRemove)
+		case helperv1.DockerEnsureRequest_OPERATION_VOLUME_ENSURE:
+			return mutating("docker.volume.ensure", opspec.ActionDockerVolumeEnsure)
+		case helperv1.DockerEnsureRequest_OPERATION_VOLUME_REMOVE:
+			return mutating("docker.volume.remove", opspec.ActionDockerVolumeRemove)
+		}
+		return mutating("docker.declare.unknown")
 	case *helperv1.HelperRequest_Compose:
 		if action.Compose.GetOperation() == helperv1.ComposeRequest_OPERATION_PLAN {
 			return read("compose.plan")
