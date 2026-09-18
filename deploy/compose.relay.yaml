@@ -1,0 +1,114 @@
+# The relay of one site.
+#
+# A relay stands where its agents stand - behind the NAT of a branch, in an
+# isolated network, on the other side of a WAN link - and not next to the
+# control plane. That is why this file is run on its own, as its own project,
+# on the site host:
+#
+#   docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
+#   docker compose -f compose.relay.yaml up -d
+#
+# It is not an overlay for compose.yaml, and merging the two would put the
+# site component and the centre in one failure domain, which is the opposite
+# of what a relay is for.
+name: flotestro-relay
+
+services:
+  relay:
+    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    # A tag for readability; production pins the digest as well, and the
+    # relay is upgraded from the same release as the panel it talks to.
+    restart: unless-stopped
+    user: "65532:65532"
+    # The default command of the image, written out because the path of the
+    # configuration file is the one decision this service makes.
+    command: ["run", "-config", "/etc/flotestro/relay.yaml"]
+
+    volumes:
+      # The configuration is a file and not an environment: the relay is a
+      # separate trust boundary with its own name, its own site and its own
+      # advertised addresses, and the file that describes them is read-only
+      # to the process that obeys it.
+      - ./relay.yaml:/etc/flotestro/relay.yaml:ro
+      # The fleet CA for the first connection, as bootstrap_ca_file in that
+      # file points at it. After the enrollment the relay uses the copy in
+      # its own state.
+      - ./relay-ca.pem:/etc/flotestro/ca.pem:ro
+      # The identity of the relay, its certificate and the durable spool -
+      # the results of the site that the centre has not acknowledged yet.
+      # The volume is named: a spool lost with a renamed project is a night
+      # of the site's history lost with it.
+      - relay_state:/var/lib/flotestro-relay
+
+    ports:
+      # The agents of the site connect here. The address must match a name in
+      # advertised_names, because that name is in the relay certificate.
+      - "8453:8453"
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 131072
+    # The spool is flushed and the agent sessions are ended rather than cut.
+    stop_grace_period: 30s
+
+    healthcheck:
+      # Liveness only: the listener of the site is up and accepts. It is
+      # deliberately not a question about the link to the centre - a WAN
+      # outage is what the relay exists for, and a health check that failed
+      # during one would restart the process that is holding the site's
+      # results. The readiness of the upstream link is read from the panel
+      # and from relayctl, not from here.
+      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-tcp", "-addr", "127.0.0.1:8453"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # The registration. It runs once, with a one-time token, and ends; the
+  # token never enters the service above, because that one restarts and the
+  # token must not outlive its use.
+  relay-enroll:
+    image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    profiles: ["enroll"]
+    user: "65532:65532"
+    command: ["enroll", "-config", "/etc/flotestro/relay.yaml", "-token-file", "/run/secrets/relay_enrollment_token"]
+    restart: "no"
+
+    secrets:
+      - relay_enrollment_token
+
+    volumes:
+      - ./relay.yaml:/etc/flotestro/relay.yaml:ro
+      - ./relay-ca.pem:/etc/flotestro/ca.pem:ro
+      - relay_state:/var/lib/flotestro-relay
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=65532,gid=65532
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  relay_state:
+    name: flotestro-relay-state
+
+secrets:
+  relay_enrollment_token:
+    # Written before the enrollment and deleted after it: the token is a
+    # one-time secret and this directory survives restarts and backups.
+    file: ./secrets/relay-enrollment-token

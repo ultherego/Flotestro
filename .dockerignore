@@ -1,0 +1,46 @@
+# The build context of the images in deploy/Containerfile.
+#
+# The file lies at the repository root because that is the context the build
+# runs with: the Containerfile copies go.mod, cmd/, internal/, db/ and web/,
+# which are siblings of this file, and a builder reads the ignore file of the
+# context - one placed next to the Containerfile would simply be ignored.
+#
+# It is an allowlist and not a list of exceptions: everything is excluded
+# first and only the sources of the artefacts are let back in. A denylist
+# would send every new directory to the builder until somebody remembered to
+# add it, and the directories that must never enter an image - state, keys,
+# environment files, the Vagrant laboratory - are exactly the ones nobody
+# remembers. What is not named here does not reach the build, does not land
+# in a layer and cannot be read out of the image afterwards.
+**
+
+!go.mod
+!go.sum
+
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+
+# The migrations are embedded in the control plane binary, so the directory
+# is a source of the build even though it is never copied into the image.
+!db/
+!db/**
+
+# The panel: the manifests, the build configuration and the sources. Nothing
+# else of web/ - node_modules is installed from the lockfile in the build
+# stage, dist/ is produced there, and the end-to-end tests are not part of
+# any artefact.
+!web/package.json
+!web/package-lock.json
+!web/index.html
+!web/tsconfig.json
+!web/vite.config.ts
+!web/public/
+!web/public/**
+!web/src/
+!web/src/**
+
+# The Containerfile itself, for a build that reads it from the context
+# instead of through -f.
+!deploy/Containerfile

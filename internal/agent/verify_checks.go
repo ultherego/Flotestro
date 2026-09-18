@@ -2657,7 +2657,23 @@ func verifyDomainMembership(ctx context.Context, readers *hostReaders, in verify
 		return unverified(expected, observed,
 			"the host is joined to "+state.Domain+" and not to "+domain)
 	}
-	if state.KeytabKVNO == nil {
+	// The keytab is root's file, so the agent's own read never sees it: a
+	// missing key version here says nothing about the host. The privileged
+	// read answers the question, and where there is none the join is
+	// unconfirmed rather than declared keyless - an unreadable file is not
+	// an absent one.
+	kvno := state.KeytabKVNO
+	if kvno == nil {
+		if readers.keytabKVNO == nil {
+			return unreadable(expected, noReader("the host keytab"))
+		}
+		read, err := readers.keytabKVNO(ctx, firstNonEmpty(domain, state.Domain))
+		if err != nil {
+			return unreadable(expected, "the host keytab was not read: "+err.Error())
+		}
+		kvno = read
+	}
+	if kvno == nil {
 		return unverified(expected, observed+", no keytab",
 			"the host is joined to "+state.Domain+" and carries no host keytab")
 	}

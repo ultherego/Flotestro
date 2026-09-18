@@ -44,9 +44,32 @@ var ErrTimerNotManaged = errors.New("the unit file does not carry the marker of 
 // as neither by accident.
 var ErrCalendarUnsupported = errors.New("the expression cannot be written as a timer")
 
+// UnitPrefix is the namespace of a managed entry's units.
+//
+// It is not the plain product prefix, and the difference is the whole
+// point: /etc/systemd/system overrides the units a package installs under
+// /usr/lib, so an entry called "agent" written as flotestro-agent.service
+// would not collide with a file - it would silently replace the agent's
+// own unit, and the host would lose the agent at the next reload. Under a
+// namespace of its own no identifier can reach a unit of the product, and
+// the transient unit of a manual run (flotestro-schedule-<id>.service) is
+// out of reach as well.
+const UnitPrefix = FilePrefix + "entry-"
+
+// The directories systemd reads units from, in the order it prefers them.
+// A unit under a name we would write may live in any of them: the panel
+// looks at all of them, because a file in /etc that shadows a package's
+// unit is the accident with no way back.
+var unitSearchDirs = []string{
+	"/etc/systemd/system",
+	"/run/systemd/system",
+	"/usr/lib/systemd/system",
+	"/lib/systemd/system",
+}
+
 // TimerUnitName and ServiceUnitName are the two units of a managed entry.
-func TimerUnitName(id string) string   { return FilePrefix + id + ".timer" }
-func ServiceUnitName(id string) string { return FilePrefix + id + ".service" }
+func TimerUnitName(id string) string   { return UnitPrefix + id + ".timer" }
+func ServiceUnitName(id string) string { return UnitPrefix + id + ".service" }
 
 // TimerUnitPath and ServiceUnitPath place those units in a directory.
 func TimerUnitPath(dir, id string) string   { return filepath.Join(dir, TimerUnitName(id)) }
@@ -158,6 +181,16 @@ func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 	}
 	plan.Read = true
 	for _, file := range plan.Files {
+		// A unit of that name somewhere else on the host is the dangerous
+		// case: writing ours into /etc/systemd/system would not collide
+		// with it, it would shadow it, and the unit the host really runs
+		// would be gone at the next reload with nothing to say so.
+		if shadowed, err := shadowingUnit(filepath.Base(file.Path), file.Path); err != nil {
+			return TimerPlan{}, err
+		} else if shadowed != "" {
+			return TimerPlan{}, fmt.Errorf("%w: %s would shadow %s",
+				ErrTimerNotManaged, file.Path, shadowed)
+		}
 		current, err := os.ReadFile(file.Path)
 		switch {
 		case os.IsNotExist(err):
@@ -175,6 +208,32 @@ func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 		}
 	}
 	return plan, nil
+}
+
+// shadowingUnit names a unit file of the same name in another of systemd's
+// directories, when that file is not one of ours. The path being written
+// is skipped: a managed unit already in place is read by the caller.
+func shadowingUnit(name, writing string) (string, error) {
+	for _, dir := range unitSearchDirs {
+		path := filepath.Join(dir, name)
+		if path == writing {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		switch {
+		case os.IsNotExist(err):
+			continue
+		case err != nil:
+			// A unit that cannot be read is not thereby absent: refusing
+			// here is the fail-closed answer, because writing would be the
+			// irreversible one.
+			return "", fmt.Errorf("reading %s: %w", path, err)
+		}
+		if !ours(string(content)) {
+			return path, nil
+		}
+	}
+	return "", nil
 }
 
 // RemoveTimer deletes the pair of a managed timer. A file without our
@@ -237,7 +296,7 @@ func ReadManagedTimers(dir string) []Schedule {
 	names := make([]string, 0, len(files))
 	for _, file := range files {
 		name := file.Name()
-		if file.IsDir() || !strings.HasPrefix(name, FilePrefix) || !strings.HasSuffix(name, ".timer") {
+		if file.IsDir() || !strings.HasPrefix(name, UnitPrefix) || !strings.HasSuffix(name, ".timer") {
 			continue
 		}
 		names = append(names, name)
@@ -246,7 +305,7 @@ func ReadManagedTimers(dir string) []Schedule {
 
 	var entries []Schedule
 	for _, name := range names {
-		id := strings.TrimSuffix(strings.TrimPrefix(name, FilePrefix), ".timer")
+		id := strings.TrimSuffix(strings.TrimPrefix(name, UnitPrefix), ".timer")
 		if !ValidIdentifier(id) {
 			continue
 		}

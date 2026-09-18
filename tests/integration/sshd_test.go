@@ -79,8 +79,14 @@ func TestChangeCuttingOffLoginIsRejected(t *testing.T) {
 
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "ssh.config.apply", "reason": sshReason,
+		// Every method the panel can set goes off in one order: with
+		// keyboard-interactive left as the server has it - and OpenSSH
+		// leaves it on - a password still gets somebody in through PAM, so
+		// turning off two of the three is not a lockout and the host is
+		// right not to call it one.
 		"payload": map[string]any{"ssh": map[string]any{
-			"password_authentication": "no", "pubkey_authentication": "no"}},
+			"password_authentication": "no", "pubkey_authentication": "no",
+			"kbd_interactive_authentication": "no"}},
 	}, 2*time.Minute)
 	if job.State == "succeeded" {
 		t.Fatal("the panel accepted a configuration without any authentication method")

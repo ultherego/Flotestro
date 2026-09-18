@@ -53,8 +53,13 @@ func account(h *harness, hostID, name string) *accountView {
 
 func accountOperation(h *harness, hostID, action string, payload map[string]any) (jobView, []attemptView) {
 	h.t.Helper()
+	// Replacing the keys of an account decides who may log into the host,
+	// so the panel asks for a reason as it does for every change of that
+	// weight. The order carries one here for the same reason an operator
+	// would: without it the request is refused before a job exists.
 	return h.runOperation(hostID, map[string]any{
 		"action":  action,
+		"reason":  "integration test of the local accounts module",
 		"payload": map[string]any{"local_user": payload},
 	}, 120*time.Second)
 }

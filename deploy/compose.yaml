@@ -1,0 +1,149 @@
+# The Flotestro control plane, and nothing else.
+#
+# This file is the whole of the "production basic" profile: one control plane
+# against a PostgreSQL somebody else runs, backs up and tunes. It names no
+# postgres service, no host called postgres and no database volume - those
+# exist only in compose.local-db.yaml, so that an installation which points
+# at an external database cannot quietly start a second one beside it and
+# write half of its truth there.
+#
+#   docker compose up -d                                    external database
+#   docker compose -f compose.yaml -f compose.local-db.yaml up -d   quick start
+#
+# The non-secret settings come from ./.env, the secrets from files under
+# ./secrets/ - see README.md.
+name: flotestro
+
+services:
+  control-plane:
+    # A tag is readable and is what an example should show. Production pins
+    # the digest as well - image:tag@sha256:... - because a tag can be
+    # rewritten by whoever publishes it and a digest cannot; the digest is
+    # moved in a separate change, after the image behind it was tested.
+    image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    restart: unless-stopped
+    user: "65532:65532"
+
+    environment:
+      # The DSN is a secret and travels as a file, never as a value: an
+      # environment variable is visible in "docker inspect", in the process
+      # list of the host and in any crash report that dumps the environment.
+      # The control plane reads the path and the content once at start.
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      # The state directory and the panel are already set in the image; they
+      # stand here as well because a deployment that has to be read in one
+      # place is a deployment nobody guesses about.
+      FLOTESTRO_STATE_DIR: /var/lib/flotestro
+      FLOTESTRO_WEB_ROOT: /usr/share/flotestro/web
+      # Every listener binds to every address inside the container. The
+      # native installation keeps the admin listener on 127.0.0.1, which
+      # between containers would mean "reachable by nobody"; what limits the
+      # exposure here is the port mapping below.
+      FLOTESTRO_ADMIN_ADDR: 0.0.0.0:8080
+      FLOTESTRO_GATEWAY_ADDR: 0.0.0.0:8443
+      FLOTESTRO_ENROLLMENT_ADDR: 0.0.0.0:8444
+      # The name of this gateway. Without it the control plane takes the
+      # hostname of the machine, and the hostname of a container is a random
+      # string that changes at every recreate - the sessions and the
+      # scheduler leases would then be tagged with a name nothing else knows.
+      FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:?required, for example cp-prod-01}
+      # The addresses the agents see the panel under. They enter the
+      # certificate of the agent gateway, so they are the public names of the
+      # host, never the name of a Compose service.
+      FLOTESTRO_ADVERTISE: ${FLOTESTRO_ADVERTISE:?required, the DNS names or addresses the fleet reaches this panel at}
+      # The address the operator sees. The OIDC redirect and the Secure flag
+      # of the session cookies follow from it.
+      FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:?required, for example https://panel.example.org}
+      # Optional, and non-secret; uncomment what the installation uses.
+      # FLOTESTRO_PACKAGE_REPOSITORY_URL: https://packages.example.org/flotestro
+      # FLOTESTRO_OIDC_ISSUER: https://login.example.org/realms/flotestro
+      # FLOTESTRO_OIDC_CLIENT_ID: flotestro-panel
+      # FLOTESTRO_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc_client_secret
+      # FLOTESTRO_WEBHOOK_SECRET_FILE: /run/secrets/webhook_secret
+      # FLOTESTRO_VULN_NVD_KEY_FILE: /run/secrets/nvd_key
+
+    secrets:
+      - database_url
+
+    volumes:
+      # The state: the fleet CA, the keys of the secret store, the helper
+      # signing key, the bootstrap token and the feed cache. The name is
+      # explicit, so renaming the Compose project cannot silently hand the
+      # panel a fresh empty state next to the old database.
+      - control_plane_state:/var/lib/flotestro
+      # The keytab of the directory connector, when FreeIPA is configured:
+      # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
+
+    ports:
+      # The panel and the API are published on the host loopback alone; a
+      # reverse proxy with TLS puts them on the network.
+      - "127.0.0.1:8080:8080"
+      # The agent gateway (mTLS) and the enrollment (TLS) are reached by the
+      # fleet directly or through an L4 load balancer: their TLS is
+      # end-to-end and must not be terminated by an HTTP proxy.
+      - "8443:8443"
+      - "8444:8444"
+
+    networks:
+      - application
+      - database_egress
+
+    # The process writes to its state volume and to /tmp, and nowhere else.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 131072
+    # A stop is a chance to finish what is in flight: the gateway ends the
+    # agent sessions and the workers release their leases instead of leaving
+    # them to expire.
+    stop_grace_period: 30s
+
+    healthcheck:
+      # The image carries no curl and no shell; this is the static client
+      # from cmd/container-healthcheck. It asks /healthz, which pings the
+      # database, so a panel that cannot reach its database is unhealthy
+      # rather than merely unhappy.
+      test: ["CMD", "/usr/local/bin/flotestro-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      # The first start of an installation migrates the schema before it
+      # listens; the window covers it.
+      start_period: 60s
+
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  # The panel and the edge.
+  application:
+  # The way out to the database. It is a separate network so that the rule
+  # which lets the control plane reach PostgreSQL is one an operator can see
+  # and a firewall can name.
+  database_egress:
+
+volumes:
+  control_plane_state:
+    name: flotestro-state
+
+secrets:
+  database_url:
+    # Mode 0600, owned by the account that runs the deployment. The directory
+    # is not in Git.
+    file: ./secrets/database-url
+  # oidc_client_secret:
+  #   file: ./secrets/oidc-client-secret
+  # webhook_secret:
+  #   file: ./secrets/webhook-secret
+  # nvd_key:
+  #   file: ./secrets/nvd-key

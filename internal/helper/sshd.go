@@ -3,6 +3,7 @@ package helper
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,7 +133,20 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 	mismatches := sshmodule.DivergentSettings(settings, after)
 	message := "the configuration was written and reloaded"
 	if len(mismatches) > 0 {
-		message = "the configuration was written, but some settings did not take effect"
+		// The message names them: "some settings" sends the operator to
+		// read the server's configuration by hand, and the host has just
+		// read it. The list itself travels in the result as well, so the
+		// panel shows every one of them; the sentence carries the first few
+		// for the places that show a line rather than a table.
+		named := mismatches
+		if len(named) > 3 {
+			named = named[:3]
+		}
+		message = "the configuration was written, but some settings did not take effect: " +
+			strings.Join(named, "; ")
+		if len(mismatches) > len(named) {
+			message += fmt.Sprintf(" (and %d more)", len(mismatches)-len(named))
+		}
 	}
 	return sshResponse(after, message, mismatches)
 }

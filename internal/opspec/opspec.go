@@ -1517,7 +1517,17 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 			return fmt.Errorf("the layered order names the interface %q and the layer %q; they are the same interface",
 				change.Interface, change.Link.Name)
 		}
-		return network.ValidateLinkSpec(*change.Link)
+		// A refusal the module names with a code keeps it all the way to
+		// the API: the operator reads the same word here as they would in
+		// the plan the host computes.
+		if err := network.ValidateLinkSpec(*change.Link); err != nil {
+			var refusal *network.LinkRefusal
+			if errors.As(err, &refusal) {
+				return &RefusalError{Code: refusal.Code, Err: err}
+			}
+			return err
+		}
+		return nil
 
 	case ActionNetworkLinkRemove:
 		if change.Link != nil {

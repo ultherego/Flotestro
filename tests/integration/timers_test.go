@@ -103,18 +103,29 @@ func TestManagedTimerLifecycle(t *testing.T) {
 	}
 }
 
-// TestATimerThePanelDidNotWriteIsRefusedByName is the ownership boundary of
-// the mechanism. A unit under the name a managed timer would use, without
-// the panel's marker, belongs to the host administrator - here it is the
-// agent's own service unit, which the entry "agent" would write over. The
-// panel neither rewrites nor removes it, and the refusal names the file.
-func TestATimerThePanelDidNotWriteIsRefusedByName(t *testing.T) {
+// TestAnEntryNamedAfterTheProductCannotTouchItsUnits is the ownership
+// boundary of the mechanism, and it is drawn by the namespace rather than
+// by a check that could be got around.
+//
+// /etc/systemd/system is the directory systemd prefers over the one a
+// package installs into, so a managed entry written under the product's
+// own unit name would not collide with the agent's unit - it would shadow
+// it, and the host would lose its agent at the next reload with nothing to
+// say so. A managed entry therefore writes flotestro-entry-<id>, which no
+// identifier an operator can type turns into a unit of the product; the
+// entry called "agent" is written, read back under that name, and the
+// agent goes on running from its own unit.
+func TestAnEntryNamedAfterTheProductCannotTouchItsUnits(t *testing.T) {
 	h := newHarness(t)
 	host := h.hostByFamily("arch")
-	// flotestro-agent.service is installed by the agent package and carries
-	// no marker of the panel.
 	const id = "agent"
-	const unit = unitDirectory + "flotestro-agent.service"
+
+	t.Cleanup(func() {
+		h.runOperation(host.ID, map[string]any{
+			"action": "schedule.remove", "reason": timerReason,
+			"payload": map[string]any{"schedule": map[string]any{"id": id}},
+		}, 120*time.Second)
+	})
 
 	job, attempts := h.runOperation(host.ID, map[string]any{
 		"action": "schedule.ensure", "reason": timerReason,
@@ -127,31 +138,23 @@ func TestATimerThePanelDidNotWriteIsRefusedByName(t *testing.T) {
 			"enabled":    true,
 		}},
 	}, 120*time.Second)
-	if job.State == "succeeded" {
-		t.Fatalf("the panel wrote over %s", unit)
-	}
-	if len(attempts) == 0 || attempts[len(attempts)-1].ErrorCode != "unit_not_managed" {
-		t.Fatalf("refusal = %s, want unit_not_managed", lastMessage(attempts))
-	}
-	if message := lastMessage(attempts); !strings.Contains(message, unit) {
-		t.Errorf("the refusal does not name the unit in the way: %q", message)
+	if job.State != "succeeded" {
+		t.Fatalf("the entry was not written: %s %s", job.State, lastMessage(attempts))
 	}
 
-	// The removal is refused the same way: the panel takes off the host
-	// only what it put there.
-	job, attempts = h.runOperation(host.ID, map[string]any{
-		"action": "schedule.remove", "reason": timerReason,
-		"payload": map[string]any{"schedule": map[string]any{"id": id}},
-	}, 120*time.Second)
-	if job.State == "succeeded" {
-		t.Fatalf("the panel removed %s", unit)
+	entry := hostEntry(t, h, host.ID, id)
+	// The path is the proof: a unit of the product would be named
+	// flotestro-agent.service, and this one cannot be.
+	if !strings.Contains(entry.Path, "flotestro-entry-"+id) {
+		t.Errorf("the entry was written as %q, outside the namespace of managed entries", entry.Path)
 	}
-	if len(attempts) == 0 || attempts[len(attempts)-1].ErrorCode != "unit_not_managed" {
-		t.Fatalf("refusal = %s, want unit_not_managed", lastMessage(attempts))
+	if strings.HasSuffix(entry.Path, "/flotestro-"+id+".service") ||
+		strings.HasSuffix(entry.Path, "/flotestro-"+id+".timer") {
+		t.Fatalf("the entry took the name of a unit of the product: %q", entry.Path)
 	}
 
-	// The host is still there: the refusal happened before anything was
-	// written, so the agent that runs from that unit kept running.
+	// The host is still there, which is the whole point: the agent runs
+	// from the unit the package installed and the entry did not touch it.
 	h.awaitConnection(host.ID, 60*time.Second)
 }
 

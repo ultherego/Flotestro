@@ -297,7 +297,13 @@ func Classify(err error, attempt, maxAttempts int) Outcome {
 	sentence := failure.Error()
 	retry := func() Outcome {
 		if attempt >= maxAttempts {
-			return Outcome{State: StateDeadLetter, ErrorCode: CodeAttemptsExhausted,
+			// The delivery keeps the reason it failed for, not the fact
+			// that the queue stopped trying: the state already says that,
+			// and an operator reading "attempts exhausted" learns nothing
+			// about the receiver. A test of a channel is one attempt, so
+			// the reason would otherwise be lost exactly where it is the
+			// whole answer.
+			return Outcome{State: StateDeadLetter, ErrorCode: failure.Code,
 				Error: fmt.Sprintf("%d attempts; last: %s", attempt, sentence)}
 		}
 		return Outcome{State: StateRetryWait, ErrorCode: failure.Code, Error: sentence}

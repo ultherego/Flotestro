@@ -561,8 +561,11 @@ const (
 	// CodePermanentSMTP: the mail relay refused the message with a
 	// permanent reply.
 	CodePermanentSMTP = "permanent_smtp_error"
-	// CodeAttemptsExhausted: the receiver kept failing in a way that
-	// passes until the attempts ran out.
+	// CodeAttemptsExhausted named a delivery the queue stopped retrying.
+	// It is no longer put on a delivery: the state says the queue gave up
+	// and the transport's own code says why it kept failing, which is what
+	// an operator acts on. The constant stays for the records written
+	// before this, which the panel still lists and explains.
 	CodeAttemptsExhausted = "delivery_attempts_exhausted"
 	// CodeChannelMisconfigured: the channel cannot send as it is - no
 	// sender for its kind, a configuration that does not read.

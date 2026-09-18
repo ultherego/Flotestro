@@ -29,8 +29,8 @@ func TestRenderTimerWritesBothUnitsWithTheMarker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rendering the timer: %v", err)
 	}
-	if plan.Timer.Path != "/etc/systemd/system/flotestro-nightly-report.timer" ||
-		plan.Service.Path != "/etc/systemd/system/flotestro-nightly-report.service" {
+	if plan.Timer.Path != "/etc/systemd/system/"+UnitPrefix+"nightly-report.timer" ||
+		plan.Service.Path != "/etc/systemd/system/"+UnitPrefix+"nightly-report.service" {
 		t.Fatalf("the pair goes to %q and %q", plan.Timer.Path, plan.Service.Path)
 	}
 	if len(plan.Files) != 2 {
@@ -60,7 +60,7 @@ func TestRenderTimerWritesBothUnitsWithTheMarker(t *testing.T) {
 	if !strings.Contains(plan.Timer.Content, MarkerCron+"15 3 * * *") {
 		t.Errorf("the timer does not keep the expression it was ordered with:\n%s", plan.Timer.Content)
 	}
-	if !strings.Contains(plan.Timer.Content, "Unit=flotestro-nightly-report.service") {
+	if !strings.Contains(plan.Timer.Content, "Unit="+UnitPrefix+"nightly-report.service") {
 		t.Errorf("the timer does not name its service:\n%s", plan.Timer.Content)
 	}
 	if !strings.Contains(plan.Timer.Content, "WantedBy=timers.target") {
@@ -197,7 +197,7 @@ func TestPlanTimerSeesWhatIsAlreadyOnTheHost(t *testing.T) {
 // way.
 func TestATimerThePanelDidNotWriteIsNeverTouched(t *testing.T) {
 	dir := t.TempDir()
-	foreign := filepath.Join(dir, "flotestro-nightly-report.service")
+	foreign := filepath.Join(dir, UnitPrefix+"nightly-report.service")
 	const content = "[Unit]\nDescription=written by the host administrator\n"
 	if err := os.WriteFile(foreign, []byte(content), 0o644); err != nil {
 		t.Fatalf("writing the foreign unit: %v", err)
@@ -287,11 +287,11 @@ func TestReadAndMergeManagedTimers(t *testing.T) {
 	// systemd knows the same timer as a unit and says whether it is
 	// installed; the found list keeps everything else the host has.
 	found := []Schedule{
-		{ID: "flotestro-nightly-report.timer", Kind: KindTimer, Source: SourceManual, Enabled: true},
+		{ID: UnitPrefix + "nightly-report.timer", Kind: KindTimer, Source: SourceManual, Enabled: true},
 		{ID: "logrotate.timer", Kind: KindTimer, Source: SourceManual, Enabled: true},
 	}
 	merged := MergeManagedTimers(found, managed, map[string]string{
-		"flotestro-nightly-report.timer": "enabled",
+		UnitPrefix + "nightly-report.timer": "enabled",
 	})
 	if len(merged) != 2 {
 		t.Fatalf("the merge kept %d entries: %+v", len(merged), merged)
@@ -307,9 +307,69 @@ func TestReadAndMergeManagedTimers(t *testing.T) {
 	// in the list: an entry that disappears when it is switched off cannot
 	// be switched back on.
 	off := MergeManagedTimers(found, managed, map[string]string{
-		"flotestro-nightly-report.timer": "disabled",
+		UnitPrefix + "nightly-report.timer": "disabled",
 	})
 	if len(off) != 2 || off[0].Enabled {
 		t.Errorf("a disabled timer after the merge = %+v", off[0])
+	}
+}
+
+// A managed entry writes into /etc/systemd/system, which is the directory
+// systemd prefers over the one a package installs into. A unit of the same
+// name further down would therefore not be overwritten but shadowed: the
+// host would keep the file and stop running it, and nothing would say so.
+// The plan refuses that, and the refusal names both paths.
+func TestAUnitThatWouldShadowAnotherIsRefused(t *testing.T) {
+	root := t.TempDir()
+	etc := filepath.Join(root, "etc")
+	lib := filepath.Join(root, "usr-lib")
+	for _, dir := range []string{etc, lib} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("preparing %s: %v", dir, err)
+		}
+	}
+	shadowed := filepath.Join(lib, ServiceUnitName("nightly-report"))
+	if err := os.WriteFile(shadowed, []byte("[Unit]\nDescription=the package's own unit\n"), 0o644); err != nil {
+		t.Fatalf("writing the packaged unit: %v", err)
+	}
+
+	previous := unitSearchDirs
+	unitSearchDirs = []string{etc, lib}
+	defer func() { unitSearchDirs = previous }()
+
+	_, err := PlanTimer(etc, timerEntry())
+	if !errors.Is(err, ErrTimerNotManaged) {
+		t.Fatalf("the plan would have shadowed a unit of the host: %v", err)
+	}
+	if err == nil || !strings.Contains(err.Error(), shadowed) {
+		t.Errorf("the refusal does not name the unit it would shadow: %v", err)
+	}
+
+	// A unit of ours in the same place is not somebody else's work, so it
+	// does not stop the plan.
+	if err := os.WriteFile(shadowed, []byte(FileHeader+"\n"+MarkerEntry+"nightly-report\n"), 0o644); err != nil {
+		t.Fatalf("rewriting the unit: %v", err)
+	}
+	if _, err := PlanTimer(etc, timerEntry()); err != nil {
+		t.Errorf("a managed unit further down stopped the plan: %v", err)
+	}
+}
+
+// The namespace of a managed entry is the protection itself: no identifier
+// an operator can type reaches a unit of the product, and none reaches the
+// transient unit a manual run uses either.
+func TestAManagedEntryCannotReachTheProductsOwnUnits(t *testing.T) {
+	for _, id := range []string{"agent", "helper", "relay", "control-plane", "schedule-nightly"} {
+		for _, name := range []string{TimerUnitName(id), ServiceUnitName(id)} {
+			for _, reserved := range []string{
+				"flotestro-agent.service", "flotestro-helper.service", "flotestro-helper.socket",
+				"flotestro-relay.service", "flotestro-control-plane.service",
+				"flotestro-schedule-nightly.service",
+			} {
+				if name == reserved {
+					t.Errorf("the entry %q writes the unit %s, which is %s", id, name, reserved)
+				}
+			}
+		}
 	}
 }

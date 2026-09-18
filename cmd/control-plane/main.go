@@ -81,8 +81,30 @@ func main() {
 
 func run() error {
 	cfg := config.ControlPlane{}
-	flag.StringVar(&cfg.DatabaseURL, "database-url",
-		config.Env("FLOTESTRO_DATABASE_URL", ""), "the PostgreSQL DSN")
+	// The secrets are read before the flags are defined, so that an
+	// installation can mount each of them as a file instead of putting the
+	// value into the environment of the process - where the container
+	// engine's inspection, the shell history and every child process read
+	// it along. For every FLOTESTRO_X the panel also accepts
+	// FLOTESTRO_X_FILE; a mount it will not read stops the start rather
+	// than turning off in silence the feature that needs it.
+	databaseURL, err := config.OptionalSecretValue("FLOTESTRO_DATABASE_URL")
+	if err != nil {
+		return err
+	}
+	oidcClientSecret, err := config.OptionalSecretValue("FLOTESTRO_OIDC_CLIENT_SECRET")
+	if err != nil {
+		return err
+	}
+	webhookSecretValue, err := config.OptionalSecretValue("FLOTESTRO_WEBHOOK_SECRET")
+	if err != nil {
+		return err
+	}
+	nvdKey, err := config.OptionalSecretValue("FLOTESTRO_VULN_NVD_KEY")
+	if err != nil {
+		return err
+	}
+	flag.StringVar(&cfg.DatabaseURL, "database-url", databaseURL, "the PostgreSQL DSN")
 	flag.StringVar(&cfg.StateDir, "state-dir",
 		config.Env("FLOTESTRO_STATE_DIR", "/var/lib/flotestro"), "the state directory (CA)")
 	flag.StringVar(&cfg.GatewayAddr, "gateway-addr",
@@ -103,8 +125,7 @@ func run() error {
 		"the address of the OIDC issuer, e.g. https://ipa:8081/realms/flotestro")
 	clientID := flag.String("oidc-client-id",
 		config.Env("FLOTESTRO_OIDC_CLIENT_ID", "flotestro-panel"), "the OIDC client identifier")
-	clientSecret := flag.String("oidc-client-secret",
-		config.Env("FLOTESTRO_OIDC_CLIENT_SECRET", ""), "the OIDC client secret")
+	clientSecret := flag.String("oidc-client-secret", oidcClientSecret, "the OIDC client secret")
 	directoryWrite := flag.Bool("directory-write",
 		config.Env("FLOTESTRO_DIRECTORY_WRITE", "") == "true",
 		"enables changes in the identity directory; by default the panel only reads it")
@@ -323,8 +344,7 @@ func run() error {
 	flag.StringVar(&vulnerabilities.NVDURL, "vulnerability-nvd-url",
 		config.Env("FLOTESTRO_VULN_NVD_URL", nvdsource.DefaultURL),
 		"the API of the NVD database for enriching the descriptions (https:// or file://); empty disables it")
-	flag.StringVar(&vulnerabilities.NVDKey, "vulnerability-nvd-key",
-		config.Env("FLOTESTRO_VULN_NVD_KEY", ""),
+	flag.StringVar(&vulnerabilities.NVDKey, "vulnerability-nvd-key", nvdKey,
 		"the API key for NVD; without it the first read takes around twenty minutes")
 	flag.DurationVar(&vulnerabilities.NVDInterval, "vulnerability-nvd-interval",
 		config.EnvDuration("FLOTESTRO_VULN_NVD_INTERVAL", 6*time.Hour),
@@ -332,8 +352,7 @@ func run() error {
 	webhookURL := flag.String("webhook-url",
 		config.Env("FLOTESTRO_WEBHOOK_URL", ""),
 		"the address the events of the durable trail are posted to; empty disables the webhook")
-	webhookSecret := flag.String("webhook-secret",
-		config.Env("FLOTESTRO_WEBHOOK_SECRET", ""),
+	webhookSecret := flag.String("webhook-secret", webhookSecretValue,
 		"the secret the webhook deliveries are signed with (HMAC-SHA256)")
 	webhookEvents := flag.String("webhook-events",
 		config.Env("FLOTESTRO_WEBHOOK_EVENTS", ""),
@@ -557,8 +576,11 @@ func run() error {
 	var directory *freeipa.Client
 	if *ipaServer != "" && *ipaPrincipal != "" {
 		// The keytab is a credential of the directory: readable by anyone on
-		// the machine, it hands the connector's identity to anyone.
-		if err := checkKeytabPermissions(*ipaKeytab); err != nil {
+		// the machine, it hands the connector's identity to anyone. It stays
+		// a path rather than a value, so what is checked is the file the
+		// panel is about to hand to the Kerberos library - by the same rule
+		// every other secret file is read under.
+		if err := config.CheckSecretFile(*ipaKeytab); err != nil {
 			return fmt.Errorf("the directory connector: %w", err)
 		}
 		directory, err = freeipa.New(freeipa.Config{
@@ -1286,29 +1308,6 @@ func warnAboutBootstrapToken(ctx context.Context, store *authz.Store, log *slog.
 		log.Warn("the bootstrap token is still valid although other administrators exist; " +
 			"revoke it in the access screen or with DELETE /api/v1/principals/{id}/tokens/{token}")
 	}
-}
-
-// checkKeytabPermissions refuses a keytab anyone on the machine can read.
-// The owner has to be root or the account the service runs as, and the
-// mode must not grant reading to the group or to others.
-func checkKeytabPermissions(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("keytab %s: %w", path, err)
-	}
-	if info.Mode().Perm()&0o044 != 0 {
-		return fmt.Errorf("keytab %s is readable by the group or by others (mode %04o); "+
-			"chmod 600 it", path, info.Mode().Perm())
-	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok {
-		return nil
-	}
-	if owner := int(stat.Uid); owner != 0 && owner != os.Geteuid() {
-		return fmt.Errorf("keytab %s belongs to uid %d rather than to root or to the service user",
-			path, owner)
-	}
-	return nil
 }
 
 // errorText renders an optional error for a log line.

@@ -1,6 +1,7 @@
 package network
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -240,6 +241,16 @@ func ValidateLinkSpec(spec LinkSpec) error {
 	}
 	switch spec.Kind {
 	case LinkBond:
+		// A bond of one member is the same link with a driver in between:
+		// no redundancy, no more traffic, and the member's address moved
+		// onto the layer for nothing. This is a property of the order,
+		// knowable without asking any host, so it is refused here - with
+		// the code the host would have used - instead of being sent out.
+		if len(spec.Members) < 2 {
+			return &LinkRefusal{Code: CodeBondNeedsMembers,
+				Reason: "the bond " + spec.Name + " would have " + strconv.Itoa(len(spec.Members)) +
+					" member(s); a bond carries traffic over at least two, and with one it is the same link with a driver in between"}
+		}
 		if !contains(bondModes, spec.Mode) {
 			return fmt.Errorf("unsupported bond mode %q; the kernel knows %s",
 				spec.Mode, strings.Join(bondModes, ", "))
@@ -334,6 +345,12 @@ func ComputeLink(snapshot Snapshot, adapter string, spec LinkSpec) Plan {
 		Operation: PlanLink, CurrentLink: &current,
 	}
 	if err := ValidateLinkSpec(spec); err != nil {
+		// A refusal of the shape that has a code of its own keeps it: the
+		// panel and the host name the same fault the same way.
+		var refusal *LinkRefusal
+		if errors.As(err, &refusal) {
+			return plan.withTypedRefusal(refusal)
+		}
 		return plan.withRefusal(err.Error())
 	}
 	if refusal := LayerAdapterRefusal(adapter); refusal != nil {
@@ -381,15 +398,6 @@ func layerConflicts(snapshot Snapshot, spec LinkSpec, current LinkState) *LinkRe
 					"; a VLAN belongs on the layer above, not on an interface somebody else owns"}
 		}
 		return nil
-	}
-	// A bond of one member is a slower copy of that member: it carries the
-	// same traffic over the same cable and adds a driver in between. The
-	// redundancy is the reason a bond exists, so one member is refused
-	// rather than built.
-	if spec.Kind == LinkBond && len(spec.Members) < 2 {
-		return &LinkRefusal{Code: CodeBondNeedsMembers,
-			Reason: "the bond " + spec.Name + " would have " + strconv.Itoa(len(spec.Members)) +
-				" member(s); a bond carries traffic over at least two, and with one it is the same link with a driver in between"}
 	}
 	for _, member := range spec.Members {
 		link := snapshot.InterfaceByName(member)
