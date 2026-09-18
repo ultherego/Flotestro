@@ -54,7 +54,10 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const operation = page.locator("label.field").filter({ hasText: /^Operation/ }).locator("select");
   await expect(operation.locator("option[value='unit.restart']")).toHaveCount(1);
   await operation.selectOption("unit.restart");
-  await page.getByPlaceholder("unit, e.g. cron.service").fill("cron.service");
+  // The field is found by its label: the form no longer suggests a unit
+  // name, because a unit is called whatever its host calls it.
+  await page.locator("label.field").filter({ hasText: /^Unit/ }).locator("input")
+    .fill("cron.service");
 
   // The scope bar pins the order for the whole wizard.
   const scopeBar = page.locator(".scope-bar");
