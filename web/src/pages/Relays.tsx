@@ -6,7 +6,7 @@ import type { Relay, RelayDetail, RelayHost, RelayState, Whoami } from "../lib/t
 import { bytes } from "../lib/format";
 import { ErrorBox, Time, Empty, Pairs, Pair } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
-import { Breakdown, StatusBar } from "../components/widgets";
+import { AreaChart, Breakdown, ChartLegend, StatusBar, type AreaSeries } from "../components/widgets";
 import { useT } from "../i18n";
 
 /** How long before the end of a relay certificate the expiry is a warning. */
@@ -160,6 +160,220 @@ export function Relays() {
 }
 
 /**
+ * One point of the buffer history: a single report on a short window, a
+ * quarter-hour of reports on a long one.
+ */
+export type RelayBufferPoint = {
+  at: string;
+  instance_id?: string;
+  bytes_used: number;
+  bytes_used_max: number;
+  bytes_limit: number;
+  item_count: number;
+  item_count_max: number;
+  dropped_total: number;
+  /** The growth since the previous point; null across a restart, where the counter starts again. */
+  dropped_delta: number | null;
+  active_sessions: number;
+  upstream_state?: string;
+  disconnected: boolean;
+  restarted: boolean;
+  version?: string;
+  samples: number;
+};
+
+export type RelayBufferAlert = {
+  id: string;
+  rule_name: string;
+  metric: string;
+  severity: string;
+  value: number;
+  detail?: string;
+  started_at: string;
+  fired_at?: string;
+};
+
+export type RelayBufferHistory = {
+  relay_id: string;
+  range: string;
+  step_seconds: number;
+  rollup: boolean;
+  points: RelayBufferPoint[];
+  latest: RelayBufferPoint | null;
+  alerts: RelayBufferAlert[];
+  raw_retention_hours: number;
+  rollup_retention_days: number;
+};
+
+/** The windows the history offers, from the minute-by-minute to the quarter of a year. */
+export const BUFFER_RANGES = ["3h", "24h", "7d", "30d", "90d"] as const;
+export type BufferRangeName = (typeof BUFFER_RANGES)[number];
+
+export function historyAddress(relayID: string, range: BufferRangeName): string {
+  return `/api/v1/relays/${relayID}/buffer-history?range=${range}`;
+}
+
+/**
+ * What the window as a whole says, read off the points.
+ *
+ * The drops are summed from the deltas rather than taken as the
+ * difference of the counters at the ends: the counter starts again at
+ * every restart, so the difference across one would report a negative
+ * number or hide everything the ended process lost. The peak fill is
+ * missing rather than zero when no point knew its limit - a share of an
+ * unknown limit is not a share of nothing.
+ */
+export function bufferSummary(points: RelayBufferPoint[], stepSeconds: number) {
+  let dropped = 0;
+  let offlineSteps = 0;
+  let restarts = 0;
+  let peakPercent: number | undefined;
+  for (const point of points) {
+    if (point.dropped_delta !== null && point.dropped_delta > 0) dropped += point.dropped_delta;
+    if (point.disconnected) offlineSteps += 1;
+    if (point.restarted) restarts += 1;
+    if (point.bytes_limit > 0) {
+      const share = (point.bytes_used_max / point.bytes_limit) * 100;
+      peakPercent = peakPercent === undefined ? share : Math.max(peakPercent, share);
+    }
+  }
+  return { dropped, restarts, peakPercent, offlineMinutes: Math.round((offlineSteps * stepSeconds) / 60) };
+}
+
+/**
+ * The buffer of a relay over a window.
+ *
+ * The last heartbeat answers "how full is it now" and nothing else. This
+ * is the rest, and it is what an operator reads the morning after: the
+ * fill against the limit, the items waiting, the results the site lost
+ * between two points, the stretches when the relay had nothing upstream
+ * to send to, and the moments it restarted - which is the only thing that
+ * explains a drop counter falling back to zero.
+ */
+function BufferHistory({ relay }: { relay: Relay }) {
+  const t = useT();
+  const [range, setRange] = useState<BufferRangeName>("24h");
+  const { data, error } = useQuery({
+    queryKey: ["relays", relay.id, "buffer-history", range],
+    queryFn: () => api.get<RelayBufferHistory>(historyAddress(relay.id, range)),
+    refetchInterval: 60 * 1000,
+  });
+
+  const points = data?.points ?? [];
+  const times = points.map((point) => point.at);
+  const summary = bufferSummary(points, data?.step_seconds ?? 60);
+  // The top of the chart is the largest limit the window saw, so the fill
+  // is read against the room it had rather than against itself.
+  const limit = Math.max(0, ...points.map((point) => point.bytes_limit));
+  const ceiling = limit > 0 ? limit : undefined;
+  const band = ceiling ?? Math.max(1, ...points.map((point) => point.bytes_used_max));
+
+  const fillSeries: AreaSeries[] = [
+    { name: t("Buffered"), tone: "accent", values: points.map((point) => point.bytes_used) },
+  ];
+  if (limit > 0) {
+    fillSeries.push({ name: t("Limit"), tone: "neutral", line: true, values: points.map((point) => point.bytes_limit) });
+  }
+  // The outage is drawn as a band the height of the chart over the points
+  // that had no upstream, and a restart as a single mark: both are
+  // stretches of the same time axis, so they belong on the same picture
+  // rather than in a sentence underneath it.
+  fillSeries.push({
+    name: t("No upstream"), tone: "error",
+    values: points.map((point) => (point.disconnected ? band : undefined)),
+  });
+  fillSeries.push({
+    name: t("Relay restarted"), tone: "warn", line: true,
+    values: points.map((point) => (point.restarted ? band : undefined)),
+  });
+
+  const waitingSeries: AreaSeries[] = [
+    { name: t("Items waiting"), tone: "info", values: points.map((point) => point.item_count) },
+    {
+      name: t("Results dropped"), tone: "error", line: true,
+      values: points.map((point) => (point.dropped_delta === null ? undefined : point.dropped_delta)),
+    },
+  ];
+
+  return (
+    <Card
+      className="span-12"
+      title={t("Buffer history")}
+      description={t("What the relay reported about its spool over the window. The raw reports are kept for {raw} h and the quarter-hour rollups for {rollup} days; a window reaching further back shows nothing because nothing is kept, not because the relay was quiet.", {
+        raw: data?.raw_retention_hours ?? 0, rollup: data?.rollup_retention_days ?? 0,
+      })}
+      footer={
+        <Actions>
+          <div className="segmented" role="group" aria-label={t("Window")} data-testid="buffer-range">
+            {BUFFER_RANGES.map((name) => (
+              <button key={name} className={range === name ? "active" : ""} onClick={() => setRange(name)}>
+                {name}
+              </button>
+            ))}
+          </div>
+        </Actions>
+      }
+    >
+      {error ? (
+        <ErrorBox error={error} />
+      ) : !data ? (
+        <Empty>{t("Loading…")}</Empty>
+      ) : points.length === 0 ? (
+        <p className="fp-blank">
+          {t("The relay reported nothing in this window. A relay reports every minute while it reaches the centre; a silent relay is on the state above, not here.")}
+        </p>
+      ) : (
+        <>
+          <div data-testid="buffer-summary">
+            <StatusBar segments={[
+              {
+                label: t("Peak fill"),
+                value: summary.peakPercent === undefined ? undefined : Math.round(summary.peakPercent),
+                tone: summary.peakPercent !== undefined && summary.peakPercent > 85 ? "error"
+                  : summary.peakPercent !== undefined && summary.peakPercent > 70 ? "warn" : "ok",
+              },
+              { label: t("Minutes without upstream"), value: summary.offlineMinutes, tone: summary.offlineMinutes > 0 ? "warn" : "ok" },
+              { label: t("Results dropped"), value: summary.dropped, tone: summary.dropped > 0 ? "error" : "ok" },
+              { label: t("Restarts"), value: summary.restarts, tone: summary.restarts > 0 ? "warn" : "neutral" },
+            ]} />
+          </div>
+          <AreaChart times={times} series={fillSeries} max={ceiling} format={bytes}
+            peak={data.rollup ? points.map((point) => point.bytes_used_max) : undefined} />
+          <ChartLegend items={[
+            { name: t("Buffered"), tone: "accent" },
+            ...(limit > 0 ? [{ name: t("Limit"), tone: "neutral" as const }] : []),
+            { name: t("No upstream"), tone: "error" },
+            { name: t("Relay restarted"), tone: "warn" },
+            ...(data.rollup ? [{ name: t("peak of the step"), tone: "accent" as const, dashed: true }] : []),
+          ]} />
+          <AreaChart times={times} series={waitingSeries} height={110}
+            format={(value) => String(Math.round(value))} />
+          <ChartLegend items={[
+            { name: t("Items waiting"), tone: "info" },
+            { name: t("Results dropped between two reports"), tone: "error" },
+          ]} />
+          {data.alerts.length > 0 && (
+            <Pairs>
+              {data.alerts.map((alert) => (
+                <Pair key={alert.id} label={alert.rule_name}>
+                  <span className={alert.severity === "critical" ? "badge error" : "badge warn"}>
+                    {alert.severity}
+                  </span>
+                  {alert.detail && <div className="source">{alert.detail}</div>}
+                  <div className="source">
+                    {t("since")} <Time value={alert.fired_at ?? alert.started_at} />
+                  </div>
+                </Pair>
+              ))}
+            </Pairs>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/**
  * One relay: what it is, what it reported, the hosts that come through it,
  * and the way to cut it off.
  */
@@ -237,6 +451,8 @@ export function RelayPage() {
             </Pairs>
           )}
         </Card>
+
+        <BufferHistory relay={relay} />
 
         <Card className="span-12" title={t("Hosts attested")} description={t("The hosts whose open session came through this relay. A host connects directly one day and through the relay the next; only the open session says which is true now.")} flush>
           <HostsTable hosts={hosts} />

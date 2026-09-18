@@ -11,7 +11,8 @@ import (
 func TestPlanDistinguishesMissingFileFromDifferentContent(t *testing.T) {
 	desired := []byte("new content\n")
 
-	missing := Compute(File{Path: "/etc/x.conf"}, desired, "0644", "root", "root", false, false)
+	missing := Compute(File{Path: "/etc/x.conf"}, Desired{
+		Content: desired, Mode: "0644", Owner: "root", Group: "root"})
 	if missing.Action != PlanCreate {
 		t.Errorf("a non-existent file has the plan %q", missing.Action)
 	}
@@ -22,7 +23,7 @@ func TestPlanDistinguishesMissingFileFromDifferentContent(t *testing.T) {
 	other := Compute(File{
 		Path: "/etc/x.conf", Exists: true, SHA256: "aaa", Mode: "0644",
 		Owner: "root", Group: "root",
-	}, desired, "0644", "root", "root", false, false)
+	}, Desired{Content: desired, Mode: "0644", Owner: "root", Group: "root"})
 	if other.Action != PlanUpdate {
 		t.Errorf("a file with different content has the plan %q", other.Action)
 	}
@@ -47,7 +48,7 @@ func TestPlanNoChangeIsAnAnswer(t *testing.T) {
 	plan := Compute(File{
 		Path: "/etc/x.conf", Exists: true, SHA256: fingerprint, Mode: "0644",
 		Owner: "root", Group: "root",
-	}, desired, "0644", "root", "root", false, false)
+	}, Desired{Content: desired, Mode: "0644", Owner: "root", Group: "root"})
 
 	if plan.Action != PlanNoChange {
 		t.Fatalf("the plan of an identical file is %q (%+v)", plan.Action, plan.Changes)
@@ -64,7 +65,7 @@ func TestPlanSeesPermissionsAlone(t *testing.T) {
 	plan := Compute(File{
 		Path: "/etc/x.conf", Exists: true, SHA256: Fingerprint(desired), Mode: "0644",
 		Owner: "root", Group: "root",
-	}, desired, "0600", "root", "root", false, false)
+	}, Desired{Content: desired, Mode: "0600", Owner: "root", Group: "root"})
 
 	if plan.Action != PlanUpdate {
 		t.Fatalf("a permissions change gave the plan %q", plan.Action)
@@ -80,7 +81,8 @@ func TestPlanSeesPermissionsAlone(t *testing.T) {
 func TestPlanOfSecretFileCarriesNoContent(t *testing.T) {
 	plan := Compute(File{
 		Path: "/etc/secret.conf", Exists: true, SHA256: "aaa", Mode: "0600",
-	}, []byte("password-from-store"), "0600", "root", "root", true, false)
+	}, Desired{Content: []byte("password-from-store"), Mode: "0600", Owner: "root",
+		Group: "root", FromSecret: true})
 
 	if plan.DesiredSHA256 != "" {
 		t.Error("the plan of a secret file carries the desired content fingerprint")
@@ -94,12 +96,12 @@ func TestPlanOfSecretFileCarriesNoContent(t *testing.T) {
 // does not exist is visible before approval, not after.
 func TestRemovalPlanDistinguishesExistingFile(t *testing.T) {
 	present := Compute(File{Path: "/etc/x.conf", Exists: true, SHA256: "aaa"},
-		nil, "", "", "", false, true)
+		Desired{Removal: true})
 	if present.Action != PlanRemove {
 		t.Errorf("removing an existing file has the plan %q", present.Action)
 	}
 
-	absent := Compute(File{Path: "/etc/x.conf"}, nil, "", "", "", false, true)
+	absent := Compute(File{Path: "/etc/x.conf"}, Desired{Removal: true})
 	if absent.Action != PlanRemoveAbsent {
 		t.Errorf("removing a non-existent file has the plan %q", absent.Action)
 	}
@@ -112,7 +114,7 @@ func TestPlanFingerprintDoesNotDependOnValidatorOutput(t *testing.T) {
 	desired := []byte("content\n")
 	current := File{Path: "/etc/x.conf", Exists: true, SHA256: "aaa", Mode: "0644"}
 
-	plan := Compute(current, desired, "0644", "", "", false, false)
+	plan := Compute(current, Desired{Content: desired, Mode: "0644"})
 
 	// The fingerprint is computed directly on two plans differing only in
 	// the validator output. Setting the field after Compute would check
@@ -142,4 +144,108 @@ func containsChange(changes []string, fragment string) bool {
 		}
 	}
 	return false
+}
+
+// TestPlanCarriesTheWholeIntendedState guards what an approval is meant to
+// cover: not a digest, but the inode, the rule the path was resolved
+// under, who would check the content and what would have to be reloaded
+// afterwards.
+func TestPlanCarriesTheWholeIntendedState(t *testing.T) {
+	desired := []byte("server {}\n")
+	identity := ValidatorIdentity{Known: true, Name: "nginx", Command: "/usr/sbin/nginx",
+		Available: true, Version: "nginx version: nginx/1.22.1"}
+
+	plan := Compute(File{
+		Path: "/etc/nginx/conf.d/app.conf", Exists: true, SHA256: "aaa",
+		Mode: "0644", Owner: "root", Group: "root",
+	}, Desired{Content: desired, Mode: "0600", Owner: "www-data", Group: "root",
+		Validator: identity, KeptVersions: 3})
+
+	if !plan.ContentChanges || !plan.ModeChanges || !plan.OwnerChanges {
+		t.Errorf("the plan does not mark what changes: %+v", plan)
+	}
+	if plan.GroupChanges {
+		t.Error("the plan marks a group change although the group stays")
+	}
+	if plan.SymlinkPolicy != SymlinkPolicyNoFollow {
+		t.Errorf("symlink policy = %q", plan.SymlinkPolicy)
+	}
+	if plan.Validator.Name != "nginx" || plan.Validator.Version == "" || !plan.Validator.Known {
+		t.Errorf("the plan does not say who would check the content: %+v", plan.Validator)
+	}
+	if plan.KeptVersions != 3 {
+		t.Errorf("kept versions = %d", plan.KeptVersions)
+	}
+	// The file has a consumer: a written file is not an applied change
+	// until the service reads it again.
+	if len(plan.Consumers) == 0 || plan.Consumers[0].Unit != "nginx.service" ||
+		plan.Consumers[0].Action != ConsumerReload {
+		t.Errorf("the plan does not name what has to be reloaded: %+v", plan.Consumers)
+	}
+	if plan.ConsumersReason != "" {
+		t.Errorf("a plan with consumers also explains their absence: %q", plan.ConsumersReason)
+	}
+}
+
+// TestAPlanWithoutConsumersSaysWhy guards the doctrine on an empty list:
+// "nothing to reload" and "the panel knows of nothing" are different
+// answers, and only one of them is silence.
+func TestAPlanWithoutConsumersSaysWhy(t *testing.T) {
+	plan := Compute(File{Path: "/etc/motd", Exists: true, SHA256: "aaa", Mode: "0644"},
+		Desired{Content: []byte("hello\n"), Mode: "0644"})
+	if len(plan.Consumers) != 0 {
+		t.Fatalf("a file read at every use has consumers: %+v", plan.Consumers)
+	}
+	if plan.ConsumersReason == "" {
+		t.Error("an empty list of consumers is not explained")
+	}
+
+	unknown := Compute(File{Path: "/etc/something-nobody-knows.conf", Exists: true, SHA256: "a"},
+		Desired{Content: []byte("x\n"), Mode: "0644"})
+	if !strings.Contains(unknown.ConsumersReason, "knows of no service") {
+		t.Errorf("a path with no entry in the table claims knowledge: %q", unknown.ConsumersReason)
+	}
+}
+
+// TestAMissingValidatorIsNotAPassedCheck guards the plan of a host without
+// the tool: the identity says the tool is not there, which is not the same
+// as a check that found nothing wrong.
+func TestAMissingValidatorIsNotAPassedCheck(t *testing.T) {
+	plan := Compute(File{Path: "/etc/nginx/conf.d/app.conf", Exists: false},
+		Desired{Content: []byte("server {}\n"), Mode: "0644",
+			Validator: ValidatorIdentity{Known: true, Name: "nginx", Command: "/usr/sbin/nginx",
+				VersionUnavailableReason: "the tool is not installed on this host"}})
+	if plan.Validator.Available {
+		t.Error("the plan claims a tool the host does not have")
+	}
+	if plan.Validator.VersionUnavailableReason == "" {
+		t.Error("the plan does not say why there is no version")
+	}
+}
+
+// TestThePlanFingerprintIgnoresTheSurroundings guards that an approval
+// binds the change and not the environment: the version of the tool, the
+// units installed and the number of copies kept may differ between the
+// plan and the write without turning it into a different change.
+func TestThePlanFingerprintIgnoresTheSurroundings(t *testing.T) {
+	current := File{Path: "/etc/nginx/conf.d/app.conf", Exists: true, SHA256: "aaa", Mode: "0644"}
+	desired := Desired{Content: []byte("server {}\n"), Mode: "0644",
+		Validator: ValidatorIdentity{Known: true, Name: "nginx", Available: true,
+			Version: "nginx version: nginx/1.22.1"}}
+
+	before := Compute(current, desired)
+	desired.Validator.Version = "nginx version: nginx/1.24.0"
+	desired.KeptVersions = 7
+	after := Compute(current, desired)
+
+	if before.PlanHash != after.PlanHash {
+		t.Error("an upgrade of the tool turned an approved change into a different one")
+	}
+	// The identity of the checker still differs where it describes the
+	// check itself: a validator that is suddenly unavailable is a
+	// different plan.
+	desired.Validator.Available = false
+	if Compute(current, desired).PlanHash == before.PlanHash {
+		t.Error("a plan whose validator disappeared has the same fingerprint")
+	}
 }

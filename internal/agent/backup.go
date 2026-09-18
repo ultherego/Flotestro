@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
@@ -153,6 +155,15 @@ func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelo
 		return nil, rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 			"the agent has no connection through which a secret could be fetched")
 	}
+	// The panel issues one lease per task and redeems it once: a task that
+	// reads the repository before the change, writes it and reads it again
+	// to verify asks for the same secret three times, and the second ask
+	// would be refused. The value is therefore fetched once and kept for
+	// the life of this task - in memory, next to the task that is using it
+	// anyway - and forgotten with it.
+	if value, held := e.taskSecret(task.GetTaskId(), reference); held {
+		return value, nil
+	}
 	value, err := e.secrets(ctx, task.GetTaskId(), reference.Name, reference.Version)
 	if err != nil {
 		// The reason for the refusal is the content of the result; the value is
@@ -160,7 +171,49 @@ func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelo
 		return nil, rejected(agentv1.TaskResult_STATUS_REJECTED, RejectPrecondition,
 			"the secret "+reference.Name+" was not fetched: "+err.Error())
 	}
+	e.keepTaskSecret(task.GetTaskId(), reference, value)
 	return value, nil
+}
+
+// secretKey names one secret of one task: the same name and version asked
+// for twice within a task is the same lease.
+func secretKey(taskID string, reference opspec.SecretRef) string {
+	return taskID + "\x00" + reference.Name + "\x00" + strconv.Itoa(int(reference.Version))
+}
+
+// taskSecret answers a value already fetched for this task.
+func (e *TaskExecutor) taskSecret(taskID string, reference opspec.SecretRef) ([]byte, bool) {
+	e.secretsMu.Lock()
+	defer e.secretsMu.Unlock()
+	value, held := e.taskSecrets[secretKey(taskID, reference)]
+	return value, held
+}
+
+// keepTaskSecret remembers a value for the life of the task.
+func (e *TaskExecutor) keepTaskSecret(taskID string, reference opspec.SecretRef, value []byte) {
+	e.secretsMu.Lock()
+	defer e.secretsMu.Unlock()
+	if e.taskSecrets == nil {
+		e.taskSecrets = map[string][]byte{}
+	}
+	e.taskSecrets[secretKey(taskID, reference)] = value
+}
+
+// forgetTaskSecrets drops what a finished task fetched. The values are
+// overwritten before they are dropped: the memory is reused by whatever
+// runs next, and a secret has no business being in it.
+func (e *TaskExecutor) forgetTaskSecrets(taskID string) {
+	e.secretsMu.Lock()
+	defer e.secretsMu.Unlock()
+	prefix := taskID + "\x00"
+	for key, value := range e.taskSecrets {
+		if strings.HasPrefix(key, prefix) {
+			for i := range value {
+				value[i] = 0
+			}
+			delete(e.taskSecrets, key)
+		}
+	}
 }
 
 // backupJSON decodes the state of the repository from the result of the task.

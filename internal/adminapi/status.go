@@ -127,6 +127,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"certificates":        s.certificatesStatus(ctx),
 		"crypto":              s.cryptoStatus(ctx),
 		"housekeeping":        s.housekeepingStatus(),
+		"monitoring":          s.monitoringStatus(ctx),
 		"build":               s.buildStatus(),
 	}
 	// The verdict of the whole: false when any block that could be judged
@@ -632,6 +633,65 @@ func (s *Server) housekeepingStatus() statusBlock {
 		return statusFailed("the last sweep failed: "+report.LastError, facts)
 	}
 	return statusOK(facts)
+}
+
+// monitoringStatus reads the machinery behind the charts and the alerts:
+// how much raw history is on disk, how far behind the rollup is, and which
+// instance is judging the rules.
+//
+// The backlog is the number worth watching. Every stored sample marks the
+// quarter-hour it belongs to, and the rollup clears those marks; a backlog
+// that grows and does not come back down is a rollup that has stopped, and
+// the long charts are quietly standing still while the short ones look
+// fine. The retention of a partition that still owes a recomputation is
+// held back too, so the same number explains a database that stops
+// shrinking.
+func (s *Server) monitoringStatus(ctx context.Context) statusBlock {
+	if s.monitoring == nil {
+		return statusUnknown("this panel keeps no resource samples", nil)
+	}
+	state, err := s.monitoring.MaintenanceState(ctx)
+	if err != nil {
+		return statusUnknown("the state of the monitoring could not be read: "+err.Error(), nil)
+	}
+	facts := map[string]any{
+		"raw_partitioned":        state.Partitioned,
+		"raw_partitions":         state.Partitions,
+		"dirty_buckets":          state.DirtyBuckets,
+		"hosts_with_rollup_mark": state.HostsWatermarked,
+		"sample_identities":      state.SampleIdentities,
+		"raw_retention":          state.RawRetention,
+		"rollup_retention":       state.RollupRetention,
+		"max_lateness":           state.MaxLateness,
+		"raw_query_window":       state.RawQueryWindow,
+		"clock_skew_limit":       state.ClockSkewLimit,
+		"partitions_ahead_days":  state.PartitionsAhead,
+		"evaluator_holder":       state.EvaluatorHolder,
+	}
+	if state.OldestRawDay != nil {
+		facts["oldest_raw_day"] = *state.OldestRawDay
+	}
+	if state.NewestRawDay != nil {
+		facts["newest_raw_day"] = *state.NewestRawDay
+	}
+	if state.OldestDirtyAt != nil {
+		facts["oldest_dirty_bucket_at"] = *state.OldestDirtyAt
+	}
+	if state.EvaluatorUntil != nil {
+		facts["evaluator_lease_until"] = *state.EvaluatorUntil
+	}
+	block := statusOK(facts)
+	switch {
+	case !state.Partitioned:
+		// The raw samples are still one table: the retention then deletes
+		// by the row, which is what the partitions were introduced to stop.
+		block.Attention = "the raw samples are not partitioned; the retention deletes rows instead of dropping partitions"
+	case state.Partitions <= 1:
+		block.Attention = "no partition exists ahead of today; the samples of tomorrow have nowhere to go"
+	case state.OldestDirtyAt != nil && time.Since(*state.OldestDirtyAt) > 2*time.Hour:
+		block.Attention = "a quarter-hour has been waiting to be rolled up for more than two hours"
+	}
+	return block
 }
 
 // buildStatus names the binary and the process; it is the block a bug

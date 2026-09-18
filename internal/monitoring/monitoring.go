@@ -10,10 +10,13 @@ package monitoring
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,9 +38,66 @@ const (
 	evaluationInterval = SamplingInterval
 
 	// DefaultRawRetention and DefaultRollupRetention are the retention of
-	// the raw samples and of the quarter-hour rollups.
-	DefaultRawRetention    = 48 * time.Hour
-	DefaultRollupRetention = 30 * 24 * time.Hour
+	// the raw samples and of the quarter-hour rollups: a week of readings
+	// at full resolution, a quarter of a year of quarter-hours. A week
+	// covers the question an operator asks on a Monday about a Saturday
+	// night; the rollups carry the capacity trend a purchase is argued
+	// from. Both are settings, and the raw samples are dropped a
+	// partition at a time, so a longer window costs storage rather than a
+	// sweep that holds the database.
+	DefaultRawRetention    = 7 * 24 * time.Hour
+	DefaultRollupRetention = 90 * 24 * time.Hour
+	// DefaultMaxLateness is how long after it was taken a sample may still
+	// arrive and be stored. A relay whose link to the centre was down for a
+	// day drains its spool and every reading lands in the chart it belongs
+	// to; anything older is refused with a reason rather than drawn at the
+	// wrong moment.
+	DefaultMaxLateness = 24 * time.Hour
+	// DefaultRawQueryWindow is the longest window a chart reads raw
+	// samples over. It is not a limit on the charts - the ranges do that -
+	// but the promise the retention is checked against: what the panel
+	// offers to show at full resolution.
+	DefaultRawQueryWindow = 24 * time.Hour
+	// DefaultClockSkewLimit is how far a host's clock may differ from the
+	// panel's before the sample is stamped with the panel's time instead.
+	// The host's clock is an observation, not an identity: the sample is
+	// identified by its boot and its sequence, so a stamp corrected here
+	// changes where the point is drawn and never which sample it is.
+	DefaultClockSkewLimit = 5 * time.Minute
+	// DefaultPartitionsAhead is how many daily partitions of the raw
+	// samples exist before they are needed. An insert into a day no
+	// partition covers is an error, so the margin is the number of days
+	// the maintenance may fail to run without a fleet losing its samples.
+	DefaultPartitionsAhead = 3
+	// DefaultEvaluatorLease is how long one control-plane instance holds
+	// the right to evaluate the alert rules. Three renewals fit in it,
+	// like the ownership of a session: a renewal that fails once does not
+	// hand the fleet over, and an instance that stops renewing loses it
+	// within one evaluation interval.
+	DefaultEvaluatorLease = 45 * time.Second
+	// evaluatorRenewEvery is how often the holder renews while it
+	// evaluates.
+	evaluatorRenewEvery = 15 * time.Second
+	// rollupCatchUp is how far back the rollup looks for buckets nobody
+	// queued. Every stored sample marks its bucket in the transaction that
+	// stored it, so this scan finds nothing on a healthy panel; it is the
+	// net under the rows a database held before the queue existed. Bounded
+	// on purpose: an unbounded one would read the whole retention window
+	// every quarter of an hour.
+	rollupCatchUp = 4 * rollupInterval
+	// rollupBatchSize is how many buckets one pass of the rollup claims.
+	rollupBatchSize = 500
+	// rollupMaxPasses bounds one run of the rollup, so a backlog is worked
+	// off over several runs rather than in one transaction that never ends.
+	rollupMaxPasses = 40
+	// identitySweepBatch and identitySweepPasses bound the deletion of the
+	// sample identities. They are the one part of the monitoring that is
+	// still deleted by the row - the identity cannot be partitioned by
+	// time, because the whole point of it is that it does not contain the
+	// host's clock - so it is deleted in bounded batches, like the rest of
+	// the housekeeping, and never as one statement over a day of a fleet.
+	identitySweepBatch  = 20000
+	identitySweepPasses = 16
 )
 
 // Filesystem is the usage of one mounted filesystem as the agent sent it.
@@ -60,7 +120,19 @@ type Interface struct {
 
 // Sample is one reading of a host as it is stored.
 type Sample struct {
+	// BootID and Sequence identify the reading: the boot the agent runs on
+	// and the number of the sample within that boot, counted from one.
+	// Together with the host they are what a second delivery is recognised
+	// by. Both are empty on a sample from an agent that predates them;
+	// such a sample is deduplicated by its moment alone, as before.
+	BootID   string
+	Sequence uint64
+	// At is the moment the host says it took the reading and the moment
+	// the chart draws it at; ReceivedAt is when the panel got it. They
+	// differ by whatever the sample spent in a spool, and freshness is
+	// judged by the second one.
 	At              time.Time
+	ReceivedAt      time.Time
 	CPUPercent      float64
 	Load1           float64
 	Load5           float64
@@ -91,55 +163,203 @@ type Sample struct {
 	AgentCPUPercentMax *float64
 }
 
-// Options configures the store.
+// Options configures the store. Every field is a setting of the
+// installation; a zero one is the default named above.
 type Options struct {
 	RawRetention    time.Duration
 	RollupRetention time.Duration
+	// MaxLateness is how old a sample may be on arrival and still be
+	// stored. Past it the panel answers the host with a terminal refusal
+	// and the gap stays a gap with a reason.
+	MaxLateness time.Duration
+	// RawQueryWindow is how far back the panel offers raw resolution.
+	RawQueryWindow time.Duration
+	// ClockSkewLimit is how far a host's clock may differ from the panel's
+	// before the sample is stamped with the panel's time.
+	ClockSkewLimit time.Duration
+	// PartitionsAhead is how many days of raw partitions exist ahead of
+	// today.
+	PartitionsAhead int
+	// EvaluatorLease is how long one instance holds the right to evaluate
+	// the alert rules.
+	EvaluatorLease time.Duration
 }
+
+// withDefaults fills the fields the installation left out.
+func (o Options) withDefaults() Options {
+	if o.RawRetention <= 0 {
+		o.RawRetention = DefaultRawRetention
+	}
+	if o.RollupRetention <= 0 {
+		o.RollupRetention = DefaultRollupRetention
+	}
+	if o.MaxLateness <= 0 {
+		o.MaxLateness = DefaultMaxLateness
+	}
+	if o.RawQueryWindow <= 0 {
+		o.RawQueryWindow = DefaultRawQueryWindow
+	}
+	if o.ClockSkewLimit <= 0 {
+		o.ClockSkewLimit = DefaultClockSkewLimit
+	}
+	if o.PartitionsAhead <= 0 {
+		o.PartitionsAhead = DefaultPartitionsAhead
+	}
+	if o.EvaluatorLease <= 0 {
+		o.EvaluatorLease = DefaultEvaluatorLease
+	}
+	return o
+}
+
+// Validate refuses a configuration that throws data away by definition.
+//
+// Raw samples have to be kept for at least as long as the panel offers to
+// show them plus the longest a sample may take to arrive: with a shorter
+// retention the reading a relay delivers after its link comes back is
+// dropped by the sweep in the same hour it landed, and the chart the panel
+// promises at full resolution has a hole nobody ordered. The check runs
+// before the panel serves anything, because the alternative is finding out
+// from a missing week.
+func (o Options) Validate() error {
+	filled := o.withDefaults()
+	if filled.RawRetention < filled.RawQueryWindow+filled.MaxLateness {
+		return fmt.Errorf(
+			"%s: the raw retention %s is shorter than the raw query window %s plus the maximum lateness %s; "+
+				"raise the retention or lower the window or the lateness",
+			ErrorRetentionTooShort, filled.RawRetention, filled.RawQueryWindow, filled.MaxLateness)
+	}
+	if filled.PartitionsAhead > maxPartitionsAhead {
+		return fmt.Errorf("at most %d days of raw partitions may be created ahead, not %d",
+			maxPartitionsAhead, filled.PartitionsAhead)
+	}
+	return nil
+}
+
+// maxPartitionsAhead bounds the margin. A partition is a table; a
+// configuration asking for a year of empty ones is a mistake, not a
+// preference.
+const maxPartitionsAhead = 60
 
 // Store is the database side of the monitoring.
 type Store struct {
 	pool    *pgxpool.Pool
 	log     *slog.Logger
 	options Options
+	// instanceID names this control-plane process among the ones that
+	// share the database. It says who holds the evaluator's lease and
+	// nothing else; who holds it is read from the row every time.
+	instanceID string
 }
 
 func NewStore(pool *pgxpool.Pool, log *slog.Logger, options Options) *Store {
-	if options.RawRetention <= 0 {
-		options.RawRetention = DefaultRawRetention
-	}
-	if options.RollupRetention <= 0 {
-		options.RollupRetention = DefaultRollupRetention
-	}
-	return &Store{pool: pool, log: log, options: options}
+	return &Store{pool: pool, log: log, options: options.withDefaults(), instanceID: uuid.NewString()}
 }
+
+// ClockSkewLimit and MaxLateness are what the gateway judges an arriving
+// sample by: how far the host's clock may be out before the panel's time
+// is used, and how old a sample may be before it is refused outright.
+func (s *Store) ClockSkewLimit() time.Duration { return s.options.ClockSkewLimit }
+
+func (s *Store) MaxLateness() time.Duration { return s.options.MaxLateness }
+
+// Settings returns the retention and lateness the store runs on, for the
+// status screen.
+func (s *Store) Settings() Options { return s.options }
+
+// The codes the monitoring puts on a refusal, as the error guide lists
+// them. They travel to the host on the acknowledgement of a sample and to
+// the operator on the screen, so they are named once here rather than
+// written out at each place that sends one.
+const (
+	// ErrorSampleTooOld: the sample reached the panel older than the raw
+	// samples are kept for and was not stored.
+	ErrorSampleTooOld = "metric_sample_too_old"
+	// ErrorSampleNotKept: the gateway that received it keeps no samples.
+	ErrorSampleNotKept = "metric_sample_not_kept"
+	// ErrorRetentionTooShort: the configuration deletes samples before
+	// they can arrive; the panel refuses to start on it.
+	ErrorRetentionTooShort = "metrics_retention_too_short"
+)
+
+// RecordOutcome says what one delivery of a sample did. The gateway
+// answers the host with it: a sample the panel already holds is
+// acknowledged all the same, so the copy the agent kept for the resend can
+// go, and nothing is written a second time.
+type RecordOutcome string
+
+const (
+	// OutcomeUnknown is the outcome of a delivery that failed; the
+	// acknowledgement is then not sent at all and the sample comes again.
+	OutcomeUnknown RecordOutcome = ""
+	// OutcomePersisted: this delivery wrote the sample.
+	OutcomePersisted RecordOutcome = "persisted"
+	// OutcomeDuplicate: the panel already held it.
+	OutcomeDuplicate RecordOutcome = "duplicate"
+)
 
 // Record stores a sample of a host and marks the host as reporting.
 //
-// A sample that arrives twice - the agent resent after a broken stream -
-// is stored once: the pair of host and moment is the key.
-func (s *Store) Record(ctx context.Context, hostID string, sample Sample) error {
+// A sample that arrives twice - the agent drained its spool after a broken
+// stream, the relay carried a record whose acknowledgement never got back -
+// is stored once. What makes it the same sample is the host, the boot the
+// agent runs on and the sequence within that boot, not the moment: a clock
+// that is stepped, or a virtual machine resumed from a snapshot, changes
+// the moment of every following reading, and identity by the clock would
+// then either count a resend twice or drop a genuinely new sample onto an
+// older one.
+//
+// The identity, the reading, the mark on the bucket and the freshness of
+// the host are one transaction. That is what lets the gateway acknowledge
+// after the commit and nowhere earlier: whatever the host is told, the
+// panel either holds the whole sample or holds none of it.
+//
+// A sample from an agent that sends no identity - one release older - is
+// stored under the old rule, the host and the moment. It keeps its charts;
+// what it does not have is a resend that is free.
+func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (RecordOutcome, error) {
 	filesystems, err := json.Marshal(orEmptyFilesystems(sample.Filesystems))
 	if err != nil {
-		return err
+		return OutcomeUnknown, err
 	}
 	interfaces, err := json.Marshal(orEmptyInterfaces(sample.Interfaces))
 	if err != nil {
-		return err
+		return OutcomeUnknown, err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return OutcomeUnknown, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if sample.BootID != "" && sample.Sequence > 0 {
+		var taken bool
+		err := tx.QueryRow(ctx, `
+			insert into metric_samples (host_id, boot_id, sequence, at, received_at)
+			values ($1, $2, $3, $4, coalesce($5::timestamptz, now()))
+			on conflict (host_id, boot_id, sequence) do nothing
+			returning true`,
+			hostID, sample.BootID, int64(sample.Sequence), sample.At,
+			orNullTime(sample.ReceivedAt)).Scan(&taken)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The panel holds this reading already. Nothing is written -
+			// not even the freshness of the host, because a second
+			// delivery of an old sample says nothing new about the host -
+			// and the transaction is rolled back by the deferred call.
+			return OutcomeDuplicate, nil
+		}
+		if err != nil {
+			return OutcomeUnknown, err
+		}
+	}
 
 	if _, err := tx.Exec(ctx, `
 		insert into host_metrics (host_id, at, cpu_percent, load1, load5, load15,
 		    memory_total, memory_used, memory_available, swap_total, swap_used,
 		    uptime_seconds, filesystems, interfaces,
-		    agent_rss_bytes, agent_cpu_percent, agent_goroutines, agent_open_fds, helper_rss_bytes)
+		    agent_rss_bytes, agent_cpu_percent, agent_goroutines, agent_open_fds, helper_rss_bytes,
+		    received_at)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb, $14::jsonb,
-		        $15, $16, $17, $18, $19)
+		        $15, $16, $17, $18, $19, coalesce($20::timestamptz, now()))
 		on conflict (host_id, at) do nothing`,
 		hostID, sample.At, sample.CPUPercent, sample.Load1, sample.Load5, sample.Load15,
 		int64(sample.MemoryTotal), int64(sample.MemoryUsed), int64(sample.MemoryAvailable),
@@ -147,17 +367,43 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) error 
 		filesystems, interfaces,
 		nullableUint64(sample.AgentRSSBytes), sample.AgentCPUPercent,
 		nullableUint32(sample.AgentGoroutines), nullableUint32(sample.AgentOpenFDs),
-		nullableUint64(sample.HelperRSSBytes)); err != nil {
-		return err
+		nullableUint64(sample.HelperRSSBytes), orNullTime(sample.ReceivedAt)); err != nil {
+		return OutcomeUnknown, err
+	}
+	// The quarter-hour this reading falls in has to be computed again. The
+	// mark is written here rather than left to the rollup to notice,
+	// because a reading that arrives late for a quarter the rollup has
+	// already finished is exactly the one nobody would notice: the
+	// rollup's own progress says that quarter is done.
+	if _, err := tx.Exec(ctx, `
+		insert into metric_rollup_dirty (host_id, bucket_at)
+		values ($1, date_trunc('hour', $2::timestamptz)
+		            + (extract(minute from $2::timestamptz)::int / 15) * interval '15 minutes')
+		on conflict (host_id, bucket_at) do nothing`, hostID, sample.At); err != nil {
+		return OutcomeUnknown, err
 	}
 	// The host row carries the moment of the newest sample; an old sample
 	// replayed after a break must not move it backwards.
 	if _, err := tx.Exec(ctx, `
 		update hosts set last_metrics_at = greatest(coalesce(last_metrics_at, $2), $2)
 		where id = $1`, hostID, sample.At); err != nil {
-		return err
+		return OutcomeUnknown, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return OutcomeUnknown, err
+	}
+	return OutcomePersisted, nil
+}
+
+// orNullTime passes a moment the caller did not observe as null, so the
+// database stamps its own. The gateway does observe it - it is the moment
+// the message came off the stream - and a reading that then waits on a
+// busy pool is not thereby fresher than it is.
+func orNullTime(at time.Time) *time.Time {
+	if at.IsZero() {
+		return nil
+	}
+	return &at
 }
 
 // nullableUint64 and nullableUint32 pass an absent value to the database
@@ -209,7 +455,7 @@ func (s *Store) Run(ctx context.Context) {
 		case <-rollup.C:
 			s.maintain(ctx)
 		case <-evaluate.C:
-			if err := s.Evaluate(ctx, time.Now()); err != nil && ctx.Err() == nil {
+			if err := s.EvaluateLeased(ctx, time.Now()); err != nil && ctx.Err() == nil {
 				s.log.Error("the alert rules were not evaluated", "err", err)
 			}
 		}
@@ -217,6 +463,13 @@ func (s *Store) Run(ctx context.Context) {
 }
 
 func (s *Store) maintain(ctx context.Context) {
+	// The partitions of the days ahead come first. Everything else here
+	// delays a chart; a day with no partition to write into refuses every
+	// sample of the fleet, and that is the one failure of the maintenance
+	// that costs readings instead of time.
+	if err := s.EnsurePartitions(ctx, time.Now()); err != nil && ctx.Err() == nil {
+		s.log.Error("the partitions of the raw samples were not prepared", "err", err)
+	}
 	if err := s.Rollup(ctx); err != nil && ctx.Err() == nil {
 		s.log.Error("the samples were not rolled up", "err", err)
 	}
@@ -225,81 +478,193 @@ func (s *Store) maintain(ctx context.Context) {
 	}
 }
 
-// Rollup folds the finished quarter-hours into host_metrics_15m.
+// Rollup recomputes every quarter-hour bucket that owes one.
 //
-// The rollup starts at the newest rolled-up quarter and ends at the start
-// of the current one, so a quarter is written once complete and rewritten
-// only when it was the newest - a sample that arrived late for it is then
-// counted. The network counters are cumulative, so a quarter keeps the
-// last values rather than an average of counters.
+// The previous rollup asked the newest row of host_metrics_15m where to
+// carry on from. That single mark is wrong the moment a fleet has more
+// than one kind of link: a host behind a relay whose line to the centre
+// was down for an hour delivers its readings after every directly
+// connected host has already pushed the mark past that hour, and those
+// readings are then never folded into a quarter at all. They sit in
+// host_metrics until the retention drops them, and the long chart of that
+// one host has a hole with no cause on any screen.
+//
+// Two things replace it. Every stored sample marks its own quarter in the
+// transaction that stored it, so a reading that is late for a quarter the
+// rollup finished long ago says so itself; and the progress mark is kept
+// per host, so no host's progress can speak for another's. The queue is
+// the working part - it is why late data is correct - and the mark is what
+// bounds the catch-up scan and what the panel can show as "rolled up
+// through" for one host.
+//
+// Only finished quarters are computed: the one that is running now would
+// have to be written again on the next pass anyway.
 func (s *Store) Rollup(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, `
-		with bounds as (
-		    select coalesce((select max(at) from host_metrics_15m),
-		                    now() - make_interval(secs => $1)) as since,
-		           date_trunc('hour', now())
-		             + (extract(minute from now())::int / 15) * interval '15 minutes' as upto
+	if err := s.queueFinishedBuckets(ctx); err != nil {
+		return err
+	}
+	for pass := 0; pass < rollupMaxPasses; pass++ {
+		done, err := s.rollupBatch(ctx)
+		if err != nil {
+			return err
+		}
+		if done == 0 {
+			return nil
+		}
+	}
+	// A backlog larger than one run - a panel that was down for a day -
+	// is worked off over the next runs rather than in one transaction.
+	s.log.Info("the rollup left buckets for the next pass",
+		"claimed_per_pass", rollupBatchSize, "passes", rollupMaxPasses)
+	return nil
+}
+
+// queueFinishedBuckets is the net under the queue: it looks over the last
+// hour for a bucket of a host that nobody marked, queues it, and moves
+// that host's mark to the quarter now running.
+//
+// On a healthy panel it finds nothing, because the mark is written with
+// the sample. What it does catch is the rows a database already held when
+// the queue was introduced, and any bucket whose mark was lost. The scan
+// is bounded by the hour rather than by the retention on purpose: an
+// unbounded one would read a week of a fleet's samples every quarter of an
+// hour to find, almost always, nothing.
+func (s *Store) queueFinishedBuckets(ctx context.Context) error {
+	const queue = `
+		with edge as (
+		    select date_trunc('hour', now())
+		             + (extract(minute from now())::int / 15) * interval '15 minutes' as at
 		),
-		bucketed as (
-		    select m.*,
+		pending as (
+		    select m.host_id,
 		           date_trunc('hour', m.at)
 		             + (extract(minute from m.at)::int / 15) * interval '15 minutes' as bucket
-		    from host_metrics m, bounds b
-		    where m.at >= b.since and m.at < b.upto
+		      from host_metrics m
+		      cross join edge
+		      left join metric_rollup_watermarks w on w.host_id = m.host_id
+		     where m.at >= now() - make_interval(secs => $1::double precision)
+		       and m.at >= coalesce(w.complete_through, '-infinity'::timestamptz)
+		       and m.at < edge.at
+		     group by 1, 2
+		),
+		queued as (
+		    insert into metric_rollup_dirty (host_id, bucket_at)
+		    select host_id, bucket from pending
+		    on conflict (host_id, bucket_at) do nothing
+		    returning host_id
 		)
-		insert into host_metrics_15m (host_id, at, cpu_percent, cpu_percent_max,
-		    load1, load5, load15, memory_total, memory_used, memory_used_max,
-		    memory_available, swap_total, swap_used, uptime_seconds,
-		    filesystems, interfaces, samples,
-		    agent_rss_bytes, agent_rss_bytes_max, agent_cpu_percent, agent_cpu_percent_max,
-		    agent_goroutines, agent_open_fds, helper_rss_bytes)
-		select host_id, bucket,
-		       avg(cpu_percent), max(cpu_percent),
-		       avg(load1), avg(load5), avg(load15),
-		       max(memory_total), avg(memory_used)::bigint, max(memory_used),
-		       avg(memory_available)::bigint, max(swap_total), avg(swap_used)::bigint,
-		       (array_agg(uptime_seconds order by at desc))[1],
-		       (array_agg(filesystems order by at desc))[1],
-		       (array_agg(interfaces order by at desc))[1],
-		       count(*),
-		       -- The footprint averages skip the samples without one, so a
-		       -- quarter with a single reading keeps that reading rather
-		       -- than a mean dragged towards zero by the unknowns.
-		       avg(agent_rss_bytes)::bigint, max(agent_rss_bytes),
-		       avg(agent_cpu_percent), max(agent_cpu_percent),
-		       avg(agent_goroutines)::integer, avg(agent_open_fds)::integer,
-		       avg(helper_rss_bytes)::bigint
-		from bucketed
-		group by host_id, bucket
-		on conflict (host_id, at) do update set
-		    cpu_percent = excluded.cpu_percent, cpu_percent_max = excluded.cpu_percent_max,
-		    load1 = excluded.load1, load5 = excluded.load5, load15 = excluded.load15,
-		    memory_total = excluded.memory_total, memory_used = excluded.memory_used,
-		    memory_used_max = excluded.memory_used_max,
-		    memory_available = excluded.memory_available,
-		    swap_total = excluded.swap_total, swap_used = excluded.swap_used,
-		    uptime_seconds = excluded.uptime_seconds,
-		    filesystems = excluded.filesystems, interfaces = excluded.interfaces,
-		    samples = excluded.samples,
-		    agent_rss_bytes = excluded.agent_rss_bytes,
-		    agent_rss_bytes_max = excluded.agent_rss_bytes_max,
-		    agent_cpu_percent = excluded.agent_cpu_percent,
-		    agent_cpu_percent_max = excluded.agent_cpu_percent_max,
-		    agent_goroutines = excluded.agent_goroutines,
-		    agent_open_fds = excluded.agent_open_fds,
-		    helper_rss_bytes = excluded.helper_rss_bytes`,
-		s.options.RawRetention.Seconds())
+		insert into metric_rollup_watermarks (host_id, complete_through)
+		select distinct p.host_id, edge.at from pending p cross join edge
+		on conflict (host_id) do update
+		   set complete_through = greatest(metric_rollup_watermarks.complete_through,
+		                                   excluded.complete_through),
+		       updated_at = now()`
+	_, err := s.pool.Exec(ctx, queue, rollupCatchUp.Seconds())
 	return err
 }
 
-// sweep applies the retention: two days of raw samples, a month of
-// rollups, and the silences that ran out a month ago.
+// rollupBatch claims a batch of dirty buckets, recomputes exactly those and
+// clears them, all in one statement and so in one transaction.
+//
+// The claim skips the rows another instance holds, so two panels share the
+// queue instead of fighting over it. A sample that arrives for a bucket
+// while it is being recomputed waits on that row, and once the
+// recomputation has committed and the row is gone its mark goes in again:
+// the reading is never lost in the gap between the two.
+//
+// The network counters are cumulative, so a quarter keeps the last values
+// rather than an average of counters, and the footprint averages skip the
+// samples without one - a quarter with a single reading keeps that reading
+// rather than a mean dragged towards zero by the unknowns.
+func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
+	const recompute = `
+		with claimed as (
+		    select host_id, bucket_at
+		      from metric_rollup_dirty
+		     where bucket_at < date_trunc('hour', now())
+		             + (extract(minute from now())::int / 15) * interval '15 minutes'
+		     order by dirty_at
+		     limit $1::int
+		     for update skip locked
+		),
+		bucketed as (
+		    select c.host_id, c.bucket_at, m.at, m.cpu_percent, m.load1, m.load5, m.load15,
+		           m.memory_total, m.memory_used, m.memory_available, m.swap_total, m.swap_used,
+		           m.uptime_seconds, m.filesystems, m.interfaces,
+		           m.agent_rss_bytes, m.agent_cpu_percent, m.agent_goroutines, m.agent_open_fds,
+		           m.helper_rss_bytes
+		      from claimed c
+		      join host_metrics m
+		        on m.host_id = c.host_id
+		       and m.at >= c.bucket_at
+		       and m.at <  c.bucket_at + interval '15 minutes'
+		),
+		rolled as (
+		    insert into host_metrics_15m (host_id, at, cpu_percent, cpu_percent_max,
+		        load1, load5, load15, memory_total, memory_used, memory_used_max,
+		        memory_available, swap_total, swap_used, uptime_seconds,
+		        filesystems, interfaces, samples,
+		        agent_rss_bytes, agent_rss_bytes_max, agent_cpu_percent, agent_cpu_percent_max,
+		        agent_goroutines, agent_open_fds, helper_rss_bytes)
+		    select host_id, bucket_at,
+		           avg(cpu_percent), max(cpu_percent),
+		           avg(load1), avg(load5), avg(load15),
+		           max(memory_total), avg(memory_used)::bigint, max(memory_used),
+		           avg(memory_available)::bigint, max(swap_total), avg(swap_used)::bigint,
+		           (array_agg(uptime_seconds order by at desc))[1],
+		           (array_agg(filesystems order by at desc))[1],
+		           (array_agg(interfaces order by at desc))[1],
+		           count(*),
+		           avg(agent_rss_bytes)::bigint, max(agent_rss_bytes),
+		           avg(agent_cpu_percent), max(agent_cpu_percent),
+		           avg(agent_goroutines)::integer, avg(agent_open_fds)::integer,
+		           avg(helper_rss_bytes)::bigint
+		    from bucketed
+		    group by host_id, bucket_at
+		    on conflict (host_id, at) do update set
+		        cpu_percent = excluded.cpu_percent, cpu_percent_max = excluded.cpu_percent_max,
+		        load1 = excluded.load1, load5 = excluded.load5, load15 = excluded.load15,
+		        memory_total = excluded.memory_total, memory_used = excluded.memory_used,
+		        memory_used_max = excluded.memory_used_max,
+		        memory_available = excluded.memory_available,
+		        swap_total = excluded.swap_total, swap_used = excluded.swap_used,
+		        uptime_seconds = excluded.uptime_seconds,
+		        filesystems = excluded.filesystems, interfaces = excluded.interfaces,
+		        samples = excluded.samples,
+		        agent_rss_bytes = excluded.agent_rss_bytes,
+		        agent_rss_bytes_max = excluded.agent_rss_bytes_max,
+		        agent_cpu_percent = excluded.agent_cpu_percent,
+		        agent_cpu_percent_max = excluded.agent_cpu_percent_max,
+		        agent_goroutines = excluded.agent_goroutines,
+		        agent_open_fds = excluded.agent_open_fds,
+		        helper_rss_bytes = excluded.helper_rss_bytes
+		    returning 1
+		)
+		delete from metric_rollup_dirty d
+		 using claimed c
+		 where d.host_id = c.host_id and d.bucket_at = c.bucket_at`
+	tag, err := s.pool.Exec(ctx, recompute, rollupBatchSize)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// sweep applies the retention: the raw samples a partition at a time, the
+// rollups and the expired silences by the row, and the identities of the
+// samples that can no longer arrive again.
 func (s *Store) sweep(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx,
-		`delete from host_metrics where at < now() - make_interval(secs => $1)`,
-		s.options.RawRetention.Seconds()); err != nil {
+	if err := s.DropExpiredPartitions(ctx, time.Now()); err != nil {
 		return err
 	}
+	if err := s.sweepIdentities(ctx); err != nil {
+		return err
+	}
+	// The quarter-hour rollups stay a delete by the row. A quarter is a
+	// sixtieth of the raw volume, so a day of them on a fleet of ten
+	// thousand hosts is around a million rows rather than fourteen
+	// million, and the sweep is bounded work rather than the thing that
+	// holds the oldest transaction in the database.
 	if _, err := s.pool.Exec(ctx,
 		`delete from host_metrics_15m where at < now() - make_interval(secs => $1)`,
 		s.options.RollupRetention.Seconds()); err != nil {
@@ -309,6 +674,39 @@ func (s *Store) sweep(ctx context.Context) error {
 		`delete from silences where until < now() - make_interval(secs => $1)`,
 		s.options.RollupRetention.Seconds())
 	return err
+}
+
+// sweepIdentities deletes the identities of the samples that can no longer
+// be delivered a second time.
+//
+// An identity is worth keeping exactly as long as a copy of its sample
+// could still arrive, and a sample older than the maximum lateness is
+// refused before the identity is ever consulted - so the identity of a
+// sample past that has nothing left to protect. An hour of slack covers a
+// delivery in flight while the setting is changed.
+//
+// This is the one part of the monitoring still deleted by the row: the
+// identity cannot be partitioned by time, because not containing the
+// host's clock is the whole point of it. It is deleted in bounded batches
+// like the rest of the housekeeping, so it never becomes the long
+// transaction it was meant to remove.
+func (s *Store) sweepIdentities(ctx context.Context) error {
+	horizon := (s.options.MaxLateness + time.Hour).Seconds()
+	for pass := 0; pass < identitySweepPasses; pass++ {
+		tag, err := s.pool.Exec(ctx, `
+			delete from metric_samples
+			 where ctid in (
+			     select ctid from metric_samples
+			      where at < now() - make_interval(secs => $1::double precision)
+			      limit $2::int)`, horizon, identitySweepBatch)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() < identitySweepBatch {
+			return nil
+		}
+	}
+	return nil
 }
 
 // Range is a named chart window.

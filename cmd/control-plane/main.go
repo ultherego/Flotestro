@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -174,6 +175,40 @@ func run() error {
 	flag.DurationVar(&metricsRetention.RollupRetention, "metrics-retention-rollup",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_ROLLUP", monitoring.DefaultRollupRetention),
 		"how long the quarter-hour rollups of the resource samples are kept")
+	flag.DurationVar(&metricsRetention.MaxLateness, "metrics-max-lateness",
+		config.EnvDuration("FLOTESTRO_METRICS_MAX_LATENESS", monitoring.DefaultMaxLateness),
+		"how late a resource sample may arrive and still be stored")
+	flag.DurationVar(&metricsRetention.RawQueryWindow, "metrics-query-window",
+		config.EnvDuration("FLOTESTRO_METRICS_QUERY_WINDOW", monitoring.DefaultRawQueryWindow),
+		"how far back the panel offers the raw samples at full resolution")
+	flag.DurationVar(&metricsRetention.ClockSkewLimit, "metrics-clock-skew",
+		config.EnvDuration("FLOTESTRO_METRICS_CLOCK_SKEW", monitoring.DefaultClockSkewLimit),
+		"how far ahead of the panel a host's clock may be before its sample is stamped with the panel's time")
+	flag.IntVar(&metricsRetention.PartitionsAhead, "metrics-partitions-ahead",
+		config.EnvInt("FLOTESTRO_METRICS_PARTITIONS_AHEAD", monitoring.DefaultPartitionsAhead),
+		"how many days of raw sample partitions exist ahead of today")
+	flag.DurationVar(&metricsRetention.EvaluatorLease, "metrics-evaluator-lease",
+		config.EnvDuration("FLOTESTRO_METRICS_EVALUATOR_LEASE", monitoring.DefaultEvaluatorLease),
+		"how long one control-plane instance holds the right to evaluate the alert rules")
+	// The buffer history of the relays: a week of raw reports and a quarter
+	// of a year of quarter-hour rollups. It is what answers "was this site
+	// cut off last night" after the night is over.
+	relayRetention := relays.Options{}
+	flag.DurationVar(&relayRetention.RawRetention, "relay-buffer-retention-raw",
+		config.EnvDuration("FLOTESTRO_RELAY_BUFFER_RETENTION_RAW", relays.DefaultRawRetention),
+		"how long the raw buffer reports of the relays are kept")
+	flag.DurationVar(&relayRetention.RollupRetention, "relay-buffer-retention-rollup",
+		config.EnvDuration("FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP", relays.DefaultRollupRetention),
+		"how long the quarter-hour rollups of the relay buffer reports are kept")
+	// How much of the snapshot in force a feed fetch may lose and still be
+	// activated. An unreadable value keeps the default: a mistyped setting
+	// must not switch the gate off.
+	vulnShrinkShare := vuln.DefaultShrinkShare
+	if raw := config.Env("FLOTESTRO_VULN_SHRINK_SHARE", ""); raw != "" {
+		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
+			vulnShrinkShare = parsed
+		}
+	}
 	// The lifecycle orders between the control-plane instances: an order
 	// written for the instance that holds a host's session. One loop per
 	// instance; an installation with a single instance never writes one.
@@ -307,6 +342,13 @@ func run() error {
 		config.Env("FLOTESTRO_MIGRATE_ONLY", "") != "",
 		"apply the missing migrations and exit; nothing is served")
 	flag.Parse()
+
+	// A raw retention shorter than the window the panel offers plus the
+	// longest a sample may take to arrive deletes a reading a relay is
+	// still carrying, by definition and without anybody ordering it.
+	if err := metricsRetention.Validate(); err != nil {
+		return fmt.Errorf("the monitoring settings would delete samples before they can arrive: %w", err)
+	}
 
 	// An operation without an explicit decision on what a cancel, a retry
 	// or a rollback means is a reason not to start: the panel would draw a
@@ -772,6 +814,14 @@ func run() error {
 		PackageRepositoryURL: *packageRepositoryURL,
 	})
 	panelServer.SetRelays(relayStore)
+	// The buffer history of the relays: the gateway writes a point at every
+	// heartbeat, this loop rolls them up, applies the retention and
+	// evaluates the built-in rules over the newest reading.
+	relayStore.SetRetention(relayRetention)
+	go relayStore.Run(ctx, log)
+	log.Info("the relay buffer history is running",
+		"raw_retention", relayRetention.RawRetention.String(),
+		"rollup_retention", relayRetention.RollupRetention.String())
 
 	// The built-in monitoring: the agents send their resource samples down
 	// the same stream as the heartbeat, the store keeps them, rolls them up
@@ -784,7 +834,10 @@ func run() error {
 	log.Info("the built-in monitoring is running",
 		"sampling_interval", monitoring.SamplingInterval.String(),
 		"raw_retention", metricsRetention.RawRetention.String(),
-		"rollup_retention", metricsRetention.RollupRetention.String())
+		"rollup_retention", metricsRetention.RollupRetention.String(),
+		"max_lateness", metricsRetention.MaxLateness.String(),
+		"partitions_ahead_days", metricsRetention.PartitionsAhead,
+		"evaluator_lease", metricsRetention.EvaluatorLease.String())
 
 	// The budgets are visible in the panel: a host standing on capacity is to
 	// show which budget it waits for rather than stand without a reason.
@@ -1072,6 +1125,7 @@ func run() error {
 				inventoryStore, jobStore, sources, vuln.Settings{
 					Interval:       vulnerabilities.SyncInterval,
 					MaxSnapshotAge: vulnerabilities.MaxSnapshotAge,
+					ShrinkShare:    vulnShrinkShare,
 				}, log)
 			// A host that has just sent its package list or the findings of
 			// its repositories gets a recomputation at once. Otherwise it

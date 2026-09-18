@@ -12,10 +12,13 @@ import (
 // payload is the union of what the triggers put in an event: every field
 // a message may read, each empty when the event does not carry it.
 type payload struct {
-	RuleName        string   `json:"rule_name"`
-	Metric          string   `json:"metric"`
-	Severity        string   `json:"severity"`
-	HostID          string   `json:"host_id"`
+	RuleName string `json:"rule_name"`
+	Metric   string `json:"metric"`
+	Severity string `json:"severity"`
+	HostID   string `json:"host_id"`
+	// RelayID is set on an alert about a relay: the buffer of a site has
+	// no host behind it, and a link into the host pages would lead nowhere.
+	RelayID         string   `json:"relay_id"`
 	Hostname        string   `json:"hostname"`
 	Value           *float64 `json:"value"`
 	Detail          string   `json:"detail"`
@@ -67,11 +70,17 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 		message.Title = fmt.Sprintf("[%s] %s on %s", fields.Severity, fields.RuleName, host)
 		message.Text = alertText(fields)
 		message.Link = link("/hosts/" + fields.HostID + "/monitoring")
+		if fields.RelayID != "" {
+			message.Link = link("/relays/" + fields.RelayID)
+		}
 	case "alert.resolved":
 		message.Severity = fields.Severity
 		message.Title = fmt.Sprintf("Resolved: %s on %s", fields.RuleName, host)
 		message.Text = alertText(fields)
 		message.Link = link("/hosts/" + fields.HostID + "/monitoring")
+		if fields.RelayID != "" {
+			message.Link = link("/relays/" + fields.RelayID)
+		}
 	case "campaign.finished":
 		state := strings.TrimPrefix(event.Type, "campaign.")
 		message.Title = fmt.Sprintf("Campaign %s %s", fields.Name, strings.ReplaceAll(state, "_", " "))

@@ -78,11 +78,59 @@ type Sampler struct {
 	previousProcess *processCPU
 	// releasedAt is when the pages were last handed back.
 	releasedAt time.Time
+	// spool keeps the samples the panel has not acknowledged. Nil is a
+	// sampler that keeps nothing: the fleet simulator, and a host whose
+	// state directory the spool could not be opened in.
+	spool *MetricsSpool
 }
 
-// NewSampler returns a sampler reading the real host.
+// NewSampler returns a sampler reading the real host and keeping nothing:
+// a sample it cannot send is lost. It is what a test and the fleet
+// simulator use.
 func NewSampler() *Sampler {
 	return &Sampler{ProcRoot: "/proc", Now: time.Now, Statfs: statfsUsage, HelperPID: helperMainPID}
+}
+
+// NewSpooledSampler returns a sampler that keeps every reading until the
+// panel says it holds it.
+//
+// This is the one a host runs. A spool that cannot be opened - a state
+// directory that is not writable, a disk that is full - is not a reason to
+// stop sampling: the agent then reports as it did before, and the host
+// keeps its charts while the readings it cannot deliver are lost rather
+// than kept. The reason is logged once, here, where it can be acted on.
+func NewSpooledSampler(stateDir, bootID string, log *slog.Logger) *Sampler {
+	sampler := NewSampler()
+	spool, err := OpenMetricsSpool(stateDir, bootID, MetricsSpoolSize, log)
+	if err != nil {
+		log.Warn("the resource samples are not kept for a resend; a broken session loses them",
+			"err", err)
+		return sampler
+	}
+	sampler.spool = spool
+	return sampler
+}
+
+// Acknowledge drops the sample the panel says it holds. A sample that was
+// refused outright - too old to be stored at all - is dropped as well:
+// keeping a reading the panel will never take would push out the readings
+// it would.
+func (s *Sampler) Acknowledge(ack *agentv1.MetricsAck) {
+	if s.spool == nil {
+		return
+	}
+	s.spool.Acknowledge(ack)
+}
+
+// SpoolDepth is how many samples wait for an acknowledgement; zero on a
+// sampler without a spool. The agent's own state file reports it, so
+// somebody on the host can see that the panel is not taking what it is
+// being sent.
+func (s *Sampler) SpoolDepth() int {
+	if s.spool == nil {
+		return 0
+	}
+	return s.spool.Len()
 }
 
 // Run sends a sample every interval until the context ends.
@@ -101,6 +149,15 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 	// The agent's own counter is primed for the same reason; without it the
 	// first sample would carry no CPU figure for the agent at all.
 	s.readProcessCPU(filepath.Join(s.ProcRoot, "self", "stat"))
+	// What the panel never confirmed goes first, oldest first, before the
+	// reading this session is about to take. A chart is drawn in the order
+	// of the moments the samples carry, not the order they arrive in, but
+	// the rollup is cheaper when the late ones come in order, and the
+	// panel's refusal of anything too old is easier to read in the log
+	// when the oldest is what asked first.
+	if !s.drain(send, log) {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -115,11 +172,48 @@ func (s *Sampler) Run(ctx context.Context, interval time.Duration,
 			log.Warn("the resource sample was not taken", "err", err)
 			continue
 		}
+		// The identity and the copy on disk come before the send, always.
+		// A sample that went out and was never written is the one a broken
+		// stream loses for good, and the counters it was read from have
+		// moved on by the time anybody notices.
+		if s.spool != nil {
+			if err := s.spool.Enqueue(sample); err != nil {
+				log.Warn("the resource sample was not kept for a resend", "err", err)
+			}
+		}
 		if err := send(sample); err != nil {
 			log.Debug("the resource sample was not sent", "err", err)
 			return
 		}
 	}
+}
+
+// drain sends the samples the panel has not acknowledged. It says whether
+// the session is still worth sampling on: a send that failed here has
+// ended the stream, and the caller stops rather than taking a reading
+// nobody can receive.
+//
+// Nothing is deleted here. A sample leaves the spool when the panel says
+// it holds it and at no other moment, so a stream that breaks in the
+// middle of the drain costs a second delivery and never a reading.
+func (s *Sampler) drain(send func(*agentv1.MetricsSample) error, log *slog.Logger) bool {
+	if s.spool == nil {
+		return true
+	}
+	pending := s.spool.Pending()
+	if len(pending) == 0 {
+		return true
+	}
+	log.Info("the resource samples the panel has not confirmed are sent again",
+		"samples", len(pending))
+	for _, sample := range pending {
+		if err := send(sample); err != nil {
+			log.Debug("a kept resource sample was not sent",
+				"sequence", sample.GetSequence(), "err", err)
+			return false
+		}
+	}
+	return true
 }
 
 // Sample reads one set of counters. The CPU percentage covers the time since

@@ -36,6 +36,11 @@ type File struct {
 	// Exists distinguishes a deleted file from an unread one.
 	Exists            bool   `json:"exists"`
 	UnavailableReason string `json:"unavailable_reason,omitempty"`
+	// Versions are the copies the host kept before the writes that
+	// displaced them, newest first. They are reported so that the panel can
+	// offer a specific content to go back to instead of asking the operator
+	// for a digest of something they cannot see.
+	Versions []KeptVersion `json:"versions,omitempty"`
 }
 
 // Content is a file together with its contents.

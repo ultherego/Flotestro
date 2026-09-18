@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -74,19 +75,61 @@ type processCPU struct {
 }
 
 // releaseThreshold is the resident size past which the agent hands the
-// pages it no longer uses back to the host before it reports.
+// pages it no longer uses back to the host.
 //
 // A package plan or a full inventory allocates for a moment and frees at
 // once; the Go runtime keeps those pages for a while, and the host sees
 // an agent that holds twenty-odd megabytes it is not using. The agent is
 // a guest on somebody's server: it gives them back rather than wait for
 // the scavenger, and it reports what the host sees afterwards. The
-// release costs a collection - milliseconds - and is not repeated more
-// often than releaseEvery.
+// release costs a collection - milliseconds.
+//
+// It happens in two places, because a minute is a long time on a busy
+// host: after a task, which is what allocates, and before a sample, which
+// is what the host's owner reads. releaseEvery is the shortest interval
+// between two of them, so a campaign of small tasks does not turn into a
+// collection per task; taskReleaseEvery is shorter, because a task that
+// has just finished is exactly the moment the pages are free.
 const (
 	releaseThreshold = 24 << 20
 	releaseEvery     = 5 * time.Minute
+	taskReleaseEvery = 30 * time.Second
 )
+
+// pagesHeld says whether this process holds more than the threshold.
+func pagesHeld(procRoot string) bool {
+	data, err := os.ReadFile(filepath.Join(procRoot, "self", "status"))
+	if err != nil {
+		return false
+	}
+	rss, ok := parseVmRSS(string(data))
+	return ok && rss >= releaseThreshold
+}
+
+// taskRelease is the release after a task. It is its own clock, so the
+// sampler's rhythm and the tasks' do not cancel each other out.
+var taskRelease struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+// releaseAfterTask hands back what a finished task no longer needs. A host
+// that runs one package transaction an hour should not carry its peak for
+// the rest of that hour.
+func releaseAfterTask() {
+	if !pagesHeld("/proc") {
+		return
+	}
+	taskRelease.mu.Lock()
+	now := time.Now()
+	if !taskRelease.at.IsZero() && now.Sub(taskRelease.at) < taskReleaseEvery {
+		taskRelease.mu.Unlock()
+		return
+	}
+	taskRelease.at = now
+	taskRelease.mu.Unlock()
+	debug.FreeOSMemory()
+}
 
 // footprint reads the agent's own numbers. The CPU percentage covers the
 // interval since the previous call; the first call has no interval and no

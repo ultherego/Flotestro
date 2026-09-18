@@ -25,7 +25,41 @@ type Validator struct {
 	// gets a named staging file that keeps the suffix of the target, never
 	// an anonymous one.
 	NeedsName bool
+	// VersionCommand asks the tool what it is. "The content was checked"
+	// says nothing about what checked it: nginx 1.18 and nginx 1.24 accept
+	// different directives, so the identity of the checker belongs in the
+	// plan next to its verdict. Empty means a check built into the agent,
+	// which has no separate version.
+	VersionCommand []string
 }
+
+// ValidatorIdentity describes the check that ran, or the one that did not.
+//
+// A plan that says only "the content is valid" hides the question the
+// operator would ask next: valid according to what. This says which tool
+// answered, from where and in which version - and, when there was no
+// answer, why there was none.
+type ValidatorIdentity struct {
+	// Known says the panel has a check for this path at all. False is not
+	// a passed check; it is the absence of one.
+	Known bool   `json:"known"`
+	Name  string `json:"name,omitempty"`
+	// Command is the tool on the host, empty for a check built into the
+	// agent.
+	Command string `json:"command,omitempty"`
+	// Available says the tool is installed on this host.
+	Available bool `json:"available"`
+	// Version is what the tool answers about itself, for instance the line
+	// nginx -v prints.
+	Version string `json:"version,omitempty"`
+	// VersionUnavailableReason says why the version is not there. Silence
+	// would read as a tool without a version.
+	VersionUnavailableReason string `json:"version_unavailable_reason,omitempty"`
+}
+
+// BuiltInVersion is what a check that runs inside the agent reports as its
+// identity: there is no separate tool to ask.
+const BuiltInVersion = "built into the agent"
 
 // validators lists the known checks. The key is the name used in the
 // order.
@@ -37,17 +71,20 @@ var validators = map[string]Validator{
 		Command: []string{"/usr/bin/systemd-analyze", "verify"},
 		// The unit type comes from the suffix of the file name, so the
 		// check needs a name ending like the target.
-		NeedsName: true,
+		NeedsName:      true,
+		VersionCommand: []string{"/usr/bin/systemd-analyze", "--version"},
 	},
 	"nginx": {
 		Name: "nginx",
 		// nginx checks the whole configuration, not a single file: a
 		// fragment without context is not a valid configuration by itself.
-		Command: []string{"/usr/sbin/nginx", "-t"},
+		Command:        []string{"/usr/sbin/nginx", "-t"},
+		VersionCommand: []string{"/usr/sbin/nginx", "-v"},
 	},
 	"chrony": {
-		Name:    "chrony",
-		Command: []string{"/usr/sbin/chronyd", "-Q", "-f"},
+		Name:           "chrony",
+		Command:        []string{"/usr/sbin/chronyd", "-Q", "-f"},
+		VersionCommand: []string{"/usr/sbin/chronyd", "-v"},
 	},
 }
 

@@ -224,13 +224,21 @@ What follows from that, on the API and on the screen:
 | `FLOTESTRO_VULN_NVD_URL` | `https://services.nvd.nist.gov/rest/json/cves/2.0` | The NVD API for the descriptions and scores; empty disables the enrichment. NVD settles nothing about a host. | yes | |
 | `FLOTESTRO_VULN_NVD_KEY` | empty | The NVD API key; without it the first read takes around twenty minutes. | yes | Secret; the settings screen shows only whether it is set. |
 | `FLOTESTRO_VULN_NVD_INTERVAL` | `6h` | How often the descriptions are refreshed. | yes | |
+| `FLOTESTRO_VULN_SHRINK_SHARE` | `0.4` | How much of the snapshot in force a fetch may lose and still be activated. A fetch that loses more, or that stops covering a release the snapshot in force covered, is not activated: it is kept as a candidate with the reason `feed_shrank` or `feed_release_missing`, the previous snapshot stays in force and ages into stale, and an operator accepts the candidate deliberately from the Vulnerabilities screen (`POST /api/v1/vulnerabilities/snapshots/{id}/accept`, with a reason and on the audit trail). A value outside `0 < share < 1` falls back to the default, so a mistyped setting cannot switch the gate off; `0` means the default. | yes | Towards `0` the gate refuses ordinary movement at the vendor and trains the operator to accept without reading; towards `1` only an empty feed is refused. |
 
 ### Monitoring and retention
 
 | Variable | Default | Meaning | Restart | Security |
 |---|---|---|---|---|
-| `FLOTESTRO_METRICS_RETENTION_RAW` | `48h` | How long the raw resource samples of the hosts are kept. | yes | |
-| `FLOTESTRO_METRICS_RETENTION_ROLLUP` | `720h` | How long the quarter-hour rollups are kept. | yes | |
+| `FLOTESTRO_METRICS_RETENTION_RAW` | `168h` (7 days) | How long the raw resource samples of the hosts are kept. The raw samples live in one partition per day and the retention drops whole partitions, so a longer window costs storage rather than a sweep that holds the database. A partition that still owes a rollup is kept past its day; the status block counts what is owed. | yes | |
+| `FLOTESTRO_METRICS_RETENTION_ROLLUP` | `2160h` (90 days) | How long the quarter-hour rollups are kept. This is the window a capacity trend is read over. | yes | |
+| `FLOTESTRO_RELAY_BUFFER_RETENTION_RAW` | `168h` (7 days) | How long the raw buffer reports of the relays are kept. A relay reports once a minute, so this is the window that answers "was this site cut off last night" minute by minute. Plain rows with a delete sweep, not daily partitions: a fleet of relays is three orders of magnitude smaller than a fleet of hosts. `0` means the default. | yes | |
+| `FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP` | `2160h` (90 days) | How long the quarter-hour rollups of the relay buffer reports are kept. This is the window that answers "has this spool been filling for a month", and it also bounds how long a resolved relay buffer alert stays as history. `0` means the default. | yes | |
+| `FLOTESTRO_METRICS_MAX_LATENESS` | `24h` | How long after it was taken a sample may still arrive and be stored. A relay whose link to the centre was down drains its spool and every reading lands in the chart it belongs to; anything older is answered `metric_sample_too_old`, is not stored, and leaves a gap with a reason instead of a line drawn through it. The agent drops such a sample from its own spool. | yes | |
+| `FLOTESTRO_METRICS_QUERY_WINDOW` | `24h` | How far back the panel promises full resolution. It is what the retention is validated against, not a limit on the chart ranges. | yes | |
+| `FLOTESTRO_METRICS_CLOCK_SKEW` | `5m` | How far ahead of the panel a host's clock may be before its sample is stamped with the panel's time. Only the future direction is corrected: a sample from the past may simply have waited in a spool, and restamping it would turn a relay's backlog into a wall of identical points. A sample is identified by its boot and its sequence, never by its clock, so a correction here changes where a point is drawn and never which sample it is. | yes | |
+| `FLOTESTRO_METRICS_PARTITIONS_AHEAD` | `3` | How many days of raw partitions exist ahead of today. An insert into a day no partition covers is an error, so this is how many days the maintenance loop may fail to run without a fleet losing its samples. At most 60. | yes | |
+| `FLOTESTRO_METRICS_EVALUATOR_LEASE` | `45s` | How long one control-plane instance holds the right to evaluate the alert rules. An instance that finds the lease held evaluates nothing; one that loses it mid-pass stops where it is (`alert_evaluator_lease_lost`) and the new holder carries on from the open episodes. Three renewals fit in the term. | yes | |
 | `FLOTESTRO_AUDIT_RETENTION` | `0` | How long the audit trail is kept; `0` keeps it forever. The trail is evidence: deleting it is a decision of the installation. | yes | Set it only when the trail is kept elsewhere. |
 | `FLOTESTRO_JOB_RETENTION` | `2160h` (90 days) | How long finished jobs are kept with their attempts. A job of a campaign stays as long as the campaign; a job under way is never deleted. `0` means the default. | yes | |
 | `FLOTESTRO_CAMPAIGN_RETENTION` | `8760h` (a year) | How long finished campaigns are kept with their targets, steps, plans and approvals. A campaign under way, or one another campaign retries or compensates, is never deleted. `0` means the default. | yes | |
@@ -242,6 +250,20 @@ What follows from that, on the API and on the screen:
 The sweep runs once an hour, five thousand rows of a kind at a time, and
 the ended agent sessions are swept after thirty days regardless of any
 setting.
+
+**The panel refuses to start** when `FLOTESTRO_METRICS_RETENTION_RAW` is shorter than
+`FLOTESTRO_METRICS_QUERY_WINDOW` plus `FLOTESTRO_METRICS_MAX_LATENESS`
+(`metrics_retention_too_short`). Such a configuration deletes a reading a relay is still
+carrying, by definition and without anybody ordering it; raise the retention or lower the
+window or the lateness.
+
+The agent keeps the samples the panel has not acknowledged in
+`<state dir>/metrics-spool`: at most 240 of them, four hours at one a minute, one small file
+each. A sample is written there before it is sent and deleted only when the panel answers
+that very sample; on reconnect the agent sends what was never answered, oldest first. Past
+the bound the oldest is dropped - a panel that has been away for a week costs the host four
+hours of readings, not a week of them. There is no setting: the bound is what the agent may
+cost a host.
 
 ## Agent (`flotestro-agent`)
 
@@ -280,7 +302,26 @@ package updates.
 | `FLOTESTRO_HELPER_CAPABILITY_MODE` | `prefer` | What the helper does with a request that changes the host. Every such request is meant to carry a capability the panel signed for exactly this host, task, action and payload. `observe` runs a request without one or with a bad one and logs it; `prefer` runs a request without one (an agent from before the capability) but refuses a bad one; `enforce` refuses a request without one with `capability_required`. Reads never need a capability. | yes | Set `enforce` on every host once the panel's `flotestro_helper_capability_total{outcome="legacy_agent"}` stays at zero. |
 | `FLOTESTRO_HELPER_TRUST_DIR` | `/etc/flotestro/helper-trust.d` | The panel's capability keys, one `<key_id>.pub` each, root-owned. Filled from the panel's signed bundle at enrollment and at every session; the first bundle is taken on trust only while the helper has neither a key nor a host identity. | yes | A key file that is not root's or is writable by others is not a key. |
 | `FLOTESTRO_HELPER_REPLAY_DIR` | `/var/lib/flotestro-helper/replay` | Where the helper remembers the nonce of every capability it ran, so the same capability cannot run twice. | yes | |
+| `FLOTESTRO_HELPER_FILE_VERSION_DIR` | `/var/lib/flotestro-helper/files` | Where the host keeps the content of a managed configuration file from before each write, so a return to a version has something exact to put back. One directory per file, named by the digest of its path. | yes | Root's own directory, 0700, every copy 0600: a copy holds what the file held, including a value that came from the secret store, so it is readable by exactly whom the file was readable by. |
+| `FLOTESTRO_HELPER_FILE_VERSIONS` | `10` | How many copies of one file the host keeps. The oldest goes when the next is made. | yes | |
+| `FLOTESTRO_HELPER_FILE_VERSION_BYTES` | `33554432` | The size of the whole store in bytes. Above it the oldest copies go, across all files - one file rewritten with megabytes stays inside its own count and would still fill the partition the helper's state lives on. | yes | |
 | `FLOTESTRO_HELPER_HOST_ID_FILE` | `/var/lib/flotestro-helper/host-id` | The host identifier the helper answers to; a capability for another host is refused. `flotestro-agentctl helper-trust show` prints it with the keys, and `helper-trust reset --confirm <hostname>` (as root) forgets both for a host enrolled anew with a panel the helper does not know. | yes | |
+
+The store of file versions is what `file.rollback` restores from. A write
+copies the content it is about to replace into it before the rename, and a
+write that cannot make that copy - a full partition, a file larger than the
+module's one-megabyte boundary - refuses with `file_version_not_kept`
+instead of making a change nothing can undo. The host reports what it keeps
+with the files fragment of the inventory, so the panel offers a content to
+go back to rather than asking for a checksum; a copy whose content came
+from the secret store is reported without its checksum and therefore cannot
+be ordered back from the panel, because naming it would put a fingerprint
+of a secret value in the panel's database. A return names one version by
+its checksum: a checksum this host never kept is refused with
+`file_version_unknown` rather than answered with the newest copy, and the
+restored content goes through the same staging and the same validator as
+any other write - a version the service no longer accepts is refused, not
+written back.
 
 ## Relay (`flotestro-relay`)
 

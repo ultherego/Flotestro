@@ -1186,12 +1186,20 @@ message FileRequest {
   // not installed. The helper honours it only together with the grant
   // file.write.unvalidated in the capability.
   bool allow_missing_validator = 10;
+  // VersionSha256 names a content the host itself kept before an earlier
+  // write took its place. The helper then writes that copy instead of the
+  // content field, through the same staging and the same validator. A
+  // digest this host never kept is refused with file_version_unknown
+  // rather than answered with the newest copy.
+  string version_sha256 = 11;
 }
 
 message FileResult {
   bytes snapshot = 1;
   string message = 2;
-  // Content is the file content on a read.
+  // Content is the file content on a read, and the content that was put
+  // back on a return to a version the host kept - the panel has no copy of
+  // such a version and would otherwise hold a digest it cannot show.
   bytes content = 3;
   string sha256 = 4;
   bool truncated = 5;
@@ -1203,6 +1211,12 @@ message FileResult {
   // that has not happened yet, and the other fields describe what the host
   // has now.
   bytes plan = 7;
+  // Change describes what the write really did, in JSON and in the same
+  // terms as the plan: both digests, the inode before and after, the
+  // identity of the check that ran, the version that was kept and what
+  // needs a reload afterwards. An operator who approved a whole state is
+  // answered with a whole state.
+  bytes change = 8;
 }
 
 // ProcessSignalRequest sends a signal to a process. The start time binds the

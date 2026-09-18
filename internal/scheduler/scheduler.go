@@ -893,6 +893,10 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 			file.ExpectedSha256 = payload.File.ExpectedSHA256
 			file.Validator = payload.File.Validator
 			file.AllowMissingValidator = payload.File.AllowMissingValidator
+			// A return to a version the panel does not hold travels as the
+			// digest of that version: the content lies on the host, which
+			// is the only place it survived.
+			file.VersionSha256 = payload.File.VersionSHA256
 		}
 		envelope.Action = &agentv1.TaskEnvelope_File{File: file}
 

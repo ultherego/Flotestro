@@ -29,6 +29,10 @@ type fileView struct {
 	Mode               string `json:"observed_mode,omitempty"`
 	Owner              string `json:"observed_owner,omitempty"`
 	UnavailableReason  string `json:"unavailable_reason,omitempty"`
+	// HostVersions are the copies the host itself kept: the content from
+	// before the panel managed the file, and anything changed outside the
+	// panel, exist nowhere else.
+	HostVersions []filesmodule.KeptVersion `json:"host_versions,omitempty"`
 }
 
 // handleListManagedFiles returns the files managed on a host.
@@ -71,6 +75,7 @@ func (s *Server) handleListManagedFiles(w http.ResponseWriter, r *http.Request) 
 			view.Mode = file.Mode
 			view.Owner = file.Owner
 			view.UnavailableReason = file.UnavailableReason
+			view.HostVersions = file.Versions
 			// Drift means only a confirmed divergence: a file the host did
 			// not read is neither matching nor diverged.
 			//

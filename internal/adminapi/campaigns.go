@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
+	managedfiles "github.com/ultherego/flotestro/internal/files"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/selector"
@@ -193,21 +194,23 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())
 		return
 	}
-	// A rollback to an earlier file version carries only the digest, as on
-	// one host: the content is attached here, so the plans, the consent and
-	// what reaches the hosts are the same thing. Left as a digest it would
-	// plan and write emptiness on every host. The digest itself leaves the
-	// payload once the content is in, exactly as the single-host order does,
-	// so the job envelope and the plan hash see an ordinary write.
+	// A rollback names a version by its digest, as on one host: the
+	// content is attached here when the panel holds a copy, so the plans,
+	// the consent and what reaches the hosts are the same thing. The
+	// digest stays in the payload - the hosts keep copies of their own and
+	// restore the inode of the version, not only its bytes - and a version
+	// the panel never saw travels as the digest alone, which each host
+	// refuses with file_version_unknown unless it kept that version.
 	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
 		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
-		if err != nil {
-			problem(w, http.StatusBadRequest, "version_not_found",
-				"no stored version with the checksum "+payload.File.VersionSHA256)
+		switch {
+		case err == nil:
+			payload.File.Content = string(content)
+		case errors.Is(err, managedfiles.ErrNotFound):
+		default:
+			s.fail(w, err)
 			return
 		}
-		payload.File.Content = string(content)
-		payload.File.VersionSHA256 = ""
 		resolved, err := json.Marshal(payload)
 		if err != nil {
 			s.fail(w, err)

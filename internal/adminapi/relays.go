@@ -155,6 +155,79 @@ func (s *Server) handleGetRelay(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"relay": view, "hosts": hosts})
 }
 
+// relayBufferHistoryView is the answer of the buffer history endpoint.
+//
+// A relay page that shows only the last heartbeat answers "how full is the
+// buffer now" and nothing else. This is the rest: the fill against the
+// limit over a window, the items waiting, how many results were dropped
+// between two points, the stretches when the relay had no link upwards,
+// and the points at which the relay restarted.
+type relayBufferHistoryView struct {
+	RelayID string `json:"relay_id"`
+	// Range is the window the points cover, and StepSeconds the distance
+	// between them: a minute for the short windows, a quarter-hour for the
+	// long ones, which come from the rollups.
+	Range       string               `json:"range"`
+	StepSeconds int                  `json:"step_seconds"`
+	Rollup      bool                 `json:"rollup"`
+	Points      []relays.BufferPoint `json:"points"`
+	// Latest is the newest raw report whatever the range; empty for a
+	// relay that has not reported within the last few minutes.
+	Latest *relays.BufferPoint `json:"latest"`
+	// Alerts are the buffer rules firing on this relay right now.
+	Alerts []relays.BufferAlert `json:"alerts"`
+	// RetentionDays says how far back the history can reach at all, so a
+	// window that answers nothing is read as "not kept that long" rather
+	// than as "the relay was quiet".
+	RawRetentionHours   int `json:"raw_retention_hours"`
+	RollupRetentionDays int `json:"rollup_retention_days"`
+}
+
+// handleRelayBufferHistory answers the buffer reports of a relay over a
+// window.
+//
+// It is read with the same right as the relay list: an operator who may
+// see that the site has a relay may see how that relay has been doing. A
+// relay outside the caller's scope answers as one that does not exist -
+// a narrowed scope is not to learn which sites have relays.
+func (s *Server) handleRelayBufferHistory(w http.ResponseWriter, r *http.Request) {
+	principal, ok := s.authorizeCollection(w, r, authz.PermHostEnrollRead, "relay")
+	if !ok {
+		return
+	}
+	relay, ok := s.loadRelay(w, r)
+	if !ok {
+		return
+	}
+	if !relayVisible(principal, *relay) {
+		problem(w, http.StatusNotFound, "relay_not_found", "no such relay")
+		return
+	}
+	window, err := relays.ParseBufferRange(r.URL.Query().Get("range"))
+	if err != nil {
+		problem(w, http.StatusBadRequest, "invalid_range", err.Error())
+		return
+	}
+	history, err := s.relays.BufferSamples(r.Context(), relay.ID, window)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	alerts, err := s.relays.FiringBufferAlerts(r.Context(), relay.ID)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	retention := s.relays.Retention()
+	writeJSON(w, http.StatusOK, relayBufferHistoryView{
+		RelayID: relay.ID, Range: window.Name, StepSeconds: int(window.Step.Seconds()),
+		Rollup: window.Rollup(), Points: history.Points, Latest: history.Latest,
+		Alerts:              alerts,
+		RawRetentionHours:   int(retention.RawRetention.Hours()),
+		RollupRetentionDays: int(retention.RollupRetention.Hours() / 24),
+	})
+}
+
 // relayRevocation is the body of a revocation order.
 type relayRevocation struct {
 	Reason string `json:"reason"`

@@ -317,7 +317,52 @@ message ServerMessage {
     // The relay deletes the spooled copy on it and does not forward it; an
     // agent that receives one all the same ignores it.
     MessageAck message_ack = 8;
+    // The application acknowledgement of one resource sample, addressed to
+    // the agent that took it. It travels the whole way down - a relay
+    // forwards it like a task - because it is the agent's own spool it
+    // frees.
+    MetricsAck metrics_ack = 9;
   }
+}
+
+// MetricsAck answers one resource sample, named by the identity the agent
+// gave it rather than by the moment it was taken.
+//
+// It is a message of its own and not a MessageAck: a MessageAck names the
+// envelope of a relayed message and is consumed by the relay, which never
+// forwards it, so it could free nothing on the host; and a direct session
+// has no envelope for the agent to match against at all. The agent keeps
+// an unacknowledged sample in a small spool on disk and sends it again on
+// the next session, so the acknowledgement has to reach the agent on both
+// paths and has to name what the agent's spool is keyed by.
+//
+// The gateway sends it after the transaction that stored the sample
+// committed. A sample the panel already holds is acknowledged again, with
+// DUPLICATE: the second delivery changed nothing and the agent may drop
+// it. A terminal refusal - too old to be stored at all, or malformed -
+// also frees the spool: keeping a sample the panel will never take would
+// push out the samples it would.
+message MetricsAck {
+  string boot_id = 1;
+  uint64 sequence = 2;
+  enum Status {
+    STATUS_UNSPECIFIED = 0;
+    // The sample was written in this delivery.
+    STATUS_PERSISTED = 1;
+    // The panel already held this sample; nothing was written.
+    STATUS_DUPLICATE = 2;
+    // The sample is older than the panel keeps raw samples for and was
+    // not stored. The gap it leaves carries this reason rather than
+    // passing for a host that had nothing to say.
+    STATUS_REJECTED_TOO_OLD = 3;
+    // The sample cannot be stored as it stands, or this panel keeps no
+    // samples at all.
+    STATUS_REJECTED_INVALID = 4;
+  }
+  Status status = 3;
+  // The entry of the error guide behind a refusal; empty on a sample that
+  // was stored.
+  string reason_code = 4;
 }
 
 // MessageAck names a message of a relayed session the panel has consumed:
@@ -472,6 +517,22 @@ message MetricsSample {
   // runs: it is activated by the socket and exits after an idle period, so
   // most samples of a host at rest carry nothing here.
   optional uint64 helper_rss_bytes = 18;
+
+  // The identity of the sample, which its timestamp is not. The clock of a
+  // host moves: NTP steps it, a virtual machine resumes from a snapshot,
+  // an operator sets it by hand - and a sample keyed by the clock would
+  // then either overwrite an older reading of the same host or be counted
+  // twice after a resend. The boot the agent runs on and a sequence that
+  // grows by one within that boot, starting at one, say instead exactly
+  // which reading this is. The panel stores the pair and answers a sample
+  // it already holds with a duplicate acknowledgement rather than a second
+  // row.
+  //
+  // An agent from before this field sends neither, and the panel falls
+  // back to the host and the moment, as it did: an older agent keeps its
+  // charts, it only has no spool to drain.
+  string boot_id = 19;
+  uint64 sequence = 20;
 }
 
 // FilesystemSample is the usage of one mounted real filesystem. Pseudo
@@ -2226,6 +2287,12 @@ message FileAction {
   // validator the order names. The order says so, and the capability has
   // to carry the grant file.write.unvalidated; either alone is not enough.
   bool allow_missing_validator = 10;
+  // VersionSha256 names a content the host kept before an earlier write
+  // took its place. It travels to the host when the panel has no copy of
+  // that version itself - the file was changed outside the panel, or it
+  // existed before the panel ever managed it - and the host writes its own
+  // copy. Part of the payload hash like every other field of the order.
+  string version_sha256 = 11;
 }
 
 message FileResult {
@@ -2238,6 +2305,10 @@ message FileResult {
   // Plan describes the difference between the found and the requested
   // state, in JSON.
   bytes plan = 7;
+  // Change describes what the write really did, in JSON: both digests, the
+  // inode before and after, the identity of the check that ran, the version
+  // that was kept and what needs a reload afterwards.
+  bytes change = 8;
 }
 
 // PackageLifecycle installs, removes or holds packages. The name differs

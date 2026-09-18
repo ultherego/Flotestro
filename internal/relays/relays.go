@@ -64,22 +64,39 @@ func (r Relay) StateAt(now time.Time) string {
 
 // Heartbeat is what a relay reports about itself when it calls the centre.
 //
-// It is kept in memory rather than in the database: the numbers change
-// every minute, describe the present rather than history, and are gone
-// with the relay that reported them. A panel restarted shows them again a
-// minute later, from the next heartbeat.
+// The latest one is kept in memory, because that is what the list reads:
+// one map lookup per row rather than a query per relay. The same report
+// also goes into the history table, where it answers the questions a
+// single latest value cannot - whether the site was cut off last night,
+// whether the spool has been filling for a week, when the relay last
+// restarted.
 type Heartbeat struct {
-	BufferBytes    int64     `json:"buffer_bytes"`
-	BufferMaxBytes int64     `json:"buffer_max_bytes"`
-	BufferedItems  int       `json:"buffered_items"`
-	BufferDropped  int64     `json:"buffer_dropped"`
-	Sessions       int       `json:"sessions"`
-	RelayVersion   string    `json:"relay_version,omitempty"`
-	ReportedAt     time.Time `json:"reported_at"`
+	BufferBytes    int64 `json:"buffer_bytes"`
+	BufferMaxBytes int64 `json:"buffer_max_bytes"`
+	BufferedItems  int   `json:"buffered_items"`
+	BufferDropped  int64 `json:"buffer_dropped"`
+	Sessions       int   `json:"sessions"`
+	// SpoolBytesLimit is the room the durable spool of the relay may take
+	// on disk. Zero for a relay from before the spool, which reported the
+	// memory buffer in BufferMaxBytes alone.
+	SpoolBytesLimit int64 `json:"spool_bytes_limit,omitempty"`
+	// InstanceID names the process of the relay: a fresh identifier at
+	// every start. A change of it is a restart, which neither the version
+	// nor the address shows.
+	InstanceID string `json:"instance_id,omitempty"`
+	// UpstreamState is connected, buffering or reconnecting, as the relay
+	// saw its link at the moment of the report. Empty for a relay that
+	// does not say - and an empty state is not "connected".
+	UpstreamState string    `json:"upstream_state,omitempty"`
+	RelayVersion  string    `json:"relay_version,omitempty"`
+	ReportedAt    time.Time `json:"reported_at"`
 }
 
 type Store struct {
 	pool *pgxpool.Pool
+	// retention is how long the buffer history is kept; set once at
+	// startup by the process that also runs the sweep.
+	retention Options
 
 	mu         sync.RWMutex
 	heartbeats map[string]Heartbeat

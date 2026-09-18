@@ -220,16 +220,35 @@ func (s *AgentService) SetClonePolicy(policy ClonePolicy) { s.clonePolicy = poli
 // sampleFromProto translates a sample of the agent into the stored shape.
 //
 // The moment of the sample is the host's clock, not the gateway's: a sample
-// delayed on the wire still describes the moment it was taken. A host with
-// a broken clock gets the gateway's time instead, because a sample from a
-// year ago would land outside every chart and be swept at once.
-func sampleFromProto(sample *agentv1.MetricsSample) monitoring.Sample {
+// delayed on the wire still describes the moment it was taken, and a
+// sample that waited hours in a spool describes the moment it was taken
+// just as well. Lateness is not skew, and the two used to be confused
+// here: a single limit around the gateway's clock restamped every late
+// reading to now, which is exactly how a relay's backlog came back as a
+// wall of identical points instead of the night it described.
+//
+// So only the impossible direction is corrected. A sample from the future
+// by more than the skew limit is a host whose clock is wrong - nothing
+// waits in a spool to arrive before it was taken - and it gets the
+// gateway's time, because a point a year ahead would sit outside every
+// chart for ever. A sample from the past is believed, however old; how old
+// it may be at all is the maximum lateness, decided before this is called.
+// The moment it arrived is kept next to the moment it describes, and
+// freshness is judged by the first.
+func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
+	skewLimit time.Duration) monitoring.Sample {
 	at := time.Unix(sample.GetSampledAtUnix(), 0).UTC()
-	if skew := time.Since(at); skew > 10*time.Minute || skew < -10*time.Minute {
-		at = time.Now().UTC().Truncate(time.Second)
+	if at.Sub(now) > skewLimit {
+		at = now.Truncate(time.Second)
 	}
 	stored := monitoring.Sample{
+		// The identity of the reading, which its clock is not. Empty from
+		// an agent of the release before this one; the store then falls
+		// back to the host and the moment, as it did.
+		BootID:          sample.GetBootId(),
+		Sequence:        sample.GetSequence(),
 		At:              at,
+		ReceivedAt:      now,
 		CPUPercent:      sample.GetCpuPercent(),
 		Load1:           sample.GetLoad1(),
 		Load5:           sample.GetLoad5(),
@@ -718,6 +737,97 @@ func (s *AgentService) acknowledge(hostID string, session *Session, envelope *ag
 // relay, and the receive loop of a host must not stand still for it.
 const ackSendTimeout = 2 * time.Second
 
+// recordSample stores one resource sample and answers the host with what
+// became of it.
+//
+// The answer is what frees the copy the agent kept. An agent writes every
+// reading to a small spool on disk before it sends it and deletes it only
+// on this acknowledgement, so a stream that broke, a panel that restarted
+// between the receive and the commit, or a relay whose link went down cost
+// a second delivery and never a reading. That only works if the panel
+// answers after the transaction committed and answers every outcome the
+// agent can act on - including the two that are not success: a sample the
+// panel already holds, which the agent may drop because it changed
+// nothing, and a sample too old to be stored at all, which the agent must
+// drop because carrying it would push out readings the panel would take.
+//
+// A failure of the write is the one case with no answer. The sample then
+// stays in the agent's spool and in the relay's, and comes again.
+func (s *AgentService) recordSample(ctx context.Context, hostID string, session *Session,
+	sample *agentv1.MetricsSample) error {
+	if s.samples == nil {
+		// A gateway without a monitoring store keeps no samples at all.
+		// The host is told so terminally rather than left waiting for an
+		// acknowledgement that is never coming: a spool full of readings
+		// for a panel that was never going to take them is a spool with no
+		// room for the ones it would.
+		s.ackSample(hostID, session, sample,
+			agentv1.MetricsAck_STATUS_REJECTED_INVALID, monitoring.ErrorSampleNotKept)
+		return nil
+	}
+	now := time.Now().UTC()
+	stored := sampleFromProto(sample, now, s.samples.ClockSkewLimit())
+	if age := now.Sub(stored.At); age > s.samples.MaxLateness() {
+		// Older than the panel keeps raw samples for. Writing it would put
+		// a reading into a window the retention drops in the same pass, so
+		// it is refused with a reason instead: the chart keeps a gap, and
+		// the gap has a cause somebody can look up rather than passing for
+		// a host that had nothing to say.
+		s.log.Warn("a resource sample reached the panel too late to be stored",
+			"host_id", hostID, "age", age.String(),
+			"max_lateness", s.samples.MaxLateness().String(),
+			"reason", monitoring.ErrorSampleTooOld)
+		s.ackSample(hostID, session, sample,
+			agentv1.MetricsAck_STATUS_REJECTED_TOO_OLD, monitoring.ErrorSampleTooOld)
+		return nil
+	}
+	outcome, err := s.samples.Record(ctx, hostID, stored)
+	if err != nil {
+		return err
+	}
+	status := agentv1.MetricsAck_STATUS_PERSISTED
+	if outcome == monitoring.OutcomeDuplicate {
+		status = agentv1.MetricsAck_STATUS_DUPLICATE
+	}
+	s.ackSample(hostID, session, sample, status, "")
+	return nil
+}
+
+// ackSample tells the agent what became of one sample.
+//
+// It is a message of its own and not the acknowledgement of a relayed
+// message: that one names the envelope of a relayed message, is consumed
+// by the relay and never reaches the host, and a direct session has no
+// envelope at all - so neither could free anything on the host, which is
+// what this has to do. It names the sample by what the agent's spool is
+// keyed by, the boot and the sequence, and travels the whole way down.
+//
+// A sample without an identity comes from an agent of the release before
+// this one: it has no spool, so there is nothing to free and nothing is
+// sent. A send that does not fit into the outbound buffer is noted and no
+// more - the sample stays in the host's spool and comes again, which is
+// what the spool is for, while a session torn down over an acknowledgement
+// would cost the host its link.
+func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv1.MetricsSample,
+	status agentv1.MetricsAck_Status, reason string) {
+	if session == nil || sample.GetBootId() == "" || sample.GetSequence() == 0 {
+		return
+	}
+	err := session.Send(&agentv1.ServerMessage{
+		Payload: &agentv1.ServerMessage_MetricsAck{MetricsAck: &agentv1.MetricsAck{
+			BootId:     sample.GetBootId(),
+			Sequence:   sample.GetSequence(),
+			Status:     status,
+			ReasonCode: reason,
+		}},
+	}, ackSendTimeout)
+	if err != nil {
+		s.log.Warn("the acknowledgement of a resource sample was not sent; the host will send it again",
+			"host_id", hostID, "boot_id", sample.GetBootId(),
+			"sequence", sample.GetSequence(), "err", err)
+	}
+}
+
 // consume applies a message of the agent to the records of the panel. Its
 // error is the panel's refusal of the message, which keeps it in the
 // spool of the relay.
@@ -804,13 +914,7 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 		return nil
 
 	case *agentv1.AgentMessage_MetricsSample:
-		// A sample is kept only where the monitoring store is attached; a
-		// gateway without one drops it, and the host stays a host without
-		// charts rather than a broken session.
-		if s.samples == nil {
-			return nil
-		}
-		return s.samples.Record(ctx, hostID, sampleFromProto(payload.MetricsSample))
+		return s.recordSample(ctx, hostID, session, payload.MetricsSample)
 
 	case *agentv1.AgentMessage_TaskResult:
 		return s.recordTaskResult(ctx, session, payload.TaskResult)
@@ -1204,18 +1308,21 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	// rather than at the ordering: the panel must not claim it manages a file
 	// the host rejected.
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		s.saveFileState(ctx, hostID, jobID)
-		s.saveCertificateDeployment(ctx, hostID, jobID, result.GetCertificateResult())
-		// The content that was read goes into the store of versions: without
-		// that there is no getting back to the state from before the first
-		// change from the panel, because the panel never recorded that
-		// content.
+		// The content the host reported goes into the store of versions
+		// first: without it there is no getting back to the state from
+		// before the panel managed the file, and the desired state written
+		// below names a version that has to exist by then - a host that
+		// restored a copy only it kept is exactly that case.
+		var restored []byte
 		if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 &&
 			!file.GetTruncated() {
-			if _, err := s.files.SaveVersion(ctx, s.pool, file.GetContent()); err != nil {
+			restored = file.GetContent()
+			if _, err := s.files.SaveVersion(ctx, s.pool, restored); err != nil {
 				s.log.Error("the version of the file that was read was not written", "host_id", hostID, "err", err)
 			}
 		}
+		s.saveFileState(ctx, hostID, jobID, restored)
+		s.saveCertificateDeployment(ctx, hostID, jobID, result.GetCertificateResult())
 	}
 
 	// The state of the managed files goes into the inventory: it is what shows
@@ -3909,7 +4016,7 @@ func versionFromLease(ctx context.Context, s *AgentService, jobID, name string) 
 
 // saveFileState writes the desired state of a file after a successful
 // operation.
-func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string) {
+func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string, restored []byte) {
 	job, err := s.jobs.Get(ctx, jobID)
 	if err != nil {
 		return
@@ -3946,7 +4053,14 @@ func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string) 
 			state.SecretVersion = versionFromLease(ctx, s, jobID, state.SecretName)
 		}
 	} else {
-		digest, err := s.files.SaveVersion(ctx, s.pool, []byte(payload.File.Content))
+		content := []byte(payload.File.Content)
+		if len(content) == 0 && payload.File.VersionSHA256 != "" {
+			// A return to a version only the host kept: the panel had no
+			// copy to send, so what it records is the content the host
+			// put back.
+			content = restored
+		}
+		digest, err := s.files.SaveVersion(ctx, s.pool, content)
 		if err != nil {
 			s.log.Error("the version of the file was not written", "host_id", hostID, "err", err)
 			return

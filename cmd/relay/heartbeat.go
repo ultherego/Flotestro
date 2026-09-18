@@ -81,6 +81,14 @@ func sendHeartbeat(ctx context.Context, proxy *relay.Relay, live *relay.Live,
 		BufferMaxBytes:     uint64(buffer.MaxBytes),
 		BufferDroppedTotal: uint64(buffer.Dropped),
 		Sessions:           uint32(sessions),
+		// The panel reads a restart of the relay off a change of the
+		// instance, and an outage off the state of the link. Neither can
+		// be recovered from the numbers alone: the drop counter starts
+		// again with the process, and a full buffer looks the same whether
+		// the link is down or the centre is slow.
+		InstanceId:      proxy.InstanceID(),
+		UpstreamState:   proxy.UpstreamState(),
+		SpoolBytesLimit: uint64(buffer.MaxBytes),
 	}
 	response, err := relayCentre(live.Current(), proxy.Gateway()).Ping(callCtx, connect.NewRequest(request))
 	if err != nil {

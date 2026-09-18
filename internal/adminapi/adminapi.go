@@ -273,6 +273,7 @@ func (s *Server) Routes() http.Handler {
 	// off, so it has a right of its own.
 	s.route(mux, "GET /api/v1/relays", s.handleListRelays)
 	s.route(mux, "GET /api/v1/relays/{id}", s.handleGetRelay)
+	s.route(mux, "GET /api/v1/relays/{id}/buffer-history", s.handleRelayBufferHistory)
 	s.route(mux, "POST /api/v1/relays/{id}/revoke", s.handleRevokeRelay)
 	s.route(mux, "POST /api/v1/hosts/{id}/identity-recovery", s.handleIdentityRecovery)
 	// The host lifecycle: cut-off, release and decommissioning from the fleet.
@@ -350,6 +351,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "PUT /api/v1/budgets/{key...}", s.handleSetBudget)
 	s.route(mux, "DELETE /api/v1/budgets/{key...}", s.handleDeleteBudget)
 	s.route(mux, "GET /api/v1/vulnerabilities", s.handleFleetVulnerabilities)
+	s.route(mux, "POST /api/v1/vulnerabilities/snapshots/{id}/accept", s.handleAcceptSnapshotCandidate)
 	s.route(mux, "GET /api/v1/vulnerabilities/cves", s.handleFleetCVEs)
 	s.route(mux, "GET /api/v1/vulnerabilities/cves/{cve}", s.handleCVE)
 	s.route(mux, "GET /api/v1/hosts/{id}/vulnerabilities", s.handleHostVulnerabilities)

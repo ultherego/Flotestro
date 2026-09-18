@@ -510,6 +510,9 @@ var queryParameters = map[string][]queryParameter{
 		{"q", "string", "The beginning of a name: a hostname, machine identifier or management address, a campaign, policy, group, relay or secret name, an identity's subject or display name, at least eight characters of a job identifier, or a CVE identifier in full. Fewer than two characters answer with nothing; a kind the caller may not read is left out."},
 		{"limit", "integer", "The hits per kind: 8 by default, 25 at most."},
 	},
+	"GET /api/v1/relays/{id}/buffer-history": {
+		{"range", "string", "The chart window: 3h, 24h (the default), 7d, 30d or 90d; the first two answer with the raw reports, the others with the quarter-hour rollups."},
+	},
 	"GET /api/v1/host-groups/preview": {
 		{"expression", "string", "The typed selector as JSON; the answer is the count within the caller's scope, a sample of up to 20 hostnames and the selector in one line."},
 	},

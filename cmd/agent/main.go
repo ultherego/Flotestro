@@ -183,6 +183,10 @@ func main() {
 	// a path to the centre at all, not which of them serves the current
 	// session.
 	agent.SetGatewayURL(gateways[0])
+	// The proof after a network or a firewall change goes out as the host
+	// itself. The identity is the session's own, so a renewal reaches the
+	// proof without a restart.
+	agent.SetManagementIdentity(identity)
 	agent.SetFirewallProbe(executor.ProbeFirewall)
 	agent.SetLVMProbe(executor.ProbeLVM)
 	agent.SetSSHProbe(executor.ProbeSSH)
@@ -235,6 +239,10 @@ func main() {
 		// The state on disk is the only source agentctl on a host without the
 		// panel learns from whether the agent really speaks to the gateway.
 		State: agent.NewStateWriter(*stateDir, identity.HostID),
+		// The samples the panel has not acknowledged are kept under the
+		// state directory, so a broken session costs a second delivery
+		// rather than a hole in the host's chart.
+		StateDir: *stateDir,
 	}); err != nil {
 		// A decommission is the panel ending this host's membership: the
 		// helper has wiped the identity and disabled the service, and the

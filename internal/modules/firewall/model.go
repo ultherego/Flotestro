@@ -95,6 +95,27 @@ type Zone struct {
 	Ports      []string `json:"ports,omitempty"`
 }
 
+// Drift is a difference between two views of the same firewall: what the host
+// filters with now, and what it keeps for its next start.
+//
+// The two are not the same picture. A rule in one and not in the other either
+// does nothing while looking enforced, or enforces something no file keeps -
+// and vanishes at the next reload. The panel names which, and never guesses
+// when the two notations cannot be compared.
+type Drift struct {
+	// Reason is the stable code of the difference.
+	Reason string `json:"reason"`
+	// Rule is the rule as the view that holds it writes it.
+	Rule string `json:"rule,omitempty"`
+	// RuleID names the rule when it is the panel's own. Empty means a rule
+	// somebody else put there.
+	RuleID string `json:"rule_id,omitempty"`
+	Family string `json:"family,omitempty"`
+	Chain  string `json:"chain,omitempty"`
+	// Detail says what the difference means for the host, in one sentence.
+	Detail string `json:"detail,omitempty"`
+}
+
 // Snapshot is the picture of the host firewall at one moment.
 type Snapshot struct {
 	// Adapter names the mechanism that holds the rules on this host.
@@ -111,6 +132,11 @@ type Snapshot struct {
 	// rules: the default policy is what a packet meets when no rule
 	// matches, and no rule list says that.
 	UFW *UFWStatus `json:"ufw,omitempty"`
+	// Drift lists the differences between what the host filters with and
+	// what it keeps for its next start. An empty list on a host that was
+	// compared means agreement; a host nothing compared has no list at all,
+	// which is not the same answer.
+	Drift []Drift `json:"drift,omitempty"`
 	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`
 	ReadOnlyReason string    `json:"read_only_reason,omitempty"`

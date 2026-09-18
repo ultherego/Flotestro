@@ -34,9 +34,10 @@ type ErrorGuide struct {
 	// Stage is where the code arises: materialize, preflight, planning,
 	// admission, dispatch, agent, helper, verify, reconcile, approval,
 	// cancel, startup for the states the panel refuses to start in,
-	// notification for the dead letters of the notification queue, or
+	// notification for the dead letters of the notification queue,
 	// directory for the phases of a change the control plane carries out
-	// in the directory.
+	// in the directory, or monitoring for the machinery behind the charts
+	// and the alert rules.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -337,6 +338,15 @@ var reportedGuides = []ErrorGuide{
 	{Code: ErrorRebootNotObserved, Stage: "verify", Retry: RetryReadState,
 		Meaning: "The reboot was ordered and accepted by the host, and no session with a new boot identifier followed within the wait: the host is down, is up without the agent, or came back so late that the wait ran out first.",
 		Action:  "Check the host out of band. A host that comes back later reconnects on its own; the job stays failed, because nobody saw the return in time.", CountsAsFailure: true},
+	// The gate in front of a vulnerability feed: a fetch that lost most of
+	// what the snapshot in force holds is a source in trouble far more
+	// often than a fleet that became safe overnight.
+	{Code: "feed_shrank", Stage: "startup", Retry: RetryAfterChange,
+		Meaning: "A fetch of a vulnerability feed carried far fewer findings than the snapshot in force, so it was not activated.",
+		Action:  "Compare the two counts on the Vulnerabilities screen; accept the fetch there if the vendor really retired the findings, otherwise fix the source. The previous snapshot stays in force and ages into stale."},
+	{Code: "feed_release_missing", Stage: "startup", Retry: RetryAfterChange,
+		Meaning: "A fetch of a vulnerability feed stopped covering a release the snapshot in force covered, so it was not activated.",
+		Action:  "Check the feed URL and the release list on the Vulnerabilities screen; accept the fetch there if the release really went out of the feed. Hosts of that release would otherwise all read as clean."},
 	{Code: "job_create_failed", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The operation for the host could not be created.",
 		Action:  "Check the panel log; order again.", CountsAsFailure: true},
@@ -376,6 +386,12 @@ var reportedGuides = []ErrorGuide{
 	{Code: "validator_unavailable", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The order relies on a content check the host cannot run: the validator tool is not installed there. Nothing was written, because a write nobody checked is not the write that was ordered.",
 		Action:  "Install the tool on the host, or order again with allow_missing_validator as a principal holding file.write.unvalidated; the result then says the content went unchecked.", CountsAsFailure: true},
+	{Code: "file_version_unknown", Stage: "helper", Retry: RetryAfterReplan,
+		Meaning: "The order asked to go back to a content this host does not keep a copy of. Nothing was written: the operator named one version, and the newest copy is not it.",
+		Action:  "Read the file's kept versions from the host and order the return to one of them; the refusal lists what the host has.", CountsAsFailure: true},
+	{Code: "file_version_not_kept", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The content about to be replaced or removed could not be copied aside, or the copy asked for no longer matches its digest. Nothing was written, because a change this host could not undo is not the change this operation promises.",
+		Action:  "Check the free space and the state of /var/lib/flotestro-helper/files on the host, then order the change again.", CountsAsFailure: true},
 	{Code: "payload_permission_missing", Stage: "admission", Retry: RetryNever,
 		Meaning: "The content of the order asks for more than the operation's own permission: an entry for root needs schedule.root.exec, a write allowed to skip its validator needs file.write.unvalidated. The panel refused the order before it became a job.",
 		Action:  "Change the order - a service account instead of root, a write with its validator - or have a principal with the permission place it."},
@@ -594,6 +610,31 @@ var reportedGuides = []ErrorGuide{
 	{Code: "directory_unreachable", Stage: "directory", Retry: RetryAutomatic,
 		Meaning: "The directory did not answer, so nothing is known about what it would have done and nothing was changed anywhere.",
 		Action:  "Check the connector on the identity screen - the keytab, the KDC, the directory itself - and order again once it answers."},
+
+	// The built-in monitoring (security remediation, chapters 12 and 16).
+	// None of these sits on a job of a host, so none counts against a
+	// campaign. They are in the guide because a gap in a chart and a
+	// refused start both have to name a reason somebody can look up.
+	{Code: "metric_sample_too_old", Stage: "monitoring", Retry: RetryNever,
+		Meaning: "A resource sample reached the panel older than the raw samples are kept for, so it was not stored: writing it would put a reading into a window the retention drops in the same pass. The host was told so and dropped its copy, and the chart keeps a gap at that moment rather than a line drawn through it.",
+		Action:  "Read how long the host or its relay was cut off: a gap longer than the maximum lateness is the outage, not a fault. Raise the maximum lateness and the raw retention together if such an outage has to be recoverable; the panel refuses a retention shorter than the query window plus the lateness."},
+	{Code: "metric_sample_not_kept", Stage: "monitoring", Retry: RetryNever,
+		Meaning: "The panel that received the sample keeps no samples at all: this gateway has no monitoring store attached. The host was told terminally rather than left waiting, so its spool holds readings it can still deliver instead of one nobody will take.",
+		Action:  "This is a deployment without the built-in monitoring. Attach the monitoring store on the control plane if the fleet is meant to have charts and alerts."},
+	{Code: "alert_evaluator_lease_lost", Stage: "monitoring", Retry: RetryAutomatic,
+		Meaning: "The control-plane instance evaluating the alert rules lost the lease in the middle of a pass and stopped where it was. Another instance holds the lease and carries on from the open episodes; nothing was written after the loss, because two instances judging one fleet at once is how a panel contradicts itself about an alert.",
+		Action:  "Nothing, unless it repeats. A stream of these from one instance means it cannot renew in time: look at the database latency and at the clock of that instance."},
+	{Code: "metrics_retention_too_short", Stage: "startup", Retry: RetryAfterChange,
+		Meaning: "The panel refused to start because the raw retention is shorter than the window it offers at full resolution plus the longest a sample may take to arrive. Such a configuration deletes a reading a relay is still carrying, by definition and without anybody ordering it.",
+		Action:  "Raise the raw retention to at least the sum, or lower the raw query window or the maximum lateness. The three are named in the configuration reference under the monitoring settings."},
+
+	// The proof of the management channel after a change of the network or
+	// the firewall (security remediation, chapter 14.4). Such a change arms a
+	// rescue plan before it touches the host, and only a call the host makes
+	// with its own identity, acknowledged by the panel, disarms it.
+	{Code: "management_channel_unproved", Stage: "agent", Retry: RetryReadState,
+		Meaning: "After the change the host could not prove it still talks to the panel: the call it made with its own identity was not acknowledged. The rescue plan was not disarmed, so the host returns on its own to the state from before the change. A connection that merely opens is not the proof - a rule can admit the handshake and still end every management session.",
+		Action:  "Wait for the rollback, read the state of the host, and order the change again only with a rule that leaves the management channel working - or, deliberately, with break-glass consent.", CountsAsFailure: true},
 }
 
 // RefusalError is a validation refusal with a code of its own. Validate

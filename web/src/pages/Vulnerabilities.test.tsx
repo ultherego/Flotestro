@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import "@testing-library/jest-dom/vitest";
-import { FleetVulnerabilities, fleetListAddress, packagesPreview, severityTone } from "./Vulnerabilities";
+import { FleetVulnerabilities, fleetListAddress, generationState, packagesPreview, severityTone } from "./Vulnerabilities";
 import { patchAddress } from "./Vulnerability";
 import { findingMatches, patchAddress as hostPatchAddress, severityRung } from "./host/Vulnerabilities";
 
@@ -51,6 +51,41 @@ describe("fleetListAddress", () => {
     expect(query.has("severity")).toBe(false);
     // The first page carries no offset, so its address is the plain list.
     expect(query.has("offset")).toBe(false);
+  });
+});
+
+/* A generation says which fetch of the feed judged a host. The answer has
+   three states rather than two: a verdict that names no generation is not
+   a verdict against the current one. */
+
+describe("generationState", () => {
+  const sources = [
+    { provider: "debian", digest: "d", advisories: 1, fetched_at: "", stale: false, generation_id: "g2" },
+    { provider: "ubuntu", digest: "u", advisories: 1, fetched_at: "", stale: false },
+  ];
+  const host = (over: Record<string, unknown>) => ({
+    host_id: "h", packages_total: 1, packages_covered: 1, affected: 0,
+    affected_with_vendor_fix: 0, affected_no_fix: 0, unknown: 0, affected_packages: 0,
+    unique_advisories: 0, unique_cves: 0, coverage_percent: 100, fully_assessed: true,
+    ...over,
+  }) as Parameters<typeof generationState>[0];
+
+  it("calls a host judged against the fetch in force current", () => {
+    expect(generationState(host({ provider: "debian", generation_id: "g2" }), sources)).toBe("current");
+  });
+
+  it("calls a host judged against an earlier fetch older", () => {
+    expect(generationState(host({ provider: "debian", generation_id: "g1" }), sources)).toBe("older");
+  });
+
+  it("never turns a missing generation into a current one", () => {
+    // A verdict from before generations were recorded.
+    expect(generationState(host({ provider: "debian" }), sources)).toBe("unknown");
+    // A source that has no central generation at all: the findings came
+    // from the host's own repository metadata.
+    expect(generationState(host({ provider: "ubuntu", generation_id: "g9" }), sources)).toBe("unknown");
+    // A provider the fleet answer does not name.
+    expect(generationState(host({ provider: "fedora", generation_id: "g9" }), sources)).toBe("unknown");
   });
 });
 
@@ -169,6 +204,7 @@ const fleetAnswer = {
       affected_no_fix: 4, unknown: 0, affected_packages: 7, unique_advisories: 3, unique_cves: 9,
       coverage_reason: "", advisories_reason: "", evaluated_at: "2026-09-18T08:00:00Z",
       coverage_percent: 100, fully_assessed: true, by_severity: { critical: 2 },
+      provider: "debian", generation_id: "g-now", generation_at: "2026-09-18T07:00:00Z",
     },
   ],
   count: 1, total: 300, next_cursor: "the-next-page", limit: 100, offset: 0,
@@ -176,7 +212,9 @@ const fleetAnswer = {
   unique_cves: 120, unique_advisories: 60, affected_package_instances: 700, hosts_affected: 210,
   hosts_total: 1001, hosts_assessed: 300, hosts_without_assessment: 701,
   coverage_reasons: { package_list_missing: 701 },
-  sources: [], max_snapshot_age_hours: 48,
+  sources: [{ provider: "debian", digest: "d1", advisories: 12000, fetched_at: "2026-09-18T07:00:00Z", stale: false, generation_id: "g-now", generation_at: "2026-09-18T07:00:00Z" }],
+  max_snapshot_age_hours: 48,
+  candidates: [],
 };
 
 vi.mock("../lib/api", async (importOriginal) => {

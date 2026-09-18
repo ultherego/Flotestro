@@ -3,12 +3,17 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"net"
-	"net/url"
+	"strings"
+	"sync"
 	"time"
 
+	"connectrpc.com/connect"
+
+	"github.com/ultherego/flotestro/internal/agentconfig"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
+	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	helperv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/helper/v1"
 	"github.com/ultherego/flotestro/internal/opspec"
 )
@@ -22,13 +27,14 @@ const confirmationMargin = 20 * time.Second
 // panel.
 const connectivityProbeInterval = 3 * time.Second
 
-// applyNetwork changes the network configuration and confirms that the host
+// applyNetwork changes the network configuration and proves that the host
 // still talks to the panel.
 //
 // The order is the whole content of the operation: the helper arms the
-// rollback, changes the configuration, and only then does the agent check
-// whether the route to the panel still exists. A confirmation sent without that
-// check would disarm the rescue timer exactly when it is needed.
+// rollback, changes the configuration, and only then does the host prove the
+// management channel - as itself, with a control call the panel acknowledges.
+// A confirmation sent without that proof would disarm the rescue timer
+// exactly when it is needed.
 func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.NetworkPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -109,7 +115,8 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 	}
 
 	deadline := rollbackDeadline(result.GetRollbackDeadline())
-	if !waitForPanel(ctx, panelAddressOf, deadline.Add(-confirmationMargin)) {
+	proof := proveManagementChannel(ctx, panelAddressOf, deadline.Add(-confirmationMargin))
+	if !proof.Proved {
 		// No confirmation is sent. The host goes back on its own to the
 		// configuration from before the change, and the operator is to learn
 		// about it right away rather than from silence.
@@ -117,8 +124,8 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 		return &agentv1.TaskResult{
 			TaskId:        task.GetTaskId(),
 			Status:        agentv1.TaskResult_STATUS_FAILED,
-			Message:       fmt.Sprintf("after the change the host does not reach the panel; rollback at %s", result.GetRollbackDeadline()),
-			ErrorCode:     RejectNetworkUnreachable,
+			Message:       fmt.Sprintf("after the change %s; rollback at %s", proof.summary(), result.GetRollbackDeadline()),
+			ErrorCode:     RejectManagementUnproved,
 			NetworkResult: details,
 		}
 	}
@@ -154,58 +161,202 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 	return &agentv1.TaskResult{
 		TaskId:        task.GetTaskId(),
 		Status:        agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:       result.GetMessage() + "; connectivity confirmed, the rollback was disarmed",
+		Message:       result.GetMessage() + "; " + proof.summary() + ", the rollback was disarmed",
 		NetworkResult: details,
 	}
 }
 
-// panelAddressOf holds the address of the control plane for the connectivity
-// check after a network change.
+// panelAddressOf holds the address of the control plane the host proves its
+// management channel against after a change.
 var panelAddressOf string
 
 // SetGatewayURL remembers the address of the control plane.
 func SetGatewayURL(gatewayURL string) { panelAddressOf = gatewayURL }
 
-// waitForPanel checks whether the host still reaches the panel.
+// RejectManagementUnproved marks a change after which the host could not
+// prove it still talks to the panel as itself. The code lives next to the
+// proof rather than with the other refusals of the executor, because it is
+// the proof that decides whether it is given.
+const RejectManagementUnproved = "management_channel_unproved"
+
+// managementProofTimeout bounds one attempt at the proof. It is the limit the
+// connectivity check has always had: a call to the panel that takes longer
+// than this is not a channel an operator could work through either.
+const managementProofTimeout = 5 * time.Second
+
+// panelAck is what the panel answered the proof with.
 //
-// A TCP connection is checked and not the session of the agent: the session can
-// still live on an old socket the kernel keeps despite an address change, and
-// it would tell us everything works when a new connection would no longer get
-// through.
-func waitForPanel(ctx context.Context, gatewayURL string, until time.Time) bool {
-	address := socketAddress(gatewayURL)
-	if address == "" {
-		// Without a known panel address the connectivity cannot be checked, and
-		// guessing "it probably works" disarms the rescue timer.
-		return false
+// An empty answer is not an acknowledgement. A channel that opens and says
+// nothing is exactly the state the proof exists to catch, so the fields are
+// read rather than assumed from the absence of an error.
+type panelAck struct {
+	GatewayID  string
+	ServerTime time.Time
+}
+
+// acknowledged says whether the panel really answered the control call.
+func (a panelAck) acknowledged() bool { return a.GatewayID != "" || !a.ServerTime.IsZero() }
+
+// managementProof is what the host has to show before a rescue plan is
+// disarmed, and what the result of the task carries afterwards.
+type managementProof struct {
+	Proved     bool
+	GatewayID  string
+	ServerTime time.Time
+	// Attempts counts the calls made. A proof that took several tries is not
+	// the same fact as one that went through at once, and the operator reading
+	// the result is to see the difference.
+	Attempts int
+	// Reason names why the proof was not produced. It is never empty on a
+	// proof that failed: an unknown reason is not "the channel works".
+	Reason string
+}
+
+// summary renders the proof for the message of the result. The operator reads
+// the result of the task rather than the journal of the host, so the proof
+// has to travel in it.
+func (p managementProof) summary() string {
+	if !p.Proved {
+		return "the management channel was not proved: " + p.Reason
+	}
+	who := "the panel"
+	if p.GatewayID != "" {
+		who = "gateway " + p.GatewayID
+	}
+	attempts := "attempts"
+	if p.Attempts == 1 {
+		attempts = "attempt"
+	}
+	return fmt.Sprintf("the management channel was proved: %s acknowledged a control call over mTLS in %d %s",
+		who, p.Attempts, attempts)
+}
+
+// askPanel makes one acknowledged control call to the panel.
+//
+// It is a variable so that the proof can be held against a channel that
+// refuses, one that acknowledges, and one that opens but never answers - the
+// last being the case a bare TCP handshake used to call a success.
+var askPanel = pingPanel
+
+// pingPanel proves the channel the way the session uses it: a new mTLS
+// connection with the host's own certificate, a control call, and the
+// panel's answer read back.
+//
+// The new connection is the whole point. The session of the agent may live on
+// for minutes on a socket the kernel keeps outside the new rules, and a rule
+// that admits a handshake but kills the session - one that drops long-lived
+// connections, or blocks the protocol they run on - leaves the host reachable
+// for exactly as long as nobody reconnects. A TCP handshake to the gateway
+// proved none of that.
+func pingPanel(ctx context.Context, gatewayURL string) (panelAck, error) {
+	identity, err := managementIdentity()
+	if err != nil {
+		return panelAck{}, err
+	}
+	client := newHTTP2Client(identity)
+	// Every attempt opens its own connection; an idle one left behind would
+	// be the old socket all over again.
+	defer client.CloseIdleConnections()
+	response, err := agentv1connect.NewAgentServiceClient(client, gatewayURL).
+		Ping(ctx, connect.NewRequest(&agentv1.PingRequest{}))
+	if err != nil {
+		return panelAck{}, err
+	}
+	ack := panelAck{GatewayID: response.Msg.GetGatewayId()}
+	if stamp := response.Msg.GetServerTime(); stamp != nil {
+		ack.ServerTime = stamp.AsTime()
+	}
+	return ack, nil
+}
+
+// proveManagementChannel repeats the proof until the panel acknowledges or
+// the moment the rescue plan has to keep for itself.
+func proveManagementChannel(ctx context.Context, gatewayURL string, until time.Time) managementProof {
+	var proof managementProof
+	if strings.TrimSpace(gatewayURL) == "" {
+		// Without a known address of the panel there is nothing to prove the
+		// channel against, and guessing "it probably works" disarms the rescue.
+		proof.Reason = "the agent does not know the address of the panel"
+		return proof
 	}
 	for {
-		conn, err := net.DialTimeout("tcp", address, 5*time.Second)
-		if err == nil {
-			_ = conn.Close()
-			return true
+		attempt, cancel := context.WithTimeout(ctx, managementProofTimeout)
+		ack, err := askPanel(attempt, gatewayURL)
+		cancel()
+		proof.Attempts++
+		switch {
+		case err != nil:
+			proof.Reason = err.Error()
+		case !ack.acknowledged():
+			proof.Reason = "the panel answered the control call without acknowledging it"
+		default:
+			proof.Proved = true
+			proof.GatewayID = ack.GatewayID
+			proof.ServerTime = ack.ServerTime
+			proof.Reason = ""
+			return proof
 		}
-		if time.Now().After(until) {
-			return false
+		if !time.Now().Before(until) {
+			return proof
 		}
 		select {
 		case <-ctx.Done():
-			return false
+			proof.Reason = "the task ended before the panel acknowledged: " + proof.Reason
+			return proof
 		case <-time.After(connectivityProbeInterval):
 		}
 	}
 }
 
-func socketAddress(gatewayURL string) string {
-	parsed, err := url.Parse(gatewayURL)
-	if err != nil || parsed.Hostname() == "" {
-		return ""
+// waitForPanel says whether the host proved it still reaches the panel. The
+// modules that only need the answer keep asking this question.
+func waitForPanel(ctx context.Context, gatewayURL string, until time.Time) bool {
+	return proveManagementChannel(ctx, gatewayURL, until).Proved
+}
+
+// The identity the proof goes out with. It is shared with the session, which
+// replaces it in place when the certificate is renewed, so the proof always
+// goes out with the certificate the host holds now.
+var (
+	managementIdentityMu    sync.RWMutex
+	managementIdentityValue *Identity
+)
+
+// SetManagementIdentity hands the proof the identity the host talks to the
+// panel with. The proof is made as the host itself: a call anybody could make
+// would say nothing about this host's place in the fleet.
+func SetManagementIdentity(identity *Identity) {
+	managementIdentityMu.Lock()
+	defer managementIdentityMu.Unlock()
+	managementIdentityValue = identity
+}
+
+// managementIdentity returns the identity the proof goes out with.
+//
+// The daemon hands it over at start. A process that did not - a tool run by
+// hand on the host - reads the same files the daemon connects with. A host
+// that has no identity at all cannot prove anything and says so: the rescue
+// plan then stays armed, which is the point of it.
+func managementIdentity() (*Identity, error) {
+	managementIdentityMu.RLock()
+	identity := managementIdentityValue
+	managementIdentityMu.RUnlock()
+	if identity != nil {
+		return identity, nil
 	}
-	port := parsed.Port()
-	if port == "" {
-		port = "443"
+	loaded, ok := agentconfig.Current()
+	if !ok {
+		return nil, errors.New("the agent has no identity to prove the management channel with")
 	}
-	return net.JoinHostPort(parsed.Hostname(), port)
+	cfg, err := agentconfig.Load(loaded.Path)
+	if err != nil {
+		return nil, fmt.Errorf("the identity of the host was not read: %w", err)
+	}
+	identity, err = LoadIdentity(cfg.Agent.StateDir)
+	if err != nil {
+		return nil, fmt.Errorf("the identity of the host was not read: %w", err)
+	}
+	return identity, nil
 }
 
 func rollbackDeadline(value string) time.Time {

@@ -2,6 +2,7 @@ package monitoring
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -58,6 +59,69 @@ type openAlert struct {
 // way holds its pending episode in place - the no-data state - rather
 // than letting the timer run on to firing.
 func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
+	return s.evaluate(ctx, now, nil)
+}
+
+// EvaluateLeased is the pass the running panel makes: one instance at a
+// time, under a lease taken from the database.
+//
+// An instance that does not get the lease evaluates nothing. It does not
+// evaluate a little, or evaluate and let an index swallow the second
+// insert: the rest of an episode - firing, refreshing, resolving - is
+// plain updates that no index guards, and two instances a second apart
+// would contradict each other about one alert. An instance that loses the
+// lease in the middle of a pass stops where it is for the same reason;
+// what it has written is a state the new holder reads and carries on
+// from, which is exactly what an open episode is for.
+func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
+	lease, held, err := s.acquireEvaluatorLease(ctx)
+	if err != nil {
+		return err
+	}
+	if !held {
+		s.log.Debug("another instance holds the lease of the alert evaluator; the rules are judged there")
+		return nil
+	}
+	defer func() {
+		// The lease is given back at the end of the pass so that the next
+		// instance may take it at once instead of waiting out the term.
+		// The context of the run may already be cancelled - the panel is
+		// shutting down - and that is precisely when handing it back
+		// matters.
+		if err := s.releaseEvaluatorLease(context.WithoutCancel(ctx), lease); err != nil {
+			s.log.Warn("the lease of the alert evaluator was not given back; it runs out by itself",
+				"err", err)
+		}
+	}()
+
+	renewed := time.Now()
+	guard := func(ctx context.Context) error {
+		if time.Since(renewed) < evaluatorRenewEvery {
+			return nil
+		}
+		if err := s.renewEvaluatorLease(ctx, lease); err != nil {
+			return err
+		}
+		renewed = time.Now()
+		return nil
+	}
+	if err := s.evaluate(ctx, now, guard); err != nil {
+		if errors.Is(err, ErrLeaseLost) {
+			// Not a failure of the panel: another instance judges the
+			// fleet now, and this pass stopped rather than writing over it.
+			s.log.Warn("the lease of the alert evaluator was lost during the pass; the pass was stopped",
+				"holder", lease.Holder, "token", lease.Token)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// evaluate is the pass itself. The guard, when there is one, is asked
+// between rules whether the caller may still write; without one - a test,
+// or a single-instance call - the pass simply runs.
+func (s *Store) evaluate(ctx context.Context, now time.Time, guard func(context.Context) error) error {
 	rules, err := s.ListRules(ctx)
 	if err != nil {
 		return err
@@ -72,6 +136,15 @@ func (s *Store) Evaluate(ctx context.Context, now time.Time) error {
 	}
 	scopes := s.scopes(ctx, rules)
 	for _, rule := range rules {
+		// Asked between rules rather than only at the start: a pass over a
+		// fleet takes time, and an instance that lost the fleet halfway
+		// must not write the second half of a verdict somebody else is
+		// already giving.
+		if guard != nil {
+			if err := guard(ctx); err != nil {
+				return err
+			}
+		}
 		within := scopes[rule.ID]
 		if !rule.Enabled || within == nil {
 			continue

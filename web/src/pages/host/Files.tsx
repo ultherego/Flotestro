@@ -14,6 +14,28 @@ import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
+/**
+ * A copy of the file the host itself kept before a write took its place.
+ *
+ * The panel's own history covers only what the panel sent. The content a
+ * host had before it was ever managed from here, and the content somebody
+ * changed outside the panel, exist on that host alone - so the host reports
+ * them and the return is ordered by the checksum it reports.
+ */
+type HostVersion = {
+  // No checksum means a version whose content came from the secret store:
+  // the host keeps the copy but does not name it, because the checksum of a
+  // short secret is a hint about it.
+  sha256?: string;
+  size_bytes: number;
+  mode?: string;
+  owner?: string;
+  group?: string;
+  kept_at: string;
+  ordered_by?: string;
+  from_secret?: boolean;
+};
+
 type ManagedFile = {
   path: string;
   // An empty desired-state fingerprint means a file from a secret: the
@@ -34,7 +56,41 @@ type ManagedFile = {
   observed_mode?: string;
   observed_owner?: string;
   unavailable_reason?: string;
+  // The versions the host keeps of this file, newest first.
+  host_versions?: HostVersion[];
 };
+
+/**
+ * Why a version the host keeps cannot be ordered back, or an empty string
+ * when it can.
+ *
+ * A disabled button with no reason is the worst of both: the operator sees
+ * the version, cannot ask for it and is not told why.
+ */
+export function hostVersionRefusal(version: HostVersion): "" | "from_secret" | "no_checksum" {
+  if (version.from_secret) return "from_secret";
+  if (!version.sha256) return "no_checksum";
+  return "";
+}
+
+/**
+ * The order that puts a version the host kept back in place.
+ *
+ * The version is named by its checksum rather than by "the last one": the
+ * operator picks a content, and the host refuses a checksum it never kept
+ * instead of writing the newest copy. The permissions travel with it, so
+ * the file comes back as the inode it was, not as the bytes alone.
+ */
+export function hostRollbackPayload(file: ManagedFile, version: HostVersion) {
+  return {
+    file: {
+      path: file.path,
+      version_sha256: version.sha256,
+      expected_sha256: file.observed_sha256 ?? "",
+      mode: version.mode ?? "",
+    },
+  };
+}
 
 type Version = {
   sha256?: string;
@@ -383,6 +439,8 @@ function History({
         </Table>
       </Section>
 
+      <HostVersions hostID={hostID} hostname={hostname} file={file} onIntent={onIntent} />
+
       {comparison && chosen.data && current.data && (
         <Section
           title={t("Difference")}
@@ -392,6 +450,96 @@ function History({
         </Section>
       )}
     </>
+  );
+}
+
+/**
+ * The copies of the file the host itself kept.
+ *
+ * The panel's history holds what the panel sent; this holds what the file
+ * really was on this machine before each write - including content the
+ * panel never had, because somebody changed the file outside it. Offering
+ * the list is the point: without it a return to such a content would mean
+ * asking the operator for the checksum of something they cannot see.
+ */
+function HostVersions({
+  hostID, hostname, file, onIntent,
+}: {
+  hostID: string;
+  hostname: string;
+  file: ManagedFile;
+  onIntent: (intent: Intent) => void;
+}) {
+  const t = useT();
+  const versions = file.host_versions ?? [];
+  if (!versions.length) return null;
+
+  const refusals: Record<string, string> = {
+    from_secret: t("The content came from the secret store, so the host does not report its checksum. The copy is there, but the panel cannot name it."),
+    no_checksum: t("The host reports no checksum for this version."),
+  };
+
+  return (
+    <Section
+      title={t("Versions kept on the host")}
+      count={versions.length}
+      description={t("What the file was before each write, kept by the host itself. A return puts back exactly this content, with the permissions it had.")}
+      flush
+    >
+      <Table>
+        <thead>
+          <tr>
+            <th>{t("Version")}</th>
+            <th className="hm-num">{t("Size")}</th>
+            <th>{t("Mode")}</th>
+            <th>{t("Kept")}</th>
+            <th>{t("Ordered by")}</th>
+            <th>{t("Actions")}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {versions.map((version) => {
+            const refusal = hostVersionRefusal(version);
+            return (
+              <tr key={`${version.sha256 ?? "secret"}-${version.kept_at}`}>
+                <td className="hm-mono">
+                  {version.sha256 ? version.sha256.slice(0, 12) : t("not named")}
+                  {version.from_secret && <span className="badge unknown"> {t("from a secret")}</span>}
+                </td>
+                <td className="hm-num" title={t("{n} bytes", { n: version.size_bytes })}>{bytes(version.size_bytes)}</td>
+                <td className="hm-mono">{version.mode || "—"}</td>
+                <td><Time value={version.kept_at} /></td>
+                <td>{version.ordered_by || "—"}</td>
+                <td>
+                  <div className="operations">
+                    <ActionGuard action="file.rollback" host={hostID}>
+                      <button
+                        className="secondary"
+                        disabled={refusal !== ""}
+                        title={refusal ? refusals[refusal] : t("The host writes back exactly this copy, through the same validator as any other write.")}
+                        onClick={() =>
+                          onIntent({
+                            action: "file.rollback",
+                            label: t("Restore this version"),
+                            description: t("{path} on {host} goes back to the copy the host kept on {when}, with the mode {mode}.", {
+                              path: file.path, host: hostname,
+                              when: absoluteTime(version.kept_at), mode: version.mode || "—",
+                            }),
+                            payload: hostRollbackPayload(file, version),
+                          })
+                        }
+                      >
+                        {t("Restore")}
+                      </button>
+                    </ActionGuard>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </Table>
+    </Section>
   );
 }
 

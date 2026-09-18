@@ -15,8 +15,13 @@ route or command for a step, the runbook says so rather than describing one.
   raising a budget under `If-Match`; pausing and cancelling a campaign.
 - [Relay buffer full and relay disk full](relay-disk-full.md): the in-memory buffer and
   `buffer_max_bytes`, what is dropped, `flotestro-relayctl`, re-enrollment of a relay.
+- [Samples stop arriving, or a chart has a hole](metrics-gap.md): the agent's spool, a
+  delivery refused as too late, a rollup that has stopped, the lease of the alert
+  evaluator, the daily partitions of the raw samples.
 - [Quarantine, identity recovery and decommission](quarantine.md): the host lifecycle, the
   clone policy, release, `flotestro-agentctl identity reset`, the decommission handshake.
+- [Support bundle](support-bundle.md): what a bundle carries and what it never carries,
+  making one, `--verify` before sending it, and what to do when the scanner refuses to make one.
 - [Golden image and cloud-init](golden-image.md): what an image may and must not carry, the
   sanitisation before sealing, the first-boot enrollment through `flotestro-enroll.service`
   and its credential file, the Ansible alternative, what a clone does to the fleet.

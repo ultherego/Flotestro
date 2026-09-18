@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -190,6 +191,11 @@ type TaskExecutor struct {
 	// after a change. Nil means they have not been assembled yet: the real
 	// ones are built on first use, and a test puts its own host here.
 	verifyReaders *hostReaders
+	// taskSecrets holds what a running task has fetched, so the read
+	// before the change, the change and the verification after it share
+	// the one lease the panel issued. Cleared when the task ends.
+	secretsMu   sync.Mutex
+	taskSecrets map[string][]byte
 }
 
 // SecretFetch reaches for the value of the secret named in the task.
@@ -244,6 +250,11 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 		return inProgress(task)
 	}
 	defer e.running.release(idempotencyKey)
+	// Whatever this task fetched from the secret store is forgotten with
+	// it, whichever way it ends, and the pages it needed go back to the
+	// host rather than waiting for the next sample.
+	defer e.forgetTaskSecrets(taskID)
+	defer releaseAfterTask()
 
 	// The task runs under a context of its own, which a cancel that
 	// arrives before the start closes: the checks and the wait for the
@@ -1335,6 +1346,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			// Part of the payload hash: a flag the agent added on its own
 			// would not match the approved plan.
 			AllowMissingValidator: file.GetAllowMissingValidator(),
+			// Part of the payload hash: the digest names which content the
+			// host is to put back.
+			VersionSHA256: file.GetVersionSha256(),
 		}}, nil
 
 	case *agentv1.TaskEnvelope_Security:

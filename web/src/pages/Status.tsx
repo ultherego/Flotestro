@@ -63,7 +63,7 @@ export function formatSeconds(value: number): string {
 /** The order the blocks stand in: what breaks the panel first comes first. */
 const BLOCK_ORDER = [
   "database", "migrations", "outbox", "scheduler", "sessions", "relays",
-  "directory", "vulnerability_feeds", "certificates", "housekeeping",
+  "directory", "vulnerability_feeds", "certificates", "monitoring", "housekeeping",
 ];
 
 const BLOCK_TITLES: Record<string, string> = {
@@ -76,6 +76,7 @@ const BLOCK_TITLES: Record<string, string> = {
   directory: "Directory connector",
   vulnerability_feeds: "Vulnerability feeds",
   certificates: "Certificates",
+  monitoring: "Monitoring",
   housekeeping: "Housekeeping",
   build: "About",
 };
@@ -85,6 +86,22 @@ const BLOCK_TITLES: Record<string, string> = {
    the screen learns its name. */
 type FactKind = "text" | "number" | "bytes" | "seconds" | "time" | "flag" | "ms";
 const FACT_LABELS: Record<string, [string, FactKind]> = {
+  raw_partitioned: ["Raw samples partitioned", "flag"],
+  raw_partitions: ["Raw partitions", "number"],
+  oldest_raw_day: ["Oldest raw day", "time"],
+  newest_raw_day: ["Newest raw day", "time"],
+  dirty_buckets: ["Buckets to recompute", "number"],
+  oldest_dirty_bucket_at: ["Oldest waiting bucket", "time"],
+  hosts_with_rollup_mark: ["Hosts with a rollup mark", "number"],
+  sample_identities: ["Sample identities", "number"],
+  raw_retention: ["Raw retention", "text"],
+  rollup_retention: ["Rollup retention", "text"],
+  max_lateness: ["Maximum lateness", "text"],
+  raw_query_window: ["Raw query window", "text"],
+  clock_skew_limit: ["Clock skew limit", "text"],
+  partitions_ahead_days: ["Partitions ahead", "number"],
+  evaluator_holder: ["Evaluator holder", "text"],
+  evaluator_lease_until: ["Evaluator lease until", "time"],
   reachable: ["Reachable", "flag"],
   latency_ms: ["Round trip", "ms"],
   size_bytes: ["Size", "bytes"],

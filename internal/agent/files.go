@@ -107,6 +107,10 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 				// The flag travels with the order; the grant that makes it
 				// count travels in the capability the client attaches.
 				AllowMissingValidator: payload.AllowMissingValidator,
+				// A return to a version the panel does not have travels as
+				// the digest of that version: the content lies on the host,
+				// which is the only place it survived.
+				VersionSha256: payload.VersionSHA256,
 			},
 		},
 	}, timeout)
@@ -123,6 +127,9 @@ func (e *TaskExecutor) applyFile(ctx context.Context, task *agentv1.TaskEnvelope
 		Truncated:       result.GetTruncated(),
 		ValidatorOutput: result.GetValidatorOutput(),
 		Plan:            result.GetPlan(),
+		// What the write really did travels back whole: the panel showed the
+		// operator an intended state, and the answer is in the same terms.
+		Change: result.GetChange(),
 	}
 	if !response.GetAccepted() {
 		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,

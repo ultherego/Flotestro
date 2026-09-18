@@ -2,11 +2,16 @@ package adminapi
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/vuln"
 )
@@ -38,6 +43,13 @@ type vulnerabilityReport struct {
 	Snapshot *vuln.Snapshot `json:"snapshot,omitempty"`
 	// SnapshotStale says the data is older than the policy allows.
 	SnapshotStale bool `json:"snapshot_stale"`
+	// GenerationCurrent says whether this verdict was produced by the feed
+	// generation in force right now. False means the host still carries an
+	// older judgement - the feed has moved on and this host has not been
+	// assessed against it yet. Empty for a host whose verdict predates
+	// generations or whose findings come from its own repositories, where
+	// there is no central generation to be current against.
+	GenerationCurrent *bool `json:"generation_current,omitempty"`
 	// CoveragePercent is the share of packages covered by the feed.
 	CoveragePercent float64 `json:"coverage_percent"`
 	// FullyAssessed says whether the assessment is complete: no coverage
@@ -134,6 +146,10 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 		if snapshot, err := s.vulnerabilities.ActiveSnapshot(r.Context(), report.State.Provider); err == nil {
 			report.Snapshot = &snapshot
 			report.SnapshotStale = snapshot.Stale(s.feedAge, time.Now().UTC())
+			if snapshot.GenerationID != "" && report.State.GenerationID != "" {
+				current := snapshot.GenerationID == report.State.GenerationID
+				report.GenerationCurrent = &current
+			}
 		} else if report.State.SnapshotDigest != "" {
 			// The RPM family reads the advisories from the metadata of its own
 			// repositories, so there is no central snapshot. The panel must
@@ -272,6 +288,131 @@ type fleetVulnerabilitiesView struct {
 	CoverageReasons        map[string]int   `json:"coverage_reasons"`
 	Sources                []map[string]any `json:"sources"`
 	MaxSnapshotAgeHours    int              `json:"max_snapshot_age_hours"`
+	// Candidates are the fetches the sanity gate is holding back. They are
+	// on the fleet screen rather than behind a settings page, because a
+	// held-back feed is the reason the numbers below have stopped moving,
+	// and the operator reading those numbers is the one who has to decide.
+	Candidates []candidateView `json:"candidates"`
+}
+
+// candidateView is a fetch the gate refused to activate.
+type candidateView struct {
+	ID       string `json:"id"`
+	Provider string `json:"provider"`
+	Digest   string `json:"digest"`
+	// Reason is the typed code: feed_shrank or feed_release_missing.
+	Reason     string     `json:"reason"`
+	Advisories int        `json:"advisories"`
+	Releases   []string   `json:"releases,omitempty"`
+	FetchedAt  time.Time  `json:"fetched_at"`
+	HeldAt     *time.Time `json:"held_at,omitempty"`
+	// ActiveAdvisories is what the snapshot in force carries, so the two
+	// numbers can be read side by side: that comparison is the decision.
+	ActiveAdvisories int      `json:"active_advisories"`
+	ActiveReleases   []string `json:"active_releases,omitempty"`
+}
+
+// candidateViews dresses the held-back fetches with what the snapshot in
+// force carries, so the screen shows the comparison rather than one half
+// of it.
+func (s *Server) candidateViews(ctx context.Context, active []vuln.Snapshot) ([]candidateView, error) {
+	candidates, err := s.vulnerabilities.Candidates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	inForce := make(map[string]vuln.Snapshot, len(active))
+	for _, snapshot := range active {
+		inForce[snapshot.Provider] = snapshot
+	}
+	views := make([]candidateView, 0, len(candidates))
+	for _, candidate := range candidates {
+		view := candidateView{
+			ID: candidate.ID, Provider: candidate.Provider, Digest: candidate.Digest,
+			Reason: candidate.CandidateReason, Advisories: candidate.AdvisoryCount,
+			Releases: candidate.Releases, FetchedAt: candidate.FetchedAt,
+			HeldAt: candidate.CandidateAt,
+		}
+		if current, ok := inForce[candidate.Provider]; ok {
+			view.ActiveAdvisories = current.AdvisoryCount
+			view.ActiveReleases = current.Releases
+		}
+		views = append(views, view)
+	}
+	return views, nil
+}
+
+// handleAcceptSnapshotCandidate activates a fetch the sanity gate held
+// back.
+//
+// The gate refused the fetch because it looked like a broken download;
+// only somebody who has compared it with the snapshot in force can say it
+// was a real change at the vendor. That is a decision about what the panel
+// will say about every host of that distribution, so it is taken with the
+// right to change how the panel judges the fleet, with fresh
+// authentication and a reason, and it leaves one entry on the trail.
+func (s *Server) handleAcceptSnapshotCandidate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	principal, ok := s.authorize(w, r, authz.PermMonitoringRulesWrite, authz.GlobalScope,
+		"vuln_snapshot", id)
+	if !ok {
+		return
+	}
+	if s.vulnerabilities == nil {
+		problem(w, http.StatusNotImplemented, "vulnerability_correlator_disabled",
+			"the vulnerability correlator is disabled in this installation")
+		return
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		problem(w, http.StatusNotFound, "snapshot_not_found", "no such snapshot")
+		return
+	}
+	var request struct {
+		Reason string `json:"reason"`
+	}
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&request); err != nil {
+			problem(w, http.StatusBadRequest, "invalid_body", "the request body is not valid JSON")
+			return
+		}
+	}
+	request.Reason = strings.TrimSpace(request.Reason)
+	if request.Reason == "" {
+		problem(w, http.StatusBadRequest, "reason_required",
+			"accepting a held-back feed must state its reason")
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
+		"vulnerability.snapshot.accept", "vuln_snapshot", id)
+	if !ok {
+		return
+	}
+
+	activated, err := s.vulnerabilities.AcceptCandidate(r.Context(), id)
+	switch {
+	case errors.Is(err, vuln.ErrNoSnapshot):
+		problem(w, http.StatusNotFound, "snapshot_not_found", "no such snapshot")
+		return
+	case errors.Is(err, vuln.ErrNotCandidate):
+		problem(w, http.StatusConflict, "snapshot_not_candidate",
+			"this snapshot was not held back by the sanity gate")
+		return
+	case err != nil:
+		s.fail(w, err)
+		return
+	}
+	s.audit.Record(r.Context(), audit.Event{
+		ActorType: audit.ActorUser, ActorID: principal.Subject,
+		Action: "vulnerability.snapshot.accept", TargetType: "vuln_snapshot", TargetID: id,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"reason": request.Reason, "provider": activated.Provider,
+			"digest": activated.Digest, "advisories": activated.AdvisoryCount,
+			"releases": activated.Releases, "generation_id": activated.GenerationID,
+		}, evidence),
+	})
+	s.log.Info("a held-back feed snapshot was accepted", "provider", activated.Provider,
+		"snapshot_id", id, "advisories", activated.AdvisoryCount, "actor", principal.Subject)
+	writeJSON(w, http.StatusOK, map[string]any{"snapshot": activated})
 }
 
 // handleFleetVulnerabilities returns the assessment of the whole visible
@@ -341,6 +482,10 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 			"advisories": snapshot.AdvisoryCount, "releases": snapshot.Releases,
 			"fetched_at": snapshot.FetchedAt, "stale": snapshot.Stale(s.feedAge, now),
 			"error": snapshot.Error,
+			// The generation of the data in force. A host's verdict names
+			// one too, and the two together answer "was this host judged
+			// against what the panel holds now".
+			"generation_id": snapshot.GenerationID, "generation_at": snapshot.GenerationAt,
 		})
 	}
 	// The advisories a host reads from its own repositories - Fedora's
@@ -356,6 +501,12 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 			"hosts": repository.Hosts, "fetched_at": repository.CollectedAt,
 			"stale": repository.CollectedAt.Before(now.Add(-s.feedAge)),
 		})
+	}
+
+	candidates, err := s.candidateViews(r.Context(), snapshots)
+	if err != nil {
+		s.fail(w, err)
+		return
 	}
 
 	coverage := fleetCoverage{
@@ -378,6 +529,7 @@ func (s *Server) handleFleetVulnerabilities(w http.ResponseWriter, r *http.Reque
 		CoverageReasons:        summary.CoverageReasons,
 		Sources:                sources,
 		MaxSnapshotAgeHours:    int(s.feedAge.Hours()),
+		Candidates:             candidates,
 	})
 }
 
@@ -416,6 +568,10 @@ var vulnerabilitiesCSVColumns = []string{
 	"unknown", "critical", "high", "medium", "low", "negligible", "unrated",
 	"affected_packages", "unique_advisories", "unique_cves", "packages_total", "packages_covered",
 	"coverage_percent", "fully_assessed", "coverage_reason", "advisories_reason", "provider", "evaluated_at",
+	// Appended at the end, where a new column does not move the ones a
+	// sheet already reads: the generation that produced the verdict and
+	// when that generation was taken.
+	"generation_id", "generation_at",
 }
 
 // writeVulnerabilitiesCSV streams the fleet assessment as a file: one row
@@ -462,6 +618,6 @@ func hostVulnerabilitiesCSVRow(item hostVulnerabilities) []string {
 		strconv.Itoa(item.AffectedPackages), strconv.Itoa(item.UniqueAdvisories), strconv.Itoa(item.UniqueCVEs),
 		strconv.Itoa(item.PackagesTotal), strconv.Itoa(item.PackagesCovered), csvFloat(item.CoveragePercent),
 		strconv.FormatBool(item.FullyAssessed), item.CoverageReason, item.AdvisoriesReason, item.Provider,
-		formatTime(item.EvaluatedAt),
+		formatTime(item.EvaluatedAt), item.GenerationID, formatTime(item.GenerationAt),
 	}
 }

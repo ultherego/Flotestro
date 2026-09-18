@@ -76,6 +76,15 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 		AdvisoriesReason: input.AdvisoriesReason,
 		PackagesTotal:    len(input.Packages),
 		EvaluatedAt:      &now,
+		// The verdict names the generation of the data that settled it.
+		// The digest says which data; the generation says which data and
+		// when they were taken, and that is what lets an operator tell a
+		// host judged against yesterday's feed from one judged just now.
+		GenerationID: snapshot.GenerationID,
+	}
+	if !snapshot.GenerationAt.IsZero() {
+		takenAt := snapshot.GenerationAt
+		state.GenerationAt = &takenAt
 	}
 
 	reason, blocking := CoverageReasonFor(input, snapshot, maxFeedAge, now)

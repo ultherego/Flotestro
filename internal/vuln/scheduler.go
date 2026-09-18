@@ -53,6 +53,11 @@ type Settings struct {
 	// findings to a change of the package list would sometimes refresh them
 	// never.
 	MaxAdvisoryAge time.Duration
+	// ShrinkShare is how much of the snapshot in force a fetch may lose
+	// and still be activated without anybody looking. A fetch that loses
+	// more is kept as a candidate with a typed reason and the previous
+	// snapshot stays in force. Zero means the default.
+	ShrinkShare float64
 }
 
 // DefaultSettings returns the default settings.
@@ -60,6 +65,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Interval: 30 * time.Minute, MaxSnapshotAge: 6 * time.Hour,
 		MaxAdvisoryAge: 30 * time.Minute, Debounce: 15 * time.Second,
+		ShrinkShare: DefaultShrinkShare,
 	}
 }
 
@@ -452,7 +458,22 @@ func (h *Scheduler) Synchronize(ctx context.Context, descriptions []HostDescript
 			_ = h.store.SaveFetchError(ctx, source.Name(), err.Error())
 			continue
 		}
-		_, err = h.store.SaveSnapshot(ctx, snapshot, advisories)
+		_, err = h.store.SaveSnapshot(ctx, snapshot, advisories, h.settings.ShrinkShare)
+		var refusal *FeedRefusal
+		if errors.As(err, &refusal) {
+			// The fetch lost more than the installation allows, or lost a
+			// whole release. It is kept as a candidate with its findings
+			// and the snapshot in force stays in force; without a
+			// confirmation it ages into a stale source the panel shows as
+			// such, so nobody mistakes "held back" for "up to date". An
+			// operator who has read the numbers accepts the candidate.
+			h.log.Error("the fetch of the feed did not pass the sanity gate; the previous snapshot stays in force",
+				"provider", source.Name(), "reason", refusal.Reason,
+				"findings", refusal.FetchedCount, "in_force", refusal.ActiveCount,
+				"missing_releases", refusal.MissingReleases, "releases", list)
+			_ = h.store.SaveFetchError(ctx, source.Name(), refusal.Reason)
+			continue
+		}
 		if errors.Is(err, ErrFeedEmpty) {
 			// A feed that answered with nothing where it used to carry
 			// findings is a broken fetch or a broken parser, not a vendor
@@ -582,10 +603,15 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			// The snapshot here belongs to the host: its digest is the digest
 			// of the set of findings, and its age - the moment the metadata
 			// were read.
+			//
+			// It carries no generation identifier: a generation names one
+			// fetch of a central feed, and these findings were read by the
+			// host itself. The moment they were read stands in its place,
+			// so the verdict still says how old the data behind it are.
 			snapshot = Snapshot{
 				Provider: provider, Digest: advisoryState.Digest,
 				Releases: []string{description.Release}, AdvisoryCount: len(fromHost),
-				FetchedAt: collected, Active: true,
+				FetchedAt: collected, GenerationAt: collected, Active: true,
 			}
 		} else {
 			key := provider + "\x1f" + description.Release
@@ -687,6 +713,10 @@ func (h *Scheduler) toRecalculate(previous HostState, input Input,
 		previous.Release != input.Release ||
 		previous.Provider != snapshot.Provider ||
 		previous.SnapshotDigest != snapshot.Digest ||
+		// The generation is compared as well as the digest. A verdict from
+		// before generations were recorded carries none, and it is to be
+		// computed again rather than left naming nothing for ever.
+		previous.GenerationID != snapshot.GenerationID ||
 		previous.InventoryDigest != input.InventoryDigest ||
 		previous.AdvisoryDigest != input.AdvisoryDigest {
 		return true

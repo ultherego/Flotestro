@@ -2991,6 +2991,29 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
+		// A version is named only by a return to one, and it names a content
+		// by its digest. An ordinary write that carried a digest would look
+		// like a write of the content in the order while the host wrote
+		// something else entirely.
+		if payload.File.VersionSHA256 != "" {
+			if action != ActionFileRollback {
+				return fmt.Errorf("only %s names a version to go back to", ActionFileRollback)
+			}
+			if !validChecksum(payload.File.VersionSHA256) {
+				return fmt.Errorf("the version is named by a sha256 digest of 64 hexadecimal characters")
+			}
+			if payload.File.Content != "" &&
+				filesmodule.Fingerprint([]byte(payload.File.Content)) != payload.File.VersionSHA256 {
+				return fmt.Errorf("the order names a version and carries content that is not that version")
+			}
+		}
+		// A return to a version has to say which one: without a digest and
+		// without content it is an order to write nothing, and writing
+		// nothing over a configuration file is not what anybody meant.
+		if action == ActionFileRollback && payload.File.VersionSHA256 == "" &&
+			payload.File.Content == "" && payload.File.ContentSecret.Empty() {
+			return fmt.Errorf("a return to a version requires the digest of that version")
+		}
 		return nil
 
 	case ActionPackageList:

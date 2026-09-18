@@ -15,6 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
+	managedfiles "github.com/ultherego/flotestro/internal/files"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
@@ -227,24 +228,23 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A rollback to an earlier file version carries only the digest: the
-	// content is attached here, so that the plan and what reaches the host
-	// are the same thing. An order with an empty file and a version digest
-	// would write emptiness.
-	if action == opspec.ActionFileRollback && payload.File != nil {
+	// A rollback names a version by its digest. The panel attaches the
+	// content when it holds a copy, so the plan and what reaches the host
+	// are the same thing; the digest stays in the payload either way,
+	// because the host keeps copies of its own and restores the inode of
+	// the version, not only its bytes. A version the panel never saw
+	// travels as the digest alone, and the host refuses it with
+	// file_version_unknown when it does not have it either.
+	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
 		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
-		if err != nil {
-			problem(w, http.StatusBadRequest, "version_not_found",
-				"no stored version with that checksum")
+		switch {
+		case err == nil:
+			payload.File.Content = string(content)
+		case errors.Is(err, managedfiles.ErrNotFound):
+		default:
+			s.fail(w, err)
 			return
 		}
-		payload.File.Content = string(content)
-		// The version digest was a way of pointing at the content, not part
-		// of the order: once the content is in, the payload describes the
-		// same thing as an ordinary write. Left in the payload it would not
-		// reach the agent, because the job envelope does not carry it - and
-		// the plan hash would stop matching.
-		payload.File.VersionSHA256 = ""
 	}
 
 	// The secret named in the order must exist and be issuable. Otherwise

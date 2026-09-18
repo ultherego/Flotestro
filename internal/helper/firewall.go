@@ -571,8 +571,17 @@ func (s *Server) readUFW(ctx context.Context, snapshot *firewall.Snapshot, rules
 		snapshot.Writable = false
 		return "ufw show added: " + err.Error()
 	}
+	// The rules the kernel filters with now are the ones nft listed; the
+	// ufw rules are appended after, in the form ufw takes them back in.
+	loaded := firewall.UFWLoadedRules(snapshot.Rules)
 	snapshot.Rules = append(snapshot.Rules, firewall.ParseUFWAdded(added)...)
 	snapshot.Adapter = firewall.AdapterUFW
+	// What ufw keeps in its files and what the kernel filters with now are
+	// two pictures, and the panel used to see only the tool's account of
+	// itself. A rule written into user.rules and never loaded does nothing
+	// while looking enforced; a rule in the kernel no file keeps vanishes
+	// at the next reload.
+	snapshot.Drift = ufwDrift(ruleset, loaded)
 	// The fingerprint covers the ufw rules together with the tables: a rule
 	// added with ufw since the plan is a changed rule set even when the
 	// operator's nft listing looks the same at a glance.
@@ -724,4 +733,31 @@ func outputWithWarnings(ctx context.Context, path string, arguments ...string) (
 func exists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ufwDrift compares what ufw keeps in its files with what the kernel filters
+// with now. Without a listing from the kernel, or with a file that cannot be
+// read, there is no comparison at all: an empty side would call every rule of
+// the other one a drift.
+func ufwDrift(ruleset string, loaded []firewall.Rule) []firewall.Drift {
+	if ruleset == "" {
+		return nil
+	}
+	var filed []firewall.Rule
+	for _, source := range []struct{ family, path string }{
+		{"ip", firewall.UFWUserRulesFile},
+		{"ip6", firewall.UFWUser6RulesFile},
+	} {
+		content, err := os.ReadFile(source.path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// ufw writes user6.rules only where IPv6 is on; a file that
+				// is not there holds no rules, which is an answer.
+				continue
+			}
+			return nil
+		}
+		filed = append(filed, firewall.UFWFileRules(source.family, string(content))...)
+	}
+	return firewall.UFWDrift(filed, loaded)
 }

@@ -470,16 +470,37 @@ func (a *APT) Upgrade(ctx context.Context, options Options) (Apply, error) {
 
 // installedVersions returns a map of package -> version.
 func (a *APT) installedVersions(ctx context.Context) map[string]string {
-	result := run(ctx, 2*time.Minute, dpkgQueryPath, "-W", "-f", "${binary:Package} ${Version}\n")
+	// Both spellings of the name are recorded: a package that may be
+	// installed for more than one architecture is printed by dpkg as
+	// name:arch, while apt names it without the suffix in a plan. A
+	// lookup by the plan's name must find what dpkg holds, or a package
+	// that is installed reads as absent.
+	result := run(ctx, 2*time.Minute, dpkgQueryPath, "-W", "-f",
+		"${Package} ${Architecture} ${Version} ${db:Status-Status}\n")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
+	return parseInstalledDebian(result.Stdout)
+}
+
+// parseInstalledDebian reads what dpkg-query printed. A package that is
+// not fully installed - unpacked, half-configured, removed but not purged
+// - is not a version the host has.
+func parseInstalledDebian(output string) map[string]string {
 	versions := map[string]string{}
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) == 2 {
-			versions[fields[0]] = fields[1]
+		if len(fields) != 4 || fields[3] != "installed" {
+			continue
 		}
+		name, architecture, version := fields[0], fields[1], fields[2]
+		// A second architecture of the same package would otherwise
+		// overwrite the first under the bare name; the qualified name
+		// stays exact either way.
+		if _, taken := versions[name]; !taken {
+			versions[name] = version
+		}
+		versions[name+":"+architecture] = version
 	}
 	return versions
 }

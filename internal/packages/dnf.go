@@ -296,20 +296,31 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 // the version a transaction moves the host to, and the one an expected
 // effect is read against.
 func (d *DNF) installedVersions(ctx context.Context) map[string]string {
-	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", "%{NAME} %{EVR}\n")
+	// The architecture is recorded next to the bare name: a plan that
+	// names kernel-core.x86_64 and a database that holds kernel-core have
+	// to find each other, and a package installed for two architectures
+	// keeps both spellings exact.
+	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", "%{NAME} %{ARCH} %{EVR}\n")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
 	}
+	return parseInstalledRPM(result.Stdout)
+}
+
+// parseInstalledRPM reads what rpm printed. Several versions of the same
+// name - the kernels - are answered by the newest under the bare name.
+func parseInstalledRPM(output string) map[string]string {
 	versions := map[string]string{}
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 2 {
+		if len(fields) != 3 {
 			continue
 		}
-		if previous, seen := versions[fields[0]]; seen && CompareRPMVersions(previous, fields[1]) >= 0 {
-			continue
+		name, architecture, version := fields[0], fields[1], fields[2]
+		if previous, seen := versions[name]; !seen || CompareRPMVersions(previous, version) < 0 {
+			versions[name] = version
 		}
-		versions[fields[0]] = fields[1]
+		versions[name+"."+architecture] = version
 	}
 	return versions
 }

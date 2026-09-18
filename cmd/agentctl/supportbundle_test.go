@@ -303,3 +303,248 @@ func TestSupportBundleWritesTheArchiveWhereAsked(t *testing.T) {
 		t.Fatalf("the refusal does not say why: %q", errOut.String())
 	}
 }
+
+// Every collector says what it produces before it produces it: no field
+// without a sensitivity, and no secret field without a reason for leaving it
+// out. The declaration is the policy of the bundle, so an undeclared field is
+// a gap in the policy rather than a detail.
+func TestEveryCollectorDeclaresTheSensitivityOfItsFields(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	sources := fakeBundleSources(t, certPEM)
+	collectors := bundleCollectors(sources)
+	if len(collectors) == 0 {
+		t.Fatal("the bundle collects nothing")
+	}
+	names := map[string]bool{}
+	for _, source := range collectors {
+		if source.Name == "" || source.Source == "" || source.Collect == nil {
+			t.Fatalf("collector %+v does not say what it is", source)
+		}
+		if names[source.Name] {
+			t.Fatalf("two collectors write %s", source.Name)
+		}
+		names[source.Name] = true
+		if len(source.Fields) == 0 {
+			t.Fatalf("%s declares no field", source.Name)
+		}
+		for _, declared := range source.Fields {
+			switch declared.Sensitivity {
+			case fieldPublic, fieldSensitive:
+				if declared.Why != "" {
+					t.Fatalf("%s: %s travels and still explains itself", source.Name, declared.Name)
+				}
+			case fieldSecret:
+				if declared.Why == "" {
+					t.Fatalf("%s: %s is left out without a reason", source.Name, declared.Name)
+				}
+			default:
+				t.Fatalf("%s: %s has the sensitivity %q", source.Name, declared.Name, declared.Sensitivity)
+			}
+			if declared.Name == "" {
+				t.Fatalf("%s declares a field without a name", source.Name)
+			}
+		}
+	}
+	// The two things a bundle must never carry are declared where they are
+	// known: with the file they would have been in.
+	for _, want := range []struct{ file, field string }{
+		{"agent.env", "FLOTESTRO_ENROLLMENT_TOKEN"},
+		{"identity.json", "private key"},
+	} {
+		found := false
+		for _, source := range collectors {
+			if source.Name != want.file {
+				continue
+			}
+			for _, declared := range source.Fields {
+				if declared.Name == want.field && declared.Sensitivity == fieldSecret {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s does not declare %s as secret", want.file, want.field)
+		}
+	}
+}
+
+// The manifest carries the policy the bundle was made under, the fields of
+// every file and what was left out - otherwise a bundle silent about its gaps
+// reads like a complete one.
+func TestTheManifestSaysWhatWasLeftOutAndUnderWhichPolicy(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	sources := fakeBundleSources(t, certPEM)
+	name := bundleName(sources)
+	var archive bytes.Buffer
+	if _, err := writeSupportBundle(context.Background(), sources, name, &archive); err != nil {
+		t.Fatal(err)
+	}
+	files := readBundle(t, archive.Bytes(), name)
+	var written bundleManifest
+	if err := json.Unmarshal(files["manifest.json"], &written); err != nil {
+		t.Fatal(err)
+	}
+	if written.RedactionPolicy != redactionPolicy || !written.Scanned {
+		t.Fatalf("manifest = %+v", written)
+	}
+	byName := map[string]bundleEntry{}
+	for _, entry := range written.Entries {
+		if len(entry.Fields) == 0 {
+			t.Fatalf("%s is in the bundle without saying what it carries", entry.Name)
+		}
+		byName[entry.Name] = entry
+	}
+	if len(written.Omitted) == 0 {
+		t.Fatal("the manifest leaves nothing out, although the key and the token are never collected")
+	}
+	for _, left := range written.Omitted {
+		if left.File == "" || left.Field == "" || left.Why == "" {
+			t.Fatalf("omission = %+v", left)
+		}
+		if _, present := byName[left.File]; !present {
+			t.Fatalf("the manifest leaves out %s of %s, which is not in the bundle", left.Field, left.File)
+		}
+	}
+	// What is declared secret is not in the file it was declared for.
+	if bytes.Contains(files["identity.json"], []byte("PRIVATE KEY")) {
+		t.Fatalf("identity.json holds the key:\n%s", files["identity.json"])
+	}
+	if bytes.Contains(files["agent.env"], []byte("tok-0123456789")) {
+		t.Fatalf("agent.env holds the token:\n%s", files["agent.env"])
+	}
+}
+
+// leakyBundleSources is a host whose journal quotes something no key names -
+// the case the redaction cannot catch and the scanner must.
+func leakyBundleSources(t *testing.T, certPEM []byte, leak string) bundleSources {
+	t.Helper()
+	sources := fakeBundleSources(t, certPEM)
+	command := sources.Command
+	sources.Command = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		line := name + " " + strings.Join(args, " ")
+		if strings.Contains(line, "journalctl -u flotestro-agent.service") {
+			return []byte(leak), nil
+		}
+		return command(ctx, name, args...)
+	}
+	return sources
+}
+
+// The private key of the host in a journal line: the redaction has no key
+// name to go by, so the bundle is refused rather than sent.
+func TestABundleCarryingAKeyFailsWithItsCode(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	leak := "Sep 15 10:29:58 web-01 flotestro-agent[42]: -----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIA\n-----END EC PRIVATE KEY-----\n"
+	real := bundleSourcesFor
+	bundleSourcesFor = func(string, string) bundleSources { return leakyBundleSources(t, certPEM, leak) }
+	defer func() { bundleSourcesFor = real }()
+
+	output := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"support-bundle", "--output", output}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "bundle_private_key_found") ||
+		!strings.Contains(errOut.String(), "journal-agent.txt") {
+		t.Fatalf("the refusal does not name the file and the code: %q", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "MHcCAQEEIA") {
+		t.Fatalf("the refusal quotes the finding: %q", errOut.String())
+	}
+	// A bundle that would leak does not stay on the disk for somebody to
+	// find and send.
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("the incomplete bundle is still there: %v", err)
+	}
+}
+
+// The other kinds the scanner refuses a bundle for, each with its own code.
+func TestTheScannerNamesEveryKindItRefuses(t *testing.T) {
+	cases := []struct {
+		name, content, code string
+	}{
+		{"private key", "-----BEGIN PRIVATE KEY-----\nMIIB\n-----END PRIVATE KEY-----", "bundle_private_key_found"},
+		{"bearer token", `curl -H "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9"`, "bundle_bearer_token_found"},
+		{"password in a URL", "proxy https://operator:hunter2@proxy.example.com:3128 refused", "bundle_password_in_url_found"},
+		{"enrollment token", "enrolling with flt_9f8e7d6c5b4a3210 now", "bundle_enrollment_token_found"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			findings := scanContent("journal-agent.txt", []byte(c.content))
+			if len(findings) != 1 || findings[0].Code != c.code || findings[0].File != "journal-agent.txt" {
+				t.Fatalf("findings = %+v", findings)
+			}
+			if findings[0].Kind == "" {
+				t.Fatalf("finding without a kind: %+v", findings[0])
+			}
+		})
+	}
+	// What the redaction already took out is a shape, not a secret: a bundle
+	// is not refused for the trace of its own redaction.
+	if findings := scanContent("agent.env", []byte("https://operator:[redacted]@proxy.example.com:3128")); len(findings) != 0 {
+		t.Fatalf("a redacted value was taken for a finding: %+v", findings)
+	}
+	if findings := scanContent("agent.yaml", []byte(goodConfiguration)); len(findings) != 0 {
+		t.Fatalf("a configuration with no secret was refused: %+v", findings)
+	}
+}
+
+// --verify holds a bundle somebody already has against the same scanner, and
+// says which file and what kind of thing - never the thing itself.
+func TestVerifyNamesTheFileAndTheKindOfFinding(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	leak := "Sep 15 10:29:58 web-01 flotestro-agent[42]: -----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIA\n-----END EC PRIVATE KEY-----\n"
+	sources := leakyBundleSources(t, certPEM, leak)
+	name := bundleName(sources)
+	// The archive is written past the generation on purpose: --verify exists
+	// for bundles that are already out there, however they were made.
+	var archive bytes.Buffer
+	if _, err := writeSupportBundle(context.Background(), sources, name, &archive); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "old-bundle.tar.gz")
+	if err := os.WriteFile(path, archive.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errOut bytes.Buffer
+	if code := run([]string{"support-bundle", "--verify", path}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "journal-agent.txt") ||
+		!strings.Contains(errOut.String(), "bundle_private_key_found") {
+		t.Fatalf("the report does not name the file and the kind: %q", errOut.String())
+	}
+	if strings.Contains(errOut.String(), "MHcCAQEEIA") || strings.Contains(out.String(), "MHcCAQEEIA") {
+		t.Fatalf("the report quotes the finding: %q%q", out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Policy:       "+redactionPolicy) {
+		t.Fatalf("the report does not say under which policy the bundle was made: %q", out.String())
+	}
+}
+
+// A bundle that holds nothing it should not is said to be clean, so that an
+// operator can prove what they are about to send.
+func TestVerifyPassesACleanBundle(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	real := bundleSourcesFor
+	bundleSourcesFor = func(string, string) bundleSources { return fakeBundleSources(t, certPEM) }
+	defer func() { bundleSourcesFor = real }()
+
+	output := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"support-bundle", "--output", output}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Scanner:      no finding") || !strings.Contains(out.String(), "Left out:") {
+		t.Fatalf("the summary says nothing about the scan: %q", out.String())
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"support-bundle", "--verify", output}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	if !strings.Contains(out.String(), "Findings:     none") || errOut.Len() != 0 {
+		t.Fatalf("out = %q, err = %q", out.String(), errOut.String())
+	}
+}

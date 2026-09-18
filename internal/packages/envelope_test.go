@@ -199,3 +199,31 @@ SHA-256 Sum     : None
 		t.Errorf("sizes = %v", sizes)
 	}
 }
+
+// TestAnInstalledPackageIsFoundUnderEitherSpelling guards the settlement of
+// an effect: dpkg prints a package that may be installed for more than one
+// architecture as name:arch, rpm answers name.arch, and a plan names it
+// without the suffix. A lookup by the plan's name has to find what the
+// database holds - otherwise a package that is installed reads as absent
+// and a transaction that did its work reports effects_partial.
+func TestAnInstalledPackageIsFoundUnderEitherSpelling(t *testing.T) {
+	debian := parseInstalledDebian("bind9-libs amd64 1:9.20.29-1~deb13u1 installed\n" +
+		"bind9-host amd64 1:9.20.29-1~deb13u1 installed\n" +
+		"half-configured-thing amd64 1.0 half-configured\n")
+	for _, name := range []string{"bind9-libs", "bind9-libs:amd64"} {
+		if debian[name] != "1:9.20.29-1~deb13u1" {
+			t.Errorf("%s = %q, want the installed version under both spellings", name, debian[name])
+		}
+	}
+	if _, present := debian["half-configured-thing"]; present {
+		t.Error("a package that is not installed was counted as installed")
+	}
+
+	fedora := parseInstalledRPM("kernel-core x86_64 6.16.5-200.fc42\nkernel-core x86_64 6.16.4-200.fc42\n")
+	if fedora["kernel-core"] != "6.16.5-200.fc42" {
+		t.Errorf("kernel-core = %q, want the newest of the installed versions", fedora["kernel-core"])
+	}
+	if fedora["kernel-core.x86_64"] == "" {
+		t.Error("the architecture-qualified name of an installed package is not recorded")
+	}
+}

@@ -241,18 +241,31 @@ func (s *RelayService) Ping(ctx context.Context,
 			fmt.Errorf("the relay %s is not active", relayID))
 	}
 	s.relays.MarkSeen(ctx, relayID)
-	// The numbers of the heartbeat are informational and stay in memory:
-	// the panel shows them next to the relay so that a site whose results
-	// stopped arriving is visible before anybody looks at the site itself.
-	s.relays.RecordHeartbeat(relayID, relays.Heartbeat{
-		BufferBytes:    int64(req.Msg.GetBufferBytes()),
-		BufferMaxBytes: int64(req.Msg.GetBufferMaxBytes()),
-		BufferedItems:  int(req.Msg.GetBufferedItems()),
-		BufferDropped:  int64(req.Msg.GetBufferDroppedTotal()),
-		Sessions:       int(req.Msg.GetSessions()),
-		RelayVersion:   req.Msg.GetBuild().GetAgentVersion(),
-		ReportedAt:     time.Now().UTC(),
-	})
+	// The numbers of the heartbeat are informational: the panel shows them
+	// next to the relay so that a site whose results stopped arriving is
+	// visible before anybody looks at the site itself.
+	heartbeat := relays.Heartbeat{
+		BufferBytes:     int64(req.Msg.GetBufferBytes()),
+		BufferMaxBytes:  int64(req.Msg.GetBufferMaxBytes()),
+		BufferedItems:   int(req.Msg.GetBufferedItems()),
+		BufferDropped:   int64(req.Msg.GetBufferDroppedTotal()),
+		Sessions:        int(req.Msg.GetSessions()),
+		SpoolBytesLimit: int64(req.Msg.GetSpoolBytesLimit()),
+		InstanceID:      req.Msg.GetInstanceId(),
+		UpstreamState:   req.Msg.GetUpstreamState(),
+		RelayVersion:    req.Msg.GetBuild().GetAgentVersion(),
+		ReportedAt:      time.Now().UTC(),
+	}
+	s.relays.RecordHeartbeat(relayID, heartbeat)
+	// The same report goes into the history. A write that fails must not
+	// tear the heartbeat down: the relay would then look silent because
+	// the panel could not write a chart point, and a site would be
+	// declared cut off over a database hiccup. The failure is logged and
+	// the relay keeps its link.
+	if err := s.relays.RecordSample(ctx, relays.SampleOf(relayID, heartbeat)); err != nil {
+		s.log.Warn("the buffer report of the relay was not recorded",
+			"relay_id", relayID, "err", err)
+	}
 
 	return connect.NewResponse(&agentv1.RelayPingResponse{
 		ServerTime: timestamppb.Now(),

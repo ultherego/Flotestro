@@ -48,8 +48,12 @@ func (e *TaskExecutor) ProbeFirewall(ctx context.Context) (firewall.Snapshot, er
 	return snapshot, nil
 }
 
-// applyFirewall changes the firewall and confirms that the host still talks to
+// applyFirewall changes the firewall and proves that the host still talks to
 // the panel.
+//
+// The proof is a call the host makes as itself and the panel acknowledges, not
+// a connection that opens: a firewall rule is exactly the kind of change that
+// leaves a port open and the management channel dead.
 func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.FirewallPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -138,12 +142,18 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 		}
 	}
 
+	// The rescue plan is disarmed only after the panel acknowledged a call the
+	// host made as itself. A rule can admit a TCP handshake and still end the
+	// management session - by dropping long-lived connections, or by blocking
+	// the protocol they are carried on - and a handshake would have called that
+	// a success and left the host unmanageable.
 	deadline := rollbackDeadline(result.GetRollbackDeadline())
-	if !waitForPanel(ctx, panelAddressOf, deadline.Add(-confirmationMargin)) {
+	proof := proveManagementChannel(ctx, panelAddressOf, deadline.Add(-confirmationMargin))
+	if !proof.Proved {
 		return &agentv1.TaskResult{
 			TaskId: task.GetTaskId(), Status: agentv1.TaskResult_STATUS_FAILED,
-			ErrorCode:      RejectNetworkUnreachable,
-			Message:        "after the firewall change the host does not reach the panel; rollback at " + result.GetRollbackDeadline(),
+			ErrorCode:      RejectManagementUnproved,
+			Message:        "after the firewall change " + proof.summary() + "; rollback at " + result.GetRollbackDeadline(),
 			FirewallResult: details,
 		}
 	}
@@ -168,7 +178,7 @@ func (e *TaskExecutor) applyFirewall(ctx context.Context, task *agentv1.TaskEnve
 	details.Confirmed = true
 	return &agentv1.TaskResult{
 		TaskId: task.GetTaskId(), Status: agentv1.TaskResult_STATUS_SUCCEEDED,
-		Message:        result.GetMessage() + "; connectivity confirmed, the rollback was disarmed",
+		Message:        result.GetMessage() + "; " + proof.summary() + ", the rollback was disarmed",
 		FirewallResult: details,
 	}
 }

@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-import { api, LIST_PAGE, loadedItems } from "../lib/api";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { api, ApiError, LIST_PAGE, loadedItems } from "../lib/api";
 import { FleetCoverage, type Coverage } from "../components/FleetCoverage";
 import { useDebounced } from "../lib/debounce";
 import { ErrorBox, Time, Empty } from "../components/ui";
-import { Card, PageHeader, Toolbar } from "../components/layout";
+import { Actions, Card, Field, FieldGrid, PageHeader, Toolbar } from "../components/layout";
 import { ExportButton } from "../components/ExportButton";
 import { Breakdown, Meter, StatusBar, type WidgetTone } from "../components/widgets";
 import { useT } from "../i18n";
@@ -31,6 +31,10 @@ type Item = {
   fully_assessed: boolean;
   evaluated_at?: string;
   by_severity?: Record<string, number>;
+  /** The feed generation that produced this verdict, and when it was taken.
+   *  Missing for a verdict written before generations were recorded. */
+  generation_id?: string;
+  generation_at?: string;
 };
 
 type Source = {
@@ -43,6 +47,9 @@ type Source = {
   fetched_at: string;
   stale: boolean;
   error?: string;
+  /** The generation of the data in force: which fetch, and when it was taken. */
+  generation_id?: string;
+  generation_at?: string;
 };
 
 /** The fleet answer: the summary numbers over the whole visible fleet and
@@ -68,6 +75,22 @@ type View = Coverage & {
   coverage_reasons: Record<string, number>;
   sources: Source[];
   max_snapshot_age_hours: number;
+  candidates?: Candidate[];
+};
+
+/** A fetch of a feed the sanity gate refused to activate. */
+export type Candidate = {
+  id: string;
+  provider: string;
+  digest: string;
+  /** feed_shrank or feed_release_missing. */
+  reason: string;
+  advisories: number;
+  releases?: string[];
+  fetched_at: string;
+  held_at?: string;
+  active_advisories: number;
+  active_releases?: string[];
 };
 
 /** One CVE across the fleet. */
@@ -99,6 +122,31 @@ export const COVERAGE_REASONS: Record<string, string> = {
   host_advisories_unreadable: "repository metadata could not be read",
   host_advisories_stale: "vendor advisories past the refresh policy",
 };
+
+/** Why the sanity gate held a fetch back; an unknown code is shown as it came. */
+export const GATE_REASONS: Record<string, string> = {
+  feed_shrank: "the fetch lost most of the findings in force",
+  feed_release_missing: "the fetch stopped covering a release that is in force",
+};
+
+/**
+ * Whether a host's verdict was produced by the generation in force.
+ *
+ * Three answers, not two. A host whose verdict names the generation the
+ * feed holds now was judged against today's data; one that names another
+ * generation was judged against older data and has not been looked at
+ * since. "Not recorded" is the third: a verdict from before generations,
+ * or one whose findings came from the host's own repositories, where
+ * there is no central generation to be current against. It is never
+ * folded into "current" - that would say the panel checked something it
+ * did not.
+ */
+export function generationState(item: Item, sources: Source[]): "current" | "older" | "unknown" {
+  if (!item.generation_id) return "unknown";
+  const source = sources.find((entry) => entry.provider === item.provider);
+  if (!source?.generation_id) return "unknown";
+  return source.generation_id === item.generation_id ? "current" : "older";
+}
 
 /** The canonical severities the server groups by, the worst first. Every
  *  vendor has its own words for them; the server translates and keeps the
@@ -182,6 +230,113 @@ export function packagesPreview(packages: string[], shown = 4): { shown: string[
  * "which vulnerability touches the most of the fleet" - the question an
  * operator asks when a number from the news lands on the desk.
  */
+/**
+ * The fetches the sanity gate is holding back.
+ *
+ * The gate refuses a fetch that lost most of the findings in force, or
+ * that stopped covering a release: the vendors do not fix everything at
+ * once, so such a fetch is a truncated download or a parser that gave up,
+ * and activating it would report most of the fleet as clean. The snapshot
+ * in force stays in force and ages into a source the panel shows as
+ * stale; nothing is silently swapped underneath the numbers.
+ *
+ * Accepting is a deliberate act. The two counts are shown side by side,
+ * because that comparison is the whole decision, and the acceptance asks
+ * for a reason and fresh authentication - it changes what the panel will
+ * say about every host of that distribution.
+ */
+export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState("");
+  const [reason, setReason] = useState("");
+  const [message, setMessage] = useState("");
+
+  const accept = useMutation({
+    mutationFn: (id: string) => api.post(`/api/v1/vulnerabilities/snapshots/${id}/accept`, { reason }),
+    onSuccess: () => {
+      setOpen("");
+      setReason("");
+      setMessage(t("The fetch was accepted and is now in force. The hosts are assessed against it on the next pass."));
+      queryClient.invalidateQueries({ queryKey: ["vulnerabilities"] });
+    },
+    onError: (error) => {
+      if (error instanceof ApiError && error.unauthenticated) {
+        setMessage(t("Fresh authentication is required: sign in again and repeat the acceptance."));
+        return;
+      }
+      setMessage(error instanceof Error ? error.message : String(error));
+    },
+  });
+
+  return (
+    <Card
+      className="span-12"
+      title={t("Feed fetches held back")}
+      description={t("A fetch that lost most of its findings, or a whole release, is not activated. The data in force stay in force and grow stale, which is visible; accept a fetch only after reading what it lost.")}
+      tone="warn"
+      flush
+    >
+      <table data-testid="feed-candidates">
+        <thead>
+          <tr>
+            <th>{t("Provider")}</th><th>{t("Reason")}</th>
+            <th className="num">{t("Fetched")}</th><th className="num">{t("In force")}</th>
+            <th>{t("Held back")}</th><th />
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((candidate) => {
+            const lost = (candidate.active_releases ?? []).filter(
+              (release) => !(candidate.releases ?? []).includes(release));
+            return (
+              <tr key={candidate.id}>
+                <td>
+                  {candidate.provider}
+                  <div className="source mono">{candidate.digest.slice(0, 12)}</div>
+                </td>
+                <td>
+                  <span className="badge warn">{GATE_REASONS[candidate.reason] ?? candidate.reason}</span>
+                  {lost.length > 0 && (
+                    <div className="source">{t("no longer covers {releases}", { releases: lost.join(", ") })}</div>
+                  )}
+                </td>
+                <td className="num">{candidate.advisories}</td>
+                <td className="num">{candidate.active_advisories}</td>
+                <td><Time value={candidate.held_at ?? candidate.fetched_at} /></td>
+                <td>
+                  {open === candidate.id ? (
+                    <FieldGrid>
+                      <Field label={t("Reason (kept in the audit trail)")} hint={t("At least 8 characters. Say what you checked: the vendor retired findings, the release went out of support.")} wide>
+                        <input value={reason} onChange={(e) => setReason(e.target.value)} />
+                      </Field>
+                      <Actions>
+                        <button
+                          className="danger"
+                          disabled={reason.trim().length < 8 || accept.isPending}
+                          onClick={() => accept.mutate(candidate.id)}
+                        >
+                          {t("Accept this fetch")}
+                        </button>
+                        <button className="secondary" onClick={() => { setOpen(""); setReason(""); }}>{t("Cancel")}</button>
+                      </Actions>
+                    </FieldGrid>
+                  ) : (
+                    <button className="secondary" onClick={() => { setOpen(candidate.id); setMessage(""); }}>
+                      {t("Accept…")}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {message && <p className="source">{message}</p>}
+    </Card>
+  );
+}
+
 export function FleetVulnerabilities() {
   const t = useT();
   const [params, setParams] = useSearchParams();
@@ -315,6 +470,12 @@ export function FleetVulnerabilities() {
           ]} />
         </Card>
 
+        {/* A fetch the sanity gate held back is above the numbers rather
+            than behind a settings page: it is the reason those numbers
+            have stopped moving, and the operator reading them is the one
+            who has to decide. */}
+        {(data.candidates ?? []).length > 0 && <FeedCandidates candidates={data.candidates ?? []} />}
+
         <Card className="span-8" title={t("Security data")} flush>
           {!data.sources.length ? (
             <Empty>{t("No feed has been fetched yet.")}</Empty>
@@ -326,7 +487,12 @@ export function FleetVulnerabilities() {
               <tbody>
                 {data.sources.map((source) => (
                   <tr key={source.provider}>
-                    <td>{source.provider === "host repository metadata" ? t("host repository metadata") : source.provider}</td>
+                    <td>
+                      {source.provider === "host repository metadata" ? t("host repository metadata") : source.provider}
+                      {source.generation_id && (
+                        <div className="source mono">{t("generation {id}", { id: source.generation_id.slice(0, 8) })}</div>
+                      )}
+                    </td>
                     <td className="num">{source.advisories}</td>
                     <td className="source">
                       {source.hosts !== undefined
@@ -530,7 +696,29 @@ export function FleetVulnerabilities() {
                         />
                       )}
                     </td>
-                    <td><Time value={item.evaluated_at} /></td>
+                    {/* When the host was judged, and against which
+                        generation of the feed. A verdict against an older
+                        generation is not wrong - it is simply not the
+                        answer the panel holds now, and that difference is
+                        invisible from the date alone. */}
+                    <td>
+                      <Time value={item.evaluated_at} />
+                      {(() => {
+                        const state = generationState(item, data.sources);
+                        if (state === "current") {
+                          return <div className="source">{t("current feed generation")}</div>;
+                        }
+                        if (state === "older") {
+                          return (
+                            <div className="source">
+                              <span className="badge warn">{t("older generation")}</span>
+                              {item.generation_at && <> <Time value={item.generation_at} /></>}
+                            </div>
+                          );
+                        }
+                        return <div className="source">{t("generation not recorded")}</div>;
+                      })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>

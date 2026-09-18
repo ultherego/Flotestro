@@ -236,6 +236,13 @@ func TestCancelTakesBackTheQueuedTaskOfAnOfflineHost(t *testing.T) {
 	var target casTargetView
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) && target.JobID == "" {
+		// The host is held online until its turn comes: nothing here keeps
+		// a session open, and a sweep that finds none would take the row
+		// back to offline while the campaign is still deciding.
+		if _, err := pool.Exec(ctx,
+			`update hosts set connection_state = 'online' where id = $1::uuid`, host.ID); err != nil {
+			t.Fatalf("keeping the synthetic host online: %v", err)
+		}
 		for _, candidate := range h.casTargets(campaign.ID) {
 			if candidate.HostID == host.ID && candidate.JobID != "" {
 				target = candidate

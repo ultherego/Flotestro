@@ -6944,8 +6944,14 @@ type FileRequest struct {
 	// not installed. The helper honours it only together with the grant
 	// file.write.unvalidated in the capability.
 	AllowMissingValidator bool `protobuf:"varint,10,opt,name=allow_missing_validator,json=allowMissingValidator,proto3" json:"allow_missing_validator,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// VersionSha256 names a content the host itself kept before an earlier
+	// write took its place. The helper then writes that copy instead of the
+	// content field, through the same staging and the same validator. A
+	// digest this host never kept is refused with file_version_unknown
+	// rather than answered with the newest copy.
+	VersionSha256 string `protobuf:"bytes,11,opt,name=version_sha256,json=versionSha256,proto3" json:"version_sha256,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *FileRequest) Reset() {
@@ -7048,11 +7054,20 @@ func (x *FileRequest) GetAllowMissingValidator() bool {
 	return false
 }
 
+func (x *FileRequest) GetVersionSha256() string {
+	if x != nil {
+		return x.VersionSha256
+	}
+	return ""
+}
+
 type FileResult struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
 	Snapshot []byte                 `protobuf:"bytes,1,opt,name=snapshot,proto3" json:"snapshot,omitempty"`
 	Message  string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	// Content is the file content on a read.
+	// Content is the file content on a read, and the content that was put
+	// back on a return to a version the host kept - the panel has no copy of
+	// such a version and would otherwise hold a digest it cannot show.
 	Content   []byte `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
 	Sha256    string `protobuf:"bytes,4,opt,name=sha256,proto3" json:"sha256,omitempty"`
 	Truncated bool   `protobuf:"varint,5,opt,name=truncated,proto3" json:"truncated,omitempty"`
@@ -7063,7 +7078,13 @@ type FileResult struct {
 	// state, in JSON. A separate field, because the plan concerns a change
 	// that has not happened yet, and the other fields describe what the host
 	// has now.
-	Plan          []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	Plan []byte `protobuf:"bytes,7,opt,name=plan,proto3" json:"plan,omitempty"`
+	// Change describes what the write really did, in JSON and in the same
+	// terms as the plan: both digests, the inode before and after, the
+	// identity of the check that ran, the version that was kept and what
+	// needs a reload afterwards. An operator who approved a whole state is
+	// answered with a whole state.
+	Change        []byte `protobuf:"bytes,8,opt,name=change,proto3" json:"change,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7143,6 +7164,13 @@ func (x *FileResult) GetValidatorOutput() string {
 func (x *FileResult) GetPlan() []byte {
 	if x != nil {
 		return x.Plan
+	}
+	return nil
+}
+
+func (x *FileResult) GetChange() []byte {
+	if x != nil {
+		return x.Change
 	}
 	return nil
 }
@@ -10477,7 +10505,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12%\n" +
 	"\x0epending_reboot\x18\x03 \x03(\tR\rpendingReboot\x12'\n" +
 	"\x0fapplied_runtime\x18\x04 \x03(\tR\x0eappliedRuntime\x12\x12\n" +
-	"\x04plan\x18\x05 \x01(\fR\x04plan\"\xf6\x03\n" +
+	"\x04plan\x18\x05 \x01(\fR\x04plan\"\x9d\x04\n" +
 	"\vFileRequest\x12H\n" +
 	"\toperation\x18\x01 \x01(\x0e2*.flotestro.helper.v1.FileRequest.OperationR\toperation\x12\x12\n" +
 	"\x04path\x18\x02 \x01(\tR\x04path\x12\x18\n" +
@@ -10490,14 +10518,15 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\vfrom_secret\x18\t \x01(\bR\n" +
 	"fromSecret\x126\n" +
 	"\x17allow_missing_validator\x18\n" +
-	" \x01(\bR\x15allowMissingValidator\"\x8e\x01\n" +
+	" \x01(\bR\x15allowMissingValidator\x12%\n" +
+	"\x0eversion_sha256\x18\v \x01(\tR\rversionSha256\"\x8e\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eOPERATION_READ\x10\x01\x12\x14\n" +
 	"\x10OPERATION_ENSURE\x10\x02\x12\x14\n" +
 	"\x10OPERATION_REMOVE\x10\x03\x12\x12\n" +
 	"\x0eOPERATION_LIST\x10\x04\x12\x12\n" +
-	"\x0eOPERATION_PLAN\x10\x05\"\xd1\x01\n" +
+	"\x0eOPERATION_PLAN\x10\x05\"\xe9\x01\n" +
 	"\n" +
 	"FileResult\x12\x1a\n" +
 	"\bsnapshot\x18\x01 \x01(\fR\bsnapshot\x12\x18\n" +
@@ -10506,7 +10535,8 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x06sha256\x18\x04 \x01(\tR\x06sha256\x12\x1c\n" +
 	"\ttruncated\x18\x05 \x01(\bR\ttruncated\x12)\n" +
 	"\x10validator_output\x18\x06 \x01(\tR\x0fvalidatorOutput\x12\x12\n" +
-	"\x04plan\x18\a \x01(\fR\x04plan\"r\n" +
+	"\x04plan\x18\a \x01(\fR\x04plan\x12\x16\n" +
+	"\x06change\x18\b \x01(\fR\x06change\"r\n" +
 	"\x14ProcessSignalRequest\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x120\n" +
 	"\x14expected_start_ticks\x18\x02 \x01(\x04R\x12expectedStartTicks\x12\x16\n" +

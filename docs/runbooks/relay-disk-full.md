@@ -23,7 +23,38 @@ are involved:
   them from the relay's heartbeats; the relay itself serves no `/metrics`.
 - `GET /api/v1/relays/{id}` and the Relays page (`/relays`, `/relays/:id`): `state` (`active`,
   `silent`, `never_seen`, `revoked`), `hosts_attested`, `buffer` with `buffer_bytes`,
-  `buffer_max_bytes`, `buffered_items`, `buffer_dropped`, `sessions`, `reported_at`.
+  `buffer_max_bytes`, `buffered_items`, `buffer_dropped`, `sessions`, `reported_at`. That is the
+  last heartbeat only - what is true now, not what happened.
+- **The history** - `GET /api/v1/relays/{id}/buffer-history?range=3h|24h|7d|30d|90d` and the
+  "Buffer history" card on `/relays/:id`, read with the same right as the relay list
+  (`host.enroll.read` over the relay's site). This is where an incident is read the morning
+  after, and it answers five things the last heartbeat cannot:
+  - `bytes_used` against `bytes_limit` over the window, with `bytes_used_max` per step on the
+    rolled-up windows, so a spike a mean would have hidden is still there. An unknown limit is
+    not zero: a relay that reported none has no fill share at all, and the card says so.
+  - `item_count`: how many results were waiting.
+  - `dropped_delta`: how many results were lost **between two reports**. It is empty across a
+    restart, because the relay's drop counter starts again with the process; the window total on
+    the card is the sum of the deltas, never the difference of the counters at the ends.
+  - `disconnected` and `upstream_state` (`connected`, `buffering`, `reconnecting`): the stretches
+    when the relay had nothing upstream to send to, drawn as a band across the chart. An empty
+    `upstream_state` is a relay that did not say, and is not counted as connected.
+  - `restarted` and `instance_id`: the relay was restarted between two points. That is the only
+    thing that explains `dropped_total` falling back to zero, and it is marked on the chart.
+  `latest` is the newest raw report whatever the window, and `raw_retention_hours` /
+  `rollup_retention_days` say how far back the history reaches at all - a window that shows
+  nothing beyond them shows nothing because nothing is kept, not because the relay was quiet.
+  The raw reports come minute by minute for `3h` and `24h`; `7d`, `30d` and `90d` are read from
+  quarter-hour rollups (`rollup: true`). Retention is set with
+  `FLOTESTRO_RELAY_BUFFER_RETENTION_RAW` and `FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP`.
+- Built-in alert rules over the history, in `relay_buffer_alert_rules`: "Relay buffer filling"
+  (over 70 % for 15 minutes, warning), "Relay buffer nearly full" (over 85 % for 5 minutes,
+  warning), "Relay buffer critical" (over 95 %, critical, no holding window) and "Relay is
+  dropping results" (any growth of `dropped_total` within one process, critical). A firing
+  episode is on `GET /api/v1/relays/{id}/buffer-history` under `alerts` and on the card, and it
+  reaches the notification channels subscribed to `alert.fired` and `alert.resolved`. A relay
+  that says nothing advances no episode in either direction: silence is a matter for the relay
+  state above, not for its buffer.
 - On the relay: `journalctl -u flotestro-relay` logs "the state of the relay" every 30 seconds
   (`buffer_bytes`, `dropped`, `connectivity_with_the_centre`) and each drop as "the buffer of
   the relay is full, the result was dropped". `flotestro-relayctl status` prints
@@ -60,7 +91,9 @@ recovered. A job whose time to live passes first ends `expired`; a campaign targ
    `flotestro-relayctl diagnose` for the `dns.*`, `tls.*` and `upstream` checks of `upstream.gateway_urls`.
 2. Restore the link. Do not restart the relay to "free" the buffer: the restart discards it.
 3. Once `Centre:` shows a last contact, watch `buffer_bytes` fall and `buffered_items` reach 0
-   on `GET /api/v1/relays/{id}`; a host's buffered messages go out with its new session.
+   on `GET /api/v1/relays/{id}`; a host's buffered messages go out with its new session. The
+   history over the same window says how long the site was cut off and whether anything was lost
+   while it was: `GET /api/v1/relays/{id}/buffer-history?range=24h`, or the card on `/relays/:id`.
 4. Read what the outage cost: `GET /api/v1/jobs?state=expired&since=<start>` and, per campaign,
    targets in `unknown` with `error_code` `lease_expired` (`GET /api/v1/campaigns/{id}/targets`);
    follow the guide before repeating a destructive step.
@@ -104,6 +137,10 @@ recovered. A job whose time to live passes first ends `expired`; a campaign targ
 
 - `GET /api/v1/relays/{id}`: `state: "active"`, `buffer_dropped: 0` after the restart,
   `hosts_attested` back to the site's count; "Relay buffers high" no longer counts the relay.
+- `GET /api/v1/relays/{id}/buffer-history?range=24h`: the newest points have `disconnected: false`,
+  `dropped_delta: 0` and a falling `bytes_used`, and `alerts` is empty. A restart to free the
+  spool shows as `restarted: true` with the drop counter starting again - the history keeps what
+  the earlier process lost, which the counter itself no longer does.
 - `flotestro-relayctl status` exits 0; `flotestro-relayctl diagnose` shows no `fail`.
 - The site's hosts show sessions on their host pages; new jobs to them complete.
 

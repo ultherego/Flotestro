@@ -80,6 +80,19 @@ const (
 	// which stays in force: an empty feed replacing a full one would turn
 	// every host clean in one sweep.
 	ReasonFeedEmpty = "feed_empty"
+	// ReasonFeedShrank means a fetch whose finding count fell against the
+	// active snapshot by more than the installation allows. "Empty" is the
+	// easy case of a broken download; a fetch that came back with a
+	// fraction of the findings is the same accident with a number in it,
+	// and it would assess most of the fleet as clean. The fetch is kept as
+	// a candidate and the previous snapshot stays in force.
+	ReasonFeedShrank = "feed_shrank"
+	// ReasonFeedReleaseMissing means a fetch that lost a whole release -
+	// or a whole distribution family - the active snapshot covered. The
+	// count alone does not catch it: a feed that drops trixie and gains
+	// findings for bookworm can keep its total and still make every trixie
+	// host look clean.
+	ReasonFeedReleaseMissing = "feed_release_missing"
 	// ReasonReleaseUnsupported means a release outside the feed.
 	ReasonReleaseUnsupported = "release_unsupported"
 	// ReasonPackageOriginUnknown means a package whose vendor cannot be
@@ -248,6 +261,20 @@ type Snapshot struct {
 	// fetch of the same data gives the same digest and creates no new
 	// snapshot.
 	Digest string `json:"digest"`
+	// GenerationID names this fetch of the feed and GenerationAt says when
+	// it was taken. Every verdict of a host carries them, so an operator
+	// can tell a host judged against yesterday's feed from one judged just
+	// now, and a re-assessment after a new fetch is visible rather than
+	// silent. The generation belongs to the data: a repeated fetch of the
+	// same digest confirms the snapshot and keeps its generation.
+	GenerationID string    `json:"generation_id,omitempty"`
+	GenerationAt time.Time `json:"generation_at"`
+	// CandidateReason is the typed reason the gate refused to activate
+	// this fetch: ReasonFeedShrank or ReasonFeedReleaseMissing. A snapshot
+	// with one is kept with its findings and is not in force; an operator
+	// who has looked at it accepts it deliberately.
+	CandidateReason string     `json:"candidate_reason,omitempty"`
+	CandidateAt     *time.Time `json:"candidate_at,omitempty"`
 	// Releases lists the releases covered by this snapshot. That is where
 	// the answer "the feed does not cover this release" comes from.
 	Releases      []string  `json:"releases,omitempty"`
@@ -267,6 +294,10 @@ type Snapshot struct {
 	// they are older than not to assess at all.
 	Error string `json:"error,omitempty"`
 }
+
+// Candidate says whether the gate held this fetch back. A candidate
+// carries its findings and is not in force.
+func (s Snapshot) Candidate() bool { return s.CandidateReason != "" }
 
 // Stale says whether the snapshot is older than the policy allows.
 //

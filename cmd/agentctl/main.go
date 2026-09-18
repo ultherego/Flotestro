@@ -82,7 +82,9 @@ func usage(where io.Writer) {
   status          [--config FILE]   the identity, the certificate, a pending attempt, the session and the helper
   diagnose        [--json]          the config, machine-id, clock, DNS, TLS, identity, socket, capabilities
   support-bundle  [--output FILE]   writes the diagnosis, the status, the config, the journal and the
-                                    identity metadata (never the key) into a tar.gz, secrets redacted
+                                    identity metadata (never the key) into a tar.gz; every collector
+                                    declares what it carries, and a bundle that would leak is refused
+  support-bundle  --verify FILE     checks an existing bundle with the same scanner before it is sent
   version                           the version of the tool
 
 Exit codes: 0 ready, 1 a problem to fix, 2 a usage error or a refused request.

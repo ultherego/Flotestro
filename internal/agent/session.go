@@ -61,6 +61,11 @@ type SessionOptions struct {
 	// diagnostic tool on the host sees only the identity files and cannot answer
 	// whether the agent really talks to the panel.
 	State *StateWriter
+	// StateDir is where the agent keeps what has to survive a restart. The
+	// spool of the resource samples the panel has not acknowledged lives
+	// under it; empty means the samples are not kept, and a broken session
+	// loses them.
+	StateDir string
 
 	// gatewayURL is the gateway chosen for this one session. It does not come
 	// from the configuration but from the gateway manager, so it is not a public
@@ -538,6 +543,17 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 		}
 	}
 
+	// The resource sampler is built before the receive loop rather than
+	// next to the heartbeat: the panel's acknowledgement of a sample
+	// arrives on that loop and frees the copy the sampler keeps on disk,
+	// so the two need the same one. Synthetic facts mean a synthetic host,
+	// and the counters of the machine running a thousand simulated agents
+	// would say nothing about any of them - such a sampler keeps nothing.
+	var sampler *Sampler
+	if opts.CollectFacts == nil {
+		sampler = NewSpooledSampler(opts.StateDir, facts.BootID, opts.Log)
+	}
+
 	go func() {
 		for {
 			msg, err := stream.Receive()
@@ -548,6 +564,16 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 			switch payload := msg.GetPayload().(type) {
 			case *agentv1.ServerMessage_InventoryRequest:
 				inventory.request()
+
+			case *agentv1.ServerMessage_MetricsAck:
+				// The panel says what became of one resource sample, after
+				// the transaction that stored it committed. The copy the
+				// agent kept for a resend may go - and it may go on a
+				// refusal too: a reading the panel will never take must
+				// not hold a place in a bounded spool.
+				if sampler != nil {
+					sampler.Acknowledge(payload.MetricsAck)
+				}
 
 			case *agentv1.ServerMessage_MessageAck:
 				// The acknowledgement of a consumed message is between the
@@ -718,9 +744,9 @@ func runSession(ctx context.Context, client agentv1connect.AgentServiceClient,
 	// heartbeat a decision signal. Synthetic facts mean a synthetic host,
 	// and the counters of the machine running a thousand simulated agents
 	// would say nothing about any of them.
-	if opts.CollectFacts == nil {
+	if sampler != nil {
 		metricsInterval := time.Duration(sessionConfig.GetMetricsIntervalSeconds()) * time.Second
-		go NewSampler().Run(sessionCtx, metricsInterval, func(sample *agentv1.MetricsSample) error {
+		go sampler.Run(sessionCtx, metricsInterval, func(sample *agentv1.MetricsSample) error {
 			return send(&agentv1.AgentMessage{
 				Payload: &agentv1.AgentMessage_MetricsSample{MetricsSample: sample},
 			})
