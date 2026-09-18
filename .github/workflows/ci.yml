@@ -217,8 +217,17 @@ jobs:
           psql_() {
             pg psql -h 127.0.0.1 -p 5432 -U flotestro -d flotestro -v ON_ERROR_STOP=1 "$@"
           }
-          pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d flotestro \
-            --schema-only --no-owner --no-privileges > before.sql
+          # pg_dump opens and closes its output with \restrict and
+          # \unrestrict lines carrying a token it makes up each time, so
+          # two dumps of one unchanged schema never match byte for byte.
+          # They say nothing about the schema and are dropped from both
+          # sides; everything else is compared as it comes.
+          dump() {
+            pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d flotestro \
+              --schema-only --no-owner --no-privileges |
+              grep -v '^\\\(un\)\?restrict '
+          }
+          dump > before.sql
           before_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
           go run ./cmd/control-plane --migrate-only
           after_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
@@ -226,8 +235,7 @@ jobs:
             echo "the second pass recorded $((after_count - before_count)) migrations; a file does not match what was recorded" >&2
             exit 1
           fi
-          pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d flotestro \
-            --schema-only --no-owner --no-privileges > after.sql
+          dump > after.sql
           if ! diff -u before.sql after.sql; then
             echo "the schema changed without a migration being applied" >&2
             exit 1
