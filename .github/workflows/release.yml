@@ -26,6 +26,15 @@ jobs:
     name: Packages
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # The signing key is lifted into the job's environment because a step
+    # condition may not read the secrets context at all - a workflow that
+    # tries is rejected whole, before any job starts, which is how this one
+    # failed on every push without ever running. The value itself never
+    # appears in a log: it is an environment variable of the runner, and
+    # the only step that uses it pipes it straight into gpg.
+    env:
+      RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+      RELEASE_SIGNING_KEY_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_KEY_PASSPHRASE }}
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -138,10 +147,7 @@ jobs:
         # signature is published unsigned rather than silently "signed" by
         # a key made up on the runner. The secret, when it exists, is the
         # armoured private key of the release identity.
-        if: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
-        env:
-          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
-          RELEASE_SIGNING_KEY_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_KEY_PASSPHRASE }}
+        if: env.RELEASE_SIGNING_KEY != ''
         run: |
           set -euo pipefail
           export GNUPGHOME="$(mktemp -d)"
