@@ -2607,7 +2607,15 @@ func verifyRestoreTarget(readers *hostReaders, in verifyInput) observation {
 	}
 	exists, entries, err := readers.directory(payload.Target)
 	if err != nil {
-		return unreadable(expected, err.Error())
+		// A restore writes as root, often into a directory the agent may
+		// not open. The helper counted what it wrote, and that count is a
+		// reading of the host by the part of it that may look; without one
+		// the state stays unknown, which is not the same as empty.
+		if counted := in.result.GetBackupResult(); counted.GetTargetRead() {
+			exists, entries, err = true, int(counted.GetTargetEntries()), nil
+		} else {
+			return unreadable(expected, err.Error())
+		}
 	}
 	if !exists {
 		return unverified(expected, "no such directory",

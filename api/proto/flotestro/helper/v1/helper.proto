@@ -1094,6 +1094,14 @@ message BackupResult {
   // Verified says that after the copy the host checked the repository. A
   // copy without a check is not a success.
   bool verified = 5;
+  // TargetEntries counts what lies under the restore target once the
+  // restore is over, read by the part of the host that may look: a
+  // restore writes as root into a directory the agent often cannot open,
+  // and a verifier that reads "permission denied" would call a restore
+  // that worked unverified. TargetRead says the count was taken at all;
+  // without it the count is no answer, not zero.
+  int64 target_entries = 6;
+  bool target_read = 7;
 }
 
 // RepositoryRequest writes or removes a package source.

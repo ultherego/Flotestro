@@ -6517,7 +6517,15 @@ type BackupResult struct {
 	Plan []byte `protobuf:"bytes,4,opt,name=plan,proto3" json:"plan,omitempty"`
 	// Verified says that after the copy the host checked the repository. A
 	// copy without a check is not a success.
-	Verified      bool `protobuf:"varint,5,opt,name=verified,proto3" json:"verified,omitempty"`
+	Verified bool `protobuf:"varint,5,opt,name=verified,proto3" json:"verified,omitempty"`
+	// TargetEntries counts what lies under the restore target once the
+	// restore is over, read by the part of the host that may look: a
+	// restore writes as root into a directory the agent often cannot open,
+	// and a verifier that reads "permission denied" would call a restore
+	// that worked unverified. TargetRead says the count was taken at all;
+	// without it the count is no answer, not zero.
+	TargetEntries int64 `protobuf:"varint,6,opt,name=target_entries,json=targetEntries,proto3" json:"target_entries,omitempty"`
+	TargetRead    bool  `protobuf:"varint,7,opt,name=target_read,json=targetRead,proto3" json:"target_read,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6583,6 +6591,20 @@ func (x *BackupResult) GetPlan() []byte {
 func (x *BackupResult) GetVerified() bool {
 	if x != nil {
 		return x.Verified
+	}
+	return false
+}
+
+func (x *BackupResult) GetTargetEntries() int64 {
+	if x != nil {
+		return x.TargetEntries
+	}
+	return 0
+}
+
+func (x *BackupResult) GetTargetRead() bool {
+	if x != nil {
+		return x.TargetRead
 	}
 	return false
 }
@@ -11057,13 +11079,16 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x0eOPERATION_PLAN\x10\x01\x12\x11\n" +
 	"\rOPERATION_RUN\x10\x02\x12\x14\n" +
 	"\x10OPERATION_VERIFY\x10\x03\x12\x15\n" +
-	"\x11OPERATION_RESTORE\x10\x04\"\x88\x01\n" +
+	"\x11OPERATION_RESTORE\x10\x04\"\xd0\x01\n" +
 	"\fBackupResult\x12\x14\n" +
 	"\x05state\x18\x01 \x01(\fR\x05state\x12\x18\n" +
 	"\aoutcome\x18\x02 \x01(\fR\aoutcome\x12\x18\n" +
 	"\amessage\x18\x03 \x01(\tR\amessage\x12\x12\n" +
 	"\x04plan\x18\x04 \x01(\fR\x04plan\x12\x1a\n" +
-	"\bverified\x18\x05 \x01(\bR\bverified\"\x8e\x03\n" +
+	"\bverified\x18\x05 \x01(\bR\bverified\x12%\n" +
+	"\x0etarget_entries\x18\x06 \x01(\x03R\rtargetEntries\x12\x1f\n" +
+	"\vtarget_read\x18\a \x01(\bR\n" +
+	"targetRead\"\x8e\x03\n" +
 	"\x11RepositoryRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +

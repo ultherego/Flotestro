@@ -132,6 +132,11 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		Message:  result.GetMessage(),
 		Plan:     result.GetPlan(),
 		Verified: result.GetVerified(),
+		// What the helper counted under the restore target travels with
+		// the result: the agent itself cannot read a directory root wrote,
+		// and the verifier below needs an answer rather than a refusal.
+		TargetEntries: result.GetTargetEntries(),
+		TargetRead:    result.GetTargetRead(),
 	}
 	if !response.GetAccepted() {
 		refused := rejected(agentv1.TaskResult_STATUS_REJECTED,

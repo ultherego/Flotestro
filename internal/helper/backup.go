@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -185,7 +186,20 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 			return reject(ErrorPreconditionFailed, err.Error())
 		}
 		result, err := adapter.RestoreData(actionCtx, order)
-		return backupResponse(result, err)
+		response := backupResponse(result, err)
+		// The helper counts what now lies under the target, because it is
+		// the part of the host that may look: a restore writes as root
+		// into a directory the agent often cannot open, and a verifier
+		// reading "permission denied" would call a restore that worked
+		// unverified. A count that could not be taken travels as no
+		// answer rather than as zero.
+		if response.GetBackupResult() != nil {
+			if entries, counted := countEntries(order.Restore.Target); counted {
+				response.BackupResult.TargetEntries = entries
+				response.BackupResult.TargetRead = true
+			}
+		}
+		return response
 	}
 	return reject(ErrorUnknownAction, "unknown backup operation")
 }
@@ -295,4 +309,18 @@ func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 			"the scope of the copy or the repository changed since the planning; the operation needs a new plan")
 	}
 	return nil
+}
+
+// countEntries counts what lies directly under a directory. It answers
+// "not counted" for anything it cannot read, so the caller can tell an
+// empty directory from one nobody looked into.
+func countEntries(path string) (int64, bool) {
+	if path == "" {
+		return 0, false
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return 0, false
+	}
+	return int64(len(entries)), true
 }
