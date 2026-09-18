@@ -104,6 +104,35 @@ describe("the registry", () => {
     expect(operationForm(undefined)).toBeUndefined();
   });
 
+  /* No field offers a value somebody's host really carries. The registry
+     draws the campaign forms, where no host is known, so a placeholder is
+     an example and nothing else - and an example that reads as a real
+     device, a real unit or a real address is the one that gets copied into
+     an order that formats a disk. The documentation ranges exist for
+     exactly this and are the only addresses allowed here. */
+  it("offers no device, unit or address a host really has", () => {
+    const offered: string[] = [];
+    for (const entry of OPERATION_FORMS) {
+      for (const field of entry.fields) {
+        const example = field.placeholder;
+        if (!example) continue;
+        const where = `${entry.action}.${field.name}: ${example}`;
+        // A path in /dev is the name this kernel handed out this boot.
+        // Only an unfinished one, ending in the ellipsis, shows the shape
+        // without naming a disk.
+        if (example.startsWith("/dev/") && !example.endsWith("…")) offered.push(where);
+        if (/\.(service|socket|timer|mount|target)\b/.test(example)) offered.push(where);
+        for (const address of example.match(/\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/g) ?? []) {
+          if (!/^(192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)/.test(address)) offered.push(where);
+        }
+        // The unique-local prefixes are somebody's own addressing just as
+        // much as the private v4 ranges are; 2001:db8:: is the one to show.
+        if (/^f[cd][0-9a-f]{2}:/i.test(example)) offered.push(where);
+      }
+    }
+    expect(offered).toEqual([]);
+  });
+
   it("gives every field a name, a label and a kind of its own", () => {
     for (const entry of OPERATION_FORMS) {
       const names = new Set<string>();

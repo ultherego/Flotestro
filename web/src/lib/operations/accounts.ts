@@ -19,8 +19,7 @@ const nameField: OperationField = {
   name: "name",
   label: "Account",
   kind: "text",
-  hint: "The login name on the host. The account is not created by these operations unless they say so.",
-  placeholder: "deploy",
+  hint: "The login name on the host, as the host's accounts page lists it. The account is not created by these operations unless they say so.",
 };
 
 const managedFileField: OperationField = {

@@ -17,12 +17,15 @@ const GROUP = "Storage";
 const PLAN_NOTE =
   "Every host computes its own plan first: the planning step resolves the device to the filesystem it really holds, says whether it is mounted and how much room there is, and the change is bound to that.";
 
+// No example device here on purpose. A path in /dev is whatever this
+// host's kernel handed out, and these orders format, delete and overwrite:
+// an example that looks like a real disk is an invitation to wipe one. The
+// host's storage page prints the true name on every row.
 const deviceField: OperationField = {
   name: "device",
   label: "Device",
   kind: "text",
-  placeholder: "/dev/vg0/data",
-  hint: "A path in /dev, or a durable identifier such as UUID=…",
+  hint: "A path in /dev or a durable identifier such as UUID=…, copied from the device's own row on the host's storage page.",
 };
 
 function deviceCheck(form: FormValue): FormProblem[] {
@@ -58,8 +61,7 @@ const arrayField: OperationField = {
   name: "array",
   label: "Array",
   kind: "text",
-  placeholder: "/dev/md0",
-  hint: "The array as the kernel names it. The order also carries the UUID out of its superblock, because /dev/md0 is whichever array the kernel assembled first this boot.",
+  hint: "The array as the kernel names it, copied from the array's card on the host's storage page. The order also carries the UUID out of its superblock, because the path is whichever array the kernel assembled first this boot.",
 };
 
 const arrayIdentityField: OperationField = {
@@ -74,8 +76,7 @@ const memberField: OperationField = {
   name: "device",
   label: "Member",
   kind: "text",
-  placeholder: "/dev/sdb1",
-  hint: "The device inside the array.",
+  hint: "The device inside the array, copied from the member's row on the array's card.",
 };
 
 const memberIdentityField: OperationField = {
@@ -91,12 +92,12 @@ function memberCheck(form: FormValue): FormProblem[] {
   const problems: FormProblem[] = [];
   if (required(problems, form, "array", "Name the array this acts on.")) {
     if (!ARRAY_PATH.test(text(form, "array"))) {
-      problems.push({ field: "array", message: "An array is a path such as /dev/md0 or /dev/md/data." });
+      problems.push({ field: "array", message: "An array is a path in /dev: /dev/md and its number, or /dev/md/ and its name." });
     }
   }
   if (required(problems, form, "device", "Name the member this acts on.")) {
     if (!DEVICE_PATH.test(text(form, "device"))) {
-      problems.push({ field: "device", message: "A member is a path in /dev, e.g. /dev/sdb1." });
+      problems.push({ field: "device", message: "A member is a path in /dev, as the array's card names it." });
     }
   }
   required(problems, form, "expected_array_uuid",
@@ -156,8 +157,7 @@ const groupField: OperationField = {
   name: "group",
   label: "Volume group",
   kind: "text",
-  placeholder: "vg0",
-  hint: "The group the operation acts in. The order also carries the group's UUID: a name can be given to another group after a rename.",
+  hint: "The group the operation acts in, named as the host's storage page lists it. The order also carries the group's UUID: a name can be given to another group after a rename.",
 };
 
 const groupIdentityField: OperationField = {
@@ -194,7 +194,7 @@ const volumes: OperationEntry[] = [
     note: "The volume is created in a group that exists. A group without room for it is a refusal in the plan, and the size is read back afterwards: LVM allocates whole extents and rounds a request up.",
     fields: [
       groupField,
-      { name: "volume", label: "Name", kind: "text", placeholder: "logs", hint: "The name of the new volume inside the group." },
+      { name: "volume", label: "Name", kind: "text", hint: "The name of the new volume inside the group." },
       {
         name: "size", label: "Size", kind: "text", placeholder: "10G",
         hint: "An absolute size such as 10G, or a share of what is free such as 100%FREE.",
@@ -265,7 +265,7 @@ const volumes: OperationEntry[] = [
     plan: PLAN_NOTE,
     note: "The extents go back to the group and the filesystem on them is gone. Like formatting, it takes two approvals, the target typed out and the stable identity of the volume; a volume with snapshots on it is refused until they are gone.",
     fields: [
-      { ...deviceField, label: "Volume", hint: "The logical volume as a path in /dev, e.g. /dev/vg0/logs." },
+      { ...deviceField, label: "Volume", hint: "The logical volume as a path in /dev, copied from the volume's row on the host's storage page." },
       volumeIdentityField,
       {
         name: "expected_by_id", label: "Only if the volume is this device", kind: "text",
@@ -277,7 +277,7 @@ const volumes: OperationEntry[] = [
       const problems: FormProblem[] = [];
       if (required(problems, form, "device", "Name the volume to delete.")) {
         if (!DEVICE_PATH.test(text(form, "device"))) {
-          problems.push({ field: "device", message: "A logical volume is a path in /dev, e.g. /dev/vg0/logs." });
+          problems.push({ field: "device", message: "A logical volume is a path in /dev, as the volume's row prints it." });
         }
       }
       required(problems, form, "expected_volume_uuid", "Give the UUID of the volume.");
@@ -307,7 +307,7 @@ const volumes: OperationEntry[] = [
       const problems: FormProblem[] = [];
       if (required(problems, form, "device", "Name the volume to snapshot.")) {
         if (!DEVICE_PATH.test(text(form, "device"))) {
-          problems.push({ field: "device", message: "A logical volume is a path in /dev, e.g. /dev/vg0/logs." });
+          problems.push({ field: "device", message: "A logical volume is a path in /dev, as the volume's row prints it." });
         }
       }
       if (required(problems, form, "volume", "Name the snapshot.")) {
@@ -334,14 +334,14 @@ const volumes: OperationEntry[] = [
     plan: PLAN_NOTE,
     note: "Only a snapshot: the same command on an ordinary volume deletes somebody's filesystem, which is a separate operation with two approvals behind it.",
     fields: [
-      { ...deviceField, label: "Snapshot", hint: "The snapshot as a path in /dev, e.g. /dev/vg0/logs-before-upgrade." },
+      { ...deviceField, label: "Snapshot", hint: "The snapshot as a path in /dev, copied from the snapshot's row on the host's storage page." },
       volumeIdentityField,
     ],
     check: (form) => {
       const problems: FormProblem[] = [];
       if (required(problems, form, "device", "Name the snapshot to drop.")) {
         if (!DEVICE_PATH.test(text(form, "device"))) {
-          problems.push({ field: "device", message: "A snapshot is a path in /dev, e.g. /dev/vg0/logs-before-upgrade." });
+          problems.push({ field: "device", message: "A snapshot is a path in /dev, as the snapshot's row prints it." });
         }
       }
       required(problems, form, "expected_volume_uuid", "Give the UUID of the snapshot.");
@@ -364,8 +364,8 @@ export const storage: OperationEntry[] = [
         hint: "A durable identifier or a path in /dev. The planning step turns a path into the identifier of the filesystem the host really has there.",
       },
       {
-        name: "target", label: "Mount point", kind: "path", placeholder: "/srv/data",
-        hint: "The directory it appears at. The panel mounts nothing onto the system's own directories.",
+        name: "target", label: "Mount point", kind: "path",
+        hint: "The absolute path the filesystem is to appear at. The panel mounts nothing onto the system's own directories, and a directory that already holds something has it hidden under the mount.",
       },
       { name: "fs_type", label: "Filesystem type", kind: "text", placeholder: "ext4" },
       {
@@ -418,7 +418,10 @@ export const storage: OperationEntry[] = [
     plan: PLAN_NOTE,
     note: "The entry in fstab goes with it, so the filesystem does not come back at the next boot.",
     fields: [
-      { name: "target", label: "Mount point", kind: "path", placeholder: "/srv/data", hint: "The directory the filesystem appears at now." },
+      {
+        name: "target", label: "Mount point", kind: "path",
+        hint: "The directory the filesystem appears at now, copied from the mount's row on the host's storage page.",
+      },
     ],
     check: (form) => {
       const problems: FormProblem[] = [];
@@ -461,7 +464,8 @@ export const storage: OperationEntry[] = [
     fields: [
       deviceField,
       {
-        name: "expected_uuid", label: "Only if it is this filesystem", kind: "text", placeholder: "UUID value",
+        name: "expected_uuid", label: "Only if it is this filesystem", kind: "text",
+        placeholder: "The UUID from the filesystem's row",
         hint: "Binds the operation to one filesystem, so a device path that came to mean something else stops it.",
       },
     ],
@@ -477,7 +481,7 @@ export const storage: OperationEntry[] = [
     plan: PLAN_NOTE,
     note: "The filesystem on the volume grows together with it: a volume bigger than its filesystem is space nobody can use.",
     fields: [
-      { ...deviceField, label: "Volume", hint: "The logical volume as a path in /dev, e.g. /dev/vg0/data." },
+      { ...deviceField, label: "Volume", hint: "The logical volume as a path in /dev, copied from the volume's row on the host's storage page." },
       {
         name: "size", label: "Grow it by", kind: "text", placeholder: "+10G",
         hint: "An increment such as +10G, or a share of what is free such as +100%FREE. The panel only grows volumes.",
@@ -487,7 +491,7 @@ export const storage: OperationEntry[] = [
       const problems: FormProblem[] = [];
       if (required(problems, form, "device", "Name the volume to grow.")) {
         if (!DEVICE_PATH.test(text(form, "device"))) {
-          problems.push({ field: "device", message: "A logical volume is a path in /dev, e.g. /dev/vg0/data." });
+          problems.push({ field: "device", message: "A logical volume is a path in /dev, as the volume's row prints it." });
         }
       }
       if (required(problems, form, "size", "Say how much to add.")) {

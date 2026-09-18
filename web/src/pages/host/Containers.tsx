@@ -12,7 +12,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { OperationForm } from "../../components/OperationForm";
-import { operationForm, startingForm, type FormValue } from "../../lib/operations";
+import { operationForm, startingForm, type FieldSuggestions, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
 
 type Summary = {
@@ -356,7 +356,7 @@ export function Containers() {
               }
             />
             {logsOf && <ContainerLogs key={logsOf.id} container={logsOf} onClose={() => setLogsOf(null)} />}
-            <Declaration kind="container" />
+            <Declaration kind="container" lists={lists} />
           </>
         )}
         {view === "images" && (
@@ -375,6 +375,7 @@ export function Containers() {
             />
             <PullImage
               hostID={host.id}
+              images={lists?.images}
               busy={request.isPending}
               onPull={(reference) => request.mutate({ action: "docker.image.pull", payload: { docker_image: { reference } } })}
             />
@@ -388,7 +389,7 @@ export function Containers() {
               read={read}
               remove={(network) => setPending({ kind: "remove-network", id: network.id, name: network.name })}
             />
-            <Declaration kind="network" />
+            <Declaration kind="network" lists={lists} />
           </>
         )}
         {view === "volumes" && (
@@ -401,7 +402,7 @@ export function Containers() {
                 setPending({ kind: "remove-volume", id: volume.name, name: volume.name })
               }
             />
-            <Declaration kind="volume" />
+            <Declaration kind="volume" lists={lists} />
           </>
         )}
 
@@ -447,7 +448,36 @@ export function Containers() {
  * settings and refuses the rest - and it is why the plan says so before
  * anybody agrees to it.
  */
-function Declaration({ kind }: { kind: "container" | "network" | "volume" }) {
+/**
+ * What the engine on this host really carries, for the fields of a
+ * declaration.
+ *
+ * A declaration that meets an object of the same name replaces it, so the
+ * name field is the dangerous one: an example the panel invents is either
+ * useless or names somebody's running container. The page has just read
+ * the engine, so it offers what is there - and the operator can still type
+ * a name that is not, which is how a new object is declared.
+ */
+export function engineSuggestions(lists?: FullState): FieldSuggestions {
+  if (!lists) return {};
+  const named = (values: (string | undefined)[]) =>
+    Array.from(new Set(values.filter((value): value is string => !!value))).sort();
+  return {
+    name: named([
+      ...(lists.containers ?? []).map((container) => container.name),
+      ...(lists.networks ?? []).map((network) => network.name),
+      ...(lists.volumes ?? []).map((volume) => volume.name),
+    ]),
+    image: named((lists.images ?? []).flatMap((image) => image.tags ?? [])),
+    network: named((lists.networks ?? []).map((network) => network.name)),
+  };
+}
+
+function Declaration({ kind, lists }: {
+  kind: "container" | "network" | "volume";
+  /** What the engine on this host reports, so the fields can offer it. */
+  lists?: FullState;
+}) {
   const t = useT();
   const host = useHost();
   const queryClient = useQueryClient();
@@ -535,6 +565,7 @@ function Declaration({ kind }: { kind: "container" | "network" | "volume" }) {
           onChange={(next) => { setForm(next); setOrdered(null); }}
           json={payloadText}
           onJson={(next) => { setPayloadText(next); setOrdered(null); }}
+          suggestions={engineSuggestions(lists)}
         />
         <FormActions>
           {/* The plan is a read and stands behind the read permission; the
@@ -1192,11 +1223,21 @@ const IMAGE_REFERENCE_PATTERN = /^[a-z0-9][A-Za-z0-9._\-/:@]{0,511}$/;
  * a mutation and waits for approval like every other; it adds to the host
  * and removes nothing, so it needs no typed confirmation.
  */
-function PullImage({ hostID, busy, onPull }: { hostID: string; busy: boolean; onPull: (reference: string) => void }) {
+function PullImage({ hostID, images, busy, onPull }: {
+  hostID: string;
+  images?: { id: string; tags?: string[] }[];
+  busy: boolean;
+  onPull: (reference: string) => void;
+}) {
   const t = useT();
   const [reference, setReference] = useState("");
   const value = reference.trim();
   const valid = IMAGE_REFERENCE_PATTERN.test(value);
+  // The references this host already carries: fetching one again is how a
+  // moving tag is brought up to date, and it saves copying the string out
+  // of the table above. A reference the host has not got is still typed in
+  // by hand, so the list stands beside the field and does not close it.
+  const held = [...new Set((images ?? []).flatMap((image) => image.tags ?? []).filter((tag) => tag !== "<none>:<none>"))].sort();
   // The whole form exists for one order; without the right to place it
   // the form is not drawn at all.
   return (
@@ -1204,8 +1245,22 @@ function PullImage({ hostID, busy, onPull }: { hostID: string; busy: boolean; on
       <div className="hm-section-body">
         <Form>
           <Fields>
-            <Field label={t("Pull an image")} help={t("The full reference, e.g. nginx:1.27 or registry.example.internal/team/app@sha256:…; the engine pulls it with its own credentials.")} wide>
-              <input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="nginx:1.27" />
+            <Field
+              label={t("Pull an image")}
+              help={held.length
+                ? t("The full reference, with its registry where it is not the default one. The images this host already carries are on the list; the engine pulls with its own credentials.")
+                : t("The full reference, with its registry where it is not the default one, and a tag or a digest. The engine pulls it with its own credentials.")}
+              wide
+            >
+              <input
+                value={reference}
+                onChange={(e) => setReference(e.target.value)}
+                list="pull-image"
+                placeholder="registry.example.test/team/app:1.4"
+              />
+              <datalist id="pull-image">
+                {held.map((tag) => <option key={tag} value={tag} />)}
+              </datalist>
             </Field>
           </Fields>
           <FormActions>

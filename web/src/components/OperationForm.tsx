@@ -3,7 +3,8 @@ import { Field, FieldGrid } from "./layout";
 import { useT } from "../i18n";
 import {
   body, count, flag, payloadTextOf, readPayloadText, text,
-  type FieldValue, type FormProblem, type FormValue, type OperationEntry, type OperationField,
+  type FieldSuggestions, type FieldValue, type FormProblem, type FormValue,
+  type OperationEntry, type OperationField,
 } from "../lib/operations";
 
 /**
@@ -21,11 +22,17 @@ import {
  * the advanced view is a detour rather than a one-way door.
  */
 export function OperationForm({
-  entry, value, onChange, json, onJson,
+  entry, value, onChange, json, onJson, suggestions,
 }: {
   entry: OperationEntry;
   value: FormValue;
   onChange: (value: FormValue) => void;
+  /**
+   * What the host this order is for really has, by field name. A screen
+   * that has just read the host passes it; the Bulk wizard, which orders
+   * on many hosts at once, passes nothing.
+   */
+  suggestions?: FieldSuggestions;
   /**
    * The payload as hand-written JSON, when the fields cannot show it. An
    * empty string means the fields are what the order carries.
@@ -106,7 +113,14 @@ export function OperationForm({
         <>
           <FieldGrid>
             {entry.fields.map((field) => (
-              <FormField key={field.name} field={field} value={value} problem={problemOf(field.name)} set={set} />
+              <FormField
+                key={field.name}
+                field={field}
+                value={value}
+                problem={problemOf(field.name)}
+                set={set}
+                suggestions={suggestions?.[field.name]}
+              />
             ))}
           </FieldGrid>
           {entry.fields.length === 0 && (
@@ -152,12 +166,13 @@ function readsAsObject(draft: string): boolean {
  * on the explanation to the checkbox.
  */
 function FormField({
-  field, value, problem, set,
+  field, value, problem, set, suggestions,
 }: {
   field: OperationField;
   value: FormValue;
   problem?: FormProblem;
   set: (field: OperationField, next: FieldValue) => void;
+  suggestions?: string[];
 }) {
   const t = useT();
   // A field that is wrong says so where its explanation stood: one place
@@ -184,7 +199,7 @@ function FormField({
 
   return (
     <Field label={t(field.label)} hint={hint} wide={field.wide}>
-      {control(t, field, value, set)}
+      {control(t, field, value, set, suggestions)}
     </Field>
   );
 }
@@ -194,7 +209,18 @@ function control(
   field: OperationField,
   value: FormValue,
   set: (field: OperationField, next: FieldValue) => void,
+  suggestions?: string[],
 ) {
+  // What the host has is offered, not imposed: a list beside the field
+  // rather than a select, because an operator ordering something the host
+  // does not report yet - a volume about to be created, a unit from a
+  // package being installed - must still be able to type it.
+  const listID = suggestions && suggestions.length > 0 ? "operation-field-" + field.name : undefined;
+  const list = listID ? (
+    <datalist id={listID}>
+      {suggestions!.map((option) => <option key={option} value={option} />)}
+    </datalist>
+  ) : null;
   switch (field.kind) {
     case "select":
       return (
@@ -235,13 +261,17 @@ function control(
 
     default:
       return (
-        <input
-          type="text"
-          value={body(value, field.name)}
-          placeholder={field.placeholder}
-          onChange={(event) => set(field, event.target.value)}
-          spellCheck={field.kind === "text"}
-        />
+        <>
+          <input
+            type="text"
+            value={body(value, field.name)}
+            placeholder={field.placeholder}
+            list={listID}
+            onChange={(event) => set(field, event.target.value)}
+            spellCheck={field.kind === "text"}
+          />
+          {list}
+        </>
       );
   }
 }

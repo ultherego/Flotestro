@@ -235,6 +235,7 @@ export function Schedules() {
             hostId={host.id}
             online={host.connection_state === "online"}
             kinds={scheduleKinds(host.capabilities)}
+            entries={entries}
             onRequest={(payload) =>
               request.mutate({ action: "schedule.ensure", payload: { schedule: payload } })
             }
@@ -425,12 +426,14 @@ export function kindLabel(kind: string, t: (text: string) => string): string {
  * host.
  */
 function NewEntry({
-  hostId, online, kinds, onRequest,
+  hostId, online, kinds, entries, onRequest,
 }: {
   hostId: string;
   online: boolean;
   /** The mechanisms this host can carry an entry with, the first preferred. */
   kinds: string[];
+  /** What the host already schedules: the names taken and the accounts used. */
+  entries: Schedule[];
   onRequest: (payload: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -446,6 +449,15 @@ function NewEntry({
   const [kind, setKind] = useState(kinds[0] ?? "cron");
   const [previewError, setPreviewError] = useState("");
   const args = commandLine.trim().split(/\s+/).filter(Boolean);
+  // The accounts this host already schedules work under. They are facts of
+  // the host, so they are offered instead of an account name invented here
+  // - "backup" and "deploy" exist on some machines and on others they do
+  // not, and an entry for an account the host has not got never runs.
+  const accounts = [...new Set(entries.map((entry) => entry.user).filter((name): name is string => Boolean(name)))].sort();
+  // A name another entry already carries is not a new entry: ordering it
+  // rewrites that one. The list is on the screen below, so the form says
+  // so rather than letting the operator find out afterwards.
+  const taken = entries.some((entry) => entry.id === id.trim());
 
   // The next runs come from the host, not from the browser: the browser
   // knows neither the host's zone nor its clock, and a preview in the
@@ -480,8 +492,15 @@ function NewEntry({
     <Section title={t("New schedule")} span={12}>
       <Form>
         <Fields>
-          <Field label={t("Name")}>
-            <input placeholder={t("Name, e.g. nightly-backup")} value={id} onChange={(e) => setId(e.target.value)} />
+          <Field
+            label={t("Name")}
+            help={taken ? t("An entry of this name is already on the host; ordering this one rewrites it.") : undefined}
+          >
+            <input
+              placeholder={t("A name for this entry, its own on this host")}
+              value={id}
+              onChange={(e) => setId(e.target.value)}
+            />
           </Field>
           <Field label={t("Cron expression")} narrow>
             <input placeholder={t("Cron expression")} value={expression} onChange={(e) => setExpression(e.target.value)} />
@@ -502,12 +521,24 @@ function NewEntry({
               ))}
             </select>
           </Field>
-          <Field label={t("Run as user")} narrow>
-            <input placeholder={t("Run as user")} value={user} onChange={(e) => setUser(e.target.value)} />
+          <Field
+            label={t("Run as user")}
+            narrow
+            help={accounts.length > 1 ? t("The accounts this host already schedules work under are on the list.") : undefined}
+          >
+            <input
+              placeholder={t("Run as user")}
+              value={user}
+              onChange={(e) => setUser(e.target.value)}
+              list="schedule-user"
+            />
+            <datalist id="schedule-user">
+              {accounts.map((account) => <option key={account} value={account} />)}
+            </datalist>
           </Field>
           <Field label={t("Command")} wide>
             <input
-              placeholder={t("Command with an absolute path, e.g. /usr/bin/systemctl restart nginx")}
+              placeholder={t("An absolute path, then one argument at a time")}
               value={commandLine}
               onChange={(e) => setCommandLine(e.target.value)}
             />

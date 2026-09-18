@@ -17,8 +17,10 @@ const unitField: OperationField = {
   name: "unit",
   label: "Unit",
   kind: "unit",
-  hint: "The systemd unit this acts on, with its suffix: cron.service, chronyd.service, fstrim.timer.",
-  placeholder: "cron.service",
+  // A unit is named by the host that carries it, and the same job runs
+  // under a different unit on another distribution. The host's services
+  // page lists what this host really has, so the field suggests nothing.
+  hint: "The systemd unit this acts on, with its suffix, exactly as the host's services page lists it.",
 };
 
 /** The name of a unit is required and has to be one systemd would accept. */

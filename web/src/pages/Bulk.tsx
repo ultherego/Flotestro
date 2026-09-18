@@ -1957,11 +1957,11 @@ function WindowStep({
         </Field>
         <Field label={t("Units to check afterwards")}
           hint={units.length === 0
-            ? t("One unit per line or comma-separated, e.g. nginx.service. Checked on every host right after the change, or after the reboot when one follows; empty means nothing is verified.")
+            ? t("One unit per line or comma-separated, named as the hosts name them - the same service is called differently on different distributions. Checked on every host right after the change, or after the reboot when one follows; empty means nothing is verified.")
             : t("{n} units will be checked on every host once its change is done.", { n: units.length })}
           wide>
           <textarea rows={3} className="mono" value={order.healthCheckUnits}
-            placeholder={"nginx.service\nphp-fpm.service"}
+            placeholder={t("A unit of these hosts, one per line")}
             onChange={(e) => change({ healthCheckUnits: e.target.value })} spellCheck={false} />
         </Field>
         <Field label={t("Job timeout (seconds)")}

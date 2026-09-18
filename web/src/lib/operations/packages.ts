@@ -22,8 +22,9 @@ const packageList: OperationField = {
   name: "packages",
   label: "Packages",
   kind: "packages",
-  hint: "One name per line, or separated by commas. The name is the one the host's package manager knows.",
-  placeholder: "nginx\ncurl",
+  // No example package: the same software is called something else on
+  // every family, and this list also drives the removal.
+  hint: "One name per line, or separated by commas, as the host's package manager knows them; the host's packages page lists what it has.",
   wide: true,
 };
 

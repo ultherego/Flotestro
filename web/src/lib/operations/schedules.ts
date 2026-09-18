@@ -20,8 +20,7 @@ const idField: OperationField = {
   name: "id",
   label: "Entry",
   kind: "text",
-  hint: "The identifier the panel gave this entry; it names the file the host keeps it in. An entry somebody wrote on the host by hand has none and cannot be named here.",
-  placeholder: "nightly-report",
+  hint: "The identifier the panel gave this entry, as the host's schedules page lists it; it names the file the host keeps it in. An entry somebody wrote on the host by hand has none and cannot be named here.",
 };
 
 function idCheck(form: FormValue): FormProblem[] {
@@ -53,15 +52,13 @@ export const schedules: OperationEntry[] = [
         label: "What it runs",
         kind: "list",
         hint: "The program first, by its absolute path, then one argument per line. It is never a shell line: an argument with a shell character would stop being an argument.",
-        placeholder: "/usr/local/bin/report\n--weekly",
         wide: true,
       },
       {
         name: "user",
         label: "Runs as",
         kind: "text",
-        hint: "The account the entry runs under. There is no default: an entry for root needs the right to schedule work as root on top of the right to write entries.",
-        placeholder: "backup",
+        hint: "The account the entry runs under, as it exists on the host. There is no default: an entry for root needs the right to schedule work as root on top of the right to write entries.",
       },
       {
         name: "kind",

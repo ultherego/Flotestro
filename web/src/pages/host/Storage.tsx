@@ -12,7 +12,7 @@ import {
 import { TargetConfirmation } from "./TargetConfirmation";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { OperationForm } from "../../components/OperationForm";
-import { emptyForm, operationForm, type FormValue } from "../../lib/operations";
+import { emptyForm, operationForm, type FieldSuggestions, type FormValue } from "../../lib/operations";
 import { useT } from "../../i18n";
 
 export type Device = {
@@ -428,7 +428,11 @@ export function Storage() {
         </p>
       )}
 
-      {wizard && <ActionGuard action="mount.ensure" host={host.id}><MountWizard onIntent={setIntent} /></ActionGuard>}
+      {wizard && (
+        <ActionGuard action="mount.ensure" host={host.id}>
+          <MountWizard devices={devices} onIntent={setIntent} />
+        </ActionGuard>
+      )}
 
       <Widgets>
       {/* The mounts by what they will look like after a reboot, and the ones
@@ -1002,6 +1006,7 @@ export function Storage() {
         <LayerWizard
           action={layer.action}
           seed={layer.seed}
+          suggestions={storageSuggestions(snapshot)}
           onIntent={setIntent}
           onClose={() => setLayer(null)}
         />
@@ -1217,6 +1222,29 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
 }
 
 /**
+ * What this host really has, for the fields of a storage order.
+ *
+ * The registry names no device, no array and no group, because each of
+ * them is called something different on every machine and an order that
+ * names the wrong one destroys what is on it. The page has just read the
+ * host, so it offers exactly what the host reported - and nothing else.
+ */
+export function storageSuggestions(snapshot?: Snapshot): FieldSuggestions {
+  if (!snapshot) return {};
+  const paths = (values: (string | undefined)[]) =>
+    Array.from(new Set(values.filter((value): value is string => !!value))).sort();
+  return {
+    device: paths([
+      ...(snapshot.devices ?? []).map((device) => device.path),
+      ...(snapshot.volumes ?? []).map((volume) => volume.path),
+    ]),
+    array: paths((snapshot.arrays ?? []).map((array) => array.path)),
+    group: paths((snapshot.groups ?? []).map((group) => group.name)),
+    member: paths((snapshot.devices ?? []).map((device) => device.path)),
+  };
+}
+
+/**
  * The form of one volume or array operation, drawn from the operation
  * registry.
  *
@@ -1226,9 +1254,11 @@ function ArrayCard({ array, hostID, onIntent, onAdd }: {
  * the server would refuse and builds the payload. One description of an
  * operation, used by this page and by the Bulk wizard alike.
  */
-function LayerWizard({ action, seed, onIntent, onClose }: {
+function LayerWizard({ action, seed, suggestions, onIntent, onClose }: {
   action: string;
   seed: FormValue;
+  /** What this host really carries, by field name; see storageSuggestions. */
+  suggestions?: FieldSuggestions;
   onIntent: (intent: Intent) => void;
   onClose: () => void;
 }) {
@@ -1247,7 +1277,8 @@ function LayerWizard({ action, seed, onIntent, onClose }: {
       tools={<button className="secondary" onClick={onClose}>{t("Cancel")}</button>}
     >
       <Form>
-        <OperationForm entry={entry} value={value} onChange={setValue} json={json} onJson={setJson} />
+        <OperationForm entry={entry} value={value} onChange={setValue}
+          json={json} onJson={setJson} suggestions={suggestions} />
         <FormActions>
           <button
             disabled={!ready}
@@ -1404,28 +1435,60 @@ export function identity(device: Device): Record<string, unknown> {
  * The mount wizard. The source is given by a durable identifier, because
  * the /dev/sdX name depends on the detection order and may point at a
  * different disk after a reboot.
+ *
+ * The identifiers are the host's own: the filesystems this host reported
+ * are offered by their UUID, with the device and the type beside them, so
+ * nobody has to copy a string out of another tab - and the panel suggests
+ * no device of its own invention. Something the list does not hold, a
+ * network filesystem among others, is still typed in by hand, which is
+ * why this is a list beside the field rather than a closed choice.
  */
-function MountWizard({ onIntent }: { onIntent: (intent: Intent) => void }) {
+function MountWizard({ devices, onIntent }: { devices: Device[]; onIntent: (intent: Intent) => void }) {
   const t = useT();
   const [source, setSource] = useState("");
   const [target, setTarget] = useState("");
   const [type, setType] = useState("ext4");
   const [options, setOptions] = useState("defaults,nofail");
   const [persist, setPersist] = useState(true);
+  // A filesystem the host reported and named by a UUID: that is what can
+  // be mounted and what survives a reboot under the same name.
+  const known = devices.filter((device) => device.uuid && device.fs_type);
+
+  /* Choosing one of the host's own filesystems fills the type in as well:
+     the host has already said what is on that device, and a type typed
+     over it is a mount that fails for no reason the operator can see. */
+  function chooseSource(value: string) {
+    setSource(value);
+    const found = known.find((device) => `UUID=${device.uuid}` === value || device.path === value);
+    if (found?.fs_type) setType(found.fs_type);
+  }
 
   return (
     <Section title={t("Mount a filesystem")}>
       <Form>
         <Fields>
-          <Field label={t("Source")}>
+          <Field
+            label={t("Source")}
+            help={known.length
+              ? t("The filesystems this host reported are on the list; anything else is typed in as UUID=… or a path in /dev.")
+              : t("The host has reported no filesystem with a durable identifier; write it as UUID=… or a path in /dev.")}
+          >
             <input
               value={source}
-              onChange={(e) => setSource(e.target.value)}
+              onChange={(e) => chooseSource(e.target.value)}
+              list="mount-source"
               placeholder="UUID=… or /dev/mapper/…"
             />
+            <datalist id="mount-source">
+              {known.map((device) => (
+                <option key={device.path} value={`UUID=${device.uuid}`}>
+                  {`${device.path} · ${device.fs_type}${device.label ? ` · ${device.label}` : ""} · ${bytes(device.size_bytes)}`}
+                </option>
+              ))}
+            </datalist>
           </Field>
           <Field label={t("Mount point")}>
-            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t("Mount point, e.g. /mnt/data")} />
+            <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t("An absolute path on the host")} />
           </Field>
           <Field label={t("Filesystem type")} narrow>
             <input value={type} onChange={(e) => setType(e.target.value)} placeholder={t("Filesystem type")} />

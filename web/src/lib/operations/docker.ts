@@ -98,11 +98,14 @@ const forceField: OperationField = {
 /** The fields of a declared container, named after the description's own. */
 const containerFields: OperationField[] = [
   {
-    name: "name", label: "Container", kind: "text", placeholder: "storefront",
-    hint: "What the container is to be called. A declaration is about the name: the engine identifier changes with every replacement.",
+    name: "name", label: "Container", kind: "text",
+    // A declaration that meets a container of this name replaces it, so
+    // the field must not offer a name the panel invented: on some host it
+    // is somebody's running service.
+    hint: "What the container is to be called, as the host's containers page lists it when the declaration is about one that already stands there. A declaration is about the name: the engine identifier changes with every replacement.",
   },
   {
-    name: "image", label: "Image", kind: "text", placeholder: "nginx:1.27", wide: true,
+    name: "image", label: "Image", kind: "text", placeholder: "registry.example.test/team/app:1.4", wide: true,
     hint: "The full reference. A tag is resolved to a digest in the plan and the container is created from that digest, never from the tag as the registry serves it at that moment.",
   },
   {
@@ -124,13 +127,11 @@ const containerFields: OperationField[] = [
   },
   {
     name: "mounts", label: "Mounts", kind: "list",
-    placeholder: "volume:storefront-data:/var/lib/data:ro",
-    hint: "One per line: volume:<name>:<mount point>, bind:<path on the host>:<mount point> or tmpfs:<mount point>[:<bytes>]. Add :ro for read only.",
+    hint: "One per line: volume:<name>:<mount point>, bind:<path on the host>:<mount point> or tmpfs:<mount point>[:<bytes>]. Add :ro for read only. The names are the host's own: its containers page lists the volumes it has.",
   },
   {
     name: "networks", label: "Networks", kind: "list",
-    placeholder: "internal=api@10.0.1.5",
-    hint: "One per line, as <network>[=alias,alias][@address]. A fixed address only works on a network with a range of its own.",
+    hint: "One per line, as <network>[=alias,alias][@address]. The network is one the host has - its containers page lists them - and a fixed address only works on a network with a range of its own.",
   },
   {
     name: "restart_policy", label: "When it exits", kind: "select",
@@ -193,24 +194,26 @@ const containerNames = containerFields.map((field) => field.name);
 
 const networkFields: OperationField[] = [
   {
-    name: "name", label: "Network", kind: "text", placeholder: "internal",
-    hint: "What the network is to be called. The engine's own - bridge, host, none - are not declared here.",
+    name: "name", label: "Network", kind: "text",
+    // A network that exists with other settings is recreated and every
+    // attached container loses it, so no invented name is offered here.
+    hint: "What the network is to be called, as the host's containers page lists it when the declaration is about one that already stands there. The engine's own - bridge, host, none - are not declared here.",
   },
   {
     name: "driver", label: "Driver", kind: "text", placeholder: "bridge",
     hint: "Empty means bridge, which is the only driver a single host has without a plugin.",
   },
   {
-    name: "subnet", label: "Address range", kind: "text", placeholder: "10.10.0.0/24",
-    hint: "Empty leaves the choice to the engine's address manager, and the plan says which range it took.",
+    name: "subnet", label: "Address range", kind: "text", placeholder: "192.0.2.0/24",
+    hint: "Taken from your own addressing - the example is a documentation range and matches nothing. Empty leaves the choice to the engine's address manager, and the plan says which range it took.",
   },
-  { name: "gateway", label: "Gateway", kind: "text", placeholder: "10.10.0.1" },
+  { name: "gateway", label: "Gateway", kind: "text", placeholder: "192.0.2.1" },
   {
-    name: "ip_range", label: "Range handed out", kind: "text", placeholder: "10.10.0.128/25",
+    name: "ip_range", label: "Range handed out", kind: "text", placeholder: "192.0.2.128/25",
     hint: "The part of the range the engine gives to containers; it lies inside the address range.",
   },
   { name: "ipv6", label: "Addressing of the second family", kind: "boolean" },
-  { name: "ipv6_subnet", label: "IPv6 range", kind: "text", placeholder: "fd00:10::/64" },
+  { name: "ipv6_subnet", label: "IPv6 range", kind: "text", placeholder: "2001:db8::/64" },
   { name: "ipv6_gateway", label: "IPv6 gateway", kind: "text" },
   {
     name: "internal", label: "No way out of the host", kind: "boolean",
@@ -227,8 +230,10 @@ const networkNames = networkFields.map((field) => field.name);
 
 const volumeFields: OperationField[] = [
   {
-    name: "name", label: "Volume", kind: "text", placeholder: "storefront-data",
-    hint: "What the volume is to be called.",
+    name: "name", label: "Volume", kind: "text",
+    // A volume that exists with another driver is recreated and everything
+    // in it is lost, so the field suggests no name of its own.
+    hint: "What the volume is to be called, as the host's containers page lists it when the declaration is about one that already stands there.",
   },
   { name: "driver", label: "Driver", kind: "text", placeholder: "local", hint: "Empty means local." },
   { name: "options", label: "Driver options", kind: "pairs", wide: true },
@@ -313,7 +318,7 @@ function containerCheckDeclared(form: FormValue): FormProblem[] {
   if (required(problems, form, "image", "Name the image the container runs.")) {
     const reference = text(form, "image");
     if (/\s/.test(reference) || reference.length > 512) {
-      problems.push({ field: "image", message: "An image reference is one word, e.g. nginx:1.27." });
+      problems.push({ field: "image", message: "An image reference is one word: a name with an optional registry, tag or digest." });
     }
   }
   lineProblems(problems, form, "ports", PUBLISHED_PORT,
@@ -419,7 +424,10 @@ function removalEntry(action: string, title: string, kind: string, note: string,
     note,
     extra: ["kind"],
     fields: [
-      { name: "name", label: kind === "network" ? "Network" : "Volume", kind: "text" },
+      {
+        name: "name", label: kind === "network" ? "Network" : "Volume", kind: "text",
+        hint: "The name as the host's containers page lists it. Nothing is guessed here: this order removes the object that carries the name.",
+      },
       forceField,
     ],
     compose: (form) => ({ kind, name: text(form, "name"), ...tail(form) }),
@@ -448,8 +456,7 @@ const declarations: OperationEntry[] = [
       ...containerFields,
       {
         name: "env_secrets", label: "Variables from the secret store", kind: "pairs", wide: true,
-        placeholder: "DB_PASSWORD = storefront.db",
-        hint: "NAME = secret[#version], one per line. The reference travels in the order; the host fetches the value right before the container is created, and no record ever holds it.",
+        hint: "NAME = secret[#version], one per line, the name being the one the secret store keeps it under. The reference travels in the order; the host fetches the value right before the container is created, and no record ever holds it.",
       },
       forceField,
     ],
@@ -570,7 +577,7 @@ export const docker: OperationEntry[] = [
     note: "Only the image is fetched; nothing on the host starts using it until a container is recreated.",
     fields: [
       {
-        name: "reference", label: "Image", kind: "text", placeholder: "nginx:1.27",
+        name: "reference", label: "Image", kind: "text", placeholder: "registry.example.test/team/app:1.4",
         hint: "The full reference, registry included where it is not the default one. Name the tag or the digest: without one the host takes whatever latest points at that day.",
         wide: true,
       },
@@ -580,7 +587,7 @@ export const docker: OperationEntry[] = [
       if (required(problems, form, "reference", "Name the image to fetch.")) {
         const reference = text(form, "reference");
         if (/\s/.test(reference) || reference.length > 512) {
-          problems.push({ field: "reference", message: "An image reference is one word, e.g. nginx:1.27." });
+          problems.push({ field: "reference", message: "An image reference is one word: a name with an optional registry, tag or digest." });
         }
       }
       return problems;
@@ -597,8 +604,8 @@ export const docker: OperationEntry[] = [
     note: "The manifest travels in the order rather than as a reference to a file on the host: the operator approves the content they read.",
     fields: [
       {
-        name: "project", label: "Project", kind: "text", placeholder: "storefront",
-        hint: "The project name the containers are grouped under; lower-case letters, digits, underscore and hyphen.",
+        name: "project", label: "Project", kind: "text",
+        hint: "The project name the containers are grouped under, as the host's containers page lists it when the project already stands there; lower-case letters, digits, underscore and hyphen.",
       },
       {
         name: "manifest", label: "Compose file", kind: "textarea", wide: true,

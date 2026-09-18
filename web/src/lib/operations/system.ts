@@ -92,8 +92,8 @@ export const system: OperationEntry[] = [
     key: "kernel",
     fields: [
       {
-        name: "module", label: "Module", kind: "text", placeholder: "br_netfilter",
-        hint: "The module name as the kernel knows it.",
+        name: "module", label: "Module", kind: "text",
+        hint: "The module name as the kernel knows it; the host's kernel page lists what it has loaded now.",
       },
     ],
     check: (form) => {
@@ -114,7 +114,12 @@ export const system: OperationEntry[] = [
     key: "kernel",
     plan: "Every host computes its own plan first: the planning step says whether the entry is already there, whether the module is loaded now and who is holding it - because then the entry only takes effect after a reboot.",
     fields: [
-      { name: "module", label: "Module", kind: "text", placeholder: "usb_storage" },
+      {
+        name: "module", label: "Module", kind: "text",
+        // No example module here: blocking one is a decision about somebody's
+        // hardware, and a name offered by the panel is a name nobody chose.
+        hint: "The module name as the kernel knows it; the host's kernel page lists what it has loaded now.",
+      },
       {
         name: "blacklist", label: "Block it", kind: "boolean",
         hint: "On writes the entry that stops the module loading, directly or as somebody else's dependency. Off takes the entry away.",
@@ -261,8 +266,8 @@ export const system: OperationEntry[] = [
     note: "What settles the task is the host reporting back in with the version asked for. The package manager's exit code says only that the transaction went through, not that the host came back.",
     fields: [
       {
-        name: "target_version", label: "Version to run", kind: "text", placeholder: "0.54.0",
-        hint: "The version that has to report in after the restart.",
+        name: "target_version", label: "Version to run", kind: "text",
+        hint: "The version that has to report in after the restart, copied from the release being rolled out - never the one the fleet already runs.",
       },
       {
         name: "package_sha256", label: "Package checksum", kind: "text", wide: true,

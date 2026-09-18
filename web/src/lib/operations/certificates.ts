@@ -22,8 +22,7 @@ const reloadField: OperationField = {
   name: "reload_unit",
   label: "Service that has to reread it",
   kind: "text",
-  placeholder: "nginx.service",
-  hint: "Without it the change ends as a new file on disk and the old identity still in the running process - a change nobody can see.",
+  hint: "The unit that serves the certificate, as the host's services page names it. Without it the change ends as a new file on disk and the old identity still in the running process - a change nobody can see.",
 };
 
 const probeField: OperationField = {
@@ -59,7 +58,10 @@ export const certificates: OperationEntry[] = [
     plan: PLAN_NOTE,
     note: "The private key is not typed here: it is fetched from the secret store at the moment of the swap. An order that carries one is edited in the advanced view.",
     fields: [
-      { name: "path", label: "Certificate file", kind: "path", placeholder: "/etc/ssl/certs/service.pem", wide: true },
+      {
+        name: "path", label: "Certificate file", kind: "path", wide: true,
+        hint: "Where the service reads its certificate from, copied from that service's own configuration; the file is replaced in place.",
+      },
       { name: "key_path", label: "Key file", kind: "path", hint: "Where the private key is to land; needed when the key comes from the store." },
       {
         name: "certificate", label: "Certificate and its chain", kind: "textarea", wide: true,

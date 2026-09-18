@@ -21,8 +21,7 @@ const idField: OperationField = {
   name: "id",
   label: "Definition",
   kind: "text",
-  placeholder: "system-nightly",
-  hint: "How the panel recognises this backup on every host; the snapshots it makes are marked with it.",
+  hint: "How the panel recognises this backup on every host, as the host's backup page lists it; the snapshots it makes are marked with it.",
 };
 
 const toolField: OperationField = {

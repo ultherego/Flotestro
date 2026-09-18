@@ -137,7 +137,7 @@ const BOND_MODES = ["balance-rr", "active-backup", "balance-xor", "broadcast", "
 
 const layerFields: OperationField[] = [
   {
-    name: "name", label: "Name", kind: "text", placeholder: "bond0",
+    name: "name", label: "Name", kind: "text",
     hint: "The name the layer will carry on the host. A name the host already uses for something else is refused rather than taken over.",
   },
   {
@@ -232,10 +232,10 @@ export const network: OperationEntry[] = [
         hint: "Automatic takes the address the network hands out; typed in means the addresses below and nothing else.",
       },
       {
-        name: "addresses", label: "Addresses", kind: "list", wide: true, placeholder: "10.0.0.5/24",
+        name: "addresses", label: "Addresses", kind: "list", wide: true, placeholder: "192.0.2.5/24",
         hint: "One per line, each with its prefix. Required when the address is typed in: an interface left without one is a host nobody reaches.",
       },
-      { name: "gateway", label: "Gateway", kind: "text", placeholder: "10.0.0.1" },
+      { name: "gateway", label: "Gateway", kind: "text", placeholder: "192.0.2.1" },
       { name: "dns", label: "Name servers", kind: "list", hint: "One address per line; empty leaves the resolver as it is." },
       ...ipv6Fields,
       rollbackField,
@@ -259,7 +259,7 @@ export const network: OperationEntry[] = [
       }
       const badAddress = addresses.find((address) => !prefixedAddressValid(address));
       if (badAddress !== undefined) {
-        problems.push({ field: "addresses", message: "{value} is not an address with a prefix, e.g. 10.0.0.5/24.", params: { value: badAddress } });
+        problems.push({ field: "addresses", message: "{value} is not an address with a prefix, e.g. 192.0.2.5/24.", params: { value: badAddress } });
       }
       const gateway = text(form, "gateway");
       if (gateway !== "" && !addressValid(gateway)) {
@@ -285,7 +285,7 @@ export const network: OperationEntry[] = [
       ...routeBase,
       {
         name: "routes", label: "Routes", kind: "list", wide: true,
-        placeholder: "192.168.20.0/24 via 10.0.0.1",
+        placeholder: "198.51.100.0/24 via 192.0.2.1",
         hint: "One per line, each as a destination with its prefix and the gateway it goes through.",
       },
     ],
@@ -476,7 +476,7 @@ export const network: OperationEntry[] = [
     fields: [
       interfaceField,
       {
-        name: "servers", label: "Name servers", kind: "list", wide: true, placeholder: "10.0.0.53",
+        name: "servers", label: "Name servers", kind: "list", wide: true, placeholder: "192.0.2.53",
         hint: "One IP address per line. A resolver with no server resolves nothing, and a host without name resolution loses the directory, Kerberos and logging in.",
       },
       { name: "search_domains", label: "Search domains", kind: "list", hint: "One per line; appended to a name typed without a dot." },

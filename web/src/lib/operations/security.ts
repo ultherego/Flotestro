@@ -100,8 +100,8 @@ export const security: OperationEntry[] = [
         hint: "One per line, each a number or a range such as 9100-9200. Only for TCP and UDP.",
       },
       {
-        name: "sources", label: "From these addresses", kind: "list", placeholder: "10.0.0.0/8",
-        hint: "One per line, each with its mask. Empty means from anywhere.",
+        name: "sources", label: "From these addresses", kind: "list", placeholder: "192.0.2.0/24",
+        hint: "One per line, each with its mask, taken from your own addressing - the example is a documentation range and matches nothing. Empty means from anywhere.",
       },
       { name: "interface", label: "On this interface", kind: "text", hint: "Empty means every interface." },
       { name: "comment", label: "Comment", kind: "text", hint: "Why the rule exists; it is written next to it on the host.", wide: true },
@@ -134,7 +134,7 @@ export const security: OperationEntry[] = [
       const sources = list(form, "sources");
       const badSource = sources.find((source) => !cidrValid(source));
       if (badSource !== undefined) {
-        problems.push({ field: "sources", message: "{value} is not an address with a mask, e.g. 10.0.0.0/8.", params: { value: badSource } });
+        problems.push({ field: "sources", message: "{value} is not an address with a mask, e.g. 192.0.2.0/24.", params: { value: badSource } });
       }
       shaped(problems, form, "interface", INTERFACE_NAME, "An interface name is letters, digits and . _ - .");
       if (/["\\\n]/.test(text(form, "comment"))) {

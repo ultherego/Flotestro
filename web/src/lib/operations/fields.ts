@@ -86,6 +86,19 @@ export type OperationField = {
 };
 
 /**
+ * What a host really has, for the fields that name something on it.
+ *
+ * The registry cannot know a device path, a unit name or a container: they
+ * are different on every machine, and an example the panel invents is
+ * either useless or - on a destructive operation - dangerous. A screen that
+ * does know, because it has just read the host, passes what it holds under
+ * the field's name, and the form offers it while still letting anything be
+ * typed. The Bulk wizard, which is about many hosts at once, passes
+ * nothing and the fields stay as they are.
+ */
+export type FieldSuggestions = Record<string, string[]>;
+
+/**
  * The registry entry of one operation: everything a screen needs to let an
  * operator order it without writing JSON.
  */
