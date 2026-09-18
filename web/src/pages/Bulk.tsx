@@ -7,6 +7,10 @@ import type {
 } from "../lib/types";
 import { ErrorBox, Empty, JobState, Time } from "../components/ui";
 import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layout";
+import { OperationForm } from "../components/OperationForm";
+import {
+  operationForm, readPayloadText, startingForm, type FormValue,
+} from "../lib/operations";
 import { OPERATIONS_INTERVAL } from "../lib/stream";
 import { useCapabilities } from "../lib/capabilities";
 import { PlanGroupView, type PlanGroup } from "../components/plan";
@@ -67,8 +71,10 @@ export function Bulk() {
     ? unready.campaign_refusal ?? t("the catalogue does not open it to the fleet")
     : undefined;
   // A prefilled operation without a payload takes the template once the
-  // catalogue is in, exactly as choosing it by hand would.
-  const prefilledTemplate = order.action && !order.payloadText && !WIZARD_OPERATIONS.includes(order.action)
+  // catalogue is in, exactly as choosing it by hand would. An operation the
+  // registry has a form for takes nothing: its fields start from their own
+  // defaults, and a template in the JSON box would only compete with them.
+  const prefilledTemplate = order.action && !order.payloadText && !operationForm(order.action)
     ? bulk.find((item) => item.action === order.action)?.payload_template
     : undefined;
   useEffect(() => {
@@ -278,6 +284,7 @@ export function emptyOrder(): Order {
     action: "",
     unit: "",
     securityOnly: true,
+    form: {},
     payloadText: "",
     mapping: {},
     pretty: "",
@@ -323,12 +330,20 @@ export function prefilledOrder(params: URLSearchParams): Draft | null {
   // A group page hands its name over: the order then opens on the group's
   // selector, the way a host list opens on its identifiers.
   const group = params.get("group") ?? "";
+  const action = params.get("action") ?? "";
+  const payloadText = params.get("payload") ?? "";
+  // A payload another screen composed opens in the fields when the registry
+  // can show it: the operator follows a link and lands in a form, not in a
+  // box of JSON they have to read before they may change one value.
+  const entry = operationForm(action);
+  const form = entry && payloadText ? readPayloadText(entry, payloadText) : null;
   return {
     order: {
       ...emptyOrder(),
       name: params.get("name") ?? "",
-      action: params.get("action") ?? "",
-      payloadText: params.get("payload") ?? "",
+      action,
+      form: form ?? startingForm(action),
+      payloadText: form ? "" : payloadText,
       compensates: params.get("compensates") ?? "",
       hostIDs: params.getAll("host_id"),
       reason: params.get("reason") ?? "",
@@ -521,10 +536,20 @@ export function campaignBody(order: Order): Record<string, unknown> {
 type Order = {
   name: string;
   action: string;
+  // The unit and the security-only choice of the orders this wizard
+  // carried before the registry existed. They are read as the starting
+  // value of the registry's form, so a draft or a link written by an
+  // earlier release still orders what it was written for.
   unit: string;
   securityOnly: boolean;
-  // The payload of an operation without a form of its own, as JSON text
-  // the operator edits; it starts from the template the server gives.
+  // The fields of the operation, as the registry describes them. Empty
+  // until something is typed; the registry's own starting value lies
+  // underneath.
+  form: FormValue;
+  // The payload of an operation the registry cannot show, as JSON text the
+  // operator edits; it starts from the template the server gives. An
+  // operation with a form leaves this empty unless the operator took the
+  // payload over by hand in the advanced view.
   payloadText: string;
   // A rename in bulk: the new name of every host, by host identifier. The
   // server splits it host by host and a host it does not name is
@@ -858,15 +883,32 @@ export function ContractChips({ contract }: { contract: OperationContract }) {
 }
 
 /**
- * The payload of the order. The few operations with a form build it from
- * the fields; every other one takes the JSON the operator edited, starting
- * from the server's template. The server validates it the same way as an
- * order typed by hand and names what is wrong.
+ * The form of the order: the registry's own starting value, the fields an
+ * older release kept beside the order laid over it, and what was typed in
+ * this wizard on top. A draft written before the registry existed still
+ * orders the unit or the upgrade it named.
+ */
+export function orderForm(order: Order): FormValue {
+  const legacy: FormValue = {};
+  if (UNIT_OPERATIONS.includes(order.action) && order.unit !== "") legacy.unit = order.unit;
+  if (order.action === "packages.upgrade") legacy.security_only = order.securityOnly;
+  return { ...startingForm(order.action), ...legacy, ...order.form };
+}
+
+/**
+ * The payload of the order. An operation the registry has a form for builds
+ * it from the fields, unless the operator took the payload over by hand;
+ * every other one takes the JSON they edited, starting from the server's
+ * template. The server validates it the same way as an order typed by hand
+ * and names what is wrong.
  */
 function orderPayload(order: Order): Record<string, unknown> | null {
-  if (UNIT_OPERATIONS.includes(order.action)) return { unit: { unit: order.unit } };
-  if (order.action === "packages.upgrade") return { package_upgrade: { security_only: order.securityOnly } };
   if (order.action === RENAME_OPERATION) {
+    // A rename across the fleet carries one name per host and nothing
+    // shared, so it keeps its own editor: the registry's form describes a
+    // rename of one host and would give every host the same name - the one
+    // thing a rename must never do.
+    //
     // Only the hosts given a name travel; an order that names nobody is
     // no order, and the server refuses an empty mapping the same way.
     const mapping = Object.fromEntries(
@@ -874,6 +916,14 @@ function orderPayload(order: Order): Record<string, unknown> | null {
     );
     if (Object.keys(mapping).length === 0) return null;
     return { hostname: { pretty: order.pretty.trim() || undefined, mapping } };
+  }
+  const entry = operationForm(order.action);
+  if (entry && !order.payloadText) {
+    // A form with a problem in it is not a payload: the wizard holds the
+    // order at the first step and says what is missing, rather than
+    // sending something the server would refuse.
+    if (entry.validate(orderForm(order)).length > 0) return null;
+    return entry.toPayload(orderForm(order));
   }
   try {
     const parsed = JSON.parse(order.payloadText);
@@ -969,9 +1019,10 @@ function stepGates(
   campaign?: Campaign,
   refusal?: string,
 ): Gate[] {
-  const hasAction = Boolean(order.action && order.name) &&
-    (!UNIT_OPERATIONS.includes(order.action) || order.unit !== "") &&
-    orderPayload(order) !== null;
+  // A valid payload is the whole test of the first step: the registry's
+  // form reports what is missing field by field, and an operation without
+  // one is judged by whether its JSON parses.
+  const hasAction = Boolean(order.action && order.name) && orderPayload(order) !== null;
   const hasTargets = order.targetMode === "hosts"
     ? order.hostIDs.length > 0
     : (preview?.count ?? 0) > 0;
@@ -980,12 +1031,24 @@ function stepGates(
   const window = windowWords(t, windowProblem(order.maintenanceStart, order.maintenanceEnd, new Date()));
   const schedule = scheduleWords(t, scheduleProblem(order.schedule, new Date()));
   const timeoutFits = jobTimeoutValid(order.jobTimeoutSeconds);
+  // Where the registry draws the form, the gate says the same thing the
+  // field does: one reason, in one place, rather than a closed step and a
+  // marked field that disagree about why.
+  const formEntry = order.action === RENAME_OPERATION || order.payloadText
+    ? undefined : operationForm(order.action);
+  const formProblem = formEntry ? formEntry.validate(orderForm(order))[0] : undefined;
   return [
     { open: hasAction && !refusal, reason: refusal
       ? t("the catalogue refuses this operation in bulk: {reason}", { reason: refusal })
-      : order.action === RENAME_OPERATION
-        ? t("pick an operation, name the campaign and give at least one host its new name")
-        : t("pick an operation, name the campaign and give it a valid payload") },
+      : !order.action
+        ? t("pick an operation and name the campaign")
+        : !order.name
+          ? t("name the campaign")
+          : order.action === RENAME_OPERATION
+            ? t("give at least one host its new name")
+            : formProblem
+              ? t(formProblem.message, formProblem.params)
+              : t("give the operation a valid payload") },
     { open: hasAction && hasTargets && exclusionsExplained, reason: !exclusionsExplained
       ? t("give the exclusions a reason")
       : order.targetMode === "hosts" && order.hostIDs.length === 0
@@ -1070,11 +1133,29 @@ function ScopeBar({
   );
 }
 
-/** The operations the wizard can build a payload for. */
+/**
+ * The operations whose payload an earlier release of this wizard built
+ * from a field of its own. The registry draws them now; the names stay so
+ * a draft or a link written back then still finds its unit.
+ */
 const UNIT_OPERATIONS = ["unit.start", "unit.stop", "unit.restart", "unit.reload", "unit.reset_failed"];
+
 /** A rename in bulk: the payload is a mapping the wizard builds host by host. */
 const RENAME_OPERATION = "system.hostname.set";
-const WIZARD_OPERATIONS = [...UNIT_OPERATIONS, "packages.upgrade", RENAME_OPERATION];
+
+/**
+ * The operations the wizard can build a payload for: those the catalogue
+ * opens to the fleet and the registry has a form for, plus the rename,
+ * whose per-host mapping this wizard builds itself.
+ *
+ * An operation outside this list is not refused - its payload is typed as
+ * JSON, and the step says so.
+ */
+export function wizardOperations(bulk: Operation[]): string[] {
+  return bulk
+    .filter((item) => item.action === RENAME_OPERATION || Boolean(operationForm(item.action)))
+    .map((item) => item.action);
+}
 
 function ScopeStep({
   order,
@@ -1097,9 +1178,13 @@ function ScopeStep({
   nav: ReactNode;
 }) {
   const t = useT();
-  const needsUnit = UNIT_OPERATIONS.includes(order.action);
   const chosen = bulk.find((item) => item.action === order.action);
-  const generic = Boolean(order.action) && !WIZARD_OPERATIONS.includes(order.action);
+  // The registry draws the fields of every operation it knows. A rename
+  // keeps its own editor, because its payload is one name per host; an
+  // operation the registry does not carry yet keeps the JSON box.
+  const entry = order.action === RENAME_OPERATION ? undefined : operationForm(order.action);
+  const generic = Boolean(order.action) && !entry && order.action !== RENAME_OPERATION;
+  const formed = wizardOperations(bulk);
   const payloadValid = orderPayload(order) !== null;
   return (
     <Card
@@ -1126,12 +1211,18 @@ function ScopeStep({
           <select
             value={order.action}
             onChange={(e) => {
-              // Choosing an operation loads its template: the operator edits
-              // a shape the server already accepts, not a blank field.
-              const next = bulk.find((item) => item.action === e.target.value);
+              // An operation the registry knows opens on its own fields,
+              // at their own starting values. One it does not know opens
+              // on the catalogue's template: the operator edits a shape
+              // the server already accepts, not a blank field.
+              const action = e.target.value;
+              const next = bulk.find((item) => item.action === action);
+              const known = Boolean(operationForm(action));
               change({
-                action: e.target.value,
-                payloadText: next?.payload_template ? JSON.stringify(next.payload_template, null, 2) : "",
+                action,
+                form: startingForm(action),
+                payloadText: !known && next?.payload_template
+                  ? JSON.stringify(next.payload_template, null, 2) : "",
               });
             }}
           >
@@ -1152,32 +1243,6 @@ function ScopeStep({
             <ContractChips contract={chosen} />
           </Field>
         )}
-        {needsUnit && (
-          <Field label={t("Unit")}>
-            <input
-              placeholder={t("unit, e.g. cron.service")}
-              value={order.unit}
-              onChange={(e) => change({ unit: e.target.value })}
-            />
-          </Field>
-        )}
-        {order.action === "packages.upgrade" && (
-          <div className="field">
-            <label className="toggle">
-              <input
-                type="checkbox"
-                checked={order.securityOnly}
-                onChange={(e) => change({ securityOnly: e.target.checked })}
-              />{" "}
-              {t("security updates only")}
-            </label>
-            <span className="field-hint">
-              {order.securityOnly
-                ? t("Only the updates the distribution marks as security fixes; every other pending update stays as it is.")
-                : t("Every pending update on every host, security fixes included.")}
-            </span>
-          </div>
-        )}
         {order.action === RENAME_OPERATION && (
           <MappingEditor order={order} change={change} hosts={preview?.hosts} />
         )}
@@ -1188,7 +1253,7 @@ function ScopeStep({
               ? t("This is not valid JSON.")
               : chosen?.needs_material
                 ? t("The template carries a placeholder for certificate material; replace it with the real PEM before the order.")
-                : t("The server validates the payload when the campaign is created and names what is wrong.")}
+                : t("The registry has no form for this operation yet, so its payload is typed here. The server validates it when the campaign is created and names what is wrong.")}
             wide
           >
             <textarea
@@ -1200,6 +1265,28 @@ function ScopeStep({
           </Field>
         )}
       </FieldGrid>
+      {/* The operation's own fields come from the registry, so the wizard
+          and the host page ask for the same things in the same words. The
+          key resets the advanced view when another operation is picked. */}
+      {entry && (
+        <OperationForm
+          key={entry.action}
+          entry={entry}
+          value={orderForm(order)}
+          onChange={(form) => change({ form })}
+          json={order.payloadText}
+          onJson={(payloadText) => change({ payloadText })}
+        />
+      )}
+      {/* How far the forms reach is said plainly: an operation ordered as
+          JSON is one the registry has not reached yet, not a boundary
+          somebody drew. */}
+      {bulk.length > 0 && formed.length < bulk.length && (
+        <p className="source">
+          {t("{formed} of the {n} operations open to the fleet have a form here; the rest are ordered by typing their payload.",
+            { formed: formed.length, n: bulk.length })}
+        </p>
+      )}
       {preview?.requires_plan && (
         <p className="subtitle">
           {order.action === RENAME_OPERATION

@@ -20,10 +20,10 @@ func testRenewal(t *testing.T) (*renewal, *time.Time, *int) {
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	calls := 0
 	r := &renewal{
-		StateDir:   t.TempDir(),
-		GatewayURL: "https://gw.example.com:8443",
-		Names:      []string{"relay-lab-01.flotestro.test"},
-		Now:        func() time.Time { return now },
+		StateDir: t.TempDir(),
+		Gateways: []string{"https://gw.example.com:8443"},
+		Names:    []string{"relay-lab-01.flotestro.test"},
+		Now:      func() time.Time { return now },
 		Identity: func(stateDir string) storedIdentity {
 			return storedIdentity{Present: true, RelayID: "4c1d9e2a", NotAfter: now.Add(5 * 24 * time.Hour)}
 		},

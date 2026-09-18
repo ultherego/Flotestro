@@ -20,3 +20,6 @@ route or command for a step, the runbook says so rather than describing one.
 - [Golden image and cloud-init](golden-image.md): what an image may and must not carry, the
   sanitisation before sealing, the first-boot enrollment through `flotestro-enroll.service`
   and its credential file, the Ansible alternative, what a clone does to the fleet.
+
+The checks a change has to pass before it reaches `main`, what each one proves and
+what to do when one of them fails, are in [the continuous integration reference](../ci.md).

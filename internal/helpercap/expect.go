@@ -383,7 +383,7 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 			if bound.Action == opspec.ActionAgentUpgrade {
 				// The agent upgrade installs its own package at the version
 				// the payload names; nothing else may ride on that order.
-				return agentPackagesOnly(action.PackageAction.GetPackages(), payload.AgentUpgrade)
+				return agentPackagesOnly(action.PackageAction, payload.AgentUpgrade)
 			}
 			if payload.PackageChange == nil {
 				return binding("the bound payload describes no package change")
@@ -449,16 +449,23 @@ func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 	return nil
 }
 
-func agentPackagesOnly(packages []string, upgrade *opspec.AgentUpgradePayload) error {
+func agentPackagesOnly(action *helperv1.PackageActionRequest, upgrade *opspec.AgentUpgradePayload) error {
 	if upgrade == nil {
 		return binding("the bound payload describes no agent upgrade")
 	}
-	for _, name := range packages {
+	for _, name := range action.GetPackages() {
 		if !strings.HasPrefix(name, "flotestro-agent") {
 			return binding(fmt.Sprintf("an agent upgrade does not install %s", name))
 		}
 	}
-	return nil
+	// The digest the helper checks the artefact against and the version it
+	// keeps a way back to are part of what the operator approved: an agent
+	// must not ask the helper to verify another file or to prepare a
+	// return to a version nobody named.
+	if err := same("package digest", action.GetPackageSha256(), upgrade.PackageSHA256); err != nil {
+		return err
+	}
+	return same("rollback version", action.GetRollbackVersion(), upgrade.RollbackVersion)
 }
 
 func same(what, got, want string) error {

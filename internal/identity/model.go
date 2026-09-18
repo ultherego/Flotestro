@@ -536,6 +536,11 @@ type Plan struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Conflicts stop the execution: the directory already holds an object with that name.
 	Conflicts []string `json:"conflicts,omitempty"`
+	// PreserveEntry is the directory entry a preserve would move: where it
+	// is, which entry it is and when it last changed. The execution refuses
+	// when any of the three moved between the plan and the change, so two
+	// operators cannot preserve the same account twice.
+	PreserveEntry *freeipa.EntryReference `json:"preserve_entry,omitempty"`
 }
 
 // Blocked says whether the plan rules out execution.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   campaignBody, clearDraft, DRAFT_KEY, emptyOrder, jobTimeoutValid, loadDraft, MIN_REASON,
-  orderTargets, parseUnits, prefilledOrder, reasonValid, REVERSE_OPERATION, reversePayload, saveDraft,
-  windowInstant, windowProblem,
+  orderForm, orderTargets, parseUnits, prefilledOrder, reasonValid, REVERSE_OPERATION, reversePayload,
+  saveDraft, windowInstant, windowProblem, wizardOperations, type Operation,
 } from "./Bulk";
 
 /* The wizard's decisions - what counts as a reason, whether the window
@@ -251,5 +251,74 @@ describe("REVERSE_OPERATION", () => {
     expect(REVERSE_OPERATION["firewall.rule.ensure"]).toBeUndefined();
     expect(reversePayload("network.profile.apply", { network: { interface: "eth0" } })).toEqual({});
     expect(reversePayload("file.ensure", { file: { path: "/etc/x" } })).toEqual({ file: { path: "/etc/x", version_sha256: "" } });
+  });
+});
+
+describe("the operations the wizard has a form for", () => {
+  const catalogue: Operation[] = [
+    { action: "sysctl.ensure", mutating: true, campaign_mode: "same_payload", campaign_ready: true },
+    { action: "system.hostname.set", mutating: true, campaign_mode: "per_host_plan", campaign_ready: true },
+    { action: "tomorrow.operation", mutating: true, campaign_mode: "same_payload", campaign_ready: true },
+  ];
+
+  it("is what the catalogue opens to the fleet and the registry can draw", () => {
+    expect(wizardOperations(catalogue)).toEqual(["sysctl.ensure", "system.hostname.set"]);
+  });
+
+  it("lays the registry's own starting values under what was typed", () => {
+    const order = { ...emptyOrder(), action: "packages.upgrade" };
+    // The security-only choice this wizard used to keep beside the order
+    // is read as the form's value, so an older draft orders what it said.
+    expect(orderForm(order).security_only).toBe(true);
+    expect(orderForm({ ...order, securityOnly: false }).security_only).toBe(false);
+    expect(orderForm({ ...order, form: { security_only: true, packages: "" }, securityOnly: false }).security_only)
+      .toBe(true);
+
+    const unit = { ...emptyOrder(), action: "unit.restart", unit: "cron.service" };
+    expect(orderForm(unit).unit).toBe("cron.service");
+  });
+});
+
+describe("an operation ordered through the registry's form", () => {
+  const order = {
+    ...emptyOrder(),
+    name: "Turn forwarding off",
+    action: "sysctl.ensure",
+    reason: "CHG-4711: hosts must not route",
+    form: { settings: "net.ipv4.ip_forward = 0" },
+  };
+
+  it("travels as the payload the fields produce", () => {
+    expect(campaignBody(order).payload).toEqual({ kernel: { settings: { "net.ipv4.ip_forward": "0" } } });
+  });
+
+  it("sends nothing at all while the form still has a problem in it", () => {
+    // The wizard holds the order at the first step instead of letting the
+    // server refuse a payload nobody could have meant.
+    expect(campaignBody({ ...order, form: { settings: "" } }).payload).toEqual({});
+    expect(campaignBody({ ...order, form: { settings: "dev.raid.speed_limit_max = 1" } }).payload).toEqual({});
+  });
+
+  it("takes the payload typed by hand when the fields cannot show it", () => {
+    const typed = { ...order, payloadText: JSON.stringify({ kernel: { settings: { "vm.swappiness": "10" }, keys: ["vm.swappiness"] } }) };
+    expect(campaignBody(typed).payload).toEqual({ kernel: { settings: { "vm.swappiness": "10" }, keys: ["vm.swappiness"] } });
+  });
+
+  it("opens in the fields when another screen handed the payload over", () => {
+    const params = new URLSearchParams();
+    params.set("action", "sysctl.ensure");
+    params.set("payload", JSON.stringify({ kernel: { settings: { "vm.swappiness": "10" } } }));
+    const draft = prefilledOrder(params);
+    expect(draft?.order.form).toEqual({ settings: "vm.swappiness = 10" });
+    expect(draft?.order.payloadText).toBe("");
+  });
+
+  it("keeps a handed-over payload as text when the fields cannot show it", () => {
+    const params = new URLSearchParams();
+    params.set("action", "sysctl.ensure");
+    params.set("payload", JSON.stringify({ kernel: { module: "br_netfilter" } }));
+    const draft = prefilledOrder(params);
+    expect(draft?.order.form).toEqual({ settings: "" });
+    expect(draft?.order.payloadText).toBe(JSON.stringify({ kernel: { module: "br_netfilter" } }));
   });
 });

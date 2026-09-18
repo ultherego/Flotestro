@@ -1,8 +1,16 @@
 # Release: a tag v* becomes the packages, the bills of materials, the
 # checksums and the provenance, attached to the GitHub release of the tag.
 #
-# The script signs nothing: signing is a separate step with a separate
-# key, and the runner does not hold it.
+# What is published is published once. An asset is never replaced in place:
+# a customer who has already fetched a file must be able to compare it with
+# what stands on the release today and find the same bytes. A re-run of a
+# tag therefore fails loudly, and a corrected build takes a new tag.
+#
+# The workflow signs the packages with nothing: signing the repository is a
+# separate step with a separate key (packaging/sign-repo.sh) and the runner
+# does not hold it. The checksums are signed here only if the repository
+# already carries a signing key as a secret; without it the step is skipped
+# and says so.
 name: Release
 
 on:
@@ -17,25 +25,30 @@ jobs:
   packages:
     name: Packages
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.2
         with:
           # The provenance carries "git describe": it needs the tags, not
           # only the commit.
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5.2.0
         with:
-          go-version: stable
-          check-latest: true
+          go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v4
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4.1.0
         with:
-          node-version: 22
+          # The version the laboratory installs on the panel machine
+          # (Vagrant/provision/control-plane.sh).
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
       - name: Packaging tools
         # dpkg-deb packs the .deb for any architecture; rpmbuild builds
         # only for the machine it runs on, so the arm64 .rpm is left to an
-        # arm64 machine and the script records that in missing-rpm.txt.
+        # arm64 machine and this run records that in the job summary.
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends dpkg-dev rpm
@@ -43,11 +56,7 @@ jobs:
       - name: Panel
         working-directory: web
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --no-audit --no-fund
-          fi
+          npm ci
           npm run build
 
       - name: Build
@@ -57,24 +66,158 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           packaging/build-release.sh all "$version" dist
 
-      - uses: actions/upload-artifact@v4
+      - name: The manifest of the run
+        # The provenance is written here, from what this run knows about
+        # itself: which commit, which workflow, which run, which machine.
+        # A file carried in the tree would say what somebody typed once;
+        # this one says what actually built the artefacts, and the run it
+        # names can be opened and read.
+        #
+        # The build log is not an artefact. missing-rpm.txt is a note about
+        # this machine, not something a customer installs, so it is read
+        # into the job summary and then removed from what gets published.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          rm -f provenance.json SHA256SUMS SHA256SUMS.asc
+          if [ -f missing-rpm.txt ]; then
+            {
+              echo "### The .rpm packages this machine could not build"
+              echo
+              echo 'rpmbuild refuses a foreign architecture, so these belong to a native machine:'
+              echo
+              sed 's/^/- /' missing-rpm.txt
+            } >> "$GITHUB_STEP_SUMMARY"
+            rm -f missing-rpm.txt
+          fi
+          bills="$(ls -1 *.cdx.json 2>/dev/null || true)"
+          jq -n \
+            --arg version "$version" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg commit "$GITHUB_SHA" \
+            --arg description "$(git -C "$GITHUB_WORKSPACE" describe --tags --always --dirty)" \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg workflow "$GITHUB_WORKFLOW" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg run_url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg builder "$RUNNER_OS/$RUNNER_ARCH ${ImageOS:-unknown} (GitHub-hosted)" \
+            --arg toolchain "$(go version)" \
+            --arg node "$(node --version)" \
+            --arg flags "-trimpath -ldflags '-s -w' CGO_ENABLED=0" \
+            --arg built_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson sbom "$(printf '%s\n' "$bills" | jq -R . | jq -s 'map(select(. != ""))')" \
+            '{version: $version, tag: $tag, commit: $commit, description: $description,
+              repository: $repository, workflow: $workflow, run_id: $run_id,
+              run_attempt: $run_attempt, run_url: $run_url, builder: $builder,
+              toolchain: $toolchain, node: $node, flags: $flags,
+              sbom_format: "CycloneDX 1.5", sbom: $sbom, built_at: $built_at}' \
+            > provenance.json
+          # The checksums cover everything that will be published, the
+          # provenance included: a file nobody can check is a file nobody
+          # knows the origin of. SHA256SUMS itself is the one exception,
+          # and its signature, when there is one.
+          published=()
+          for file in *.deb *.rpm *.pkg.tar.* *.cdx.json modules-*.txt provenance.json; do
+            [ -f "$file" ] && published+=("$file")
+          done
+          if [ ${#published[@]} -eq 0 ]; then
+            echo "the build produced nothing to publish" >&2
+            exit 1
+          fi
+          sha256sum "${published[@]}" > SHA256SUMS
+          echo "the release carries:"
+          sed 's/^/  /' SHA256SUMS
+
+      - name: Sign the checksums
+        # One signature over SHA256SUMS covers every file of the release,
+        # because every file's digest stands in it. The step runs only when
+        # the repository already holds the signing key as a secret; the
+        # workflow does not ask for a new one, and a release without a
+        # signature is published unsigned rather than silently "signed" by
+        # a key made up on the runner. The secret, when it exists, is the
+        # armoured private key of the release identity.
+        if: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          RELEASE_SIGNING_KEY_PASSPHRASE: ${{ secrets.RELEASE_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$RELEASE_SIGNING_KEY" | gpg --batch --quiet --import
+          key="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          gpg --batch --yes --pinentry-mode loopback \
+            ${RELEASE_SIGNING_KEY_PASSPHRASE:+--passphrase "$RELEASE_SIGNING_KEY_PASSPHRASE"} \
+            --local-user "$key" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
+          gpg --batch --quiet --delete-secret-and-public-key --yes "$key" || true
+          rm -rf "$GNUPGHOME"
+
+      - name: The release is not published twice
+        # The check stands before the upload so that a re-run of a tag
+        # stops here with the name of the file that already exists, rather
+        # than half way through the upload with some assets replaced.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            echo "no release for $tag yet; it will be created"
+            exit 0
+          fi
+          existing="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          clash=""
+          # The same list the upload publishes; the stage directories of
+          # the build script stay out of it, they are not artefacts.
+          for file in dist/*.deb dist/*.rpm dist/*.pkg.tar.* dist/*.cdx.json \
+                      dist/modules-*.txt dist/provenance.json \
+                      dist/SHA256SUMS dist/SHA256SUMS.asc; do
+            [ -f "$file" ] || continue
+            name="$(basename "$file")"
+            if printf '%s\n' "$existing" | grep -qxF "$name"; then
+              clash="$clash $name"
+            fi
+          done
+          if [ -n "$clash" ]; then
+            echo "the release $tag already carries:$clash" >&2
+            echo "a published artefact is never replaced; build the correction under a new tag" >&2
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4.4.3
         with:
+          # Exactly what is published, nothing else: the staged binaries
+          # and the build notes of the machine are not part of a release.
           name: dist
-          path: dist
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.*
+            dist/*.cdx.json
+            dist/modules-*.txt
+            dist/provenance.json
+            dist/SHA256SUMS
+            dist/SHA256SUMS.asc
           if-no-files-found: error
 
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
-        # The release is created when the tag was pushed without one; the
-        # files replace what an earlier run of the same tag attached.
+        # The release is created when the tag was pushed without one. The
+        # upload carries no --clobber: an asset that is already there makes
+        # this step fail, which is the intention.
         run: |
+          set -euo pipefail
           tag="$GITHUB_REF_NAME"
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --title "$tag" --generate-notes
           fi
           assets=()
-          for file in dist/*.deb dist/*.rpm dist/*.cdx.json dist/SHA256SUMS dist/provenance.json dist/modules-*.txt dist/missing-rpm.txt; do
+          for file in dist/*.deb dist/*.rpm dist/*.pkg.tar.* dist/*.cdx.json \
+                      dist/modules-*.txt dist/provenance.json \
+                      dist/SHA256SUMS dist/SHA256SUMS.asc; do
             [ -f "$file" ] && assets+=("$file")
           done
-          gh release upload "$tag" "${assets[@]}" --clobber
+          gh release upload "$tag" "${assets[@]}"

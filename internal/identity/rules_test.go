@@ -72,6 +72,21 @@ func (f *fakeDirectory) Services(context.Context) ([]freeipa.Service, error) {
 	return f.services, nil
 }
 
+// The two reads a preserve plan binds itself to. The fake answers what a
+// directory that can do the move would: an entry with its own identity and
+// a connector allowed to rename it.
+func (f *fakeDirectory) UserEntry(_ context.Context, uid string) (freeipa.EntryReference, error) {
+	return freeipa.EntryReference{
+		DN:              "uid=" + uid + ",cn=users,cn=accounts,dc=lab,dc=test",
+		EntryUUID:       "entry-" + uid,
+		ModifyTimestamp: "20260918120000Z",
+	}, nil
+}
+
+func (f *fakeDirectory) Capabilities(context.Context) (freeipa.DirectoryCapabilities, error) {
+	return freeipa.DirectoryCapabilities{UserCreate: true, UserDisable: true, UserModDN: true}, nil
+}
+
 // labDirectory is a small fleet: two web hosts in a group, one database
 // host, the administrator with the default allow_all rule and an operator.
 func labDirectory() *fakeDirectory {

@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
@@ -60,7 +61,14 @@ const renewalRetryInterval = 30 * time.Minute
 
 // RenewalOptions describes the renewal of the certificate of the agent.
 type RenewalOptions struct {
-	StateDir   string
+	StateDir string
+	// Gateways are the addresses of the panel in order of priority - the
+	// same list the session uses. A renewal that knew only one address
+	// would tie the certificate of the host to one instance of the panel
+	// being up, which is the one thing a fleet with several of them must
+	// not depend on. GatewayURL is the single address of a caller that has
+	// one; it is used when the list is empty.
+	Gateways   []string
 	GatewayURL string
 	Log        *slog.Logger
 	// OnRenewed is called after a new certificate has been written. The agent
@@ -158,35 +166,52 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return err
 	}
 
-	// The renewal goes over mTLS with the current certificate: that is the proof
-	// of identity. The enrollment token takes no part in it. The material is
-	// read once, so the handshake and the proof use the same key.
-	material := identity.Certificate
-	peer := newPeerIdentity()
-	client := agentv1connect.NewAgentServiceClient(&http.Client{
-		Timeout:   60 * time.Second,
-		Transport: newObservedHTTP2Client(material, identity.CAPool, peer).Transport,
-	}, options.GatewayURL)
+	// The addresses are tried in order of priority until one answers, with
+	// the same classes and the same jittered pause the session uses: a
+	// gateway that is not there is passed over, a revoked identity stops
+	// the attempts everywhere. One CSR for all of them - the key of the
+	// new generation is created once, and a gateway that refused it has
+	// not seen the key of another.
+	var response *connect.Response[agentv1.RenewCertificateResponse]
+	answered, err := endpoints.New(options.gateways(), 0, 0).Try(ctx,
+		func(ctx context.Context, gatewayURL string) error {
+			// The renewal goes over mTLS with the current certificate: that is
+			// the proof of identity. The enrollment token takes no part in it.
+			// The material is read once, so the handshake and the proof use the
+			// same key.
+			material := identity.Certificate
+			peer := newPeerIdentity()
+			client := agentv1connect.NewAgentServiceClient(&http.Client{
+				Timeout:   60 * time.Second,
+				Transport: newObservedHTTP2Client(material, identity.CAPool, peer).Transport,
+			}, gatewayURL)
 
-	request := &agentv1.RenewCertificateRequest{
-		CsrPem: csrPEM,
-		Build:  &agentv1.AgentBuild{AgentVersion: Version},
-	}
-	// Through a relay the handshake proves the relay, so the request has to
-	// carry the host's own proof: a challenge the panel issued for this
-	// host and this relay, signed with the key the host holds now together
-	// with the CSR, and the envelope over the request. The challenge is
-	// asked for first - the call is also what makes the handshake happen
-	// and tells the agent whom it reached. A panel from before the
-	// challenge answers Unimplemented, and the renewal goes on as before:
-	// such a panel accepts a direct renewal on the handshake alone.
-	if err := proveRenewal(ctx, client, peer, material, identity.HostID, request, csrPEM, options.Log); err != nil {
-		return err
-	}
-
-	response, err := client.RenewCertificate(ctx, connect.NewRequest(request))
+			request := &agentv1.RenewCertificateRequest{
+				CsrPem: csrPEM,
+				Build:  &agentv1.AgentBuild{AgentVersion: Version},
+			}
+			// Through a relay the handshake proves the relay, so the request has
+			// to carry the host's own proof: a challenge the panel issued for
+			// this host and this relay, signed with the key the host holds now
+			// together with the CSR, and the envelope over the request. The
+			// challenge is asked for first - the call is also what makes the
+			// handshake happen and tells the agent whom it reached. A panel from
+			// before the challenge answers Unimplemented, and the renewal goes on
+			// as before: such a panel accepts a direct renewal on the handshake
+			// alone. The proof is bound to the address it was asked at, so it is
+			// made again for every gateway tried.
+			if err := proveRenewal(ctx, client, peer, material, identity.HostID, request, csrPEM, options.Log); err != nil {
+				return err
+			}
+			answer, err := client.RenewCertificate(ctx, connect.NewRequest(request))
+			if err != nil {
+				return fmt.Errorf("the renewal was refused: %w", err)
+			}
+			response = answer
+			return nil
+		})
 	if err != nil {
-		return fmt.Errorf("the renewal was refused: %w", err)
+		return err
 	}
 
 	// The trust bundle changes only when the CA rotates. When the panel did not
@@ -213,9 +238,24 @@ func renewCertificate(ctx context.Context, identity *Identity, options RenewalOp
 		return fmt.Errorf("the new identity was refused: %w", err)
 	}
 	*identity = *fromIdentity(renewed)
+	if options.Log != nil && answered != "" {
+		options.Log.Info("the gateway that answered the renewal", "gateway", answered)
+	}
 	// The renewal carries the panel's current capability keys: a rotated
 	// key reaches the helper here, and again with the next session.
 	deliverHelperTrust(ctx, response.Msg.GetHelperTrust(), options.Log)
+	return nil
+}
+
+// gateways is the list of addresses a renewal may use: the configured
+// list, or the single address of a caller that has one.
+func (o RenewalOptions) gateways() []string {
+	if len(o.Gateways) > 0 {
+		return o.Gateways
+	}
+	if o.GatewayURL != "" {
+		return []string{o.GatewayURL}
+	}
 	return nil
 }
 

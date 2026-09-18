@@ -162,10 +162,12 @@ func (p *Planner) planUserPreserve(ctx context.Context, uid string) (Plan, error
 		Summary:       fmt.Sprintf("Preserving the account %s", uid),
 		AffectedUsers: []string{uid},
 		Steps: []string{
+			"asking the directory what it can do",
+			"binding the plan to the entry",
+			"removing the account from the directory with its entry preserved",
 			"the local denial marker in the panel",
 			"revoking the panel sessions",
 			"ending the sessions at the identity provider",
-			"removing the account from the directory with its entry preserved",
 		},
 	}
 	user, err := p.findUser(ctx, uid)
@@ -196,6 +198,25 @@ func (p *Planner) planUserPreserve(ctx context.Context, uid string) (Plan, error
 	if slices.Contains(p.guardedAccounts(), uid) {
 		plan.Conflicts = append(plan.Conflicts,
 			"the account "+uid+" is the directory administrator or the panel's own account; it is not removed from here")
+	}
+
+	// The entry the change would move, read now rather than at execution
+	// time: the operator approves this entry, and an entry that moved in
+	// between is refused instead of preserved a second time.
+	entry, err := p.directory.UserEntry(ctx, uid)
+	if err != nil {
+		return plan, err
+	}
+	plan.PreserveEntry = &entry
+
+	// A directory that proved it cannot move an entry blocks the preserve
+	// before the operator approves anything.
+	capabilities, err := p.directory.Capabilities(ctx)
+	if err == nil {
+		if reason, blocked := capabilities.PreserveBlocked(); blocked {
+			plan.Conflicts = append(plan.Conflicts,
+				"the directory cannot preserve an account: "+reason)
+		}
 	}
 	return plan, nil
 }

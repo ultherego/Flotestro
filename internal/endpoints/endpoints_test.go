@@ -1,7 +1,9 @@
 package endpoints
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -120,5 +122,114 @@ func TestDuplicateGatewaysAreSkipped(t *testing.T) {
 	m := New([]string{"https://a:8443", "https://a:8443", ""}, time.Second, time.Minute)
 	if len(m.Gateways()) != 1 {
 		t.Fatalf("gateways = %+v", m.Gateways())
+	}
+}
+
+// tryManager is a manager with the clock stopped and the backoff between
+// the addresses skipped: the failover order is what the tests are about,
+// not how long the waiting takes.
+func tryManager(addresses ...string) *Manager {
+	m := New(addresses, time.Second, time.Minute)
+	m.now = func() time.Time { return now }
+	m.sleep = func(ctx context.Context, wait time.Duration) error { return ctx.Err() }
+	return m
+}
+
+// TestTheRenewalTriesTheGatewaysInOrder guards the property the gap names:
+// a renewal or an identity recovery does not depend on the first address
+// of the list being up. The first one is still tried first - it is the
+// priority, not a suggestion - and the answer says which gateway answered,
+// so the operator knows where their certificate came from.
+func TestTheRenewalTriesTheGatewaysInOrder(t *testing.T) {
+	m := tryManager("https://a:8443", "https://b:8443", "https://c:8443")
+	var tried []string
+	answered, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
+		tried = append(tried, url)
+		if url == "https://b:8443" {
+			return nil
+		}
+		return errors.New("dial tcp: connect: connection refused")
+	})
+	if err != nil {
+		t.Fatalf("the failover gave up: %v", err)
+	}
+	if answered != "https://b:8443" {
+		t.Fatalf("the gateway that answered = %q", answered)
+	}
+	if len(tried) != 2 || tried[0] != "https://a:8443" || tried[1] != "https://b:8443" {
+		t.Fatalf("the addresses were tried as %v", tried)
+	}
+	// The one that answered carries no error history, and the one that did
+	// not is in its retry window.
+	states := m.Gateways()
+	if states[0].Errors != 1 || states[1].Errors != 0 {
+		t.Fatalf("the state after the failover = %+v", states)
+	}
+}
+
+// TestEveryGatewayRefusingIsOneAnswer guards that a fleet-wide outage is
+// reported as what it is: every address, in order, with the reason each
+// one gave. A caller that only saw the last error would have the operator
+// chasing the last gateway in the list.
+func TestEveryGatewayRefusingIsOneAnswer(t *testing.T) {
+	m := tryManager("https://a:8443", "https://b:8443")
+	_, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
+		if url == "https://b:8443" {
+			return errors.New("x509: certificate signed by unknown authority")
+		}
+		return errors.New("dial tcp: connect: connection refused")
+	})
+	var failover *Failover
+	if !errors.As(err, &failover) {
+		t.Fatalf("the answer of a total outage = %v", err)
+	}
+	if len(failover.Attempts) != 2 {
+		t.Fatalf("the attempts on record = %+v", failover.Attempts)
+	}
+	if failover.Attempts[0].Class != ClassNetwork || failover.Attempts[1].Class != ClassConfiguration {
+		t.Fatalf("the classes = %s, %s", failover.Attempts[0].Class, failover.Attempts[1].Class)
+	}
+	if !strings.Contains(err.Error(), "https://a:8443") || !strings.Contains(err.Error(), "https://b:8443") {
+		t.Fatalf("the message names only a part of the fleet: %s", err)
+	}
+}
+
+// TestARejectedIdentityStopsTheFailover guards the doctrine of the class:
+// a certificate the panel revoked is refused by every gateway, so the
+// second address is not even tried - and the caller learns the reason
+// rather than a connection error.
+func TestARejectedIdentityStopsTheFailover(t *testing.T) {
+	m := tryManager("https://a:8443", "https://b:8443")
+	tried := 0
+	_, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
+		tried++
+		return errors.New("the certificate was revoked")
+	})
+	if !errors.Is(err, ErrIdentityRejected) {
+		t.Fatalf("the answer = %v", err)
+	}
+	if tried != 1 {
+		t.Fatalf("the addresses tried = %d; a revoked identity is not a matter of the address", tried)
+	}
+}
+
+// TestOneAddressBehavesAsBefore guards the installations that configure a
+// single gateway: one attempt, its own error, and no waiting introduced by
+// the failover.
+func TestOneAddressBehavesAsBefore(t *testing.T) {
+	m := tryManager("https://a:8443")
+	tried := 0
+	answered, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
+		tried++
+		return nil
+	})
+	if err != nil || answered != "https://a:8443" || tried != 1 {
+		t.Fatalf("answered=%q tried=%d err=%v", answered, tried, err)
+	}
+	m = tryManager()
+	if _, err := m.Try(context.Background(), func(ctx context.Context, url string) error {
+		return nil
+	}); !errors.Is(err, ErrNoGateway) {
+		t.Fatalf("a manager without addresses answered %v", err)
 	}
 }

@@ -46,6 +46,13 @@ every change carries a reason.
    become `canceled` with `cancel_reason` `host.quarantine` (`duplicate_identity` under the clone
    policy), their budget tokens are released and the session is closed. A task already
    `dispatched` or `running` is not interrupted; its result is recorded on arrival.
+   In an installation with several control-plane instances the host may hold its session on
+   another one: the same transaction then writes the order to end it (`gateway_commands`,
+   addressed to that session and its fencing token) and the answer says where it was ended -
+   `session_close`: `local`, `remote`, `none` or `unconfirmed`. An `unconfirmed` close needs
+   nothing at once: the ownership claim of an instance that is not answering runs out within a
+   minute and the session with it, and the quarantine already refuses the host at its next
+   connection.
 3. The gateway then refuses the host's connection (`lifecycle_quarantined`): no heartbeat,
    inventory or sample arrives; secret leases and renewal are refused; new operations answer
    `409 host_quarantined`.
@@ -70,14 +77,18 @@ every change carries a reason.
    of purpose `replace_identity` with the clear `token` (shown once) and `expires_at` (default
    15 minutes, at most 24 hours). An `active` host moves to `recovery` and its undelivered jobs
    are cancelled; a `quarantined` host stays quarantined. `revoke_old_immediately` revokes the
-   old certificates now and ends the session with `identity_recovery`; otherwise the old
+   old certificates now and ends the session with `identity_recovery`, on whichever
+   control-plane instance holds it (the same order as a quarantine writes); otherwise the old
    certificate may still connect for 24 hours.
 2. On the host, with the token in a file the service user can read:
    `sudo -u flotestro-agent flotestro-agentctl identity reset --confirm <hostname> --token-file /run/token`
    (`--confirm` must equal the machine's hostname, else `confirmation_mismatch`; `--timeout`
    default 2m; `--discard-pending` abandons an unfinished attempt). The tool writes a new
    generation under `/var/lib/flotestro-agent/identity/generations/<serial>/`, verifies it
-   against the gateway and only then switches `identity/current`. Output: `Replaced: host/<id>`.
+   against the gateway and only then switches `identity/current`. The gateways of
+   `agent.yaml` are tried in their order of priority, so a recovery does not wait for one
+   instance of the panel; the output names the one that answered
+   (`Replaced: host/<id>`, `Gateway: <url>`).
 3. `systemctl restart flotestro-agent`: the running daemon keeps its old session otherwise.
 4. The first session of the new certificate takes the host from `recovery` back to `active`;
    the record, history and tasks are the same host, rebound to the new machine id. An order
@@ -94,6 +105,15 @@ every change carries a reason.
    certificates, sends the commit (identity and journal wiped, service disabled) and gives the
    session 15 seconds to close. Without a session, or on a timeout, the host is retired anyway
    with `remote_cleanup_unconfirmed` (phase `no_session`, `timeout` or `committed` in the audit).
+   When the host's session is held by another control-plane instance, the handshake is that
+   instance's to run: the decision is recorded here, the order goes to it (`handed_over: true`,
+   `command_id`, `owner_instance_id` in the answer), and the answer carries the phase that
+   instance reported. An owner that has not answered within 60 seconds gives phase
+   `handover_pending` - the host stands in `retiring`, the owner finishes the handshake, and
+   repeating the decommission afterwards picks the host up from there; do not wipe the machine
+   until a phase of `committed` says the agent confirmed it. An order no instance claims before
+   `FLOTESTRO_COMMAND_EXPIRY` ends as `expired` and the repeated order retires the host with
+   `remote_cleanup_unconfirmed`, as for any host nobody holds.
 3. The row stays `retired`; the machine id is withheld from new enrollments for 30 days, then
    released under `retired:<id>:<machine_id>` so the machine can enroll as a new host.
 
@@ -132,7 +152,8 @@ identity.
 ## Related codes
 
 From the error guide: `quarantined`, `recovery`, `retiring`, `retired` (preflight),
-`host_retiring` (agent), `remote_cleanup_unconfirmed` (reconcile), `canceled` (dispatch).
+`host_retiring` (agent), `remote_cleanup_unconfirmed`, `lifecycle_handover_pending`,
+`lifecycle_handover_failed`, `session_close_unconfirmed` (reconcile), `canceled` (dispatch).
 Outside the guide: `host_quarantined`, `host_retired`, `lifecycle_conflict`, `identity_revoked`,
 `confirmation_mismatch` (HTTP problems); `lifecycle_<state>`, `unknown_certificate`,
 `revoked_certificate`, `identity_mismatch`, `certificate_expired` (gateway refusals);

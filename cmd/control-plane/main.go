@@ -174,6 +174,17 @@ func run() error {
 	flag.DurationVar(&metricsRetention.RollupRetention, "metrics-retention-rollup",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_ROLLUP", monitoring.DefaultRollupRetention),
 		"how long the quarter-hour rollups of the resource samples are kept")
+	// The lifecycle orders between the control-plane instances: an order
+	// written for the instance that holds a host's session. One loop per
+	// instance; an installation with a single instance never writes one.
+	commandOptions := gateway.CommandOptions{}
+	flag.DurationVar(&commandOptions.Poll, "command-poll",
+		config.EnvDuration("FLOTESTRO_COMMAND_POLL", gateway.DefaultCommandPoll),
+		"how often an instance looks for lifecycle orders addressed to the sessions it holds")
+	flag.DurationVar(&commandOptions.Expiry, "command-expiry",
+		config.EnvDuration("FLOTESTRO_COMMAND_EXPIRY", gateway.DefaultCommandExpiry),
+		"how long an unclaimed lifecycle order stands before it is settled as expired")
+
 	// The notification queue. One worker per instance; the defaults are
 	// the ones the document names, and an installation with a few
 	// channels has no reason to touch them.
@@ -288,6 +299,13 @@ func run() error {
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"the environments where a change has to be approved by a second person")
+	// A run that only brings the schema forward. The installer and the
+	// continuous integration need the migrations applied, not a control
+	// plane listening, and applying them with another tool would test
+	// another tool.
+	migrateOnly := flag.Bool("migrate-only",
+		config.Env("FLOTESTRO_MIGRATE_ONLY", "") != "",
+		"apply the missing migrations and exit; nothing is served")
 	flag.Parse()
 
 	// An operation without an explicit decision on what a cancel, a retry
@@ -336,6 +354,9 @@ func run() error {
 		return err
 	}
 	log.Info("the database schema is current")
+	if *migrateOnly {
+		return nil
+	}
 
 	// The cryptographic identity of the installation is checked before
 	// anything touches the secret store or the CA. A missing key or a
@@ -672,6 +693,14 @@ func run() error {
 	// The cancel relay: sends the open cancel requests to the hosts this
 	// instance holds and settles the ones nobody answered in time.
 	go agentService.RunCancelRelay(ctx)
+	// The lifecycle orders of the other instances: a decommission or a
+	// quarantine that landed on an instance which does not hold the host's
+	// session is carried out here, by the instance that does.
+	commandOptions.Registry = registry
+	commandOptions.Decommissioner = gateway.NewDecommissioner(pool, hostStore, jobStore, recorder, registry, log)
+	commandOptions.Audit = recorder
+	commandOptions.Events = eventBus
+	go gateway.NewCommands(pool, log, commandOptions).RunCommandLoop(ctx)
 
 	// The publisher of the durable trail: the triggers write the events,
 	// this hands them on at least once and marks them published. The

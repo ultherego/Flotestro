@@ -27,6 +27,12 @@ type Directory interface {
 	// plans against them, so a principal the directory does not know is a
 	// conflict before the approval rather than a failure after it.
 	Services(ctx context.Context) ([]freeipa.Service, error)
+	// UserEntry reads the identity of an account's entry, so the plan can
+	// be bound to the entry it was made for.
+	UserEntry(ctx context.Context, uid string) (freeipa.EntryReference, error)
+	// Capabilities says what the directory can do for the connector, so an
+	// operation it would refuse is refused before it is approved.
+	Capabilities(ctx context.Context) (freeipa.DirectoryCapabilities, error)
 }
 
 // Planner builds a preview of a change's impact. The plan shows the resulting

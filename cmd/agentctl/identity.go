@@ -10,6 +10,7 @@ import (
 
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
+	"github.com/ultherego/flotestro/internal/endpoints"
 )
 
 // identityCommands routes the subcommands that touch the identity of the
@@ -71,13 +72,17 @@ func identityResetCommand(args []string, in_ io.Reader, out, errOut io.Writer) i
 		Now:            time.Now,
 		Identity:       agent.ReadIdentity,
 		ReadToken:      func() ([]byte, error) { return readToken(*tokenFile, in_, errOut) },
-		Recover: func(ctx context.Context, token []byte) (*agent.Identity, error) {
+		// A recovery is the way back for a host whose identity is gone, so
+		// it may not hang on one address: the new certificate is verified
+		// against whichever gateway of the configuration answers.
+		Gateways: cfg.Connection.GatewayURLs,
+		Recover: func(ctx context.Context, token []byte, gatewayURL string) (*agent.Identity, error) {
 			request, err := agent.LocalIdentityRequest(cfg.Agent.StateDir,
 				cfg.Connection.EnrollmentURL, string(token), cfg.Connection.BootstrapCA)
 			if err != nil {
 				return nil, err
 			}
-			return agent.Recover(ctx, request, cfg.Connection.GatewayURLs[0])
+			return agent.Recover(ctx, request, gatewayURL)
 		},
 	}
 	return r.run(ctx, out, errOut)
@@ -94,7 +99,10 @@ type identityReset struct {
 	Now            func() time.Time
 	Identity       func(stateDir string) agent.StoredIdentity
 	ReadToken      func() ([]byte, error)
-	Recover        func(ctx context.Context, token []byte) (*agent.Identity, error)
+	// Gateways are the addresses the new certificate is verified against,
+	// in order of priority.
+	Gateways []string
+	Recover  func(ctx context.Context, token []byte, gatewayURL string) (*agent.Identity, error)
 }
 
 // run carries the reset out.
@@ -160,7 +168,19 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	identity, err := r.Recover(ctx, token)
+	// The gateways are tried in order: the identity the panel issued is
+	// one for the whole fleet, so any of them may verify it, and the one
+	// that did is printed next to the new certificate.
+	var identity *agent.Identity
+	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
+		func(ctx context.Context, gatewayURL string) error {
+			recovered, err := r.Recover(ctx, token, gatewayURL)
+			if err != nil {
+				return err
+			}
+			identity = recovered
+			return nil
+		})
 	if err != nil {
 		fmt.Fprintf(errOut, "the reset failed: %v\n", err)
 		if current.Present {
@@ -171,6 +191,7 @@ func (r identityReset) run(ctx context.Context, out, errOut io.Writer) int {
 	}
 
 	fmt.Fprintf(out, "Replaced:     host/%s\n", identity.HostID)
+	fmt.Fprintf(out, "Gateway:      %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", identity.NotAfter.UTC().Format(time.RFC3339))
 	if current.Present && current.HostID != identity.HostID {
 		// A recovery token names one host; another answer means the order

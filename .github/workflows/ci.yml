@@ -1,32 +1,50 @@
-# Continuous integration: what every push and every pull request must pass.
+# Continuous integration: what every push to main and every pull request
+# must pass.
 #
 # Only what runs without the fleet is here. The integration suite carries
 # the "integration" build tag and the Playwright screenshots need the panel
-# VM; both run from the lab, not from a runner.
+# VM; both run from the laboratory, not from a runner. Their verdict reaches
+# a commit through lab-gate.yml, which the owner triggers by hand.
+#
+# The jobs are independent on purpose: a broken panel must not hide a
+# broken migration, and the slowest job decides how long the pull request
+# waits. Third-party and GitHub actions are pinned to an exact version;
+# nothing here uploads the sources, the logs or the test output anywhere.
 name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
   contents: read
 
+# A new push to the same branch replaces the run in flight: the older
+# verdict is about code nobody will merge any more. On main every commit
+# keeps its own run.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   go:
     name: Go
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
         with:
-          # The current stable toolchain: go.mod names the minimum the code
-          # needs, the standard library of the newest release carries the
-          # fixes govulncheck asks for, and the lab builds with the same.
-          go-version: stable
-          check-latest: true
-          # The module and build caches are keyed by go.sum by default.
+          # The toolchain comes from go.mod: the runner then builds with
+          # what the module declares, and a bump of the declaration is the
+          # one place where the version changes.
+          go-version-file: go.mod
+          # The module cache and the build cache, keyed by go.sum. The race
+          # detector rebuilds the standard library, so the build cache is
+          # what makes the second run of a branch short.
           cache: true
+          cache-dependency-path: go.sum
 
       - name: gofmt
         # gofmt prints the files that differ and exits 0, so the output is
@@ -42,12 +60,44 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: Build
+        # The packages must build, not only type-check under vet: a release
+        # is built from this tree and a broken build is not a test failure.
+        run: go build ./...
+
+      - name: The integration suite compiles
+        # The suite itself runs only in the laboratory, but it is written
+        # against the same code. Vet compiles it, so a renamed field is
+        # caught here instead of in the laboratory an hour later.
+        run: go vet -tags=integration ./tests/...
+
       - name: Unit tests
-        run: go test ./...
+        # -race: the control plane serves many sessions at once and a data
+        # race is a fault the fleet would show as a mystery.
+        # -shuffle=on: a test that passes only in file order is a test that
+        # depends on another one's state.
+        # -count=1: no cached verdicts; the run says what this commit does.
+        run: go test -race -shuffle=on -count=1 -timeout=20m ./...
+
+  govulncheck:
+    name: Known vulnerabilities
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: govulncheck
         # Known vulnerabilities in the modules the binaries actually call
-        # into; the release carries a CycloneDX bill for the rest.
+        # into; the release carries a CycloneDX bill for the rest. The tool
+        # follows the toolchain and the format of the vulnerability
+        # database, so it is taken at its newest: a pinned older build stops
+        # understanding a newer standard library. It downloads the database
+        # and sends nothing.
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           "$(go env GOPATH)/bin/govulncheck" ./...
@@ -55,18 +105,20 @@ jobs:
   fuzz:
     name: Fuzz the decoders
     runs-on: ubuntu-latest
-    needs: go
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
         with:
-          go-version: stable
-          check-latest: true
+          go-version-file: go.mod
           cache: true
+          cache-dependency-path: go.sum
 
       # Go runs one fuzz target per invocation, so each target is a step.
-      # The seed corpus of every target runs with the unit tests above; the
-      # short budget here is a smoke run, not a campaign.
+      # The seed corpus of every target runs with the unit tests of the Go
+      # job; the short budget here is a smoke run, not a campaign. The job
+      # does not wait for the unit tests: the two find different faults and
+      # the pull request waits for the slower of them, not for their sum.
       - name: CSR decoder (internal/pki)
         run: go test -run='^$' -fuzz='^FuzzSignAgentCSR$' -fuzztime=20s ./internal/pki
       - name: Agent configuration (internal/agentconfig)
@@ -84,43 +136,221 @@ jobs:
       - name: DNF transaction summary (internal/packages)
         run: go test -run='^$' -fuzz='^FuzzParseDNFTransactionSizes$' -fuzztime=20s ./internal/packages
 
+  database:
+    name: Database
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: flotestro
+          POSTGRES_PASSWORD: flotestro
+          POSTGRES_DB: flotestro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flotestro -d flotestro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The control plane applies the migrations itself and can be told to
+      # do only that, so the job tests the migrator the product ships
+      # rather than a second implementation of it in shell. Every psql and
+      # pg_dump below runs from the server's own image, so the client never
+      # refuses a newer server and the dump is the format the server speaks.
+      - name: Apply the migrations
+        id: first
+        env:
+          FLOTESTRO_DATABASE_URL: postgres://flotestro:flotestro@127.0.0.1:5432/flotestro?sslmode=disable
+          FLOTESTRO_STATE_DIR: ${{ runner.temp }}/state
+        run: |
+          set -euo pipefail
+          mkdir -p "$FLOTESTRO_STATE_DIR"
+          go run ./cmd/control-plane --migrate-only
+          echo "applied=yes" >> "$GITHUB_OUTPUT"
+
+      - name: The migrations match the files
+        env:
+          PGPASSWORD: flotestro
+        run: |
+          set -euo pipefail
+          psql_() {
+            docker run --rm --network host -e PGPASSWORD postgres:17 \
+              psql -h 127.0.0.1 -p 5432 -U flotestro -d flotestro -v ON_ERROR_STOP=1 "$@"
+          }
+          files="$(ls db/migrations/*.sql | wc -l)"
+          recorded="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
+          if [ "$recorded" != "$files" ]; then
+            echo "schema_migrations holds $recorded versions, $files files are in db/migrations" >&2
+            exit 1
+          fi
+          # Two files with the same number are two schemas: whichever is
+          # applied second on one installation is applied first on another.
+          duplicates="$(ls db/migrations | sed 's/_.*//' | sort | uniq -d)"
+          if [ -n "$duplicates" ]; then
+            echo "two migrations share a number:" >&2
+            echo "$duplicates" >&2
+            exit 1
+          fi
+          echo "$files migrations, $recorded recorded, no repeated number"
+
+      - name: Applying them again changes nothing
+        env:
+          PGPASSWORD: flotestro
+          FLOTESTRO_DATABASE_URL: postgres://flotestro:flotestro@127.0.0.1:5432/flotestro?sslmode=disable
+          FLOTESTRO_STATE_DIR: ${{ runner.temp }}/state
+        run: |
+          set -euo pipefail
+          pg() {
+            docker run --rm --network host -e PGPASSWORD \
+              -v "$PWD:/repo:ro" -w /repo postgres:17 "$@"
+          }
+          psql_() {
+            pg psql -h 127.0.0.1 -p 5432 -U flotestro -d flotestro -v ON_ERROR_STOP=1 "$@"
+          }
+          pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d flotestro \
+            --schema-only --no-owner --no-privileges > before.sql
+          before_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
+          go run ./cmd/control-plane --migrate-only
+          after_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
+          if [ "$before_count" != "$after_count" ]; then
+            echo "the second pass recorded $((after_count - before_count)) migrations; a file does not match what was recorded" >&2
+            exit 1
+          fi
+          pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d flotestro \
+            --schema-only --no-owner --no-privileges > after.sql
+          if ! diff -u before.sql after.sql; then
+            echo "the schema changed without a migration being applied" >&2
+            exit 1
+          fi
+          echo "the second pass applied nothing and the schema is identical"
+
   web:
     name: Panel
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - name: Lock file
-        id: lock
-        # setup-node caches only against a lock file and fails without one,
-        # so the cache is switched on only when the file is there.
-        run: |
-          if [ -f package-lock.json ]; then
-            echo "cache=npm" >> "$GITHUB_OUTPUT"
-          else
-            echo "cache=" >> "$GITHUB_OUTPUT"
-          fi
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-node@v4.1.0
         with:
-          node-version: 22
-          cache: ${{ steps.lock.outputs.cache }}
+          # The version the laboratory installs on the panel machine
+          # (Vagrant/provision/control-plane.sh). The panel is built there
+          # and shipped from there, so the runner must not build it with a
+          # different one.
+          node-version-file: web/.nvmrc
+          cache: npm
           cache-dependency-path: web/package-lock.json
 
       - name: Install
-        # npm ci refuses to run without a lock file; until one is committed
-        # the install resolves the ranges of package.json.
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --no-audit --no-fund
-          fi
+        # npm ci installs exactly the lock file: the runner and the panel
+        # machine then hold the same tree.
+        run: npm ci
 
-      - name: Build
+      - name: The Polish catalogue
+        # The catalogue is keyed by the English source string, so a screen
+        # with a new string falls back to English quietly. This test walks
+        # the sources and fails on the first key that has no Polish line;
+        # it is run on its own so that a missing translation is named in
+        # the checks list and not buried in the suite.
+        run: npx vitest run src/i18n/i18n.test.ts
+
+      - name: Types and bundle
+        # "npm run build" is "tsc -b && vite build": the project references
+        # are type-checked and the bundle the release ships is produced.
         run: npm run build
 
       - name: Unit tests
-        # Vitest only: the Playwright suite drives the panel of the lab.
-        run: npm test
+        # Vitest only: the Playwright suite drives the panel of the
+        # laboratory and reaches a commit through lab-gate.yml.
+        run: npx vitest run
+
+  secrets:
+    name: Secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          # The history of the range is what is scanned: a secret removed
+          # in the last commit of a branch is still in the branch.
+          fetch-depth: 0
+
+      - name: gitleaks
+        env:
+          # Pinned exactly. The archive is verified against the checksum
+          # file published with the release; when .github/gitleaks.sha256
+          # is present it is authoritative instead, which is the stronger
+          # pin and the one to keep once the owner has recorded the digest:
+          #   sha256sum gitleaks_<version>_linux_x64.tar.gz > .github/gitleaks.sha256
+          GITLEAKS_VERSION: 8.18.4
+        run: |
+          set -euo pipefail
+          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$archive" "$base/$archive"
+          if [ -f .github/gitleaks.sha256 ]; then
+            sha256sum -c .github/gitleaks.sha256
+          else
+            curl -sSfL -o gitleaks.checksums "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+            grep -E "[[:space:]]\*?${archive}\$" gitleaks.checksums > expected.sha256 || true
+            if [ ! -s expected.sha256 ]; then
+              echo "the published checksums name no $archive" >&2
+              exit 1
+            fi
+            sha256sum -c expected.sha256
+          fi
+          tar -xzf "$archive" gitleaks
+          # --redact: a finding names the file, the commit and the rule,
+          # never the secret itself. The log of a public run is not the
+          # place to publish what was found.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          elif [ -n "${{ github.event.before }}" ] \
+            && [ "${{ github.event.before }}" != "0000000000000000000000000000000000000000" ]; then
+            range="${{ github.event.before }}..${{ github.sha }}"
+          else
+            # A new branch or a first push: only the commit itself is
+            # known to be new. The whole history is swept by hand, from
+            # the laboratory, as docs/ci.md describes.
+            range="${{ github.sha }}~1..${{ github.sha }}"
+          fi
+          echo "scanning $range"
+          ./gitleaks detect --source . --no-banner --redact \
+            --config .github/gitleaks.toml --log-opts "--no-merges $range"
+
+      - name: The product tree carries no key and no token
+        # Our own check, and deliberately narrow: a PEM header at the
+        # beginning of a line is a key file, not a string in a test, and
+        # the token patterns are the ones that are recognisable by shape.
+        # It scans the working tree, so it also covers what a scan of a
+        # commit range would not reach.
+        run: |
+          set -euo pipefail
+          found=0
+          if grep -rEnI '^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----' db internal cmd packaging; then
+            echo "a private key block stands in the product tree" >&2
+            found=1
+          fi
+          pattern='(AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}'
+          pattern="$pattern"'|xox[baprs]-[A-Za-z0-9-]{12,}|AIza[0-9A-Za-z_-]{35}'
+          pattern="$pattern"'|sk-[A-Za-z0-9]{32,}|glpat-[A-Za-z0-9_-]{20})'
+          if grep -rEnI "$pattern" db internal cmd packaging; then
+            echo "a token stands in the product tree" >&2
+            found=1
+          fi
+          if [ "$found" != "0" ]; then
+            exit 1
+          fi
+          echo "no key block and no token under db, internal, cmd, packaging"

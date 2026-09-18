@@ -45,6 +45,35 @@ off.
 | `FLOTESTRO_CLONE_POLICY` | `quarantine` | What the gateway does with the same identity alive on two boots: `quarantine` ends both sessions and quarantines the host, `report` records the incident and lets the newer session stand. Any other word refuses to start. | yes | `report` lets a cloned key act until somebody looks. |
 | `FLOTESTRO_RELAY_IDENTITY` | `prefer` | What the gateway does with a session through a relay in which the host did not sign its own identity envelope (`relay.identity` v2). A signed envelope is verified under every mode - relay, host, certificate by serial, site and environment, payload digest, signature, sequence - and marks the host `relay_identity: end_to_end` (`flotestro_relay_session_identity_total{strength="end_to_end"}`, `auth_strength: end_to_end` on the session); a bad envelope is refused under every mode with `relay_envelope_invalid`, `relay_body_hash_mismatch`, `relay_sequence_replayed` or `relay_host_signature_invalid` on the host. Without an envelope, `observe` and `prefer` let the session in on the relay's attestation (`attested`) or word alone (`weak`), counted under those strengths and recorded as `auth_strength: relay_only`. `enforce` refuses a relay that names the host alone with `relay_identity_missing`, and an agent that does not sign behind a relay that attests with `blocked_upgrade_required`. A renewal or a secret fetch through a relay requires the envelope under every mode. Any other word refuses to start. | yes | Upgrade the panel, then the relays, then the agents; set `enforce` once `weak` and `relay_only` sessions are at zero. |
 
+### Lifecycle orders between instances
+
+A host is connected to exactly one control-plane instance, and an operator's
+request lands on whichever instance answered the browser. Most decisions are
+rows and travel by themselves; the work that needs the host's open stream -
+the final task of a decommission, the end of a session at a quarantine or an
+identity recovery - does not. That work is written as an order in
+`gateway_commands`, addressed to the session `host_session_owners` names at
+the moment of the decision and to the fencing token of that claim, and the
+instance holding exactly that session carries it out. An instance that has
+since lost the host claims nothing, and an order whose session is gone is
+never carried out: it says so, and the panel falls back to what it does for
+a host nobody holds - retiring it with `remote_cleanup_unconfirmed`.
+
+The loop runs on every instance and is woken by the trail, so an order
+normally reaches its owner within a round trip; the settings below are the
+floor under that. An installation with one instance never writes an order at
+all and is unaffected by them.
+
+| Variable | Default | Meaning | Restart | Security |
+|---|---|---|---|---|
+| `FLOTESTRO_COMMAND_POLL` | `5s` | How often an instance looks for orders addressed to the sessions it holds when the trail's notification did not reach it. The same tick settles the orders that expired. | yes | |
+| `FLOTESTRO_COMMAND_EXPIRY` | `5m` | How long an unclaimed order stands. Longer than the lease of an ownership claim, so an instance that is merely slow still takes it; past it the order is settled as `expired` and nothing was done to the host. A decision acted on long after it was taken is worse than one repeated by the operator. | yes | Shortening it below the ownership lease (45s) would retire hosts as unreachable while their instance is still talking to them. |
+
+The request that gave the order waits up to 60 seconds for the answer. A
+decommission the owner has not finished by then is answered with phase
+`handover_pending`: the host stands in `retiring`, the owning instance
+finishes the handshake, and the decision is never taken twice.
+
 ### Local accounts and their SSH keys
 
 One list of privileged groups is read by every binary that judges a local

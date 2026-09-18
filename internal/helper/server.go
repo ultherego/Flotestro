@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -39,7 +40,13 @@ type Server struct {
 	// minute of work.
 	IdleTimeout time.Duration
 	active      sync.WaitGroup
-	traffic     chan struct{}
+	// inFlight counts the connections being handled. The wait group says
+	// when they are all done, which is what a shutdown needs; the counter
+	// says how many there are right now, which is what the idle watcher
+	// asks - and asking a wait group that question means waiting on it
+	// while new connections add to it, which is its one documented misuse.
+	inFlight atomic.Int64
+	traffic  chan struct{}
 
 	// The account and hostname handlers reach the system through these
 	// seams, so they can be checked without an account on the machine
@@ -122,8 +129,10 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 			return fmt.Errorf("accept: %w", err)
 		}
 		s.active.Add(1)
+		s.inFlight.Add(1)
 		go func() {
 			defer s.active.Done()
+			defer s.inFlight.Add(-1)
 			defer s.markTraffic()
 			s.handleConnection(context.WithoutCancel(ctx), conn)
 		}()
@@ -162,17 +171,7 @@ func (s *Server) watchIdleness(ctx context.Context, cancel context.CancelFunc) {
 
 // connectionsInFlight says whether some connection is being handled right now.
 func (s *Server) connectionsInFlight() bool {
-	ready := make(chan struct{})
-	go func() {
-		s.active.Wait()
-		close(ready)
-	}()
-	select {
-	case <-ready:
-		return false
-	case <-time.After(10 * time.Millisecond):
-		return true
-	}
+	return s.inFlight.Load() > 0
 }
 
 func (s *Server) markTraffic() {
@@ -961,7 +960,7 @@ func (s *Server) packageLifecycle(ctx context.Context, manager packages.Manager,
 		// the scripts of that package stop the helper, and with it the package
 		// manager in the middle of the transaction.
 		if spec, selfReplacement := agentReplacement(options.Packages); selfReplacement {
-			return s.orderAgentReplacement(ctx, manager, spec)
+			return s.orderAgentReplacement(ctx, manager, spec, action)
 		}
 		apply, err = lifecycle.Install(ctx, options)
 	case helperv1.PackageActionRequest_OPERATION_REMOVE:

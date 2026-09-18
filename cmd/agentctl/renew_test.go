@@ -20,9 +20,9 @@ func testRenewal(t *testing.T) (*renewal, *time.Time, *int) {
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	calls := 0
 	r := &renewal{
-		StateDir:   t.TempDir(),
-		GatewayURL: "https://gw.example.com:8443",
-		Now:        func() time.Time { return now },
+		StateDir: t.TempDir(),
+		Gateways: []string{"https://gw.example.com:8443"},
+		Now:      func() time.Time { return now },
 		Identity: func(stateDir string) agent.StoredIdentity {
 			return agent.StoredIdentity{Present: true, HostID: "9b6dd18a", NotAfter: now.Add(20 * 24 * time.Hour)}
 		},

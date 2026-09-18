@@ -2,11 +2,13 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
@@ -71,6 +73,17 @@ type DecommissionOutcome struct {
 	JobsCanceled        int      `json:"jobs_canceled"`
 	CertificatesRevoked int      `json:"certificates_revoked"`
 	SessionClosed       bool     `json:"session_closed"`
+	// HandedOver says the handshake was carried out by the instance that
+	// holds the host's session rather than by the one that took the
+	// request. CommandID names the order it travelled on and
+	// OwnerInstanceID the instance it went to, so the operator reading two
+	// panels can follow one decision across them.
+	HandedOver      bool   `json:"handed_over"`
+	CommandID       string `json:"command_id,omitempty"`
+	OwnerInstanceID string `json:"owner_instance_id,omitempty"`
+	// HandoverError is what the owner said when it took the order and
+	// could not finish it.
+	HandoverError string `json:"handover_error,omitempty"`
 }
 
 // The phases of the outcome.
@@ -78,6 +91,15 @@ const (
 	PhaseCommitted = "committed"
 	PhaseNoSession = "no_session"
 	PhaseTimeout   = "timeout"
+	// PhaseHandoverPending: the host is connected to another instance, the
+	// order is with that instance, and it had not answered within the
+	// wait. The host stands in retiring; the owner finishes the handshake,
+	// and a repeated order picks the host up from there.
+	PhaseHandoverPending = "handover_pending"
+	// PhaseHandoverFailed: the owner took the order and could not finish
+	// it. The host stands in retiring and nothing was decided about its
+	// disk.
+	PhaseHandoverFailed = "handover_failed"
 )
 
 // Decommissioner drives the handshake that ends a host's membership in the
@@ -96,17 +118,27 @@ type Decommissioner struct {
 	audit    *audit.Recorder
 	registry *Registry
 	log      *slog.Logger
+	// commands carries the handshake to the instance that holds the host's
+	// session when this one does not. Writing an order and waiting for it
+	// needs the database alone, so the queue is opened here rather than
+	// wired in: the loop that carries the orders out lives on every
+	// instance and is started with the rest of the background work.
+	commands *Commands
 	// readyTimeout and leaveTimeout are fields so a test does not wait two
-	// minutes for an agent that never answers.
+	// minutes for an agent that never answers, and handoverWait so it does
+	// not wait a minute for an owner that does not exist.
 	readyTimeout time.Duration
 	leaveTimeout time.Duration
+	handoverWait time.Duration
 }
 
 func NewDecommissioner(pool *pgxpool.Pool, hostStore *hosts.Store, jobStore *jobs.Store,
 	recorder *audit.Recorder, registry *Registry, log *slog.Logger) *Decommissioner {
 	return &Decommissioner{
 		pool: pool, hosts: hostStore, jobs: jobStore, audit: recorder, registry: registry, log: log,
+		commands:     NewCommands(pool, log, CommandOptions{}),
 		readyTimeout: FinalReadyTimeout, leaveTimeout: finalLeaveTimeout,
+		handoverWait: CommandWaitTimeout,
 	}
 }
 
@@ -117,6 +149,13 @@ func NewDecommissioner(pool *pgxpool.Pool, hostStore *hosts.Store, jobStore *job
 // new is ordered for it whatever happens to the handshake. A failure after
 // that leaves the host in retiring, and a repeated order picks it up from
 // there.
+//
+// The handshake needs the host's session, and in an installation of
+// several instances the session may be on another one. The same
+// transaction that records the decision then leaves an order for the
+// instance that holds it, and this one waits for the answer instead of
+// taking a connected host for an offline one. A host with no live owner
+// anywhere is retired without the confirmation, as before.
 func (d *Decommissioner) Run(ctx context.Context, order Decommission) (DecommissionOutcome, error) {
 	// The handshake outlives the request that ordered it: a browser that
 	// gave up waiting must not leave the host half-way between retiring and
@@ -125,12 +164,31 @@ func (d *Decommissioner) Run(ctx context.Context, order Decommission) (Decommiss
 	defer cancel()
 	outcome := DecommissionOutcome{RunningTasks: []string{}}
 
-	canceled, err := d.beginRetiring(ctx, order)
+	canceled, handed, err := d.beginRetiring(ctx, order)
 	if err != nil {
 		return outcome, err
 	}
 	outcome.JobsCanceled = canceled
+	if handed.CommandID != "" {
+		return d.awaitHandover(ctx, order, outcome, handed)
+	}
+	return d.carryOut(ctx, order, outcome)
+}
 
+// CarryOut runs the part of the order that needs the host's session and
+// retires the host. The command loop calls it for an order it claimed: the
+// decision is recorded already - the host stands in retiring - and this
+// instance is the one holding the session. It never hands the order on,
+// because it is where the order was handed to.
+func (d *Decommissioner) CarryOut(ctx context.Context, order Decommission) (DecommissionOutcome, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), d.readyTimeout+d.leaveTimeout+time.Minute)
+	defer cancel()
+	return d.carryOut(ctx, order, DecommissionOutcome{RunningTasks: []string{}})
+}
+
+// carryOut is the handshake itself, on the instance that holds the host.
+func (d *Decommissioner) carryOut(ctx context.Context, order Decommission,
+	outcome DecommissionOutcome) (DecommissionOutcome, error) {
 	session, connected := d.registry.Get(order.HostID)
 	if !connected {
 		return d.retireOffline(ctx, order, outcome)
@@ -139,7 +197,7 @@ func (d *Decommissioner) Run(ctx context.Context, order Decommission) (Decommiss
 	// The final task goes out over the session. A session that does not
 	// take the message is a session that is not listening; it is treated
 	// as silence rather than as a reason to keep the host in retiring.
-	err = session.Send(&agentv1.ServerMessage{
+	err := session.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_FinalTask{FinalTask: &agentv1.FinalTask{
 			Reason:            order.Reason,
 			LocalIdentityWipe: order.LocalIdentityWipe,
@@ -211,21 +269,38 @@ func (d *Decommissioner) Run(ctx context.Context, order Decommission) (Decommiss
 	return d.retire(ctx, order, outcome)
 }
 
-// beginRetiring moves the host to retiring and cancels what was queued.
-func (d *Decommissioner) beginRetiring(ctx context.Context, order Decommission) (int, error) {
+// handover names the order left for the instance that holds the host's
+// session, and that instance. Both are empty when the handshake is this
+// instance's to run.
+type handover struct {
+	CommandID       string
+	OwnerInstanceID string
+}
+
+// beginRetiring moves the host to retiring, cancels what was queued and -
+// when the host's session is held elsewhere - leaves the order for the
+// instance that holds it. All in one transaction: a decision that does not
+// commit leaves no order behind, and an order that is written is written
+// only for a host the panel really put into retiring.
+func (d *Decommissioner) beginRetiring(ctx context.Context, order Decommission) (int, handover, error) {
+	var handed handover
 	tx, err := d.pool.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return 0, handed, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if err := d.hosts.ChangeLifecycleState(ctx, tx, order.HostID, order.FromStates,
 		hosts.StateRetiring, order.Reason, order.Actor); err != nil {
-		return 0, err
+		return 0, handed, err
 	}
 	canceled, err := d.jobs.CancelUndelivered(ctx, tx, order.HostID, order.Actor, "host.decommission")
 	if err != nil {
-		return 0, err
+		return 0, handed, err
+	}
+	handed, err = d.planHandover(ctx, tx, order)
+	if err != nil {
+		return 0, handed, err
 	}
 	if err := d.audit.RecordTx(ctx, tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: order.Actor,
@@ -235,11 +310,123 @@ func (d *Decommissioner) beginRetiring(ctx context.Context, order Decommission) 
 			"reason": order.Reason, "state": hosts.StateRetiring, "jobs_canceled": canceled,
 			"local_identity_wipe":           order.LocalIdentityWipe,
 			"revoke_immediately_if_offline": order.RevokeImmediatelyIfOffline,
+			"handed_over":                   handed.CommandID != "",
+			"owner_instance_id":             handed.OwnerInstanceID,
 		}, order.StepUp),
 	}); err != nil {
-		return 0, err
+		return 0, handed, err
 	}
-	return canceled, tx.Commit(ctx)
+	return canceled, handed, tx.Commit(ctx)
+}
+
+// planHandover decides whether the handshake belongs to another instance
+// and writes the order when it does.
+//
+// The question is not "is the host connected here" but "who owns its
+// session": the registry of this process answers the first, and
+// host_session_owners - the one place that sees every instance - answers
+// the second. A host with no live owner is a host nobody can talk to, and
+// the order is carried out here, offline, as it always was.
+func (d *Decommissioner) planHandover(ctx context.Context, tx pgx.Tx,
+	order Decommission) (handover, error) {
+	var handed handover
+	if _, held := d.registry.Get(order.HostID); held {
+		return handed, nil
+	}
+	owner, err := d.jobs.OwnerOf(ctx, order.HostID)
+	if err != nil {
+		return handed, err
+	}
+	if !owner.Live(time.Now()) || owner.InstanceID == jobs.InstanceID() {
+		return handed, nil
+	}
+	commandID, err := d.commands.Enqueue(ctx, tx, Command{
+		HostID: order.HostID, SessionID: owner.SessionID, FencingToken: owner.Token,
+		Kind: CommandDecommissionFinal, CreatedBy: order.Actor,
+		Payload: mustPayload(map[string]any{
+			"reason": order.Reason, "actor": order.Actor,
+			"local_identity_wipe":           order.LocalIdentityWipe,
+			"revoke_immediately_if_offline": order.RevokeImmediatelyIfOffline,
+			"step_up":                       order.StepUp,
+		}),
+	})
+	if err != nil {
+		return handed, err
+	}
+	d.log.Info("the decommission handshake was handed to the instance holding the host",
+		"host_id", order.HostID, "command_id", commandID,
+		"owner_instance_id", owner.InstanceID, "session_id", owner.SessionID)
+	return handover{CommandID: commandID, OwnerInstanceID: owner.InstanceID}, nil
+}
+
+// awaitHandover waits for the instance that holds the host to carry the
+// handshake out, and answers with what it reported.
+//
+// An order nobody claimed - the owner died between the decision and the
+// claim, the host left it - ends as the panel has always ended a
+// decommission of a host it cannot reach: retired, with the cleanup
+// unconfirmed. An order claimed and not yet answered is neither: the host
+// stands in retiring, the owner is finishing it, and saying anything else
+// would mean two instances deciding the same host's end at once.
+func (d *Decommissioner) awaitHandover(ctx context.Context, order Decommission,
+	outcome DecommissionOutcome, handed handover) (DecommissionOutcome, error) {
+	outcome.HandedOver = true
+	outcome.CommandID = handed.CommandID
+	outcome.OwnerInstanceID = handed.OwnerInstanceID
+	outcome.State = hosts.StateRetiring
+
+	result, err := d.commands.Await(ctx, handed.CommandID, d.handoverWait)
+	if err != nil {
+		return outcome, err
+	}
+	switch result.Outcome {
+	case CommandDone:
+		remote := DecommissionOutcome{RunningTasks: []string{}}
+		if err := json.Unmarshal(result.Detail, &remote); err != nil {
+			outcome.Phase = PhaseHandoverFailed
+			outcome.HandoverError = "the owner's answer does not read: " + err.Error()
+			return outcome, nil
+		}
+		remote.HandedOver = true
+		remote.CommandID, remote.OwnerInstanceID = handed.CommandID, handed.OwnerInstanceID
+		// The jobs were cancelled here, in the transaction of the decision;
+		// the owner only ran the handshake and counts none.
+		remote.JobsCanceled = outcome.JobsCanceled
+		if remote.RunningTasks == nil {
+			remote.RunningTasks = []string{}
+		}
+		d.log.Info("the instance holding the host carried the decommission out",
+			"host_id", order.HostID, "command_id", handed.CommandID,
+			"phase", remote.Phase, "state", remote.State)
+		return remote, nil
+	case CommandNoSession, CommandExpired:
+		// Nothing was done to the host: the session was gone before the
+		// owner acted, or no owner ever claimed the order.
+		d.log.Warn("the order of the decommission was not carried out by the owner of the session; retiring the host without the confirmation",
+			"host_id", order.HostID, "command_id", handed.CommandID, "outcome", result.Outcome)
+		return d.retireOffline(ctx, order, outcome)
+	case CommandFailed:
+		outcome.Phase = PhaseHandoverFailed
+		outcome.HandoverError = handoverErrorOf(result.Detail)
+		return outcome, nil
+	default:
+		outcome.Phase = PhaseHandoverPending
+		d.log.Warn("the instance holding the host has not answered the decommission order within the wait",
+			"host_id", order.HostID, "command_id", handed.CommandID,
+			"owner_instance_id", handed.OwnerInstanceID, "waited", d.handoverWait.String())
+		return outcome, nil
+	}
+}
+
+// handoverErrorOf reads the owner's reason out of the outcome it wrote.
+func handoverErrorOf(detail []byte) string {
+	var answer struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(detail, &answer); err != nil || answer.Error == "" {
+		return "the instance holding the host could not finish the handshake"
+	}
+	return answer.Error
 }
 
 // retireOffline ends the order for a host with no session on this gateway.

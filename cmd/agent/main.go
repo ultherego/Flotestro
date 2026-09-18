@@ -202,11 +202,13 @@ func main() {
 	renewals := make(chan struct{}, 1)
 	go agent.KeepCertificateFresh(ctx, identity, agent.RenewalOptions{
 		StateDir: *stateDir,
-		// The renewal goes to the gateway of first choice. It is not urgent to
-		// the minute: a third of the life of the certificate is still left
-		// then, so a failure of that one gateway does not cut the host off.
-		GatewayURL: gateways[0],
-		Log:        log,
+		// The renewal takes the same list as the session, in the same order
+		// of priority: the first gateway is asked first, and when it is not
+		// there the next one renews. A host must not lose its place in the
+		// fleet because the instance of the panel it prefers is down for the
+		// week its certificate runs out.
+		Gateways: gateways,
+		Log:      log,
 		OnRenewed: func() {
 			select {
 			case renewals <- struct{}{}:

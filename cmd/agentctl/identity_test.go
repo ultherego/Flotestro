@@ -29,7 +29,8 @@ func testReset(t *testing.T) (*identityReset, *[]string) {
 			return agent.StoredIdentity{Present: true, HostID: "9b6dd18a", NotAfter: now.Add(20 * 24 * time.Hour)}
 		},
 		ReadToken: func() ([]byte, error) { return []byte("flt_recovery"), nil },
-		Recover: func(ctx context.Context, token []byte) (*agent.Identity, error) {
+		Gateways:  []string{"https://gw.example.com:8443"},
+		Recover: func(ctx context.Context, token []byte, gatewayURL string) (*agent.Identity, error) {
 			tokens = append(tokens, string(token))
 			return &agent.Identity{HostID: "9b6dd18a", NotAfter: now.Add(30 * 24 * time.Hour)}, nil
 		},
@@ -101,7 +102,7 @@ func TestResetReplacesTheIdentityWithTheToken(t *testing.T) {
 func TestResetKeepsTheCurrentIdentityWhenTheNewOneIsRejected(t *testing.T) {
 	r, _ := testReset(t)
 	r.Confirm = "web-01"
-	r.Recover = func(context.Context, []byte) (*agent.Identity, error) {
+	r.Recover = func(context.Context, []byte, string) (*agent.Identity, error) {
 		return nil, &agent.EnrollmentError{Code: agent.CodeIdentityRejected, Err: errors.New("bad certificate")}
 	}
 	var out, errOut bytes.Buffer

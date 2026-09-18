@@ -138,7 +138,7 @@ func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	answer := map[string]any{
 		"host_id": hostID, "lifecycle_state": outcome.State, "reason": req.Reason,
 		"phase":                      outcome.Phase,
 		"remote_cleanup_unconfirmed": outcome.RemoteCleanupUnconfirmed,
@@ -147,7 +147,20 @@ func (s *Server) handleDecommissionHost(w http.ResponseWriter, r *http.Request) 
 		"jobs_canceled":              outcome.JobsCanceled,
 		"certificates_revoked":       outcome.CertificatesRevoked,
 		"session_closed":             outcome.SessionClosed,
-	})
+		// Whether the handshake ran here or on the instance holding the
+		// host's session, and - when that instance has not answered yet -
+		// which order the operator can follow it by. A host is never
+		// retired as unreachable while another instance is talking to it.
+		"handed_over": outcome.HandedOver,
+	}
+	if outcome.CommandID != "" {
+		answer["command_id"] = outcome.CommandID
+		answer["owner_instance_id"] = outcome.OwnerInstanceID
+	}
+	if outcome.HandoverError != "" {
+		answer["handover_error"] = outcome.HandoverError
+	}
+	writeJSON(w, http.StatusOK, answer)
 }
 
 // defaultTrue reads an optional flag whose absence means yes.
@@ -262,6 +275,20 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 			return
 		}
 	}
+	// The host may be connected to another instance of the panel. Cutting
+	// it off is then an order for that instance, written in the same
+	// transaction as the decision that calls for it: a quarantine that does
+	// not commit ends no session, and a host held elsewhere is no longer
+	// left connected because this instance sees no session of it.
+	sessionClose := gateway.SessionClose{Where: gateway.SessionCloseNone}
+	if transition.CloseSession {
+		sessionClose, err = gateway.PlanSessionClose(r.Context(), tx, s.registry, s.jobs,
+			hostID, transition.Action, principal.Subject)
+		if err != nil {
+			s.fail(w, err)
+			return
+		}
+	}
 
 	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
 		ActorType: audit.ActorUser, ActorID: principal.Subject,
@@ -270,6 +297,7 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 		Detail: withStepUp(map[string]any{
 			"reason": req.Reason, "state": transition.To,
 			"certificates_revoked": revoked, "jobs_canceled": canceled,
+			"session_close": sessionClose.Where, "command_id": sessionClose.CommandID,
 		}, evidence),
 	}); err != nil {
 		s.fail(w, err)
@@ -282,14 +310,27 @@ func (s *Server) changeLifecycle(w http.ResponseWriter, r *http.Request, transit
 
 	// The session ends only after the write: had the transaction failed,
 	// the host would be disconnected without a reason recorded in the
-	// panel.
-	disconnected := false
+	// panel. On this instance that is one call; on another it is the wait
+	// for the order written above, bounded so that a dead instance does not
+	// hold the operator's request.
 	if transition.CloseSession && s.registry != nil {
-		disconnected = s.registry.EndSession(hostID, transition.Action)
+		sessionClose = gateway.FinishSessionClose(r.Context(), s.pool, s.registry, s.log,
+			sessionClose, hostID, transition.Action)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	answer := map[string]any{
 		"host_id": hostID, "lifecycle_state": transition.To, "reason": req.Reason,
 		"jobs_canceled": canceled, "certificates_revoked": revoked,
-		"session_closed": disconnected,
-	})
+		"session_closed": sessionClose.Closed,
+	}
+	if transition.CloseSession {
+		// Where the session was ended - here, on the instance holding it,
+		// nowhere, or asked and not confirmed - is the operator's business:
+		// "not closed" and "closed somewhere else" are different answers.
+		answer["session_close"] = sessionClose.Where
+		if sessionClose.CommandID != "" {
+			answer["command_id"] = sessionClose.CommandID
+			answer["owner_instance_id"] = sessionClose.OwnerInstanceID
+		}
+	}
+	writeJSON(w, http.StatusOK, answer)
 }

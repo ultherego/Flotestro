@@ -14,8 +14,10 @@
 package endpoints
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"time"
@@ -69,6 +71,11 @@ type Manager struct {
 	// rejected remembers that the centre refused the identity. Global state
 	// rather than per gateway: the identity is one for the whole fleet.
 	rejected bool
+	// now and sleep are the clock of the manager. Fields rather than calls
+	// to the package so that a test of the failover order runs in no time
+	// and with no wall clock in it.
+	now   func() time.Time
+	sleep func(context.Context, time.Duration) error
 }
 
 // New creates a manager for the given list of gateways in order of priority.
@@ -79,7 +86,10 @@ func New(addresses []string, minBackoff, maxBackoff time.Duration) *Manager {
 	if maxBackoff < minBackoff {
 		maxBackoff = MaxBackoff
 	}
-	manager := &Manager{minBackoff: minBackoff, maxBackoff: maxBackoff}
+	manager := &Manager{
+		minBackoff: minBackoff, maxBackoff: maxBackoff,
+		now: time.Now, sleep: sleepContext,
+	}
 	seen := map[string]bool{}
 	for _, address := range addresses {
 		if address == "" || seen[address] {
@@ -205,6 +215,126 @@ func fullJitter(upper time.Duration) time.Duration {
 		return upper / 2
 	}
 	return time.Duration(n.Int64())
+}
+
+// Attempt is one try against one gateway: which one, how it failed and
+// what kind of failure it was. A successful attempt ends the work, so an
+// attempt on record always carries an error.
+type Attempt struct {
+	URL   string
+	Class Class
+	Err   error
+}
+
+// ErrNoGateway means the caller gave no address to try.
+var ErrNoGateway = errors.New("no gateway address is configured")
+
+// Failover is the answer when every address refused: what was tried, in
+// order, and how each one answered. The operator's tool prints it as it
+// is - "the first one refused the connection, the second one has a
+// certificate for another name" is a diagnosis, while "the renewal failed"
+// is not.
+type Failover struct {
+	Attempts []Attempt
+}
+
+func (f *Failover) Error() string {
+	if len(f.Attempts) == 0 {
+		return ErrNoGateway.Error()
+	}
+	if len(f.Attempts) == 1 {
+		// One address configured: the failure is the gateway's own, and a
+		// sentence about a failover nobody asked for would only stand
+		// between the operator and the reason.
+		return f.Attempts[0].URL + ": " + f.Attempts[0].Err.Error()
+	}
+	parts := make([]string, 0, len(f.Attempts))
+	for _, attempt := range f.Attempts {
+		parts = append(parts, fmt.Sprintf("%s: %s (%s)", attempt.URL, attempt.Err, attempt.Class))
+	}
+	return "every gateway refused: " + strings.Join(parts, "; ")
+}
+
+// Unwrap gives the failure of the last gateway tried, so that errors.Is
+// against a transport error still works on the whole answer.
+func (f *Failover) Unwrap() error {
+	if len(f.Attempts) == 0 {
+		return ErrNoGateway
+	}
+	return f.Attempts[len(f.Attempts)-1].Err
+}
+
+// Try runs an operation against the gateways in order until one answers,
+// and returns the address that did.
+//
+// The session has always worked this way; a renewal and an identity
+// recovery used to take the first address in the list and stop there, so
+// the two moments when a host most needs the centre - a certificate close
+// to its term, an identity to be replaced - depended on one instance of
+// the panel being up. The order of the list is the priority: the first
+// gateway is tried first every time, whatever answered last.
+//
+// The classes decide how far to go. A network failure means "this one is
+// not there now" and the next address is tried at once. A configuration
+// error - a certificate for another name, a CA nobody knows - is recorded
+// and the next address is tried too: the gateways of one fleet may be
+// configured differently, and it is exactly the misconfigured one that is
+// to be passed over. A rejected identity stops everything: no gateway
+// admits a certificate the panel has revoked, and knocking at the rest
+// only fills the panel's trail with refusals.
+//
+// Between two addresses the manager waits its jittered backoff, so ten
+// thousand hosts failing over at the same second do not arrive at the
+// second gateway together.
+func (m *Manager) Try(ctx context.Context,
+	operation func(ctx context.Context, url string) error) (string, error) {
+	if len(m.gateways) == 0 {
+		return "", ErrNoGateway
+	}
+	if m.rejected {
+		return "", ErrIdentityRejected
+	}
+	failover := &Failover{}
+	for index, gateway := range m.gateways {
+		if index > 0 {
+			if err := m.sleep(ctx, fullJitter(m.minBackoff)); err != nil {
+				return "", err
+			}
+		}
+		err := operation(ctx, gateway.URL)
+		if err == nil {
+			m.Success(gateway.URL, m.now())
+			return gateway.URL, nil
+		}
+		class := Classify(err)
+		m.Error(gateway.URL, class, m.now())
+		failover.Attempts = append(failover.Attempts, Attempt{URL: gateway.URL, Class: class, Err: err})
+		if class == ClassIdentity {
+			// The reason the centre gave travels with the verdict: the
+			// operator's tool prints the code it matches against the error
+			// guide, and "the identity was rejected" alone is not one.
+			return "", fmt.Errorf("%w: %w", ErrIdentityRejected, err)
+		}
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+	}
+	return "", failover
+}
+
+// sleepContext waits, or gives up when the caller does.
+func sleepContext(ctx context.Context, wait time.Duration) error {
+	if wait <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // Classify classifies a connection error.

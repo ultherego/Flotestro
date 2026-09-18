@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/http2"
 
 	"github.com/ultherego/flotestro/internal/ctl"
+	"github.com/ultherego/flotestro/internal/endpoints"
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1/agentv1connect"
 	"github.com/ultherego/flotestro/internal/identitystore"
@@ -47,12 +48,15 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 	defer cancel()
 
 	r := renewal{
-		StateDir:   cfg.Relay.StateDir,
-		GatewayURL: cfg.Upstream.GatewayURLs[0],
-		Names:      cfg.Relay.AdvertisedNames,
-		Now:        time.Now,
-		Identity:   readIdentity,
-		Renew:      renewNow,
+		StateDir: cfg.Relay.StateDir,
+		// Every gateway of the configuration, in its order of priority: the
+		// certificate of a relay carries a whole site, and its renewal must
+		// not depend on one instance of the centre being up.
+		Gateways: cfg.Upstream.GatewayURLs,
+		Names:    cfg.Relay.AdvertisedNames,
+		Now:      time.Now,
+		Identity: readIdentity,
+		Renew:    renewNow,
 	}
 	return r.run(ctx, out, errOut)
 }
@@ -60,12 +64,14 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 // renewal gathers what a forced renewal touches, so that a test can run it
 // on a temporary directory with a clock of its own and without a centre.
 type renewal struct {
-	StateDir   string
-	GatewayURL string
-	Names      []string
-	Now        func() time.Time
-	Identity   func(stateDir string) storedIdentity
-	Renew      func(ctx context.Context, stateDir, gatewayURL string, names []string) (*identitystore.Identity, error)
+	StateDir string
+	// Gateways are the addresses of the centre in order of priority, the
+	// same list the relay's own upstream connection uses.
+	Gateways []string
+	Names    []string
+	Now      func() time.Time
+	Identity func(stateDir string) storedIdentity
+	Renew    func(ctx context.Context, stateDir, gatewayURL string, names []string) (*identitystore.Identity, error)
 }
 
 // run carries the renewal out.
@@ -109,12 +115,25 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	renewed, err := r.Renew(ctx, r.StateDir, r.GatewayURL, r.Names)
+	// The addresses of the centre are tried in order until one answers, and
+	// the one that did is printed: a site whose relay renewed against the
+	// standby is a fact the operator reads here.
+	var renewed *identitystore.Identity
+	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
+		func(ctx context.Context, gatewayURL string) error {
+			identity, err := r.Renew(ctx, r.StateDir, gatewayURL, r.Names)
+			if err != nil {
+				return err
+			}
+			renewed = identity
+			return nil
+		})
 	if err != nil {
 		fmt.Fprintf(errOut, "the renewal failed: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(out, "Renewed:      relay/%s\n", renewed.HostID)
+	fmt.Fprintf(out, "Centre:       %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", renewed.NotAfter.UTC().Format(time.RFC3339))
 	// The daemon has no local channel to be told about the new generation,
 	// and the previous certificate stays valid until its term - so the

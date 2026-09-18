@@ -33,8 +33,10 @@ type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
 	// admission, dispatch, agent, helper, verify, reconcile, approval,
-	// cancel, startup for the states the panel refuses to start in, or
-	// notification for the dead letters of the notification queue.
+	// cancel, startup for the states the panel refuses to start in,
+	// notification for the dead letters of the notification queue, or
+	// directory for the phases of a change the control plane carries out
+	// in the directory.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -544,6 +546,54 @@ var reportedGuides = []ErrorGuide{
 	{Code: "channel_misconfigured", Stage: "notification", Retry: RetryAfterChange,
 		Meaning: "A notification channel cannot send as it is: it was disabled while its messages waited, its configuration does not read, or the panel has no sender for its kind.",
 		Action:  "Enable or correct the channel and retry the dead letters; the messages of a channel that is to stay disabled can be left as they are."},
+
+	// The lifecycle orders that travel between the instances of the
+	// control plane (security remediation, chapter 6). None of them is a
+	// failure of a change on a host: they say where the decision is and
+	// what has not been confirmed yet.
+	{Code: "lifecycle_handover_pending", Stage: "reconcile", Retry: RetryReadState,
+		Meaning: "The host holds its session on another instance of the panel, the order to end its membership was written for that instance, and it had not answered within the wait. The host stands in retiring; nothing about its disk is decided.",
+		Action:  "Read the host page: the owning instance finishes the handshake on its own and the host turns retired. Repeating the decommission afterwards picks the host up from retiring; do not wipe the machine until the phase says committed. Not a failure."},
+	{Code: "lifecycle_handover_failed", Stage: "reconcile", Retry: RetryReadState,
+		Meaning: "The instance holding the host's session took the order to end its membership and could not finish it; its reason is on the answer and on the trail. The host stands in retiring.",
+		Action:  "Read the reason, then order the decommission again - it picks the host up from retiring. A host whose owning instance keeps failing is retired offline once its session is gone, with the cleanup unconfirmed."},
+	{Code: "session_close_unconfirmed", Stage: "reconcile", Retry: RetryReadState,
+		Meaning: "A quarantine or an identity recovery asked the instance holding the host's session to end it, and that instance did not answer within the wait. The decision itself is recorded, and the gateway refuses the host at its next connection.",
+		Action:  "Nothing at once: the ownership claim of a dead instance runs out within a minute and the session with it. Check the host's connection state on its page; a host that still heartbeats after that has an instance that is not reading its orders - restart it."},
+
+	// Replacing the agent with a named release (security remediation,
+	// chapter 14.5). Each of these is answered before the package database
+	// is touched, so the host keeps the version it runs.
+	{Code: "agent_upgrade_metadata_stale", Stage: "agent", Retry: RetryAutomatic,
+		Meaning: "The host did not confirm that it refreshed its repository metadata, so the version the order names may not be installable from the lists its package manager holds. The replacement was not started.",
+		Action:  "Read the reason the refresh carries in the message - an unreachable repository, a busy package manager - and order again once the host can reach its repository.", CountsAsFailure: true},
+	{Code: "agent_package_digest_mismatch", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The package file the host obtained for the ordered version does not hash to the digest of the release. The repository signature says where the file came from; the digest says whether it is the file the release published, and it is not. Nothing was installed.",
+		Action:  "Compare the digest on the release with the repository the host uses: a stale mirror and a package rebuilt under the same version both look like this. Do not order the upgrade again until they agree.", CountsAsFailure: true},
+	{Code: "agent_package_unavailable", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The host could not obtain the package file of the ordered version at all: the repository does not carry that version, or the download failed. Nothing was installed.",
+		Action:  "Check that the release reached the repository the host uses and that the host can reach it, then order again.", CountsAsFailure: true},
+	{Code: "agent_rollback_unavailable", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The order named a version to go back to and the host could not keep its package file: it is neither in the package cache nor in the repository. The upgrade was not started, because a prepared return that does not exist is worse than an upgrade postponed.",
+		Action:  "Put the named version back into the repository the host uses, or order the upgrade without a version to go back to and accept that a return would then depend on the repository.", CountsAsFailure: true},
+
+	// The phases of a directory change (security remediation, chapter
+	// 14.3). None of them sits on a job of a host, so none counts against a
+	// campaign; they are in the guide because the change screen shows them
+	// and an operator looks them up here. A plan the directory moved under
+	// is reported as stale_plan, the shared code listed above.
+	{Code: "directory_moddn_unsupported", Stage: "preflight", Retry: RetryAfterChange,
+		Meaning: "The preflight asked the directory what it can do and it proved it cannot preserve an account: the connector's service account may not move an entry, or the container of preserved accounts is not there. Nothing was ordered and the local account was not touched.",
+		Action:  "Give the connector's service account the minimal permission to move an entry into the container of preserved accounts, then plan the change again. A directory that merely does not report its rights does not raise this."},
+	{Code: "directory_plan_incomplete", Stage: "planning", Retry: RetryAfterReplan,
+		Meaning: "The approved change carries no reference to the entry it would move - where it is, which entry it is and when it last changed - so there is nothing to bind the execution to.",
+		Action:  "Plan the change again; the new plan records the entry, and the execution refuses if that entry moves between the approval and the change."},
+	{Code: "directory_refused", Stage: "directory", Retry: RetryAfterChange,
+		Meaning: "The directory refused the change and named its own reason. Nothing was changed locally: the directory goes first exactly so that its refusal does not leave a host denying a user the directory still holds.",
+		Action:  "Read the directory's reason in the phase - an ACI, a validation, an entry that is not there - correct it in the directory and order again."},
+	{Code: "directory_unreachable", Stage: "directory", Retry: RetryAutomatic,
+		Meaning: "The directory did not answer, so nothing is known about what it would have done and nothing was changed anywhere.",
+		Action:  "Check the connector on the identity screen - the keytab, the KDC, the directory itself - and order again once it answers."},
 }
 
 // RefusalError is a validation refusal with a code of its own. Validate

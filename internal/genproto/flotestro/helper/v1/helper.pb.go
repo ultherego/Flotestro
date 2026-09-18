@@ -3144,7 +3144,20 @@ type PackageActionRequest struct {
 	PlanExpiresAtUnix     int64  `protobuf:"varint,13,opt,name=plan_expires_at_unix,json=planExpiresAtUnix,proto3" json:"plan_expires_at_unix,omitempty"`
 	// The elements the operator approved, so a refusal names the one that
 	// moved rather than two digests.
-	ExactSpecs    []*PackageExactSpec `protobuf:"bytes,14,rep,name=exact_specs,json=exactSpecs,proto3" json:"exact_specs,omitempty"`
+	ExactSpecs []*PackageExactSpec `protobuf:"bytes,14,rep,name=exact_specs,json=exactSpecs,proto3" json:"exact_specs,omitempty"`
+	// The artefact of the agent release the order names. The helper fetches
+	// exactly this file, checks it against the digest before anything is
+	// installed, and installs that file rather than resolving the version
+	// from the repository a second time. Empty leaves the old path.
+	PackageSha256 string `protobuf:"bytes,15,opt,name=package_sha256,json=packageSha256,proto3" json:"package_sha256,omitempty"`
+	// The version to keep an artefact of locally before the replacement, so
+	// the host can go back without the repository. Empty means no prepared
+	// return.
+	RollbackVersion string `protobuf:"bytes,16,opt,name=rollback_version,json=rollbackVersion,proto3" json:"rollback_version,omitempty"`
+	// Fetch the artefact, check it and keep the prepared return - and stop
+	// there. The host is already at the ordered version and only the order
+	// itself is being proven; nothing is installed.
+	VerifyOnly    bool `protobuf:"varint,17,opt,name=verify_only,json=verifyOnly,proto3" json:"verify_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3275,6 +3288,27 @@ func (x *PackageActionRequest) GetExactSpecs() []*PackageExactSpec {
 		return x.ExactSpecs
 	}
 	return nil
+}
+
+func (x *PackageActionRequest) GetPackageSha256() string {
+	if x != nil {
+		return x.PackageSha256
+	}
+	return ""
+}
+
+func (x *PackageActionRequest) GetRollbackVersion() string {
+	if x != nil {
+		return x.RollbackVersion
+	}
+	return ""
+}
+
+func (x *PackageActionRequest) GetVerifyOnly() bool {
+	if x != nil {
+		return x.VerifyOnly
+	}
+	return false
 }
 
 // PackageExactSpec is one approved element of a package plan: the exact
@@ -9094,8 +9128,16 @@ type PackageActionResult struct {
 	// effects_partial and both lists filled.
 	EffectsAchieved []*PackageEffectOutcome `protobuf:"bytes,10,rep,name=effects_achieved,json=effectsAchieved,proto3" json:"effects_achieved,omitempty"`
 	EffectsMissed   []*PackageEffectOutcome `protobuf:"bytes,11,rep,name=effects_missed,json=effectsMissed,proto3" json:"effects_missed,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Where the host kept the artefact of the version it can go back to and
+	// the artefact it verified before installing. Empty when the order named
+	// neither.
+	RollbackArtefactPath string `protobuf:"bytes,12,opt,name=rollback_artefact_path,json=rollbackArtefactPath,proto3" json:"rollback_artefact_path,omitempty"`
+	VerifiedArtefactPath string `protobuf:"bytes,13,opt,name=verified_artefact_path,json=verifiedArtefactPath,proto3" json:"verified_artefact_path,omitempty"`
+	// The version the package database holds, read after the operation
+	// rather than taken from the order.
+	InstalledVersion string `protobuf:"bytes,14,opt,name=installed_version,json=installedVersion,proto3" json:"installed_version,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *PackageActionResult) Reset() {
@@ -9203,6 +9245,27 @@ func (x *PackageActionResult) GetEffectsMissed() []*PackageEffectOutcome {
 		return x.EffectsMissed
 	}
 	return nil
+}
+
+func (x *PackageActionResult) GetRollbackArtefactPath() string {
+	if x != nil {
+		return x.RollbackArtefactPath
+	}
+	return ""
+}
+
+func (x *PackageActionResult) GetVerifiedArtefactPath() string {
+	if x != nil {
+		return x.VerifiedArtefactPath
+	}
+	return ""
+}
+
+func (x *PackageActionResult) GetInstalledVersion() string {
+	if x != nil {
+		return x.InstalledVersion
+	}
+	return ""
 }
 
 // PackageEffectOutcome is one expected effect of a plan after the
@@ -9906,7 +9969,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
 	"inhibitors\x18\x03 \x01(\fR\n" +
 	"inhibitors\x12!\n" +
-	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\xab\x06\n" +
+	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\x9e\a\n" +
 	"\x14PackageActionRequest\x12Q\n" +
 	"\toperation\x18\x01 \x01(\x0e23.flotestro.helper.v1.PackageActionRequest.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12#\n" +
@@ -9924,7 +9987,11 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x16plan_resource_revision\x18\f \x01(\tR\x14planResourceRevision\x12/\n" +
 	"\x14plan_expires_at_unix\x18\r \x01(\x03R\x11planExpiresAtUnix\x12F\n" +
 	"\vexact_specs\x18\x0e \x03(\v2%.flotestro.helper.v1.PackageExactSpecR\n" +
-	"exactSpecs\"\x95\x01\n" +
+	"exactSpecs\x12%\n" +
+	"\x0epackage_sha256\x18\x0f \x01(\tR\rpackageSha256\x12)\n" +
+	"\x10rollback_version\x18\x10 \x01(\tR\x0frollbackVersion\x12\x1f\n" +
+	"\vverify_only\x18\x11 \x01(\bR\n" +
+	"verifyOnly\"\x95\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11OPERATION_REFRESH\x10\x01\x12\x15\n" +
@@ -10616,7 +10683,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x12_cache_credentialsB&\n" +
 	"$_offline_credentials_expiration_daysB\x1e\n" +
 	"\x1c_entry_cache_timeout_secondsB!\n" +
-	"\x1f_krb5_store_password_if_offline\"\xd9\x04\n" +
+	"\x1f_krb5_store_password_if_offline\"\xf2\x05\n" +
 	"\x13PackageActionResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12C\n" +
 	"\aapplied\x18\x02 \x03(\v2).flotestro.helper.v1.PackageVersionChangeR\aapplied\x12'\n" +
@@ -10630,7 +10697,10 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x10scriptlet_errors\x18\t \x03(\tR\x0fscriptletErrors\x12T\n" +
 	"\x10effects_achieved\x18\n" +
 	" \x03(\v2).flotestro.helper.v1.PackageEffectOutcomeR\x0feffectsAchieved\x12P\n" +
-	"\x0eeffects_missed\x18\v \x03(\v2).flotestro.helper.v1.PackageEffectOutcomeR\reffectsMissed\"\x98\x01\n" +
+	"\x0eeffects_missed\x18\v \x03(\v2).flotestro.helper.v1.PackageEffectOutcomeR\reffectsMissed\x124\n" +
+	"\x16rollback_artefact_path\x18\f \x01(\tR\x14rollbackArtefactPath\x124\n" +
+	"\x16verified_artefact_path\x18\r \x01(\tR\x14verifiedArtefactPath\x12+\n" +
+	"\x11installed_version\x18\x0e \x01(\tR\x10installedVersion\"\x98\x01\n" +
 	"\x14PackageEffectOutcome\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x18\n" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +

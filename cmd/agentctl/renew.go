@@ -10,6 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
 	"github.com/ultherego/flotestro/internal/ctl"
+	"github.com/ultherego/flotestro/internal/endpoints"
 )
 
 // The limit on forced renewals is shared with the tool of the relay: the
@@ -45,11 +46,15 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 	defer cancel()
 
 	r := renewal{
-		StateDir:   cfg.Agent.StateDir,
-		GatewayURL: cfg.Connection.GatewayURLs[0],
-		Now:        time.Now,
-		Identity:   agent.ReadIdentity,
-		Renew:      agent.RenewNow,
+		StateDir: cfg.Agent.StateDir,
+		// Every gateway of the configuration, in its order of priority: a
+		// certificate close to its term must not depend on one instance of
+		// the panel being up, and the host already knows where the others
+		// are.
+		Gateways: cfg.Connection.GatewayURLs,
+		Now:      time.Now,
+		Identity: agent.ReadIdentity,
+		Renew:    agent.RenewNow,
 	}
 	return r.run(ctx, out, errOut)
 }
@@ -57,11 +62,13 @@ func renewCommand(args []string, out, errOut io.Writer) int {
 // renewal gathers what a forced renewal touches, so that a test can run it
 // on a temporary directory with a clock of its own and without a gateway.
 type renewal struct {
-	StateDir   string
-	GatewayURL string
-	Now        func() time.Time
-	Identity   func(stateDir string) agent.StoredIdentity
-	Renew      func(ctx context.Context, stateDir, gatewayURL string) (*agent.Identity, error)
+	StateDir string
+	// Gateways are the addresses of the panel in order of priority, the
+	// same list the daemon's session uses.
+	Gateways []string
+	Now      func() time.Time
+	Identity func(stateDir string) agent.StoredIdentity
+	Renew    func(ctx context.Context, stateDir, gatewayURL string) (*agent.Identity, error)
 }
 
 // run carries the renewal out.
@@ -104,12 +111,26 @@ func (r renewal) run(ctx context.Context, out, errOut io.Writer) int {
 		return 1
 	}
 
-	renewed, err := r.Renew(ctx, r.StateDir, r.GatewayURL)
+	// The gateways are tried in order until one answers; which one did is
+	// printed, because an operator repeating the command after an outage
+	// wants to know whether they are talking to the main panel or to the
+	// standby.
+	var renewed *agent.Identity
+	answered, err := endpoints.New(r.Gateways, 0, 0).Try(ctx,
+		func(ctx context.Context, gatewayURL string) error {
+			identity, err := r.Renew(ctx, r.StateDir, gatewayURL)
+			if err != nil {
+				return err
+			}
+			renewed = identity
+			return nil
+		})
 	if err != nil {
 		fmt.Fprintf(errOut, "the renewal failed: %v\n", err)
 		return 1
 	}
 	fmt.Fprintf(out, "Renewed:      host/%s\n", renewed.HostID)
+	fmt.Fprintf(out, "Gateway:      %s\n", answered)
 	fmt.Fprintf(out, "Certificate:  valid until %s\n", renewed.NotAfter.UTC().Format(time.RFC3339))
 	// The daemon has no local channel to be told about the new generation,
 	// and the previous certificate stays valid until its term - so the

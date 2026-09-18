@@ -3,6 +3,7 @@ package identity
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +12,32 @@ import (
 	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/freeipa"
+	"github.com/ultherego/flotestro/internal/plan"
+)
+
+// The typed refusals of a directory change. A phase carries no field of its
+// own for a code, so the code stands at the front of its message: a refusal
+// an operator cannot look up is half a refusal.
+const (
+	// RefusalModDNUnsupported: the preflight proved the directory cannot
+	// carry the operation out - the connector's service account may not move
+	// an entry, or the container of preserved accounts is not there. Nothing
+	// was ordered and nothing was changed locally.
+	RefusalModDNUnsupported = "directory_moddn_unsupported"
+	// RefusalPlanIncomplete: the plan of the change does not name the entry
+	// it would move, so there is nothing to bind the execution to.
+	RefusalPlanIncomplete = "directory_plan_incomplete"
+	// RefusalDirectoryRefused: the directory refused the change itself. The
+	// message carries the directory's own reason, and the local account was
+	// not touched.
+	RefusalDirectoryRefused = "directory_refused"
+	// RefusalDirectoryUnreachable: the directory did not answer, so nothing
+	// about it is known and nothing was done.
+	RefusalDirectoryUnreachable = "directory_unreachable"
+	// RefusalStalePlan is the shared refusal of a plan the world moved
+	// under. The spelling is the one the package and storage plans use, so
+	// an operator looks up one code whatever it was that moved.
+	RefusalStalePlan = plan.ErrorStalePlan
 )
 
 // SessionRevoker revokes the panel sessions that belong to an identity.
@@ -42,6 +69,15 @@ type Executor struct {
 	// retire is the test seam for the directory half of a rotation; nil
 	// means the connector's own call.
 	retire func(ctx context.Context, principal string) error
+	// The halves of a preserve, each replaceable on its own: what the
+	// directory can do, which entry it holds, the move itself, and the
+	// local denial marker. Nil means the real connector and the real
+	// change store. They stand apart because the order between them is
+	// what this operation is about, and a test has to be able to watch it.
+	capabilities func(ctx context.Context) (freeipa.DirectoryCapabilities, error)
+	entryOf      func(ctx context.Context, uid string) (freeipa.EntryReference, error)
+	preserve     func(ctx context.Context, uid string) error
+	localDeny    func(ctx context.Context, subject, reason string, denied bool) (int64, error)
 }
 
 func NewExecutor(store *Store, directory *freeipa.Client, sessions SessionRevoker,
@@ -137,7 +173,7 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 	case ActionUserPOSIX:
 		phases = e.setUserPOSIX(ctx, payload.POSIX)
 	case ActionUserPreserve:
-		phases, revoked = e.preserveUser(ctx, payload.Reference)
+		phases, revoked = e.preserveUser(ctx, change, payload.Reference)
 	case ActionUserPasswordReset:
 		phases = e.resetPassword(ctx, change, payload.Reference)
 	case ActionDNSRecordEnsure:
@@ -449,30 +485,156 @@ func (e *Executor) setUserPOSIX(ctx context.Context, spec *POSIXPayload) []Phase
 	return []Phase{finishPhase(phase, nil, describeUser(user)+", shell "+user.Shell+", home "+user.HomeDir)}
 }
 
-// preserveUser removes an account while keeping its entry. The order is
-// the order of a disable, for the same reason: the local denial marker and
-// the revoked sessions first, so that no session outlives the account for
-// the time the directory takes.
-func (e *Executor) preserveUser(ctx context.Context, ref *ReferencePayload) ([]Phase, *sessionRevocation) {
+// preserveUser removes an account while keeping its entry.
+//
+// The order is the reverse of a disable, and deliberately so. A disable locks
+// locally first, because a local lock that arrives late leaves a session
+// working for as long as the directory takes. A preserve cannot afford that
+// order: the directory may refuse the move - a service account without the
+// right to it, a container that is not there, an ACI that does not allow it -
+// and a host that has already denied the user while the directory still holds
+// the account is the worst of both. The user is locked out of the panel and
+// out of the hosts, and no record of the account was removed anywhere. So the
+// directory goes first, the local half follows only on its confirmation, and
+// a refusal changes nothing locally and carries the directory's own reason.
+//
+// The window the reversed order opens - a panel session that outlives the
+// directory entry by the moment between the two - is the smaller harm and is
+// closed immediately: the account no longer exists to authenticate with, and
+// the revocation is the next step rather than a later one.
+//
+// Before either half, two things are settled. The directory is asked what it
+// can do, so an operation it would refuse is refused here instead of after
+// the local account was changed. And the plan is bound to the entry it was
+// made for: two operators preserving the same user, or an entry somebody
+// changed between the plan and the approval, are refused as a stale plan.
+func (e *Executor) preserveUser(ctx context.Context, change Change,
+	ref *ReferencePayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 
-	phase := startPhase("the local denial marker")
-	count, err := e.store.SetLocalDeny(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was preserved"), true)
+	phase := startPhase("asking the directory what it can do")
+	capabilities, err := e.directoryCapabilities(ctx)
+	if err != nil {
+		return append(phases, refusedPhase(phase, RefusalDirectoryUnreachable, err.Error())), nil
+	}
+	if reason, blocked := capabilities.PreserveBlocked(); blocked {
+		return append(phases, refusedPhase(phase, RefusalModDNUnsupported,
+			"the directory cannot preserve an account: "+reason)), nil
+	}
+	// The reads that come before the change are recorded for what they are:
+	// carried out, and no part of the change. A read that succeeded must not
+	// make a refused operation look like one half applied, so it counts
+	// towards neither the success nor the failure of the change.
+	phases = append(phases, skipPhase(phase, describeCapabilities(capabilities)))
+
+	phase = startPhase("binding the plan to the entry")
+	planned, err := preservePlan(change)
+	if err != nil {
+		return append(phases, refusedPhase(phase, RefusalPlanIncomplete, err.Error())), nil
+	}
+	current, err := e.directoryEntry(ctx, ref.UID)
+	if err != nil {
+		// An entry the directory no longer holds under that name is not an
+		// outage: somebody preserved or removed the account between the plan
+		// and now, which is exactly what the binding exists to catch.
+		code := RefusalDirectoryUnreachable
+		if errors.Is(err, freeipa.ErrEntryNotFound) {
+			code = RefusalStalePlan
+		}
+		return append(phases, refusedPhase(phase, code, err.Error())), nil
+	}
+	if moved, ok := planned.Moved(current); ok {
+		return append(phases, refusedPhase(phase, RefusalStalePlan, moved)), nil
+	}
+	phases = append(phases, skipPhase(phase, "the entry is the one the plan named"))
+
+	phase = startPhase("preserving the account in the directory")
+	if err := e.preserveInDirectory(ctx, ref.UID); err != nil {
+		return append(phases, refusedPhase(phase, RefusalDirectoryRefused, err.Error())), nil
+	}
+	phases = append(phases, finishPhase(phase, nil, "the entry stays as a preserved account"))
+
+	reason := firstNonEmpty(ref.Reason, "the account was preserved")
+	phase = startPhase("the local denial marker")
+	count, err := e.denyLocally(ctx, ref.UID, reason, true)
 	phases = append(phases, finishPhase(phase, err, describeCount("identities marked", count)))
 
 	phase = startPhase("revoking the panel sessions")
-	result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was preserved"))
+	result, err := e.revokeSessions(ctx, ref.UID, reason)
 	phases = append(phases, finishPhase(phase, err, result.String()))
 
 	phase, ended := e.endProviderSessions(ctx, ref.UID)
 	phases = append(phases, phase)
 	result.ProviderSessionsEnded = &ended.Ended
 	result.ProviderReason = ended.Reason
-
-	phase = startPhase("preserving the account in the directory")
-	err = e.directory.PreserveUser(ctx, ref.UID)
-	phases = append(phases, finishPhase(phase, err, "the entry stays as a preserved account"))
 	return phases, &result
+}
+
+// directoryCapabilities, directoryEntry, preserveInDirectory and denyLocally
+// are the four halves of a preserve behind their seams. Each falls back to
+// the real connector or the real change store when no seam was set.
+func (e *Executor) directoryCapabilities(ctx context.Context) (freeipa.DirectoryCapabilities, error) {
+	if e.capabilities != nil {
+		return e.capabilities(ctx)
+	}
+	return e.directory.Capabilities(ctx)
+}
+
+func (e *Executor) directoryEntry(ctx context.Context, uid string) (freeipa.EntryReference, error) {
+	if e.entryOf != nil {
+		return e.entryOf(ctx, uid)
+	}
+	return e.directory.UserEntry(ctx, uid)
+}
+
+func (e *Executor) preserveInDirectory(ctx context.Context, uid string) error {
+	if e.preserve != nil {
+		return e.preserve(ctx, uid)
+	}
+	return e.directory.PreserveUser(ctx, uid)
+}
+
+func (e *Executor) denyLocally(ctx context.Context, subject, reason string,
+	denied bool) (int64, error) {
+	if e.localDeny != nil {
+		return e.localDeny(ctx, subject, reason, denied)
+	}
+	return e.store.SetLocalDeny(ctx, subject, reason, denied)
+}
+
+// preservePlan reads the entry the approved plan would move.
+//
+// A plan that does not name it is refused rather than filled in here: the
+// whole point of the binding is that the entry was read when the operator
+// looked at the plan, not when the execution started.
+func preservePlan(change Change) (freeipa.EntryReference, error) {
+	var planned struct {
+		PreserveEntry *freeipa.EntryReference `json:"preserve_entry"`
+	}
+	if len(change.Plan) > 0 {
+		if err := json.Unmarshal(change.Plan, &planned); err != nil {
+			return freeipa.EntryReference{}, fmt.Errorf("the plan of the change does not read: %w", err)
+		}
+	}
+	if planned.PreserveEntry == nil || !planned.PreserveEntry.Complete() {
+		return freeipa.EntryReference{}, errors.New(
+			"the plan does not name the entry it would move; plan the change again")
+	}
+	return *planned.PreserveEntry, nil
+}
+
+// describeCapabilities says what the preflight established, including what
+// it could not: a directory that does not report the rights on an entry is
+// not a directory that granted them.
+func describeCapabilities(capabilities freeipa.DirectoryCapabilities) string {
+	verdict := "the directory does not report the rights on an entry"
+	if capabilities.UserModDN {
+		verdict = "the directory reports the connector may move an entry"
+	}
+	if len(capabilities.ReasonCodes) == 0 {
+		return verdict
+	}
+	return verdict + " (" + strings.Join(capabilities.ReasonCodes, ", ") + ")"
 }
 
 // resetPassword asks the directory for a new password and keeps it for
@@ -548,12 +710,25 @@ func startPhase(name string) Phase {
 	return Phase{Name: name, StartedAt: time.Now().UTC()}
 }
 
-// skipPhase closes a phase that was not carried out, with the reason. A
-// skipped phase counts for neither success nor failure of the change.
+// skipPhase closes a phase that changed nothing, with what it found. A
+// phase that was not carried out and a read that was both belong here: a
+// skipped phase counts for neither the success nor the failure of the
+// change, which is what keeps a refusal after a successful read from
+// reading as a change half applied.
 func skipPhase(phase Phase, message string) Phase {
 	phase.FinishedAt = time.Now().UTC()
 	phase.Status = "skipped"
 	phase.Message = message
+	return phase
+}
+
+// refusedPhase closes a phase with a typed refusal. The code stands at the
+// front of the message, because a phase has no field of its own for it and a
+// refusal the panel cannot act on is only half a refusal.
+func refusedPhase(phase Phase, code, message string) Phase {
+	phase.FinishedAt = time.Now().UTC()
+	phase.Status = "failed"
+	phase.Message = code + ": " + message
 	return phase
 }
 

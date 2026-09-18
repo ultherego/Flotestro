@@ -3623,9 +3623,16 @@ func Validate(action ActionType, payload Payload) error {
 			return fmt.Errorf("the target version %q is not a package version",
 				payload.AgentUpgrade.TargetVersion)
 		}
-		if version := payload.AgentUpgrade.RollbackVersion; version != "" &&
-			!validAgentVersion(version) {
-			return fmt.Errorf("the rollback version %q is not a package version", version)
+		if version := payload.AgentUpgrade.RollbackVersion; version != "" {
+			if !validAgentVersion(version) {
+				return fmt.Errorf("the rollback version %q is not a package version", version)
+			}
+			// A return to the version being installed is no return at all,
+			// and the host would keep an artefact of it under the name of a
+			// way back.
+			if version == payload.AgentUpgrade.TargetVersion {
+				return fmt.Errorf("the rollback version is the version being installed (%s)", version)
+			}
 		}
 		if sum := payload.AgentUpgrade.PackageSHA256; sum != "" && !validChecksum(sum) {
 			return fmt.Errorf("the package checksum is not a hexadecimal SHA-256")

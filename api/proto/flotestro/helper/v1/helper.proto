@@ -347,6 +347,19 @@ message PackageActionRequest {
   // The elements the operator approved, so a refusal names the one that
   // moved rather than two digests.
   repeated PackageExactSpec exact_specs = 14;
+  // The artefact of the agent release the order names. The helper fetches
+  // exactly this file, checks it against the digest before anything is
+  // installed, and installs that file rather than resolving the version
+  // from the repository a second time. Empty leaves the old path.
+  string package_sha256 = 15;
+  // The version to keep an artefact of locally before the replacement, so
+  // the host can go back without the repository. Empty means no prepared
+  // return.
+  string rollback_version = 16;
+  // Fetch the artefact, check it and keep the prepared return - and stop
+  // there. The host is already at the ordered version and only the order
+  // itself is being proven; nothing is installed.
+  bool verify_only = 17;
 }
 
 // PackageExactSpec is one approved element of a package plan: the exact
@@ -1502,6 +1515,14 @@ message PackageActionResult {
   // effects_partial and both lists filled.
   repeated PackageEffectOutcome effects_achieved = 10;
   repeated PackageEffectOutcome effects_missed = 11;
+  // Where the host kept the artefact of the version it can go back to and
+  // the artefact it verified before installing. Empty when the order named
+  // neither.
+  string rollback_artefact_path = 12;
+  string verified_artefact_path = 13;
+  // The version the package database holds, read after the operation
+  // rather than taken from the order.
+  string installed_version = 14;
 }
 
 // PackageEffectOutcome is one expected effect of a plan after the

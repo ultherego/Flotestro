@@ -19,6 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/enrollment"
 	"github.com/ultherego/flotestro/internal/events"
+	"github.com/ultherego/flotestro/internal/gateway"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/paging"
 	"github.com/ultherego/flotestro/internal/relays"
@@ -800,14 +801,22 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	revoked := 0
+	sessionClose := gateway.SessionClose{Where: gateway.SessionCloseNone}
 	if req.RevokeOldImmediately {
 		revoked, err = s.revokeNow(r, hostID, reason)
 		if err != nil {
 			s.fail(w, err)
 			return
 		}
-		if s.registry != nil {
-			s.registry.EndSession(hostID, "identity_recovery")
+		// The host may hold its session on another instance of the panel.
+		// A revoked certificate the host is still connected with is exactly
+		// the case this must not leave open, so the session is ended
+		// wherever it is held rather than only here.
+		sessionClose, err = gateway.CloseHostSession(r.Context(), s.pool, s.registry, s.jobs,
+			s.log, hostID, "identity_recovery", principal.Subject)
+		if err != nil {
+			s.fail(w, err)
+			return
 		}
 	}
 	// An active host enters recovery: no operation and no secret until the
@@ -834,6 +843,7 @@ func (s *Server) handleIdentityRecovery(w http.ResponseWriter, r *http.Request) 
 			"expected_machine_id": order.ExpectedMachineID,
 			"reason":              reason, "revoke_old_immediately": req.RevokeOldImmediately,
 			"certificates_revoked": revoked, "state": state, "jobs_canceled": canceled,
+			"session_close": sessionClose.Where, "session_closed": sessionClose.Closed,
 		}, evidence),
 	})
 	s.publishEnrollment(r.Context(), events.EnrollmentChange{

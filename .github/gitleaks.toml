@@ -1,0 +1,26 @@
+# The configuration of the secret scan of CI (see ci.yml, job "Secrets").
+#
+# The default rule set is the whole of the scan; nothing is switched off
+# here. The allowlist names literal strings of test fixtures that have the
+# shape of a key and hold no secret - a fixture exists precisely so that a
+# test can prove a key never leaves the host. Every entry is a literal from
+# a known file, not a pattern that would cover a real key by accident.
+#
+# When the scan fires on a new fixture, add that fixture's literal here with
+# the file it stands in. Never add a path: a whole file taken out of the
+# scan is a file where a real key can then be committed unnoticed.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures shaped like a key, holding no key material."
+regexTarget = "match"
+regexes = [
+  # cmd/agentctl/supportbundle_test.go: proves the support bundle refuses
+  # to carry the agent's private key.
+  '''MUSTNOTLEAVE''',
+  # internal/freeipa/write_test.go: "openssh-key" in base64, the body of a
+  # key that a user must not be allowed to submit as a public key.
+  '''b3BlbnNzaC1rZXk=''',
+]

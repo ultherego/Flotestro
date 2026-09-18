@@ -1,0 +1,37 @@
+# Who must review a change before it is merged.
+#
+# The rules are read from top to bottom and the last matching one wins, so
+# the general rule stands first and the security-sensitive paths after it.
+# The owner reviews everything today; the explicit paths below say which
+# files never pass on a glance even when the rest of a pull request is
+# routine, and they stay named when more reviewers are added.
+#
+# The file works as a gate only when the branch protection of main requires
+# a review from a code owner; GitHub does not enforce it by itself.
+
+*       @ultherego
+
+# The decision whether a principal may do a thing at all.
+/internal/authz/        @ultherego
+
+# What the root helper is allowed to be asked for, and by whom.
+/internal/helpercap/    @ultherego
+/internal/helper/       @ultherego
+
+# The keys of the installation and the state that says which of them is
+# current: a mistake here loses the fleet's identity rather than a feature.
+/internal/cryptostate/  @ultherego
+
+# The fleet certificate authority and everything it signs.
+/internal/pki/          @ultherego
+
+# The door the agents knock on: authentication of a host, the session, the
+# envelope that carries every task.
+/internal/gateway/      @ultherego
+
+# The schema is applied on a customer's database and is not taken back.
+/db/migrations/         @ultherego
+
+# The workflows hold the gates themselves; a change here can switch a check
+# off without anything else in the tree changing.
+/.github/               @ultherego

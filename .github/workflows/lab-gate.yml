@@ -1,0 +1,110 @@
+# The verdict of the laboratory, recorded on a commit.
+#
+# The integration suite (build tag "integration") and the Playwright
+# screenshots need the fleet: the panel, the database, the relay and the
+# hosts with the agent. None of that exists on a runner, so this workflow
+# runs nothing of the sort and does not pretend to. It takes the result the
+# owner's script produced in the laboratory and writes it on the commit as
+# the status "lab-suite", so that a branch can require it before a merge.
+#
+# The status says as much as the owner typed. It is a signature under a run
+# that happened elsewhere, and it is worth exactly the care taken before
+# typing "pass".
+#
+# The owner triggers it from the machine that ran the suite:
+#
+#   gh workflow run lab-gate.yml \
+#       -f sha=$(git rev-parse HEAD) \
+#       -f result=pass \
+#       -f report="$(cat /tmp/flotestro-lab-verdict.txt)"
+#
+# The commit has to be pushed first: a status belongs to a commit the
+# repository knows. The report is free text - what Vagrant/test.sh and
+# Vagrant/test-integration.sh printed, the counts of the suite and the
+# version of the laboratory are what makes it readable a month later. It is
+# kept in the run's summary, not in the status, which holds only its first
+# line.
+name: Lab gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: The full 40-character commit the laboratory ran.
+        required: true
+        type: string
+      result:
+        description: The verdict of the suite.
+        required: true
+        type: choice
+        options:
+          - pass
+          - fail
+      report:
+        description: What the laboratory printed; the first line becomes the status.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  record:
+    name: Record the verdict
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Record
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha }}
+          RESULT: ${{ inputs.result }}
+          REPORT: ${{ inputs.report }}
+        run: |
+          set -euo pipefail
+          # An abbreviated commit would write the status on nothing: the
+          # API takes what it is given and a typo would leave a branch
+          # waiting for a check that never arrives.
+          if ! printf '%s' "$SHA" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "sha must be the full 40-character commit, not \"$SHA\"" >&2
+            exit 1
+          fi
+          if ! gh api "repos/$GITHUB_REPOSITORY/commits/$SHA" --jq .sha >/dev/null; then
+            echo "the repository does not know the commit $SHA; push it first" >&2
+            exit 1
+          fi
+
+          case "$RESULT" in
+            pass) state=success ;;
+            fail) state=failure ;;
+            *) echo "unknown verdict \"$RESULT\"" >&2; exit 1 ;;
+          esac
+
+          # The status carries one line, and the API refuses more than 140
+          # characters. The whole report stays in the summary of this run,
+          # which the status links to.
+          description="$(printf '%s' "${REPORT:-}" | head -n 1 | cut -c1-120)"
+          if [ -z "$description" ]; then
+            description="the laboratory reports: $RESULT"
+          fi
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+
+          gh api -X POST "repos/$GITHUB_REPOSITORY/statuses/$SHA" \
+            -f state="$state" \
+            -f context=lab-suite \
+            -f description="$description" \
+            -f target_url="$run_url" >/dev/null
+
+          {
+            echo "### lab-suite: $RESULT"
+            echo
+            echo "Commit \`$SHA\`, recorded by @$GITHUB_ACTOR."
+            echo
+            echo 'What the laboratory reported:'
+            echo
+            echo '```'
+            printf '%s\n' "${REPORT:-(nothing was pasted)}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "lab-suite = $state on $SHA"
