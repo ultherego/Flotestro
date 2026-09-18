@@ -1448,6 +1448,13 @@ func validTimeKey(value string) bool {
 type Scope struct {
 	Site        string
 	Environment string
+	// Team is the group of hosts a binding names instead of a site. The
+	// listing cannot express it - the jobs table has no team column, and
+	// the boundary is a property of the host - so a scope that carries one
+	// narrows this listing to nothing rather than to everything. A screen
+	// that has to show a team's jobs asks the host listing which hosts
+	// those are and filters by them.
+	Team string
 }
 
 // conditions renders the filter as SQL over the jobs table.
@@ -1462,7 +1469,8 @@ func (f ListFilter) conditions() ([]string, []any) {
 	if len(f.Scopes) > 0 {
 		translated := make([]authz.Scope, 0, len(f.Scopes))
 		for _, scope := range f.Scopes {
-			translated = append(translated, authz.Scope{Site: scope.Site, Environment: scope.Environment})
+			translated = append(translated,
+				authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 		}
 		if condition, extra := authz.ScopeSQL(translated, "h.site", "h.environment", len(args)); condition != "" {
 			conditions = append(conditions,

@@ -11,6 +11,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/campaigns"
 	"github.com/ultherego/flotestro/internal/events"
+	"github.com/ultherego/flotestro/internal/hosts"
 )
 
 // keepaliveInterval keeps the stream alive through proxies that close idle
@@ -158,7 +159,7 @@ func (s *Server) scopeGate(principal authz.Principal) func(context.Context, even
 		if job, err := s.jobs.Get(ctx, event.JobID); err == nil && job != nil {
 			if host, err := s.hosts.Get(ctx, job.HostID); err == nil && host != nil {
 				allowed = principal.Can(authz.PermJobRead,
-					authz.Scope{Site: host.Site, Environment: host.Environment})
+					hosts.ScopeOf(host))
 			}
 		}
 		visible[event.JobID] = allowed

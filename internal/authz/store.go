@@ -94,6 +94,19 @@ func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	if !KnownRole(role) {
 		return fmt.Errorf("unknown role %q", role)
 	}
+	// A binding names a team or a site, never both: the two are different
+	// vocabularies, and the insert follows the constraint rather than
+	// letting the database explain it afterwards.
+	if scope.Team != "" {
+		const teamQuery = `
+			insert into role_bindings (id, principal_id, role, site, environment, team_id, valid_until, created_by)
+			values ($1, $2, $3, '*', '*', $4::uuid, $5, $6)
+			on conflict (principal_id, role, team_id) where team_id is not null do update
+				set valid_until = excluded.valid_until, expiry_noted = false`
+		_, err := tx.Exec(ctx, teamQuery, uuid.NewString(), principalID, string(role),
+			scope.Team, validUntil, createdBy)
+		return err
+	}
 	const query = `
 		insert into role_bindings (id, principal_id, role, site, environment, valid_until, created_by)
 		values ($1, $2, $3, $4, $5, $6, $7)
@@ -215,9 +228,20 @@ func (s *Store) DisablePrincipal(ctx context.Context, tx pgx.Tx, principalID, re
 // key: an operator on one site keeps the role on the other.
 func (s *Store) RevokeRole(ctx context.Context, tx pgx.Tx, principalID string,
 	role Role, scope Scope) (bool, error) {
+	if scope.Team != "" {
+		tag, err := tx.Exec(ctx, `
+			delete from role_bindings
+			where principal_id = $1 and role = $2 and team_id = $3::uuid`,
+			principalID, string(role), scope.Team)
+		if err != nil {
+			return false, fmt.Errorf("removing the binding: %w", err)
+		}
+		return tag.RowsAffected() > 0, nil
+	}
 	tag, err := tx.Exec(ctx, `
 		delete from role_bindings
-		where principal_id = $1 and role = $2 and site = $3 and environment = $4`,
+		where principal_id = $1 and role = $2 and site = $3 and environment = $4
+		  and team_id is null`,
 		principalID, string(role), orWildcard(scope.Site), orWildcard(scope.Environment))
 	if err != nil {
 		return false, fmt.Errorf("removing the binding: %w", err)
@@ -386,7 +410,8 @@ func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Bindin
 }
 
 func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly bool) ([]Binding, error) {
-	query := `select role, site, environment, valid_until from role_bindings where principal_id = $1`
+	query := `select role, site, environment, coalesce(team_id::text, ''), valid_until
+		from role_bindings where principal_id = $1`
 	if liveOnly {
 		query += ` and (valid_until is null or valid_until > now())`
 	}
@@ -400,7 +425,7 @@ func (s *Store) readBindings(ctx context.Context, principalID string, liveOnly b
 	for rows.Next() {
 		var binding Binding
 		if err := rows.Scan(&binding.Role, &binding.Scope.Site, &binding.Scope.Environment,
-			&binding.ValidUntil); err != nil {
+			&binding.Scope.Team, &binding.ValidUntil); err != nil {
 			return nil, err
 		}
 		bindings = append(bindings, binding)

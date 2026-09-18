@@ -610,7 +610,7 @@ func (o *Orchestrator) creatorMayDispatch(ctx context.Context, campaign Campaign
 			"campaign_id", campaign.ID, "host_id", host.ID, "err", err)
 		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
 	}
-	scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+	scope := hosts.ScopeOf(host)
 	action := opspec.ActionType(campaign.ActionType)
 	for _, permission := range []authz.Permission{authz.PermCampaignCreate, authz.Permission(action.Permission())} {
 		if !principal.Can(permission, scope) {
@@ -791,7 +791,7 @@ func (o *Orchestrator) creatorMayRemediate(ctx context.Context, campaign Campaig
 	if err != nil {
 		return true, "the rights of " + campaign.CreatedBy + " could not be checked: " + err.Error()
 	}
-	scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+	scope := hosts.ScopeOf(host)
 	for _, action := range plan.Actions() {
 		permission := authz.Permission(opspec.ActionType(action).Permission())
 		if !principal.Can(permission, scope) {

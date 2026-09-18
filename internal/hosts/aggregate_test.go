@@ -70,9 +70,18 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 			want:   "((h.site = $1 and h.environment = $2))",
 			args:   2,
 		},
+		{
+			// The case the count must not read as the whole fleet: a team
+			// binding carries the wildcard site and environment, so only
+			// the team column may answer for it.
+			name:   "a team scope compares the team column alone",
+			scopes: []authz.Scope{{Site: authz.Wildcard, Environment: authz.Wildcard, Team: "1e83"}},
+			want:   "(h.team_id = $1::uuid)",
+			args:   1,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			condition, args := ScopeCondition(test.scopes, "h.site", "h.environment", 0)
+			condition, args := ScopeCondition(test.scopes, "h.site", "h.environment", "h.team_id", 0)
 			if condition != test.want {
 				t.Errorf("condition = %q, expected %q", condition, test.want)
 			}
@@ -87,7 +96,7 @@ func TestScopeConditionNarrowsOrRefuses(t *testing.T) {
 // concatenated after them numbers its placeholders from there.
 func TestScopeConditionNumbersAfterTheOffset(t *testing.T) {
 	condition, args := ScopeCondition([]authz.Scope{{Site: "lab", Environment: authz.Wildcard}},
-		"h.site", "h.environment", 4)
+		"h.site", "h.environment", "h.team_id", 4)
 	if condition != "((h.site = $5))" {
 		t.Errorf("condition = %q", condition)
 	}

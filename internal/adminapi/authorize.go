@@ -89,6 +89,13 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 
 // hostScope returns the authorisation scope of a host. A host that does
 // not exist cannot be the target of any operation.
+//
+// The scope is all three of the host's boundaries at once - its site, its
+// environment and the team it belongs to - because a binding may be drawn
+// on either vocabulary and a check that read only one of them would grant
+// what the other refuses. It is built by hosts.ScopeOf rather than field
+// by field here, so a fourth boundary added later reaches every handler
+// that asks this function the question.
 func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string) (*hosts.Host, authz.Scope, bool) {
 	host, err := s.hosts.Get(r.Context(), hostID)
 	if errors.Is(err, hosts.ErrNotFound) {
@@ -99,7 +106,7 @@ func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string
 		s.fail(w, err)
 		return nil, authz.Scope{}, false
 	}
-	return host, authz.Scope{Site: host.Site, Environment: host.Environment}, true
+	return host, hosts.ScopeOf(host), true
 }
 
 // jobScope returns the authorisation scope of a task, that is the scope of
@@ -111,5 +118,5 @@ func (s *Server) jobScope(r *http.Request, hostID string) authz.Scope {
 		// scope is a safe default.
 		return authz.Scope{}
 	}
-	return authz.Scope{Site: host.Site, Environment: host.Environment}
+	return hosts.ScopeOf(host)
 }

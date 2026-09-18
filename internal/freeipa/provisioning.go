@@ -34,7 +34,7 @@ const (
 	// installed with the directory itself, and a directory that does not
 	// have it needs an administrator with an LDAP client - which the step
 	// reports rather than attempts.
-	PreservePermission = "System: Preserve Users"
+	PreservePermission = "System: Preserve User"
 	// PreservePrivilege is the privilege the connector's role holds. It
 	// carries that one permission, so the role grants the move and not the
 	// rest of the user administration that the directory's own privilege
@@ -230,8 +230,19 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	// The permission is the directory's own and carries the ACI. It is read
 	// first, because everything below binds to it and because a directory
 	// without it needs a different remedy altogether.
-	permission := "the permission " + PreservePermission
-	if _, err := c.provision(ctx, "permission_show", []string{PreservePermission}, map[string]any{}); err != nil {
+	//
+	// The name is not one word in every release: FreeIPA has shipped this
+	// permission as "System: Preserve User" and as "System: Preserve
+	// Users", and a step that knew only one of them would tell half the
+	// installations that their directory does not publish it at all. The
+	// spellings are tried in order and the one that answered is what the
+	// report names and what everything below binds to.
+	found, showErr := c.findPreservePermission(ctx)
+	if found != "" {
+		report.Permission = found
+	}
+	permission := "the permission " + report.Permission
+	if err := showErr; err != nil {
 		switch {
 		case isNotFound(err):
 			report.record(permission, ProvisionMissing,
@@ -264,7 +275,7 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	}
 	if !c.ensureMember(ctx, &report,
 		permission+" in the privilege "+PreservePrivilege,
-		"privilege_add_permission", PreservePrivilege, "permission", PreservePermission, commands[1]) {
+		"privilege_add_permission", PreservePrivilege, "permission", report.Permission, commands[1]) {
 		report.settle()
 		return report, nil
 	}
@@ -486,4 +497,31 @@ func baseDN(principal, realm string) string {
 		parts[i] = "dc=" + part
 	}
 	return strings.Join(parts, ",")
+}
+
+// preservePermissionNames are the spellings FreeIPA has published this
+// permission under. They are tried in order; the first the directory
+// answers for is the one the provisioning binds to.
+var preservePermissionNames = []string{"System: Preserve User", "System: Preserve Users"}
+
+// findPreservePermission reads the directory's own preserve permission
+// under whichever name this release publishes it. It returns the name that
+// answered, or the refusal of the last attempt - a directory that has none
+// of them answers NotFound, which the caller turns into the instruction to
+// add the ACI by hand.
+func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
+	var lastErr error
+	for _, name := range preservePermissionNames {
+		if _, err := c.provision(ctx, "permission_show", []string{name}, map[string]any{}); err == nil {
+			return name, nil
+		} else if !isNotFound(err) {
+			// A refusal that is not "there is no such permission" is about
+			// this connector's rights, not about the spelling, so it stops
+			// the search and is reported as it came.
+			return "", err
+		} else {
+			lastErr = err
+		}
+	}
+	return "", lastErr
 }

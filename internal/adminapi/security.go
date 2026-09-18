@@ -785,7 +785,7 @@ func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
 	// the order refuses such a host outright below.
 	visible := make([]hosts.Host, 0, len(candidates))
 	for _, host := range candidates {
-		if !principal.Can(authz.PermSecurityRead, authz.Scope{Site: host.Site, Environment: host.Environment}) {
+		if !principal.Can(authz.PermSecurityRead, hosts.ScopeOf(&host)) {
 			result.Closed = append(result.Closed, closedHost{
 				Host: host, State: campaigns.TargetIneligible, Reason: ReasonOutOfScope,
 				Message: "the host is outside the scope of your security permissions",
@@ -965,7 +965,7 @@ func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) 
 	// The composite permission, host by host, step by step. The first
 	// missing one ends the order and is named; nothing has been created.
 	for _, host := range plan.Candidates {
-		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+		scope := hosts.ScopeOf(&host)
 		if _, ok := s.authorize(w, r, authz.PermCampaignCreate, scope, "host", host.ID); !ok {
 			return
 		}
@@ -974,7 +974,7 @@ func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	for _, candidate := range plan.Ready {
-		scope := authz.Scope{Site: candidate.host.Site, Environment: candidate.host.Environment}
+		scope := hosts.ScopeOf(&candidate.host)
 		for _, step := range candidate.arrangement.Plan.Actions() {
 			permission := authz.Permission(opspec.ActionType(step).Permission())
 			if _, ok := s.authorize(w, r, permission, scope, "host", candidate.host.ID); !ok {

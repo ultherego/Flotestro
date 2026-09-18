@@ -642,7 +642,8 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, scope := range scopes {
-		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
+		filter.Scopes = append(filter.Scopes,
+			jobs.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
 	// The order of the list: one of the columns the store whitelists,
 	// newest first unless the value names another column or direction. A

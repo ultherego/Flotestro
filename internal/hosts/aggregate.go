@@ -17,12 +17,17 @@ import (
 // the screen and the list never disagree about how many hosts there are.
 
 // ScopeCondition renders the visibility of a host row for the given
-// scopes: the condition of ScopeSQL, or "true" for a caller who sees the
-// whole fleet. An empty scope list gives "false" - no scope is no host,
-// never every host - so a query that concatenates the result cannot widen
-// what a reader sees by leaving the condition out.
-func ScopeCondition(scopes []authz.Scope, siteColumn, envColumn string, offset int) (string, []any) {
-	condition, args := authz.ScopeSQL(scopes, siteColumn, envColumn, offset)
+// scopes: the condition of this package's ScopeSQL, or "true" for a
+// caller who sees the whole fleet. An empty scope list gives "false" - no
+// scope is no host, never every host - so a query that concatenates the
+// result cannot widen what a reader sees by leaving the condition out.
+//
+// teamColumn is the team column of the host row being counted. It is
+// asked for rather than guessed, because a count that reads a team
+// binding with the site columns alone would answer with the whole fleet:
+// a team binding carries the wildcard site and environment.
+func ScopeCondition(scopes []authz.Scope, siteColumn, envColumn, teamColumn string, offset int) (string, []any) {
+	condition, args := ScopeSQL(scopes, siteColumn, envColumn, teamColumn, offset)
 	if condition == "" {
 		return "true", nil
 	}
@@ -75,7 +80,7 @@ func (c ModuleCoverage) Evaluated() int {
 func (s *Store) ModuleCoverage(ctx context.Context, scopes []authz.Scope, module string,
 	staleBefore time.Time) (ModuleCoverage, error) {
 	args := []any{module, staleBefore}
-	condition, extra := ScopeCondition(scopes, "h.site", "h.environment", len(args))
+	condition, extra := ScopeCondition(scopes, "h.site", "h.environment", "h.team_id", len(args))
 	args = append(args, extra...)
 	var coverage ModuleCoverage
 	err := s.pool.QueryRow(ctx, `

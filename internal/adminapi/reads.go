@@ -18,6 +18,7 @@ import (
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/budgets"
 	"github.com/ultherego/flotestro/internal/campaigns"
+	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/jobs"
 	"github.com/ultherego/flotestro/internal/opspec"
 	"github.com/ultherego/flotestro/internal/paging"
@@ -261,7 +262,7 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 	// The permission is checked for every matched host. A fan-out covering
 	// one host outside the scope must not pass because the rest is inside.
 	for _, host := range candidates {
-		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+		scope := hosts.ScopeOf(&host)
 		if _, ok := s.authorize(w, r, authz.PermJobCreate, scope, "host", host.ID); !ok {
 			return
 		}
@@ -510,7 +511,8 @@ func (s *Server) handleGetRead(w http.ResponseWriter, r *http.Request) {
 
 	filter := jobs.ListFilter{FanoutID: stored.ID, Limit: 500}
 	for _, scope := range principal.ScopesFor(authz.PermJobRead) {
-		filter.Scopes = append(filter.Scopes, jobs.Scope{Site: scope.Site, Environment: scope.Environment})
+		filter.Scopes = append(filter.Scopes,
+			jobs.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
 	listed, err := s.jobs.List(r.Context(), filter)
 	if err != nil {

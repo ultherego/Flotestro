@@ -20,6 +20,11 @@ import (
 // tile leads to the hosts it counted. Each yes-or-no filter takes true or
 // false, and a value that is neither is refused rather than read as one of
 // them. The answer has been written when the result is false.
+//
+// The team filter is read here too, because this is the hook the fleet
+// list hands the query to. It narrows within what the caller may see and
+// never beyond it: the boundary is the scope condition the store applies
+// to every listing, and a filter cannot lift it.
 func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.ListFilter) bool {
 	flags := []struct {
 		name   string
@@ -52,6 +57,23 @@ func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.Lis
 			return false
 		}
 		filter.Relay = relay
+	}
+	// The team is a typed column, like the relay: an identifier that is
+	// not one would come back as a server fault when it is the request
+	// that is wrong. The word "none" asks for the other list - the hosts
+	// nobody has placed in a team yet, which after the migration is every
+	// host in the installation.
+	if team := strings.TrimSpace(query.Get("team")); team != "" {
+		switch {
+		case team == "none":
+			filter.TeamUnassigned = true
+		case hosts.ValidTeamID(team):
+			filter.Team = team
+		default:
+			problem(w, http.StatusBadRequest, "invalid_filter",
+				"team must be a team identifier or none")
+			return false
+		}
 	}
 	// A domain name is matched as an operator recorded it; a name that
 	// could not have been recorded is refused for the same reason it

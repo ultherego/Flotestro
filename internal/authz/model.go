@@ -58,6 +58,13 @@ const (
 	PermHostQuarantineRelease Permission = "host.quarantine.release"
 	PermHostDecommission      Permission = "host.decommission"
 	PermPrincipalManage       Permission = "principal.manage"
+	// Teams draw the boundary of what somebody may touch, so the two rights
+	// that move that boundary are their own, and both are global: moving a
+	// host into a team changes who may act on it, and binding a role to a
+	// team hands that team to somebody. Neither is part of running the
+	// fleet - they are decisions about authority, like managing principals.
+	PermHostScopeWrite   Permission = "host.scope.write"
+	PermTeamBindingWrite Permission = "team.binding.write"
 
 	PermUnitStart   Permission = "unit.start"
 	PermUnitStop    Permission = "unit.stop"
@@ -641,6 +648,7 @@ var rolePermissions = map[Role][]Permission{
 		PermRelayEnrollCreate, PermRelayManage,
 		PermHostIdentityReplace, PermHostQuarantine, PermHostQuarantineRelease,
 		PermHostDecommission, PermPrincipalManage,
+		PermHostScopeWrite, PermTeamBindingWrite,
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite, PermLocalUserGroupsWrite,
 		PermLocalSSHKeyAdd, PermLocalSSHKeyRemove, PermLocalSSHKeyReplace,
@@ -696,6 +704,12 @@ func AllRoles() []Role {
 type Scope struct {
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
+	// Team is the group of hosts a target belongs to, where somebody has
+	// said which one. It is an identifier rather than a name, because a
+	// team renamed is the same team, and it is set only for a target that
+	// really has one: a binding that names a team matches nothing else,
+	// and a target with no team is reachable through its site alone.
+	Team string `json:"team,omitempty"`
 }
 
 // Wildcard is the value meaning any scope.
@@ -705,7 +719,15 @@ const Wildcard = "*"
 // An asterisk on the permission's side matches everything. An empty target
 // scope is not matched by a narrow permission: not knowing the target must
 // not widen permissions.
+//
+// A binding that names a team is about that team and nothing else: it does
+// not widen to the site the hosts happen to stand in, and it does not
+// reach a host nobody has put in a team. The two vocabularies never mix,
+// which is what lets a person read a binding and know what it grants.
 func (s Scope) Matches(target Scope) bool {
+	if s.Team != "" {
+		return s.Team == target.Team
+	}
 	return matchesValue(s.Site, target.Site) && matchesValue(s.Environment, target.Environment)
 }
 
@@ -718,6 +740,9 @@ func matchesValue(granted, target string) bool {
 
 // String returns a readable description of the scope.
 func (s Scope) String() string {
+	if s.Team != "" {
+		return "team=" + s.Team
+	}
 	return fmt.Sprintf("site=%s env=%s", orWildcard(s.Site), orWildcard(s.Environment))
 }
 
@@ -864,6 +889,17 @@ func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string,
 	var conditions []string
 	var args []any
 	for _, scope := range scopes {
+		if scope.Team != "" {
+			// A team scope cannot be written with the site and the
+			// environment columns: the binding carries the wildcards its
+			// constraint gives it, and a listing reading those alone would
+			// answer with the whole fleet. A listing that cannot express
+			// the boundary shows nothing rather than everything; the ones
+			// that can - the host listings - go through hosts.ScopeSQL,
+			// which takes the team column as well.
+			conditions = append(conditions, "false")
+			continue
+		}
 		if scope.Site == Wildcard && scope.Environment == Wildcard {
 			// A global scope covers everything, so further conditions no
 			// longer matter.

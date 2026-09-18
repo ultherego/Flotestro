@@ -294,7 +294,7 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	// covering one host outside the scope must not pass because the rest is
 	// inside it.
 	for _, host := range candidates {
-		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+		scope := hosts.ScopeOf(&host)
 		if _, ok := s.authorize(w, r, authz.PermCampaignCreate, scope, "host", host.ID); !ok {
 			return
 		}
@@ -1871,7 +1871,7 @@ func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope,
 			continue
 		}
 		if index == 0 {
-			scope = authz.Scope{Site: host.Site, Environment: host.Environment}
+			scope = hosts.ScopeOf(host)
 			continue
 		}
 		if scope.Site != host.Site {
@@ -1879,6 +1879,14 @@ func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope,
 		}
 		if scope.Environment != host.Environment {
 			scope.Environment = authz.Wildcard
+		}
+		// A campaign is over one team only while every host of it is in
+		// that team. The moment two teams are in the snapshot there is no
+		// team that covers it, and the scope falls back to the site and
+		// the environment - which for a mixed snapshot is the wildcard
+		// above, that is the global right.
+		if scope.Team != host.TeamID {
+			scope.Team = ""
 		}
 	}
 	return scope, nil
@@ -1948,7 +1956,8 @@ func campaignScopes(principal authz.Principal) []campaigns.Scope {
 	scopes := principal.ScopesFor(authz.PermCampaignRead)
 	result := make([]campaigns.Scope, 0, len(scopes))
 	for _, scope := range scopes {
-		result = append(result, campaigns.Scope{Site: scope.Site, Environment: scope.Environment})
+		result = append(result,
+			campaigns.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
 	return result
 }

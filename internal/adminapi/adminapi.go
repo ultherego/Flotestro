@@ -546,6 +546,20 @@ func (s *Server) Routes() http.Handler {
 	// The one route that changes the directory's own configuration: it
 	// gives the connector the right to preserve an account and nothing
 	// else, and it is run on purpose rather than by an operation.
+	// Teams: the register of the groups a role binding may name. A team is
+	// what a tag is not - a boundary of authority with an identifier of its
+	// own, which an operator cannot edit their way across.
+	s.route(mux, "GET /api/v1/teams", s.handleListTeams)
+	s.route(mux, "POST /api/v1/teams", s.handleCreateTeam)
+	s.route(mux, "GET /api/v1/teams/{id}", s.handleGetTeam)
+	s.route(mux, "PUT /api/v1/teams/{id}", s.handleUpdateTeam)
+	s.route(mux, "DELETE /api/v1/teams/{id}", s.handleDeleteTeam)
+	// Putting a host into a team changes who may act on it, so it is a
+	// decision of its own rather than a field of its metadata.
+	s.route(mux, "PUT /api/v1/hosts/{id}/team", s.handleSetHostTeam)
+	// A role over a team, beside the site-scoped bindings.
+	s.route(mux, "POST /api/v1/principals/{id}/team-roles", s.handleGrantTeamRole)
+	s.route(mux, "DELETE /api/v1/principals/{id}/team-roles/{role}", s.handleRevokeTeamRole)
 	s.route(mux, "POST /api/v1/identity/directory/provision-preserve", s.handleProvisionPreserveRights)
 	s.route(mux, "POST /api/v1/identity/changes", s.handleCreateDirectoryChange)
 	s.route(mux, "GET /api/v1/identity/changes/{id}", s.handleGetDirectoryChange)

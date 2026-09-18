@@ -555,7 +555,7 @@ func (e *Evaluator) scopeTargets(publisher authz.Principal, ready, closed []camp
 	kept := make([]campaigns.TargetHost, 0, len(ready))
 	for _, target := range ready {
 		host := hostByID[target.ID]
-		scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+		scope := hosts.ScopeOf(&host)
 		missing := ""
 		required := []authz.Permission{authz.PermCampaignCreate, authz.PermSecurityRemediate}
 		if mode == ModeAutomatic {

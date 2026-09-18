@@ -3,6 +3,7 @@ package adminapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ultherego/flotestro/internal/audit"
 	"github.com/ultherego/flotestro/internal/authz"
 	"github.com/ultherego/flotestro/internal/hosts"
 	"github.com/ultherego/flotestro/internal/identity"
@@ -372,4 +374,242 @@ func rootEquivalentWarning(rule sudoers.Rule, passwordlessGlobally bool) string 
 		sentence += " without a password (a global Defaults line turns authentication off)"
 	}
 	return fmt.Sprintf("%s (%s:%d)", sentence, rule.Source, rule.Line)
+}
+
+// Role bindings scoped to a team.
+//
+// A binding names one vocabulary or the other, never both: a team, or a
+// site and an environment. That is not a convenience - it is what lets a
+// person read a binding and know what it grants. A binding that named
+// both would grant something whose meaning depended on which check read
+// it first, so a request naming both is refused here with a code of its
+// own before the database's constraint has to explain it.
+//
+// The grant takes two permissions at once. principal.manage is what every
+// grant takes, because this is still handing somebody a role; team.binding.write
+// is what this particular scope takes on top, because a team binding is
+// the one grant that follows the fleet around as hosts change hands. An
+// installation can therefore let its identity administrators grant site
+// roles while keeping the team boundary in fewer hands.
+
+// teamBindingRequest names one binding over a team. Site and Environment
+// are read only so that naming them can be refused: they belong to the
+// other vocabulary.
+type teamBindingRequest struct {
+	Role string `json:"role"`
+	// Team is the identifier of the team the role is granted over. A name
+	// would not do: a team renamed is the same team, and a binding that
+	// followed the name would follow a rename into somebody else's group.
+	Team        string `json:"team"`
+	Site        string `json:"site"`
+	Environment string `json:"environment"`
+	// ValidUntil is an RFC 3339 moment; empty means until revoked.
+	ValidUntil string `json:"valid_until"`
+	Reason     string `json:"reason"`
+}
+
+// parse reads the binding and refuses the shapes that have no meaning: an
+// unknown role, a missing or malformed team, and the two vocabularies in
+// one request.
+func (request teamBindingRequest) parse() (authz.Role, authz.Scope, *time.Time, string, error) {
+	role := authz.Role(request.Role)
+	if !authz.KnownRole(role) {
+		return "", authz.Scope{}, nil, "unknown_role", errors.New("unknown role " + request.Role)
+	}
+	if strings.TrimSpace(request.Site) != "" || strings.TrimSpace(request.Environment) != "" {
+		return "", authz.Scope{}, nil, "scope_conflict",
+			errors.New("a binding names a team or a site and an environment, never both")
+	}
+	team := strings.TrimSpace(request.Team)
+	if team == "" {
+		return "", authz.Scope{}, nil, "invalid_team", errors.New("a team binding names a team")
+	}
+	if !hosts.ValidTeamID(team) {
+		return "", authz.Scope{}, nil, "invalid_team", errors.New("team must be a team identifier")
+	}
+	validUntil, err := parseTimeParam(strings.TrimSpace(request.ValidUntil))
+	if err != nil {
+		return "", authz.Scope{}, nil, "invalid_binding",
+			errors.New("valid_until must be an RFC 3339 timestamp")
+	}
+	// The site and the environment stay at the wildcard the constraint
+	// gives a team binding: they say nothing there, and Scope.Matches
+	// reads the team alone once it is set.
+	return role, authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team},
+		validUntil, "", nil
+}
+
+// findTeamBinding returns the binding of the role over the team as the
+// trail describes it, or nil when the identity has none. It is the team
+// twin of findBinding: a team binding is keyed on the team, and the site
+// and environment it carries are not part of the key.
+func findTeamBinding(bindings []authz.Binding, role authz.Role, team string) map[string]any {
+	for _, binding := range bindings {
+		if binding.Role == role && binding.Scope.Team == team {
+			return bindingRecord(binding.Role, binding.Scope, binding.ValidUntil)
+		}
+	}
+	return nil
+}
+
+// authorizeTeamBinding checks the two permissions a team binding takes
+// and resolves the identity it is about. The answer has been written when
+// the result is false.
+func (s *Server) authorizeTeamBinding(w http.ResponseWriter, r *http.Request) (authz.Principal, *authz.Principal, bool) {
+	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
+	if !ok {
+		return actor, nil, false
+	}
+	if _, ok := s.authorize(w, r, authz.PermTeamBindingWrite, authz.GlobalScope, "principal", r.PathValue("id")); !ok {
+		return actor, nil, false
+	}
+	target, ok := s.principalTarget(w, r)
+	if !ok {
+		return actor, nil, false
+	}
+	return actor, target, true
+}
+
+// handleGrantTeamRole grants a role over a team, or changes the validity
+// of one the identity already holds.
+func (s *Server) handleGrantTeamRole(w http.ResponseWriter, r *http.Request) {
+	actor, target, ok := s.authorizeTeamBinding(w, r)
+	if !ok {
+		return
+	}
+	var request teamBindingRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	role, scope, validUntil, code, err := request.parse()
+	if err != nil {
+		problem(w, http.StatusBadRequest, code, err.Error())
+		return
+	}
+	// A binding over a team nobody created would be an access to nothing
+	// that starts granting the moment somebody creates a team with that
+	// identifier; the team is read first, and the refusal says so.
+	team, err := s.hosts.Team(r.Context(), scope.Team)
+	if errors.Is(err, hosts.ErrTeamNotFound) {
+		problem(w, http.StatusNotFound, "team_not_found", "no such team")
+		return
+	}
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.grant", "principal", target.ID)
+	if !ok {
+		return
+	}
+	before := findTeamBinding(target.Bindings, role, scope.Team)
+	after := bindingRecord(role, scope, validUntil)
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	if err := s.authz.GrantRole(r.Context(), tx, target.ID, role, scope, validUntil, actor.Subject); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.role.grant", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "role": string(role), "scope": scope.String(),
+			"team": team.Name, "valid_until": validUntil,
+		}, evidence),
+		Before: before, After: after,
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{
+		"principal_id": target.ID, "subject": target.Subject,
+		"role": string(role), "scope": scope, "team": team, "valid_until": validUntil,
+	})
+}
+
+// handleRevokeTeamRole removes one team binding: the role in the path,
+// the team in the body. The team is part of the key, because an operator
+// of two teams loses one and keeps the other.
+//
+// The team is not read back first. A binding may outlive the team it
+// names only in the moment between two statements, but a revocation must
+// work on whatever is on record: refusing to clean up a binding because
+// its team is gone would leave the record dirtier than it found it.
+func (s *Server) handleRevokeTeamRole(w http.ResponseWriter, r *http.Request) {
+	actor, target, ok := s.authorizeTeamBinding(w, r)
+	if !ok {
+		return
+	}
+	role := authz.Role(r.PathValue("role"))
+	if !authz.KnownRole(role) {
+		problem(w, http.StatusBadRequest, "unknown_role", "unknown role "+string(role))
+		return
+	}
+	var request teamBindingRequest
+	reason, ok := requestReason(w, r, &request)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(request.Site) != "" || strings.TrimSpace(request.Environment) != "" {
+		problem(w, http.StatusBadRequest, "scope_conflict",
+			"a binding names a team or a site and an environment, never both")
+		return
+	}
+	team := strings.TrimSpace(request.Team)
+	if team == "" || !hosts.ValidTeamID(team) {
+		problem(w, http.StatusBadRequest, "invalid_team", "team must be a team identifier")
+		return
+	}
+	scope := authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team}
+	evidence, ok := s.requireStepUp(w, r, actor, reason, "principal.role.revoke", "principal", target.ID)
+	if !ok {
+		return
+	}
+	before := findTeamBinding(target.Bindings, role, team)
+
+	tx, err := s.authz.Pool().Begin(r.Context())
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	defer func() { _ = tx.Rollback(r.Context()) }()
+	removed, err := s.authz.RevokeRole(r.Context(), tx, target.ID, role, scope)
+	if err != nil {
+		s.fail(w, err)
+		return
+	}
+	if !removed {
+		problem(w, http.StatusNotFound, "binding_not_found",
+			"the identity has no binding "+string(role)+" in scope "+scope.String())
+		return
+	}
+	if err := s.audit.RecordTx(r.Context(), tx, audit.Event{
+		ActorType: audit.ActorUser, ActorID: actor.Subject,
+		Action: "principal.role.revoke", TargetType: "principal", TargetID: target.ID,
+		RequestID: requestIDOf(r), Outcome: audit.OutcomeSuccess,
+		Detail: withStepUp(map[string]any{
+			"subject": target.Subject, "role": string(role), "scope": scope.String(),
+		}, evidence),
+		Before: before,
+	}); err != nil {
+		s.fail(w, err)
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		s.fail(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

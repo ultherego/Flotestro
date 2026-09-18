@@ -220,6 +220,15 @@ type Host struct {
 	// order is the record of it.
 	PlacementChangedAt *time.Time `json:"placement_changed_at,omitempty"`
 	Owner              string     `json:"owner,omitempty"`
+	// TeamID is the team the host belongs to and TeamName what that team
+	// is called. The identifier is the boundary - a role binding may name
+	// a team, and the name may be rewritten without moving anybody's
+	// access - and the name travels with it because every screen that
+	// shows a host shows names, not identifiers. Both are absent for a
+	// host nobody has placed in a team; such a host is reachable through
+	// its site alone.
+	TeamID   string `json:"team_id,omitempty"`
+	TeamName string `json:"team_name,omitempty"`
 	// FailureDomain is what the host goes down with - a rack, an
 	// availability zone, a cluster whose members keep a service alive -
 	// recorded by an operator, and keyed on by the budgets that keep a
@@ -1070,6 +1079,13 @@ type ListFilter struct {
 	Relay string
 	// FailureDomain keeps the hosts an operator placed in the named domain.
 	FailureDomain string
+	// Team keeps the hosts of one team, named by its identifier. It is a
+	// filter, not a boundary: what the caller may see at all is Scopes,
+	// and a team filter can only narrow that further. TeamUnassigned
+	// keeps instead the hosts nobody has placed in a team - the list an
+	// administrator works through after the teams are created.
+	Team           string
+	TeamUnassigned bool
 	// Capability keeps the hosts whose registry has the named adapter
 	// available; 'packages.apt', not 'packages'.
 	Capability string
@@ -1376,7 +1392,7 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 		newest := "select max(" + versionParts("n") + ") from hosts n" +
 			" where n.lifecycle_state <> 'retired' and n.agent_version ~ '^v?\\d+(\\.\\d+)*'"
 		if f.Scopes != nil {
-			if condition, extra := authz.ScopeSQL(f.Scopes, "n.site", "n.environment", len(args)); condition != "" {
+			if condition, extra := ScopeSQL(f.Scopes, "n.site", "n.environment", "n.team_id", len(args)); condition != "" {
 				newest += " and " + condition
 				args = append(args, extra...)
 			}
@@ -1398,6 +1414,15 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 				" where s.host_id = h.id and s.ended_at is null and s.relay_id = $%d::uuid)", len(args)))
 	}
 	add("h.failure_domain", f.FailureDomain)
+	if f.Team != "" {
+		// The identifier travels as text and is cast in the query; the
+		// handler has checked that it is one.
+		args = append(args, f.Team)
+		conditions = append(conditions, fmt.Sprintf("h.team_id = $%d::uuid", len(args)))
+	}
+	if f.TeamUnassigned {
+		conditions = append(conditions, "h.team_id is null")
+	}
 	if f.Capability != "" {
 		args = append(args, f.Capability)
 		conditions = append(conditions, fmt.Sprintf(
@@ -1414,8 +1439,13 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	}
 	if f.Scopes != nil {
 		// The narrowing rule lives next to the authorisation, so that a list
-		// cannot show what a direct read would refuse.
-		if condition, extra := authz.ScopeSQL(f.Scopes, "h.site", "h.environment", len(args)); condition != "" {
+		// cannot show what a direct read would refuse. It is this package's
+		// ScopeSQL rather than the one in authz, because a team binding
+		// carries the wildcard site and environment its constraint gives
+		// it: read with the site columns alone it would look like the whole
+		// fleet, and a team's operator would be listed every host in the
+		// installation.
+		if condition, extra := ScopeSQL(f.Scopes, "h.site", "h.environment", "h.team_id", len(args)); condition != "" {
 			conditions = append(conditions, condition)
 			args = append(args, extra...)
 		}
@@ -1697,6 +1727,7 @@ func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int)
 func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, error) {
 	query := `
 		select h.id, h.machine_id, h.hostname, h.site, h.environment, h.placement_changed_at,
+		       coalesce(h.team_id::text, ''), coalesce(t.name, ''),
 		       coalesce(h.owner, ''), h.tags,
 		       coalesce(h.failure_domain, ''), h.release_channel, h.notes,
 		       h.lifecycle_state, h.lifecycle_reason, h.lifecycle_changed_at, h.lifecycle_changed_by,
@@ -1718,6 +1749,9 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		       coalesce(c.rejestr, '[]'::json),
 		       i.payload, i.observed_at
 		from hosts h
+		-- The team travels with every host the panel returns: the row that
+		-- decides who may touch the host also names it on the screen.
+		left join teams t on t.id = h.team_id
 		left join lateral (
 		    select json_agg(json_build_object(
 		               'name', r.name, 'version', r.version,
@@ -1748,7 +1782,7 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 		var identityPayload []byte
 		var identityObservedAt *time.Time
 		if err := rows.Scan(&h.ID, &h.MachineID, &h.Hostname, &h.Site, &h.Environment,
-			&h.PlacementChangedAt, &h.Owner, &h.Tags,
+			&h.PlacementChangedAt, &h.TeamID, &h.TeamName, &h.Owner, &h.Tags,
 			&h.FailureDomain, &h.ReleaseChannel, &h.Notes,
 			&h.LifecycleState, &h.LifecycleReason, &h.LifecycleChangedAt, &h.LifecycleChangedBy,
 			&h.OSFamily, &h.OSDistribution, &h.OSVersion, &h.Architecture,
@@ -2055,7 +2089,7 @@ func (s *Store) TagCatalogue(ctx context.Context, scopes []authz.Scope) ([]TagCo
 		  from hosts h, unnest(h.tags) as tag`
 	var args []any
 	if scopes != nil {
-		if condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", 0); condition != "" {
+		if condition, extra := ScopeSQL(scopes, "h.site", "h.environment", "h.team_id", 0); condition != "" {
 			query += " where " + condition
 			args = append(args, extra...)
 		}
@@ -2096,7 +2130,7 @@ func (s *Store) RenameTag(ctx context.Context, tx pgx.Tx, from, to string, scope
 	query := `select id, hostname, tags from hosts h where $1 = any(h.tags)`
 	args := []any{from}
 	if scopes != nil {
-		if condition, extra := authz.ScopeSQL(scopes, "h.site", "h.environment", len(args)); condition != "" {
+		if condition, extra := ScopeSQL(scopes, "h.site", "h.environment", "h.team_id", len(args)); condition != "" {
 			query += " and " + condition
 			args = append(args, extra...)
 		}

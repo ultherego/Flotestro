@@ -1036,6 +1036,10 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 type Scope struct {
 	Site        string
 	Environment string
+	// Team, as in the job listing: a boundary this table cannot express,
+	// carried so that it narrows to nothing instead of being dropped and
+	// leaving the listing wide open.
+	Team string
 }
 
 // ListFilter narrows the campaign list. Every field is optional; the
@@ -1153,7 +1157,8 @@ func (s *Store) attachProgress(ctx context.Context, items []Campaign) error {
 func scopeCondition(scopes []Scope, offset int) (string, []any) {
 	przelozone := make([]authz.Scope, 0, len(scopes))
 	for _, scope := range scopes {
-		przelozone = append(przelozone, authz.Scope{Site: scope.Site, Environment: scope.Environment})
+		przelozone = append(przelozone,
+			authz.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
 	warunek, args := authz.ScopeSQL(przelozone, "h.site", "h.environment", offset)
 	if warunek == "" {

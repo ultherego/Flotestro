@@ -253,7 +253,7 @@ func (s *Server) applyBulkChange(r *http.Request, principal authz.Principal, hos
 		s.log.Error("bulk metadata: reading the host failed", "host", hostID, "err", err)
 		return bulkHostOutcome{HostID: hostID, Code: "internal_error", Detail: "internal error"}
 	}
-	scope := authz.Scope{Site: host.Site, Environment: host.Environment}
+	scope := hosts.ScopeOf(host)
 	target := scope
 	if change.site != nil {
 		target.Site = *change.site
