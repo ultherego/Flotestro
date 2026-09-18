@@ -155,13 +155,26 @@ func SecretValue(name string) (string, error) {
 	return result, nil
 }
 
-// OptionalSecretValue reads a secret a deployment may leave out. Only a
-// secret that is not configured in either form comes back empty and without
-// an error; a configured one that cannot be read is still a refusal,
-// because falling back to "no secret" on an unreadable mount turns a
-// mounting mistake into a panel that stops signing.
+// OptionalSecretValue reads a secret a deployment may leave out.
+//
+// A secret that is not configured comes back empty and without an error,
+// and for an optional one an empty variable says exactly that: an
+// environment file listing every variable the product knows, each with
+// nothing after the equals sign, is how a package ships its configuration,
+// and a panel that refuses to start over one of those lines would be
+// refusing its own defaults. An empty variable is a statement for a
+// required secret - SecretValue keeps refusing it - and no statement at
+// all for an optional one.
+//
+// A configured secret that cannot be read is still a refusal, whichever
+// kind it is: falling back to "no secret" on an unreadable mount turns a
+// mounting mistake into a panel that quietly stops signing.
 func OptionalSecretValue(name string) (string, error) {
 	value, err := SecretValue(name)
+	var refusal *SecretError
+	if errors.As(err, &refusal) && refusal.Reason == SecretReasonEmpty && refusal.Path == "" {
+		return "", nil
+	}
 	if errors.Is(err, ErrSecretMissing) {
 		return "", nil
 	}

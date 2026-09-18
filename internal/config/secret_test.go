@@ -322,3 +322,32 @@ func TestCheckSecretFile(t *testing.T) {
 		t.Fatalf("the refusal does not name the file: %v", err)
 	}
 }
+
+// A package ships an environment file that lists every variable the
+// product knows, most of them with nothing after the equals sign. For a
+// secret the installation may leave out, such a line says "not
+// configured" - and a panel that refused to start over one of its own
+// default lines would be refusing its own packaging. A required secret
+// keeps refusing it, because there the empty value is a statement that
+// something went wrong on the way in.
+func TestAnEmptyVariableIsNoStatementForAnOptionalSecret(t *testing.T) {
+	t.Setenv("FLOTESTRO_TEST_SECRET", "")
+	value, err := OptionalSecretValue("FLOTESTRO_TEST_SECRET")
+	if err != nil || value != "" {
+		t.Fatalf("an optional secret set to nothing = %q, %v", value, err)
+	}
+	if _, err := SecretValue("FLOTESTRO_TEST_SECRET"); err == nil {
+		t.Fatal("a required secret set to nothing was accepted")
+	} else {
+		refusal(t, err, SecretReasonEmpty)
+	}
+
+	// An empty file is still a refusal in both forms: somebody mounted
+	// something, and what they mounted holds no secret.
+	t.Setenv("FLOTESTRO_TEST_SECRET", "")
+	os.Unsetenv("FLOTESTRO_TEST_SECRET")
+	t.Setenv("FLOTESTRO_TEST_SECRET_FILE", writeSecretFile(t, "empty", ""))
+	if _, err := OptionalSecretValue("FLOTESTRO_TEST_SECRET"); err == nil {
+		t.Fatal("an empty secret file was accepted as an absent secret")
+	}
+}
