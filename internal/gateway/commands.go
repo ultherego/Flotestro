@@ -108,7 +108,14 @@ const (
 	// order. The owner answers within a round trip when the host answers;
 	// past this the answer says the order is with the owner and has not
 	// come back, which is the truth rather than a guess either way.
-	CommandWaitTimeout = 60 * time.Second
+	//
+	// It is deliberately shorter than any client's patience. A minute of
+	// silence on an HTTP request is a timeout at the browser, at a proxy
+	// and in every script anybody writes against this API - and the answer
+	// that would have come is "it is with the other instance", which the
+	// caller can read from the host a second later. The order itself
+	// stands for as long as DefaultCommandExpiry whatever this is.
+	CommandWaitTimeout = 10 * time.Second
 	// sessionCloseWait is the shorter wait of a session close: ending a
 	// session is one call on the owner, with nothing to wait for on the
 	// host.
