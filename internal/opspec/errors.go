@@ -733,6 +733,30 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The package file hashes to the digest the order names and was signed by a different key than the order names. A correct digest from the wrong signer is what this check exists for. Nothing was installed.",
 		Action:  "Do not order the upgrade again. Find out which key signed the artefact on the host and compare it with the release key; a mirror serving a rebuild and a compromised build machine both look like this.", CountsAsFailure: true},
 
+	{Code: "agent_package_signer_not_applicable", Stage: "dispatch", Retry: RetryAfterChange,
+		Meaning: "The plan named the key the package file must carry the signature of, and the host is of the apt family, where a package file carries no signature of its own. The order was not sent: the demand could never be met. Nothing was installed.",
+		Action:  "Order the replacement without a signer. On Debian and Ubuntu the origin of a package is proved by the signed repository index - InRelease covers the package list, the package list covers the checksum of the file - and the host reports which key signed that index in the result of the job.", CountsAsFailure: true},
+
+	// What an apt host can establish about the origin of the package file it
+	// installs. None of these fails a job: they are the answer the host gives to
+	// "who built this", and the panel judges it.
+	{Code: "apt_repository_unsigned", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The repository the package file comes from publishes a release file and no signature of it, so nothing vouches for the package list or for the checksums in it. The package was still checked against the digest the order named.",
+		Action:  "Sign the repository index - packaging/sign-repo.sh writes InRelease and Release.gpg - and let the host refresh its metadata. A source the operator marked trusted looks exactly like this."},
+	{Code: "apt_index_key_untrusted", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The index of that repository is signed, and by a key the host does not hold in the key store apt reads. The package was still checked against the digest the order named.",
+		Action:  "Put the release key where apt looks for it - a keyring named by Signed-By in the source, or /etc/apt/trusted.gpg.d - and refresh the metadata. A key that was rotated without the fleet being told looks like this."},
+	{Code: "apt_index_unreadable", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The host holds no release file of the repository that publishes the package file, or could not read it: the metadata was never fetched, or the file names no checksum for that package. The package was still checked against the digest the order named.",
+		Action:  "Refresh the repository metadata on the host and order again. A host that has never reached the repository it installs from reports this."},
+	{Code: "apt_artefact_origin_unknown", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "apt did not say which repository publishes the version being installed, so there is no index to read. The package was still checked against the digest the order named.",
+		Action:  "Check that the version the order names is in a source the host has, then refresh the metadata and order again."},
+	{Code: "apt_index_digest_mismatch", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The repository index is signed by a key apt trusts and it publishes a different checksum under that file name than the file the host holds. The file itself is the one the order named - the disagreement is between the release and the repository.",
+		Action:  "Compare the release with the repository the host uses: a package rebuilt under the same version, a stale mirror, or a file kept from an earlier replacement of the same version all look like this. Do not confirm the release until they agree."},
+
+	// The phases of a directory change (security remediation, chapter 14. 3).
 	{Code: "directory_moddn_unsupported", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The preflight asked the directory what it can do and it proved it cannot preserve an account: the connector's service account may not move an entry, or the container of preserved accounts is not there. Nothing was ordered and the local account was not touched.",
 		Action:  "Run the directory provisioning step for preserving accounts: it gives the connector's service account the four rights the move needs - System: Preserve User for the move itself, System: Modify User RDN for the name it carries, System: Read Preserved Users so the directory can report what it moved, and System: Modify Preserved Users because the directory clears the password of the entry it preserves - through the privilege Flotestro Preserve Users and the role Flotestro Directory Connector, and nothing else. It is safe to repeat - a second run changes nothing. If the directory refuses the connector that step too, the refusal names the ipa commands a directory administrator runs instead. A directory that merely does not report its rights does not raise this."},

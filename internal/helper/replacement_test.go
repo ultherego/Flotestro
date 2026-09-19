@@ -432,3 +432,60 @@ func digestOfContent(content string) string {
 	sum := sha256.Sum256([]byte(content))
 	return hex.EncodeToString(sum[:])
 }
+
+// A Debian package file carries no signature, so the host reports the signed
+// repository index; the file's own signature stays the proof elsewhere.
+func TestOnTheAptFamilyTheProofIsTheSignedRepositoryIndex(t *testing.T) {
+	const fingerprint = "3B4FE6ACC0B21F32B4B6C1F4A2C794A986419D8A"
+	withAPTProof(t, packages.APTIndexProof{
+		Established: true,
+		SignedBy:    fingerprint,
+		IndexPath:   "/var/lib/apt/lists/packages.example.net_repo_deb_dists_stable_InRelease",
+	})
+
+	spec := packages.AgentPackage + "=0.56.0-1"
+	identity, _ := artefactProof(context.Background(), "apt", spec, "0f", "", "")
+	if identity != packages.APTProofPrefix+fingerprint {
+		t.Fatalf("the apt host reports %q, expected the key of the repository index", identity)
+	}
+	if described := packages.DescribeArtefactSigner(identity); !strings.Contains(described,
+		"repository index signed by "+fingerprint) {
+		t.Errorf("the operator reads %q", described)
+	}
+
+	// dnf and pacman verify the file itself; the index answers for nobody there.
+	if identity, source := artefactProof(context.Background(), "dnf", spec, "0f",
+		"A2C794A986419D8A", "rpm-keyring"); identity != "A2C794A986419D8A" || source != "rpm-keyring" {
+		t.Errorf("the rpm host reports %q from %q", identity, source)
+	}
+}
+
+// An apt host that could not establish the index says so with a typed reason;
+// an empty field would read as "nothing to report".
+func TestAnAptHostThatProvesNothingSaysWhy(t *testing.T) {
+	withAPTProof(t, packages.APTIndexProof{
+		Reason: packages.APTProofUnsigned,
+		Detail: "the repository publishes a release file and no signature of it",
+	})
+	identity, detail := artefactProof(context.Background(), "apt",
+		packages.AgentPackage+"=0.56.0-1", "0f", "", "")
+	if identity != packages.APTProofUnknownPrefix+packages.APTProofUnsigned {
+		t.Fatalf("the host reports %q", identity)
+	}
+	if detail == "" {
+		t.Error("the refusal of the proof carries no explanation")
+	}
+	// The order named no key, so nothing about it is a refusal of the upgrade.
+	if refusal := judgeSigner("", "", nil); refusal != nil {
+		t.Errorf("an order naming no key was refused as %q", refusal.GetErrorCode())
+	}
+}
+
+// withAPTProof replaces the read of the repository index for one test, so that
+// nothing here touches the apt state of the machine it runs on.
+func withAPTProof(t *testing.T, proof packages.APTIndexProof) {
+	t.Helper()
+	previous := establishAPTProof
+	establishAPTProof = func(context.Context, string, string) packages.APTIndexProof { return proof }
+	t.Cleanup(func() { establishAPTProof = previous })
+}

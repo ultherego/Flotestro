@@ -1740,6 +1740,8 @@ type AgentUpgradePayload struct {
 	PackageSHA256 string `json:"package_sha256,omitempty"`
 	// PackageSigner is the key the artefact must carry the signature of, as a
 	// fingerprint or a long key ID. The checksum says the bytes are the ones the
+	// release published; the key says who built them. A plan for a host of the
+	// apt family leaves it empty on purpose - see ArtefactCarriesSignature.
 	PackageSigner string `json:"package_signer,omitempty"`
 	// RollbackVersion says what to return to when the host does not come back
 	// with the new version. Empty means no prepared return.
@@ -1747,6 +1749,16 @@ type AgentUpgradePayload struct {
 	// ReleaseRollback orders the host to drop the artefact it kept for a return.
 	// The panel sends it once the replacement is confirmed; until then the way
 	ReleaseRollback bool `json:"release_rollback,omitempty"`
+}
+
+// OSFamilyDebian is the family whose package file carries no signature of its
+// own: the proof of a package's origin there is the signed repository index.
+const OSFamilyDebian = "debian"
+
+// ArtefactCarriesSignature says whether a package file of that OS family can
+// carry a signature of its own, so a plan may name the key it must bear.
+func ArtefactCarriesSignature(osFamily string) bool {
+	return !strings.EqualFold(strings.TrimSpace(osFamily), OSFamilyDebian)
 }
 
 // validAgentVersion guards that the version is a package version rather than

@@ -264,13 +264,9 @@ func describeArtefacts(result *helperv1.PackageActionResult) string {
 			verified += " (" + source + ")"
 		}
 		parts = append(parts, verified)
-		// What the host established about the signature travels with the result:
-		// an order that named no key still says who signed what was installed.
-		if signer := result.GetArtefactSigner(); signer != "" {
-			parts = append(parts, "the artefact was signed by "+signer)
-		} else {
-			parts = append(parts, "the signer of the artefact was not established")
-		}
+		// What the host established about the origin travels with the result: the
+		// signature of the file, the signed repository index, or a typed reason.
+		parts = append(parts, packages.DescribeArtefactSigner(result.GetArtefactSigner()))
 	}
 	if rollback := result.GetRollbackArtefactPath(); rollback != "" {
 		parts = append(parts, "the artefact to go back to is kept at "+rollback)

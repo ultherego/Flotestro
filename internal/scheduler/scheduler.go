@@ -365,6 +365,15 @@ func (s *Scheduler) deliver(ctx context.Context, item jobs.LeasedJob, owner jobs
 	if err != nil {
 		s.log.Error("the task envelope was not built", "job_id", item.Job.ID, "err", err)
 		metrics.JobDispatch.Inc("invalid_envelope", s.options.GatewayID)
+		if errors.Is(err, errSignerNotApplicable) {
+			// The host would refuse such an order anyway; a demand that can never be
+			// met is settled on the panel rather than sent out to be refused.
+			if err := s.store.FailUndelivered(ctx, item.Job.ID, item.AttemptID,
+				ErrorSignerNotApplicable, err.Error()); err != nil {
+				s.log.Error("the rejected task was not settled", "job_id", item.Job.ID, "err", err)
+			}
+			return
+		}
 		if errors.Is(err, errCapabilityUnsupported) {
 			// Under enforce a host whose agent forwards no capability gets no mutating
 			// task: the helper would refuse it anyway, and the job says on the panel
@@ -643,6 +652,13 @@ func buildEnvelope(item jobs.LeasedJob) (*agentv1.TaskEnvelope, error) {
 		envelope.Action = &agentv1.TaskEnvelope_PackageUpgrade{PackageUpgrade: request}
 
 	case opspec.ActionAgentUpgrade:
+		// A Debian package file carries no signature of its own, so a plan for such
+		// a host names no key: the proof there is the signed repository index.
+		if payload.AgentUpgrade.PackageSigner != "" &&
+			!opspec.ArtefactCarriesSignature(preconditions.OSFamily) {
+			return nil, fmt.Errorf("%w: the host is of the %s family",
+				errSignerNotApplicable, preconditions.OSFamily)
+		}
 		envelope.Action = &agentv1.TaskEnvelope_AgentUpgrade{
 			AgentUpgrade: &agentv1.AgentUpgrade{
 				TargetVersion:   payload.AgentUpgrade.TargetVersion,
@@ -1470,6 +1486,14 @@ func (e unknownActionError) Error() string { return "unknown operation type: " +
 // Permanent: a payload that cannot be turned into an envelope does not
 // become one by waiting.
 func (e unknownActionError) Permanent() bool { return true }
+
+// ErrorSignerNotApplicable is the code an agent replacement ends with when the
+// plan names a signing key for a family whose package file carries none.
+const ErrorSignerNotApplicable = "agent_package_signer_not_applicable"
+
+// errSignerNotApplicable marks such a plan; a retry of it would fail the same.
+var errSignerNotApplicable = errors.New(
+	"a package file of the apt family carries no signature of its own, so a plan for it names no key")
 
 // ErrorSecretGone is the code a task ends with when the secret it needs does
 // not exist any more: retired by somebody, or deleted.

@@ -48,6 +48,10 @@ const (
 	ErrorSignerMismatch = "agent_package_signer_mismatch"
 )
 
+// establishAPTProof is the apt family's answer to who built an artefact; it is
+// a variable so that a test never reads the real apt state of the machine.
+var establishAPTProof = packages.EstablishAPTIndexProof
+
 // artefactSourceKept and artefactSourceRepository say where the file that is
 // installed came from.
 const (
@@ -165,6 +169,8 @@ func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Man
 				"expected_signer", action.GetPackageSigner(), "err", refusal.GetMessage())
 			return refusal
 		}
+		identity, signerSource = artefactProof(ctx, manager.Name(), spec, digest,
+			identity, signerSource)
 		order.ArtefactPath = path
 		order.ArtefactSHA256 = digest
 		order.ArtefactSource = source
@@ -667,10 +673,6 @@ func verifyDigest(path, expected string) error {
 // signatureSuffix is the detached signature a manager ships beside a package.
 const signatureSuffix = ".sig"
 
-// minSignerDigits is the shortest key identity worth comparing: a short key ID
-// is cheap enough to collide with that it establishes nobody.
-const minSignerDigits = 16
-
 // pacmanKeyringDir is where pacman keeps the keys it trusts.
 var pacmanKeyringDir = "/etc/pacman.d/gnupg"
 
@@ -686,10 +688,10 @@ func artefactSigner(ctx context.Context, managerName, path string) (string, stri
 	case "dnf":
 		return rpmArtefactSigner(ctx, path)
 	case "apt":
-		// A .deb carries no signature of its own: what apt verifies is the signed
-		// index of the repository, and that proof does not travel with the file.
-		return "", "", fmt.Errorf("%w: a Debian package file carries no signature of its own",
-			errSignerUnavailable)
+		// A .deb carries no signature of its own: the proof there is the signed
+		// repository index, which the host establishes separately.
+		return "", "", fmt.Errorf("%w: a Debian package file carries no signature of its own; "+
+			"the proof of its origin is the signed repository index", errSignerUnavailable)
 	}
 	return "", "", fmt.Errorf("%w: the manager %s cannot check the signature of a package file",
 		errSignerUnavailable, managerName)
@@ -723,21 +725,10 @@ func pacmanArtefactSigner(ctx context.Context, path string) (string, string, err
 	return identity, "pacman-keyring", nil
 }
 
-// gpgValidSigner reads the fingerprint out of gpg's status output. VALIDSIG is
-// written only for a signature that checked out against a key in the keyring.
+// gpgValidSigner reads the fingerprint out of gpg's status output; gpg and the
+// gpgv apt verifies its indexes with write the same line.
 func gpgValidSigner(output string) (string, bool) {
-	for _, line := range strings.Split(output, "\n") {
-		_, rest, found := strings.Cut(strings.TrimSpace(line), "[GNUPG:] VALIDSIG ")
-		if !found {
-			continue
-		}
-		fields := strings.Fields(rest)
-		if len(fields) == 0 || !isHexIdentity(fields[0]) {
-			continue
-		}
-		return strings.ToUpper(fields[0]), true
-	}
-	return "", false
+	return packages.PGPStatusSigner(output)
 }
 
 // rpmArtefactSigner asks rpm itself whether the file carries a signature of a
@@ -785,19 +776,7 @@ func rpmSigner(output string) (string, bool) {
 // isHexIdentity says whether a value is a key identity long enough to name
 // one key rather than a family of them.
 func isHexIdentity(value string) bool {
-	if len(value) < minSignerDigits {
-		return false
-	}
-	for _, char := range value {
-		switch {
-		case char >= '0' && char <= '9':
-		case char >= 'a' && char <= 'f':
-		case char >= 'A' && char <= 'F':
-		default:
-			return false
-		}
-	}
-	return true
+	return packages.HexKeyIdentity(value)
 }
 
 // signerMatches compares two ways of naming one key: the fingerprint and the
@@ -812,6 +791,17 @@ func signerMatches(established, expected string) bool {
 		longer, shorter = shorter, longer
 	}
 	return strings.HasSuffix(longer, shorter)
+}
+
+// artefactProof settles what the host reports about the origin of the file it
+// installs; on the apt family that is the signed index, not nothing at all.
+func artefactProof(ctx context.Context, managerName, spec, digest,
+	identity, source string) (string, string) {
+	if managerName != "apt" {
+		return identity, source
+	}
+	proof := establishAPTProof(ctx, spec, digest)
+	return proof.Token(), proof.Detail
 }
 
 // judgeSigner settles the signature of the artefact against the key the order

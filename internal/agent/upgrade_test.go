@@ -359,3 +359,25 @@ func TestTheResultSaysWhereTheArtefactCameFromAndWhoSignedIt(t *testing.T) {
 		t.Errorf("the description %q hides that the signer is unknown", unsigned)
 	}
 }
+
+// On an apt host the result names the proof that stood behind the file: the
+// repository index and the key that signed it, or the reason there was none.
+func TestTheResultOfAnAptUpgradeNamesTheRepositoryIndex(t *testing.T) {
+	const fingerprint = "3B4FE6ACC0B21F32B4B6C1F4A2C794A986419D8A"
+	proven := describeArtefacts(&helperv1.PackageActionResult{
+		VerifiedArtefactPath: "/var/lib/flotestro-helper/agent-upgrade/download/agent.deb",
+		ArtefactSource:       "repository",
+		ArtefactSigner:       packages.APTProofPrefix + fingerprint,
+	})
+	if !strings.Contains(proven, "repository index signed by "+fingerprint) {
+		t.Errorf("the description %q does not name the proof behind the file", proven)
+	}
+	unproven := describeArtefacts(&helperv1.PackageActionResult{
+		VerifiedArtefactPath: "/var/lib/flotestro-helper/agent-upgrade/download/agent.deb",
+		ArtefactSource:       "repository",
+		ArtefactSigner:       packages.APTProofUnknownPrefix + packages.APTProofUnsigned,
+	})
+	if !strings.Contains(unproven, packages.APTProofUnsigned) {
+		t.Errorf("the description %q hides why nothing could be proved", unproven)
+	}
+}

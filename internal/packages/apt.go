@@ -2,6 +2,7 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -801,4 +802,421 @@ func (a *APT) Holds(ctx context.Context) ([]string, string) {
 		}
 	}
 	return held, ""
+}
+
+// --- What proves the origin of a package file on the apt family ---------
+// A .deb carries no signature: the proof is the index, where InRelease covers
+// Packages and Packages the checksum of every package file.
+
+// The typed reasons an apt host cannot establish the origin of a package file.
+const (
+	// APTProofUnsigned means the repository publishes no signed index at all.
+	APTProofUnsigned = "apt_repository_unsigned"
+	// APTProofKeyUntrusted means the index is signed by a key apt does not hold.
+	APTProofKeyUntrusted = "apt_index_key_untrusted"
+	// APTProofIndexUnreadable means the index of that repository is not on the
+	// host or could not be read.
+	APTProofIndexUnreadable = "apt_index_unreadable"
+	// APTProofOriginUnknown means apt did not say which repository publishes
+	// the file.
+	APTProofOriginUnknown = "apt_artefact_origin_unknown"
+	// APTProofDigestMismatch means the index publishes another file under that
+	// name than the one the host holds.
+	APTProofDigestMismatch = "apt_index_digest_mismatch"
+)
+
+// The prefixes that mark a signer value as the signature of a repository
+// index rather than of the file, so an unproven order is never an empty field.
+const (
+	APTProofPrefix        = "apt-index:"
+	APTProofUnknownPrefix = "apt-index-unknown:"
+)
+
+// gpgvPath is the tool apt itself verifies its indexes with.
+const gpgvPath = "/usr/bin/gpgv"
+
+// errAPTIndexUnreadable says the host could not verify the index at all, as
+// opposed to reading it and finding a key it does not trust.
+var errAPTIndexUnreadable = errors.New("the repository index could not be verified")
+
+// minKeyDigits is the shortest key identity worth comparing: a short key ID is
+// cheap enough to collide with that it establishes nobody.
+const minKeyDigits = 16
+
+// The apt state the proof reads. They are variables so that a test can point
+// them at fixture files rather than at the host's own apt.
+var (
+	aptIndexDir       = aptListsDir
+	aptTrustedKeyring = "/etc/apt/trusted.gpg"
+	aptTrustedDir     = "/etc/apt/trusted.gpg.d"
+	aptSourcesDir     = APTSourcesDir
+	aptSourcesFile    = APTSourcesFile
+)
+
+// APTIndexProof is what an apt host can establish about the origin of a package
+// file: the repository that publishes it and the key that signed its index.
+type APTIndexProof struct {
+	Established bool `json:"established"`
+	// Reason is the typed code when nothing could be established.
+	Reason      string `json:"reason,omitempty"`
+	ArtefactURI string `json:"artefact_uri,omitempty"`
+	IndexPath   string `json:"index_path,omitempty"`
+	// SignedBy is the key gpgv accepted the signature of the index on.
+	SignedBy string `json:"signed_by,omitempty"`
+	// Detail says in one sentence what stood in the way.
+	Detail string `json:"detail,omitempty"`
+}
+
+// Token renders the proof into the one field a package result carries for the
+// signature: the key on success, the typed reason otherwise.
+func (p APTIndexProof) Token() string {
+	if p.Established && p.SignedBy != "" {
+		return APTProofPrefix + p.SignedBy
+	}
+	reason := p.Reason
+	if reason == "" {
+		reason = APTProofIndexUnreadable
+	}
+	return APTProofUnknownPrefix + reason
+}
+
+// DescribeArtefactSigner puts into the result of a job what proved the origin
+// of the file that was installed, in the words of the family it came from.
+func DescribeArtefactSigner(value string) string {
+	switch {
+	case value == "":
+		return "the signer of the artefact was not established"
+	case strings.HasPrefix(value, APTProofPrefix):
+		return "the proof is the repository index signed by " +
+			strings.TrimPrefix(value, APTProofPrefix)
+	case strings.HasPrefix(value, APTProofUnknownPrefix):
+		return "the repository index proved nothing about the artefact (" +
+			strings.TrimPrefix(value, APTProofUnknownPrefix) + ")"
+	}
+	return "the artefact was signed by " + value
+}
+
+// EstablishAPTIndexProof reads what an apt host can prove about a package file:
+// which repository publishes it and which key apt trusts signed that index.
+func EstablishAPTIndexProof(ctx context.Context, spec, artefactSHA256 string) APTIndexProof {
+	uri, published, err := aptArtefactOrigin(ctx, spec)
+	if err != nil {
+		return APTIndexProof{Reason: APTProofOriginUnknown, Detail: err.Error()}
+	}
+	proof := APTIndexProof{ArtefactURI: uri}
+	index, signature, reason, detail := aptIndexOf(uri)
+	if reason != "" {
+		proof.Reason, proof.Detail = reason, detail
+		return proof
+	}
+	proof.IndexPath = index
+
+	signer, err := aptIndexSigner(ctx, index, signature)
+	if err != nil {
+		proof.Reason, proof.Detail = APTProofKeyUntrusted, err.Error()
+		// A host without the tool or without a key store has not judged the key;
+		// it has not looked at it.
+		if errors.Is(err, errAPTIndexUnreadable) {
+			proof.Reason = APTProofIndexUnreadable
+		}
+		return proof
+	}
+	proof.SignedBy = signer
+
+	// A signed index proves nothing about this file unless it is the file the
+	// index publishes.
+	if published == "" {
+		proof.Reason = APTProofIndexUnreadable
+		proof.Detail = "the index of " + index + " names no checksum for " + filepath.Base(uri)
+		return proof
+	}
+	if artefactSHA256 != "" && !strings.EqualFold(published, artefactSHA256) {
+		proof.Reason = APTProofDigestMismatch
+		proof.Detail = "the index publishes " + published + " under that name and the host holds " +
+			artefactSHA256
+		return proof
+	}
+	proof.Established = true
+	return proof
+}
+
+// aptArtefactOrigin asks apt where the package file of one specification comes
+// from and what checksum its index publishes for it. Nothing is downloaded.
+var aptArtefactOrigin = func(ctx context.Context, spec string) (string, string, error) {
+	result := run(ctx, time.Minute, aptGetPath, "--yes", "--quiet", "--print-uris",
+		"--reinstall", "--allow-downgrades", "--allow-change-held-packages",
+		"-o", "Debug::NoLocking=true", "install", spec)
+	if !result.Ran || result.ExitCode != 0 {
+		return "", "", fmt.Errorf("apt-get --print-uris: %s", result.Reason())
+	}
+	uri, ok := ParseAPTArtefactURI(result.Stdout, AgentPackage)
+	if !ok {
+		return "", "", fmt.Errorf("apt named no source for %s", spec)
+	}
+	// The manifest of the same output carries the checksum the index publishes;
+	// only a SHA-256 answers the digest an order names.
+	_, digests := ParseAPTPrintURIs(result.Stdout)
+	published, isSHA256 := strings.CutPrefix(digests[AgentPackage], "sha256:")
+	if !isSHA256 {
+		published = ""
+	}
+	return uri, published, nil
+}
+
+// ParseAPTArtefactURI reads the address one package is fetched from out of
+// what apt-get --print-uris wrote; the manifest parser reads the rest.
+func ParseAPTArtefactURI(output, name string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "'") {
+			continue
+		}
+		// The file name is name_version_arch.deb; the name ends at the first
+		// underscore, and a version never carries one.
+		if file, _, found := strings.Cut(fields[1], "_"); !found || file != name {
+			continue
+		}
+		if uri := strings.Trim(fields[0], "'"); uri != "" {
+			return uri, true
+		}
+	}
+	return "", false
+}
+
+// aptIndexOf finds the release file of the repository that publishes an
+// address, or the typed reason why the host has none to read.
+func aptIndexOf(uri string) (index, signature, reason, detail string) {
+	target := APTFileName(uri)
+	entries, err := os.ReadDir(aptIndexDir)
+	if err != nil {
+		return "", "", APTProofIndexUnreadable, "reading " + aptIndexDir + ": " + err.Error()
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	name, detached, ok := MatchAPTIndex(target, names)
+	if !ok {
+		return "", "", APTProofIndexUnreadable,
+			"the host holds no release file of the repository that publishes " + target
+	}
+	index = filepath.Join(aptIndexDir, name)
+	if detached == "" {
+		return index, "", "", ""
+	}
+	// A release file without any signature beside it is a repository nobody
+	// vouches for - which apt accepts only when the source says trusted.
+	signature = filepath.Join(aptIndexDir, detached)
+	if !fileExists(signature) {
+		return "", "", APTProofUnsigned,
+			"the repository publishes " + name + " and no signature of it"
+	}
+	return index, signature, "", ""
+}
+
+// MatchAPTIndex picks, among the files apt keeps in its lists directory, the
+// release file of the repository an address belongs to.
+func MatchAPTIndex(fileName string, names []string) (index, signature string, ok bool) {
+	best, bestBase := "", ""
+	for _, name := range names {
+		base, isIndex := aptIndexBase(name)
+		if !isIndex || !strings.HasPrefix(fileName, base+"_") {
+			continue
+		}
+		// The longest base wins: two sources on one host differ by their path
+		// alone, and the shorter one would swallow the longer one's packages.
+		if len(base) < len(bestBase) {
+			continue
+		}
+		if len(base) > len(bestBase) || strings.HasSuffix(name, "_InRelease") {
+			bestBase, best = base, name
+		}
+	}
+	switch {
+	case best == "":
+		return "", "", false
+	case strings.HasSuffix(best, "_InRelease"):
+		return best, "", true
+	}
+	return best, best + ".gpg", true
+}
+
+// aptIndexBase reduces the name of a release file to the repository it belongs
+// to: the lists directory encodes the whole address in the name.
+func aptIndexBase(name string) (string, bool) {
+	trimmed, ok := strings.CutSuffix(name, "_InRelease")
+	if !ok {
+		if trimmed, ok = strings.CutSuffix(name, "_Release"); !ok {
+			return "", false
+		}
+	}
+	// A distribution tree carries the suite under dists/; a flat repository
+	// has its release file directly beside the packages.
+	if index := strings.LastIndex(trimmed, "_dists_"); index > 0 {
+		return trimmed[:index], true
+	}
+	base := strings.TrimSuffix(trimmed, "_.")
+	return base, base != ""
+}
+
+// APTFileName is the name apt gives a fetched address in its lists directory:
+// the scheme goes, the credentials go, every slash becomes an underscore.
+func APTFileName(uri string) string {
+	name := uri
+	if _, rest, found := strings.Cut(name, "://"); found {
+		name = rest
+	}
+	host, path, hasPath := strings.Cut(name, "/")
+	if _, rest, found := strings.Cut(host, "@"); found {
+		host = rest
+	}
+	name = host
+	if hasPath {
+		name += "/" + path
+	}
+	return strings.ReplaceAll(strings.Trim(name, "/"), "/", "_")
+}
+
+// aptIndexSigner verifies a release file with gpgv against the keys apt itself
+// trusts and names the key that signed it.
+var aptIndexSigner = func(ctx context.Context, index, signature string) (string, error) {
+	keyrings := APTTrustedKeyrings()
+	if len(keyrings) == 0 {
+		return "", fmt.Errorf("%w: apt holds no repository keys", errAPTIndexUnreadable)
+	}
+	args := make([]string, 0, 2*len(keyrings)+4)
+	args = append(args, "--status-fd", "1")
+	for _, keyring := range keyrings {
+		args = append(args, "--keyring", keyring)
+	}
+	if signature != "" {
+		args = append(args, signature)
+	}
+	args = append(args, index)
+	result := run(ctx, 30*time.Second, gpgvPath, args...)
+	if !result.Ran {
+		return "", fmt.Errorf("%w: %s", errAPTIndexUnreadable, result.Reason())
+	}
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf("gpgv did not accept %s against the keys apt trusts: %s",
+			filepath.Base(index), result.Reason())
+	}
+	signer, ok := PGPStatusSigner(result.Stdout)
+	if !ok {
+		return "", fmt.Errorf("gpgv accepted %s without naming the key", filepath.Base(index))
+	}
+	return signer, nil
+}
+
+// APTTrustedKeyrings lists the key stores apt reads: its own trusted set and
+// every keyring a source names with Signed-By.
+func APTTrustedKeyrings() []string {
+	var keyrings []string
+	if fileExists(aptTrustedKeyring) {
+		keyrings = append(keyrings, aptTrustedKeyring)
+	}
+	entries, _ := os.ReadDir(aptTrustedDir)
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !(strings.HasSuffix(name, ".gpg") || strings.HasSuffix(name, ".asc")) {
+			continue
+		}
+		keyrings = append(keyrings, filepath.Join(aptTrustedDir, name))
+	}
+	for _, path := range aptSignedByKeyrings() {
+		if fileExists(path) {
+			keyrings = append(keyrings, path)
+		}
+	}
+	return keyrings
+}
+
+// aptSignedByKeyrings lists the keyrings the sources themselves name: apt
+// trusts such a key for that one source, so the store is short without them.
+func aptSignedByKeyrings() []string {
+	files := []string{aptSourcesFile}
+	entries, _ := os.ReadDir(aptSourcesDir)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			files = append(files, filepath.Join(aptSourcesDir, entry.Name()))
+		}
+	}
+	var paths []string
+	for _, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		paths = append(paths, ParseAPTSignedBy(string(data))...)
+	}
+	return paths
+}
+
+// ParseAPTSignedBy reads the keyring paths a source names, in both formats apt
+// understands. Inline key material names no file and is passed over.
+func ParseAPTSignedBy(content string) []string {
+	var paths []string
+	add := func(value string) {
+		for _, field := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ' ' || r == '\t' || r == ','
+		}) {
+			if strings.HasPrefix(field, "/") {
+				paths = append(paths, field)
+			}
+		}
+	}
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		if key, value, found := strings.Cut(trimmed, ":"); found &&
+			strings.EqualFold(strings.TrimSpace(key), "signed-by") {
+			add(value)
+			continue
+		}
+		for _, field := range strings.Fields(trimmed) {
+			if value, ok := strings.CutPrefix(strings.Trim(field, "[]"), "signed-by="); ok {
+				add(value)
+			}
+		}
+	}
+	return paths
+}
+
+// PGPStatusSigner reads the fingerprint out of the status output of gpg or
+// gpgv; VALIDSIG is written only for a signature that checked out.
+func PGPStatusSigner(output string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		_, rest, found := strings.Cut(strings.TrimSpace(line), "[GNUPG:] VALIDSIG ")
+		if !found {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 || !HexKeyIdentity(fields[0]) {
+			continue
+		}
+		return strings.ToUpper(fields[0]), true
+	}
+	return "", false
+}
+
+// HexKeyIdentity says whether a value is a key identity long enough to name
+// one key rather than a family of them.
+func HexKeyIdentity(value string) bool {
+	if len(value) < minKeyDigits {
+		return false
+	}
+	for _, char := range value {
+		switch {
+		case char >= '0' && char <= '9':
+		case char >= 'a' && char <= 'f':
+		case char >= 'A' && char <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }

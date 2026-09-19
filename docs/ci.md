@@ -241,6 +241,18 @@ between a tag and a signature.
 and names it; there is no `--clobber`. A release is corrected by a new version,
 not by a new file under the old name.
 
+**What proves a package, per family.** `packaging/sign-repo.sh` composes the
+repositories out of a finished release and signs what each family verifies: the
+`.rpm` files themselves and `repodata/repomd.xml`, the pacman database, and -
+for apt - `InRelease` and `Release.gpg` over the index. The `.deb` is not signed
+individually and is not meant to be: Debian's trust model puts the signature on
+the repository index, `InRelease` covers `Packages` and `Packages` covers the
+checksum of every package file. `dpkg-sig` and `debsig-verify` are read by no
+distribution and by no `apt`. An agent upgrade therefore names a signing key for
+the rpm and pacman families only; on an apt host the panel names none and the
+host reports which key signed the index it installed from. `deploy/README.md`,
+under "What proves a package's origin", has the whole table.
+
 ## The laboratory gate
 
 `.github/workflows/lab-gate.yml` records what the laboratory reports, and runs

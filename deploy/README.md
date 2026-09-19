@@ -283,6 +283,43 @@ panel is taken from the lock file the image was built from, because the panel
 ships as a bundle and nothing in the image resembles a dependency any more.
 All three are also attached to the run as artefacts.
 
+### What proves a package's origin
+
+The three package families do not answer "who built this file" the same way,
+and the product does not pretend they do.
+
+| Family | What is signed | What the host checks |
+|---|---|---|
+| pacman | The package file itself, with a detached `.sig` beside it. | `gpg` against pacman's own keyring names the key, and an agent upgrade may demand a particular one. |
+| dnf | The package file itself, in its header. | `rpm --checksig` names the key, and an agent upgrade may demand a particular one. |
+| apt | The repository index. `InRelease` carries the checksums of `Packages`, and `Packages` the checksum of every `.deb`. | `gpgv` against the keys apt trusts names the key that signed the index, and the index has to publish the very file the host holds. |
+
+The `.deb` is the odd one out on purpose. Debian's trust model does not sign
+individual packages: `dpkg-sig` and `debsig-verify` exist, no distribution
+enables them, and `apt` never consults them - a package signed that way is
+verified by one tool nobody runs. Signing the `.deb` would therefore produce a
+signature that proves nothing to the host that installs it.
+
+So an agent upgrade plan for a host of the apt family **names no signing key**.
+A plan that names one is refused before it is sent, with
+`agent_package_signer_not_applicable`, because the host could never satisfy it;
+a host that is asked anyway refuses with `agent_package_signer_unknown` and
+installs nothing. What the apt host reports instead is the fact it can
+establish: the address the file comes from, the release file of that
+repository, and the key `gpgv` accepted the signature of that index on. The
+result of the job then reads "the proof is the repository index signed by
+&lt;key&gt;" rather than leaving an empty field. Where it cannot be established the
+reason is typed - `apt_repository_unsigned`, `apt_index_key_untrusted`,
+`apt_index_unreadable`, `apt_artefact_origin_unknown`,
+`apt_index_digest_mismatch` - and never a silent pass. None of them fails the
+upgrade by itself: the checksum from the release still binds the bytes, and the
+panel judges the rest.
+
+`packaging/sign-repo.sh` is what produces that proof: it writes `InRelease` and
+`Release.gpg` over the index, signs the `.rpm` files themselves and the
+`repomd.xml`, and signs the pacman database. A repository served without it
+leaves the apt family with no proof of origin at all.
+
 ## The mounts
 
 | Mount | Why |
