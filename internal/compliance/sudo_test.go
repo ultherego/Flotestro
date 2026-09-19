@@ -127,3 +127,96 @@ func TestAParserProblemNeverPassesTheSudoCheck(t *testing.T) {
 		t.Fatalf("a passwordless grant next to a skipped line was not a finding: %+v", result)
 	}
 }
+
+// The host's own checker is a separate answer from the parse: visudo -c says
+// what sudo loads, and a host that cannot say it does not pass by default.
+func TestTheCheckerResultIsJudgedOnItsOwn(t *testing.T) {
+	group := sudoers.Rule{
+		Users: []string{"%sudo"}, Hosts: []string{"ALL"}, RunAs: []string{"ALL"}, Commands: []string{"ALL"},
+		AllHosts: true, AllCommands: true, RunAsAnyUser: true, RootEquivalent: true, Critical: true,
+		Source: "/etc/sudoers", Line: 24,
+	}
+	policy := func(check *sudoers.SyntaxCheck) Input {
+		return Input{Fragments: map[string]Fragment{
+			moduleSudoers: fragmentOf(t, moduleSudoers, sudoers.Snapshot{
+				Rules:       []sudoers.Rule{group},
+				Files:       []sudoers.File{{Path: "/etc/sudoers", Lines: 30}},
+				SyntaxCheck: check,
+			}),
+		}}
+	}
+
+	accepted := Evaluate("host", policy(&sudoers.SyntaxCheck{
+		Tool: "/usr/sbin/visudo", Available: true, Ran: true, Output: "/etc/sudoers: parsed OK",
+	}), testNow)
+	if result := finding(accepted, "sudo.syntax_valid"); !result.Passed || result.Remediation != nil {
+		t.Errorf("a file the checker took did not pass: %+v", result)
+	}
+
+	// A refused file is a finding of its own, and it also stops the policy
+	// check from calling the parsed rules clean: sudo loads none of them.
+	refused := Evaluate("host", policy(&sudoers.SyntaxCheck{
+		Tool: "/usr/sbin/visudo", Available: true, Ran: true, ExitCode: 1,
+		Output: "/etc/sudoers.d/ops:3:10: unknown defaults entry \"authenticat\"",
+	}), testNow)
+	syntax := finding(refused, "sudo.syntax_valid")
+	if syntax.Passed || syntax.Unknown || !syntax.NeedsAction() {
+		t.Fatalf("a refused file was not a finding: %+v", syntax)
+	}
+	if !strings.Contains(syntax.Observed, "exit 1") || !strings.Contains(syntax.Evidence, "/etc/sudoers.d/ops:3") {
+		t.Errorf("the finding does not name the status and the file: %+v", syntax)
+	}
+	if syntax.Remediation == nil || syntax.Remediation.Action != "" || syntax.Remediation.Note == "" {
+		t.Errorf("remediation = %+v", syntax.Remediation)
+	}
+	if result := finding(refused, "sudo.root_nopasswd"); result.Passed || !result.Unknown ||
+		result.ReasonCode != ReasonParseError {
+		t.Errorf("a refused policy was judged clean: %+v", result)
+	}
+
+	// A host without the checker proves nothing, and a checker that returned
+	// no status is a third answer again. Neither is a pass.
+	missing := Evaluate("host", policy(&sudoers.SyntaxCheck{
+		Reason: "visudo was not found on this host",
+	}), testNow)
+	if result := finding(missing, "sudo.syntax_valid"); result.Passed || !result.Unknown ||
+		result.ReasonCode != ReasonCheckerMissing {
+		t.Errorf("a host without visudo was judged: %+v", result)
+	}
+	stuck := Evaluate("host", policy(&sudoers.SyntaxCheck{
+		Tool: "/usr/sbin/visudo", Available: true, Reason: "visudo did not finish within 15s",
+	}), testNow)
+	if result := finding(stuck, "sudo.syntax_valid"); result.Passed || !result.Unknown ||
+		result.ReasonCode != ReasonCheckerFailed {
+		t.Errorf("a checker without a status was judged: %+v", result)
+	}
+}
+
+// An agent of the previous release reports no checker result. That is unknown
+// with a reason, and it leaves the semantic check exactly where it was.
+func TestAnAgentThatReportsNoCheckerResultBreaksNothing(t *testing.T) {
+	group := sudoers.Rule{
+		Users: []string{"%sudo"}, Hosts: []string{"ALL"}, RunAs: []string{"ALL"}, Commands: []string{"ALL"},
+		AllHosts: true, AllCommands: true, RunAsAnyUser: true, RootEquivalent: true, Critical: true,
+		Source: "/etc/sudoers", Line: 24,
+	}
+	report := Evaluate("host", Input{Fragments: map[string]Fragment{
+		moduleSudoers: fragmentOf(t, moduleSudoers, sudoers.Snapshot{
+			Rules: []sudoers.Rule{group},
+			Files: []sudoers.File{{Path: "/etc/sudoers", Lines: 30}},
+		}),
+	}}, testNow)
+
+	syntax := finding(report, "sudo.syntax_valid")
+	if syntax.Passed || !syntax.Unknown || syntax.ReasonCode != ReasonFactMissing {
+		t.Errorf("a silent agent was judged on the checker: %+v", syntax)
+	}
+	if !strings.Contains(syntax.Observed, "visudo -c") {
+		t.Errorf("the observation does not name what was not reported: %q", syntax.Observed)
+	}
+	// The grant with a password still passes: the new read did not make an
+	// installation that was in order look broken.
+	if result := finding(report, "sudo.root_nopasswd"); !result.Passed {
+		t.Errorf("the policy check changed for an agent that reports no checker result: %+v", result)
+	}
+}

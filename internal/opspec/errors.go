@@ -127,6 +127,12 @@ var reportedGuides = []ErrorGuide{
 	{Code: "inventory_stale", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The module a policy or a campaign judges the host from was read more than twice its cadence ago; a verdict on it would describe a host that has been silent, not the host as it is.",
 		Action:  "Refresh the named module - order its read, or find out why the host stopped reporting; until then the verdict is unknown. Not a failure."},
+	{Code: "checker_missing", Stage: "preflight", Retry: RetryAfterChange,
+		Meaning: "The host has not got the tool a check needs for its proof - visudo for the sudoers files - so that fact was never proved on this host.",
+		Action:  "Install the tool on the host; until then the check stays unknown instead of passing. Not a failure."},
+	{Code: "checker_failed", Stage: "preflight", Retry: RetryAfterChange,
+		Meaning: "The tool a check proves a fact with is on the host but returned no status: it did not start, or it did not finish in time.",
+		Action:  "Read the reason the host sent with the fact, mend what it names, and order the module read again. Not a failure."},
 	{Code: "maintenance", Stage: "dispatch", Retry: RetryAfterChange,
 		Meaning: "The host is in a maintenance window and was skipped.",
 		Action:  "Run again after the window; not a failure."},
@@ -667,6 +673,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A notification channel cannot send as it is: it was disabled while its messages waited, its configuration does not read, or the panel has no sender for its kind.",
 		Action:  "Enable or correct the channel and retry the dead letters; the messages of a channel that is to stay disabled can be left as they are."},
 
+
 	// The lifecycle orders that travel between the instances of the control plane
 	// (security remediation, chapter 6).
 	{Code: "lifecycle_handover_pending", Stage: "reconcile", Retry: RetryReadState,
@@ -716,6 +723,9 @@ var reportedGuides = []ErrorGuide{
 	{Code: "metric_sample_not_kept", Stage: "monitoring", Retry: RetryNever,
 		Meaning: "The panel that received the sample keeps no samples at all: this gateway has no monitoring store attached. The host was told terminally rather than left waiting, so its spool holds readings it can still deliver instead of one nobody will take.",
 		Action:  "This is a deployment without the built-in monitoring. Attach the monitoring store on the control plane if the fleet is meant to have charts and alerts."},
+	{Code: "metric_clock_substituted", Stage: "monitoring", Retry: RetryNever,
+		Meaning: "The host dated a reading further ahead of the panel's clock than the installation allows, so the panel stored it at the panel's own moment. The reading was kept - this is not a refusal - but every point of that host is now drawn where the panel put it, not where the host said.",
+		Action:  "Fix the time on the host: NTP, the hypervisor's clock source, or a machine resumed from a snapshot. Until then read the host's charts as the panel's timeline; the alerts are unaffected, because freshness is measured on the moment the panel received the sample."},
 	{Code: "alert_evaluator_lease_lost", Stage: "monitoring", Retry: RetryAutomatic,
 		Meaning: "The control-plane instance evaluating the alert rules lost the lease in the middle of a pass and stopped where it was. Another instance holds the lease and carries on from the open episodes; nothing was written after the loss, because two instances judging one fleet at once is how a panel contradicts itself about an alert.",
 		Action:  "Nothing, unless it repeats. A stream of these from one instance means it cannot renew in time: look at the database latency and at the clock of that instance."},

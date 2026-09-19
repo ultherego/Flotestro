@@ -142,6 +142,10 @@ function reasonText(code: string, t: (key: string) => string): string {
     unsupported_system: t("this system has nothing to check here"),
     module_unread: t("the module this check reads has not been read yet"),
     permission_denied: t("the agent lacks the permission to read this"),
+    inventory_stale: t("the read this check rests on is too old to judge from"),
+    parse_error: t("the host's files were read but not understood in full"),
+    checker_missing: t("the host has not got the tool this proof needs"),
+    checker_failed: t("the tool this proof needs returned no result on the host"),
   };
   return names[code] ?? code;
 }
@@ -270,6 +274,11 @@ export function Security() {
   // The failing findings by severity: what happens when nobody does
   // anything, read before the list. Unknown until the report is computed.
   const failing = report.data ? findings.filter((f) => f.applicable && !f.passed && !f.unknown) : undefined;
+  // Sudoers files the host's own checker refuses mean sudo loads none of
+  // them: the grants the panel lists elsewhere are not the policy in force.
+  const sudoersRefused = findings.find(
+    (f) => f.check_id === "sudo.syntax_valid" && f.applicable && !f.passed && !f.unknown,
+  );
   const severities = ["high", "medium", "low", "info"];
   // The mode switch exists only where SELinux runs and the adapter writes:
   // the panel does not disable SELinux and does not turn it on, only moves
@@ -301,6 +310,16 @@ export function Security() {
       {snapshot?.unavailable_reason && (
         <p className="warning">
           <span>{t("Security state could not be read: {reason}", { reason: snapshot.unavailable_reason })}</span>
+        </p>
+      )}
+
+      {sudoersRefused && (
+        <p className="warning">
+          <span>
+            {t("The host's own checker refuses the sudoers files, so sudo loads none of them: {observed}",
+              { observed: sudoersRefused.observed })}
+            {sudoersRefused.evidence && <> {sudoersRefused.evidence}</>}
+          </span>
         </p>
       )}
 

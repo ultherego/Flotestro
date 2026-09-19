@@ -125,6 +125,13 @@ var Checks = []Check{
 		Rationale: "A passwordless root grant turns any session of that account - a leaked key, an unlocked screen - into root at once.",
 		Evaluate:  evaluateRootWithoutPassword,
 	},
+	{
+		ID: "sudo.syntax_valid", Version: 1, Severity: SeverityHigh, Module: moduleSudoers,
+		Title:     "The host's own checker accepts the sudoers files",
+		Expected:  "visudo -c accepts /etc/sudoers and every drop-in",
+		Rationale: "A file the host's own checker refuses is a file sudo will not load: every sudo call fails, and the grants the panel lists are not the policy in force.",
+		Evaluate:  evaluateSudoersSyntax,
+	},
 }
 
 // evaluateMAC checks whether mandatory access control protects the host.
@@ -521,6 +528,12 @@ func evaluateRootWithoutPassword(input Input) Result {
 	}
 	passwordless := policy.RootWithoutPassword()
 	if len(passwordless) == 0 {
+		// The files the host's checker refuses are not the files sudo loads, so
+		// what the parser read cannot be called a clean policy.
+		if policy.SyntaxCheck.Refused() {
+			return unknown(ReasonParseError, "the host's own checker refuses the sudoers files, "+
+				"so the parsed policy is not the one in force")
+		}
 		// A line the parser skipped or an included file it could not open may hold
 		// the very grant the check looks for.
 		if note := sudoParseProblems(policy); note != "" {
@@ -547,6 +560,47 @@ func evaluateRootWithoutPassword(input Input) Result {
 		// there is a decision about who administers the host.
 		Remediation: &Remediation{Note: "edit the named file with visudo and drop NOPASSWD from the grant, " +
 			"or move the grant to a directory rule with a password; the panel does not write sudoers files"},
+	}
+}
+
+// evaluateSudoersSyntax judges the host's own proof. The parser says what the
+// panel read; visudo -c says what sudo loads, and only the host can run it.
+func evaluateSudoersSyntax(input Input) Result {
+	fragment, ok := input.Fragment(moduleSudoers)
+	if !ok {
+		return unknown(ReasonFactMissing, "the sudo policy was not read")
+	}
+	if fragment.UnavailableReason != "" {
+		return unknown(missingCode(fragment.UnavailableReason), fragment.UnavailableReason)
+	}
+	var policy sudoers.Snapshot
+	if err := json.Unmarshal(fragment.Payload, &policy); err != nil {
+		return unknown(ReasonReadFailed, "the sudo policy was not read: "+err.Error())
+	}
+	check := policy.SyntaxCheck
+	switch {
+	case check == nil:
+		// An agent from before this read sends nothing here: nothing was
+		// proved, and nothing is claimed either.
+		return unknown(ReasonFactMissing, "the host did not report the result of visudo -c")
+	case !check.Available:
+		return unknown(ReasonCheckerMissing,
+			firstNonEmpty(check.Reason, "the host has no visudo to check its sudoers files with"))
+	case !check.Ran:
+		return unknown(ReasonCheckerFailed,
+			firstNonEmpty(check.Reason, "visudo returned no result on this host"))
+	}
+	evidence := strings.ReplaceAll(check.Output, "\n", "; ")
+	if accepted, _ := check.Accepted(); accepted {
+		return Result{Passed: true, Observed: check.Tool + " -c accepts the sudoers files", Evidence: evidence}
+	}
+	return Result{
+		Observed: check.Tool + " -c refuses the sudoers files (exit " + strconv.Itoa(check.ExitCode) + ")",
+		Evidence: evidence,
+		// The panel writes no sudoers file, and a file sudo refuses is fixed at
+		// the host with the tool that refuses it.
+		Remediation: &Remediation{Note: "open the file the checker names with visudo on the host and mend the line " +
+			"it points at; until the checker accepts the file, sudo loads none of it"},
 	}
 }
 

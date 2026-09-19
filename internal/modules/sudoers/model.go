@@ -18,9 +18,49 @@ type Snapshot struct {
 	Files []File `json:"files"`
 	// Problems lists the lines the parser did not understand.
 	Problems []Problem `json:"problems,omitempty"`
+	// SyntaxCheck is what the host's own checker said about the files sudo
+	// loads. Nil means the host said nothing: an agent from before this read.
+	SyntaxCheck *SyntaxCheck `json:"syntax_check,omitempty"`
 	// UnavailableReason says why the main file was not read at all.
 	UnavailableReason string    `json:"unavailable_reason,omitempty"`
 	ObservedAt        time.Time `json:"observed_at"`
+}
+
+// SyntaxCheck is what the host's own checker said about the files sudo really
+// loads. Facts only: whether the tool was there, what it returned and what it
+// printed. What that means for the host is the panel's decision.
+type SyntaxCheck struct {
+	// Tool is the checker that ran; empty when the host has none.
+	Tool string `json:"tool,omitempty"`
+	// Available says whether the checker was found at all. A host without
+	// visudo is a host whose files nobody proved, not a host with good ones.
+	Available bool `json:"available"`
+	// Ran says whether the checker returned a status of its own.
+	Ran bool `json:"ran"`
+	// ExitCode is that status: zero means the checker accepted the files.
+	ExitCode int `json:"exit_code"`
+	// Output is the checker's message, cut down to its diagnostics: the policy
+	// lines it quotes name accounts, hosts and commands and stay on the host.
+	Output string `json:"output,omitempty"`
+	// Reason says why there is no status - no checker, or one that did not run.
+	Reason string `json:"reason,omitempty"`
+	// CheckedAt is when the checker ran.
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+// Accepted says whether the checker took the files, and whether it got far
+// enough to say anything at all.
+func (c *SyntaxCheck) Accepted() (accepted, known bool) {
+	if c == nil || !c.Available || !c.Ran {
+		return false, false
+	}
+	return c.ExitCode == 0, true
+}
+
+// Refused says the checker ran and would not load the files this host has.
+func (c *SyntaxCheck) Refused() bool {
+	accepted, known := c.Accepted()
+	return known && !accepted
 }
 
 // Rule is one grant: who may run what, where and as whom.

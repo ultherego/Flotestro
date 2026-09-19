@@ -20,7 +20,11 @@ const maxFiles = 256
 // ParseSystem reads the policy of the host the process runs on. Only root
 // can open the files, so this is the helper's call.
 func ParseSystem(root fs.FS, now time.Time) Snapshot {
-	return Parse(root, MainFile, now)
+	snapshot := Parse(root, MainFile, now)
+	// The parse above is this panel's reading of the files; visudo -c is the
+	// host's own answer about the files sudo loads, and the two can differ.
+	snapshot.SyntaxCheck = runSyntaxCheck(now)
+	return snapshot
 }
 
 // Parse reads the policy starting at the given file.

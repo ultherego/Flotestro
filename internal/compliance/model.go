@@ -38,6 +38,12 @@ const (
 	// ReasonParseError: the fact was read, but the parser did not understand all
 	// of it - a line it skipped or an included file it could not open.
 	ReasonParseError = "parse_error"
+	// ReasonCheckerMissing: the host has not got the tool a check needs for its
+	// proof. Nothing was proved, which is not the same as nothing being wrong.
+	ReasonCheckerMissing = "checker_missing"
+	// ReasonCheckerFailed: the tool is on the host but returned no status - it
+	// did not start, or it did not finish in time.
+	ReasonCheckerFailed = "checker_failed"
 )
 
 // MaxReadAge sets how old a fact may be for an assessment to rest on it.

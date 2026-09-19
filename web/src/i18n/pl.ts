@@ -5543,4 +5543,9 @@ export const pl: Record<string, string> = {
   "Instance dead after": "Instancja uznana za martwa po",
   "Replicas without a declared pool": "Repliki bez zadeklarowanej puli",
   "This replica": "Ta replika",
+  "the read this check rests on is too old to judge from": "odczyt, na którym opiera się ten test, jest za stary, żeby na jego podstawie wyrokować",
+  "the host's files were read but not understood in full": "pliki hosta zostały odczytane, ale nie w pełni zinterpretowane",
+  "the host has not got the tool this proof needs": "host nie ma narzędzia, którego wymaga ten dowód",
+  "the tool this proof needs returned no result on the host": "narzędzie potrzebne do tego dowodu nie zwróciło wyniku na hoście",
+  "The host's own checker refuses the sudoers files, so sudo loads none of them: {observed}": "Własny walidator hosta odrzuca pliki sudoers, więc sudo nie wczytuje żadnego z nich: {observed}",
 };
