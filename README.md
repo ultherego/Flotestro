@@ -128,3 +128,7 @@ each with a build attestation that says which run produced it.
 
 Contributing, building from source and the repository layout are in the
 [documentation](https://ultherego.github.io/Flotestro/docs/).
+
+## Licence
+
+[Apache License 2.0](LICENSE). Copyright 2026 Ulther Ego.
