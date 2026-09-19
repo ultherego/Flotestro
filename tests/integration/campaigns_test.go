@@ -2724,8 +2724,27 @@ func TestTimeSourceCampaignComputesTheDiffAndRefusesBeforeConsent(t *testing.T) 
 
 	h.approveCampaign(afterPlanning)
 	final := h.awaitCampaign(campaign.ID,
-		map[string]bool{"completed": true, "failed": true, "paused": true}, 6*time.Minute)
-	if final.State != "completed" {
+		map[string]bool{"completed": true, "completed_with_issues": true,
+			"failed": true, "paused": true}, 6*time.Minute)
+	// A host that cannot reach the time server refuses the change, and it
+	// is right to: a source nothing answers is not a source. Whether this
+	// laboratory's machines reach the public pool is not what this test is
+	// about, so that one refusal is read and allowed; anything else is a
+	// failure of the change itself.
+	if final.State == "completed_with_issues" {
+		for _, target := range h.campaignTargets(campaign.ID) {
+			if target.State != "failed" {
+				continue
+			}
+			if target.ErrorCode != "precondition_failed" ||
+				!strings.Contains(target.Message, "servers answered") {
+				t.Fatalf("host %s failed the time source change: %s/%s: %s",
+					target.Hostname, target.State, target.ErrorCode, target.Message)
+			}
+			t.Logf("host %s does not reach the time server from this laboratory: %s",
+				target.Hostname, target.Message)
+		}
+	} else if final.State != "completed" {
 		t.Fatalf("the campaign ended in state %s (%s)", final.State, final.PauseReason)
 	}
 	for _, target := range h.campaignTargets(campaign.ID) {
