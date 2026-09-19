@@ -24,6 +24,15 @@ on:
   # Containerfile, a Compose file that does not parse and a build context
   # that carries a secret are found while there is still something to fix,
   # rather than at the moment somebody tags a release.
+  # A push to the default branch builds and checks the files, and pushes
+  # nothing: the compose contract is otherwise proven for the first time by
+  # the tag that publishes.
+  push:
+    branches:
+      - main
+    paths:
+      - "deploy/**"
+      - ".github/workflows/images.yml"
   pull_request:
     paths:
       - "deploy/**"
