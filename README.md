@@ -76,42 +76,29 @@ air-gapped installation, backups, upgrades — is in the
 
 ## Screenshots
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="900"></p>
+<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="880"></p>
+<p align="center"><em>The dashboard: what needs a decision, and the fleet at a glance.</em></p>
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/hosts.png" alt="Hosts" width="440"></td>
-    <td><img src="docs/screenshots/host-overview.png" alt="Host overview" width="440"></td>
+    <td width="50%"><img src="docs/screenshots/host-packages.png" alt="Packages of a host"></td>
+    <td width="50%"><img src="docs/screenshots/campaign.png" alt="Campaign"></td>
   </tr>
   <tr>
-    <td>Hosts with state, site, environment and what needs attention.</td>
-    <td>One page per module with the facts as the agent reported them.</td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="440"></td>
-    <td><img src="docs/screenshots/campaign.png" alt="Campaign" width="440"></td>
-  </tr>
-  <tr>
-    <td>Packages of a host: the plan, its digest and the actions the operator may take.</td>
+    <td>A host's packages: the plan, its digest, and what the operator may ask for.</td>
     <td>A campaign across the fleet: canary, waves, gates and thresholds.</td>
   </tr>
   <tr>
-    <td><img src="docs/screenshots/security.png" alt="Security" width="440"></td>
-    <td><img src="docs/screenshots/monitoring.png" alt="Monitoring" width="440"></td>
+    <td width="50%"><img src="docs/screenshots/monitoring.png" alt="Monitoring"></td>
+    <td width="50%"><img src="docs/screenshots/audit.png" alt="Audit"></td>
   </tr>
   <tr>
-    <td>Versioned security checks judged in the panel; a fix for many hosts is one campaign with one approval.</td>
-    <td>Built-in monitoring: raw samples, rollups, rules, alerts and silences.</td>
-  </tr>
-  <tr>
-    <td><img src="docs/screenshots/audit.png" alt="Audit" width="440"></td>
-    <td></td>
-  </tr>
-  <tr>
-    <td>Audit trail: the actor, the request and the authentication it rested on.</td>
-    <td></td>
+    <td>Built-in monitoring: samples, rules, alerts and silences. No external stack.</td>
+    <td>The audit trail: the actor, the request and the authentication behind it.</td>
   </tr>
 </table>
+
+<p align="center"><a href="https://ultherego.github.io/Flotestro/docs/">More of the panel in the documentation →</a></p>
 
 ## Built from
 
