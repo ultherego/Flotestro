@@ -31,6 +31,9 @@ const token = process.env.FLOTESTRO_TOKEN ?? "";
 
 export default defineConfig({
   testDir: "e2e",
+  // e2e/ci is the smoke test of the runner: it drives a stack that
+  // tests/e2e/smoke.sh starts and has no business against a live fleet.
+  testIgnore: "ci/**",
   // The tests share one installation and one fleet; running them one at a
   // time keeps their reads from tripping over each other's navigation.
   fullyParallel: false,

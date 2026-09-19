@@ -1,24 +1,29 @@
 # The checks a change passes
 
 Every push to `main` and every pull request runs `.github/workflows/ci.yml`.
-Six jobs run side by side; the pull request waits for the slowest of them, not
+Eight jobs run side by side; the pull request waits for the slowest of them, not
 for their sum. Nothing in them sends the sources, the logs or the test output
 anywhere: the runner downloads its tools and the module cache, and publishes
 nothing.
 
 Two things cannot run on a runner. The integration suite carries the build tag
 `integration` and drives the fleet - the panel, the database, the relay and the
-hosts with the agent - and the Playwright screenshots drive the panel of the
-laboratory. Their verdict reaches a commit through a separate workflow the owner
-triggers by hand, described under [The laboratory gate](#the-laboratory-gate).
+hosts with the agent - and the Playwright suite of the panel drives that fleet
+through a browser. Their verdict reaches a commit through a separate workflow
+the owner triggers by hand, described under
+[The laboratory gate](#the-laboratory-gate). The one browser test that needs no
+fleet - the smoke test, against a control plane and a fake agent the runner
+starts itself - runs here.
 
 ## What runs
 
 | Check | What it proves | Roughly | Required |
 |---|---|---|---|
 | `Go` | `gofmt`, `go vet ./...`, `go vet -tags=integration ./tests/...`, `go build ./...` and `go test -race -shuffle=on -count=1 ./...` | 8-14 min | yes |
-| `Database` | Every migration applies in order to an empty `postgres:17`, the recorded versions match the files, and a second pass applies nothing and changes no schema | 2-4 min | yes |
+| `Database` | Every migration applies in order to an empty `postgres:17`, the recorded versions match the files, a second pass applies nothing and changes no schema, and an upgrade from the last released tag ends in the schema of a first installation | 3-6 min | yes |
 | `Panel` | `npm ci`, the Polish catalogue, `tsc -b && vite build`, `vitest run` | 3-5 min | yes |
+| `E2E smoke` | A real control plane against `postgres:17`, a fake agent against the real gateway, and a browser that signs in, sees the host, orders one operation and reads the host's answer | 6-10 min | yes |
+| `Bill of materials` | A CycloneDX bill for every shipped binary and for the panel, each naming its artefact, every component with a name, a version and a purl, every Go module with a recorded checksum | 3-5 min | yes |
 | `Secrets` | gitleaks over the commits the change adds, and a check of our own for a key block or a token under `db/`, `internal/`, `cmd/`, `packaging/` | 1-2 min | yes |
 | `Known vulnerabilities` | `govulncheck ./...` against the modules the binaries call into | 3-5 min | yes |
 | `Fuzz the decoders` | Twenty seconds per fuzz target on the parsers that read what a host or an operator sends | 5-7 min | advisory |
@@ -69,11 +74,23 @@ Three ways it fails:
   `renamedMigrations` in `internal/database/database.go`, which is what that map
   is for.
 
-The control plane applies the migrations itself at start and has no flag that
-applies them and exits, so the job cannot simply run the binary without also
-giving it a state directory, a secret key and a certificate authority. If such a
-flag is ever added to `cmd/control-plane`, the step becomes one call to the
-binary and stops being a second implementation of the same loop.
+The job runs the migrator the product ships - `flotestro-control-plane migrate`
+- rather than a second implementation of the same loop in shell, and every
+`psql` and `pg_dump` runs from the server's own image, so the client never
+refuses a newer server.
+
+**`Database`, the upgrade from the last release.** A migration that works on an
+empty database and not on one with history breaks every installation there is,
+and a from-zero run says nothing about it. The step takes the last stable tag
+this commit descends from, lets *that* release's migrator build its own
+database, brings it forward with this tree's migrations, and compares the result
+- the schema dump and the recorded versions - with a from-zero migration of the
+same tree. A difference is one of two things: a migration that assumes what only
+an empty database has, or a migration file edited after it had already been
+applied on a released version, so that the two databases were built by different
+SQL under the same version number. Neither is fixed by changing the check.
+Until the first `v*` tag exists the step says so and passes: there is no
+previous version to upgrade from.
 
 **`Panel`, the Polish catalogue.** A string reached `t()` with no line in
 `web/src/i18n/pl.ts`; the message names the key and the file and line it is used
@@ -108,6 +125,75 @@ call into, so a report is a call path, not an advisory to file away. Raise the
 module in `go.mod` and run `go mod tidy`. When there is no fixed version yet,
 the finding holds the merge until the owner decides otherwise; that decision
 belongs in the pull request, in writing.
+
+**`E2E smoke`.** The job runs `tests/e2e/smoke.sh`, which brings up the whole
+stack on the runner: the control plane migrates the service database and serves
+the API, the gateway, the enrollment endpoint and the built panel; an
+enrollment is ordered through the API with the bootstrap token; the agent
+simulator enrolls one fake host against the real gateway and keeps its session;
+and one Playwright test signs in with the bootstrap token, finds the host,
+opens it and orders a read of its unit list.
+
+The fake agent carries no task executor, so it answers a task with the typed
+refusal `unsupported`. That refusal is the point: it proves the order left the
+panel, passed the gateway, reached the agent and came back to the screen. A
+different code - `payload_hash_mismatch`, `expired`, a timeout - means something
+on the way changed the task or lost it, and that is a fault of the product, not
+of the test. A green run guards that the parts start and talk; what every screen
+shows is Vitest's and the laboratory's to check.
+
+Three ways it fails:
+
+- the control plane did not start: the job prints the last fifty lines of its
+  log. The usual cause is a migration that did not apply or a listener whose
+  address is taken.
+- the host never appeared online: the last lines of the agent's log say why -
+  a refused enrollment token, a certificate the agent would not accept, a
+  gateway it could not reach.
+- the browser failed an assertion: the message names the step. It is the panel,
+  the API or the round trip - never the fleet, because there is none.
+
+The same script runs on a workstation against an empty database:
+
+    FLOTESTRO_DATABASE_URL=postgres://... tests/e2e/smoke.sh
+
+It needs the panel built (`npm ci && npm run build` in `web/`) and Chromium
+installed (`npx playwright install chromium`), and it leaves nothing behind but
+its work directory.
+
+The test itself is `web/e2e/ci/smoke.spec.ts` under `web/playwright.smoke.config.ts`;
+it lives beside the laboratory suite because Playwright and its browser are
+installed in `web/`, and the laboratory's configuration ignores `e2e/ci` so
+that the smoke test never runs against a real fleet.
+
+**`Bill of materials`.** The job builds the seven binaries the release ships,
+writes a CycloneDX bill of each with `cmd/sbom` - read out of the built binary,
+so the bill describes the artefact and not the `go.mod` of the working tree -
+and takes the panel's bill from the lock file with `npm sbom`. It refuses:
+
+- a bill that could not be produced at all, which is the minimum: a dependency
+  nobody can describe is a dependency nobody will find in an advisory;
+- a document that is not CycloneDX, or that does not name the artefact it is
+  the bill of;
+- a component without a name, a version or a purl - the three fields an
+  advisory is matched on;
+- a Go module that entered a binary without a recorded checksum. The toolchain
+  records the `h1:` sum of every module it takes from the cache, so a component
+  without one came in some other way, and nobody can verify afterwards what it
+  was.
+
+One npm detail: `npm sbom` refuses a package that declares no version, because
+it cannot write a purl for it, and `web/package.json` declares none - the panel
+takes its version from the release that packs it. The step therefore stamps
+`0.0.0` into the runner's copy when the field is missing, the way the Go
+toolchain records `(devel)` for a build from a working tree. Nothing is written
+back to the repository; the day `web/package.json` carries a version of its
+own, the step leaves it alone.
+
+The bills are not kept: the release writes them again from the same tool, and a
+bill of a commit that was never released describes nothing anybody will install.
+A failure here is a dependency that arrived in a shape the release could not
+describe, and it is fixed in the dependency, not in the gate.
 
 ## The release
 
@@ -184,9 +270,9 @@ settings, under Branches, for `main`:
 - require a pull request before merging, with one approving review and a review
   from a code owner (`.github/CODEOWNERS` is a list of reviewers until that box
   is ticked, not a gate);
-- require the status checks `Go`, `Database`, `Panel`, `Secrets` and
-  `Known vulnerabilities` to pass, and require branches to be up to date before
-  merging;
+- require the status checks `Go`, `Database`, `Panel`, `E2E smoke`, `Secrets`,
+  `Known vulnerabilities` and `Bill of materials` to pass, and require branches
+  to be up to date before merging;
 - require the status check `lab-suite` as well before a release tag is cut. Held
   as a required check for every merge it stops every merge until the laboratory
   has run, which is honest but slow; the owner decides which of the two the pace

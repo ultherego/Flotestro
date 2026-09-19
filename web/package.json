@@ -1,5 +1,6 @@
 {
   "name": "flotestro-web",
+  "version": "0.0.0",
   "private": true,
   "type": "module",
   "scripts": {

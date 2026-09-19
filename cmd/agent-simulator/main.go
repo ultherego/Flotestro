@@ -219,6 +219,11 @@ func run() error {
 
 	wg.Wait()
 	printSummary(counters, *count)
+	// A run in which nothing enrolled ended in failure, not in an empty
+	// measurement: a script that waits for the fleet reads the exit code.
+	if ctx.Err() == nil && counters.enrolled.Load() == 0 {
+		return fmt.Errorf("none of the %d agents enrolled; see the errors above", *count)
+	}
 	return nil
 }
 

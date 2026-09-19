@@ -2,9 +2,11 @@
 # must pass.
 #
 # Only what runs without the fleet is here. The integration suite carries
-# the "integration" build tag and the Playwright screenshots need the panel
-# VM; both run from the laboratory, not from a runner. Their verdict reaches
-# a commit through lab-gate.yml, which the owner triggers by hand.
+# the "integration" build tag and the Playwright suite of the panel needs the
+# hosts of the laboratory; both run from there, not from a runner, and their
+# verdict reaches a commit through lab-gate.yml, which the owner triggers by
+# hand. What does run here is the smoke test: a control plane against the
+# PostgreSQL service and a fake agent, which needs no fleet at all.
 #
 # The jobs are independent on purpose: a broken panel must not hide a
 # broken migration, and the slowest job decides how long the pull request
@@ -156,6 +158,11 @@ jobs:
           --health-retries 30
     steps:
       - uses: actions/checkout@v4.2.2
+        with:
+          # The upgrade step needs the released tags and the commits they
+          # point at: it migrates from the schema of the last release.
+          fetch-depth: 0
+          fetch-tags: true
 
       - uses: actions/setup-go@v5.2.0
         with:
@@ -242,6 +249,240 @@ jobs:
           fi
           echo "the second pass applied nothing and the schema is identical"
 
+      - name: The upgrade from the last release
+        # The migration every installation actually performs: not from zero,
+        # but from the schema the last release left behind. The previous
+        # release migrates its own database with its own migrator, this tree
+        # brings it forward, and the result has to be the schema a first
+        # installation of this tree gets. A migration that only works on an
+        # empty database is a migration that breaks every installation there
+        # is, and from zero alone nothing says so.
+        env:
+          PGPASSWORD: flotestro
+          FLOTESTRO_STATE_DIR: ${{ runner.temp }}/state
+        run: |
+          set -euo pipefail
+          # A stable tag that this commit descends from; a pre-release
+          # (v1.2.3-rc1) is not what an installation runs.
+          tag="$(git tag --list 'v*' --sort=-version:refname --merged HEAD |
+            grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || true)"
+          if [ -z "$tag" ]; then
+            echo "no stable release is an ancestor of this commit: there is no previous version to upgrade from, and a first installation is what the steps above already check"
+            exit 0
+          fi
+          echo "the previous version is $tag"
+
+          pg() {
+            docker run --rm --network host -e PGPASSWORD postgres:17 "$@"
+          }
+          psql_() {
+            pg psql -h 127.0.0.1 -p 5432 -U flotestro -v ON_ERROR_STOP=1 "$@"
+          }
+          # The same filtering as the idempotence step: pg_dump writes a
+          # \restrict token it makes up each time, which says nothing about
+          # the schema.
+          dump() {
+            pg pg_dump -h 127.0.0.1 -p 5432 -U flotestro -d "$1" \
+              --schema-only --no-owner --no-privileges |
+              grep -v '^\\\(un\)\?restrict '
+          }
+          for database in upgraded fresh; do
+            psql_ -d postgres -c "drop database if exists $database"
+            psql_ -d postgres -c "create database $database"
+          done
+
+          upgraded="postgres://flotestro:flotestro@127.0.0.1:5432/upgraded?sslmode=disable"
+          fresh="postgres://flotestro:flotestro@127.0.0.1:5432/fresh?sslmode=disable"
+          git worktree add --detach "$RUNNER_TEMP/previous" "$tag"
+          # -buildvcs=false: a detached worktree has no branch to stamp, and
+          # the stamp is of no interest to a migration.
+          GOFLAGS=-buildvcs=false FLOTESTRO_DATABASE_URL="$upgraded" \
+            go -C "$RUNNER_TEMP/previous" run ./cmd/control-plane migrate
+          FLOTESTRO_DATABASE_URL="$upgraded" go run ./cmd/control-plane migrate
+          FLOTESTRO_DATABASE_URL="$fresh" go run ./cmd/control-plane migrate
+
+          dump upgraded > upgraded.sql
+          dump fresh > fresh.sql
+          if ! diff -u fresh.sql upgraded.sql; then
+            echo "the schema after an upgrade from $tag is not the schema of a first installation of this tree" >&2
+            exit 1
+          fi
+          # The recorded versions have to agree as well: two databases can
+          # hold the same objects and disagree on what has been applied,
+          # and the next migration then runs on one of them only.
+          upgraded_versions="$(psql_ -d upgraded -tAq -c 'select version from schema_migrations order by version')"
+          fresh_versions="$(psql_ -d fresh -tAq -c 'select version from schema_migrations order by version')"
+          if [ "$upgraded_versions" != "$fresh_versions" ]; then
+            echo "the upgraded database records other migrations than a first installation" >&2
+            diff <(echo "$fresh_versions") <(echo "$upgraded_versions") || true
+            exit 1
+          fi
+          echo "the upgrade from $tag ends in the schema of a first installation"
+
+  e2e:
+    name: E2E smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The same service the migration job uses: the smoke test runs a real
+    # control plane, and a real control plane needs a real database.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: flotestro
+          POSTGRES_PASSWORD: flotestro
+          POSTGRES_DB: flotestro
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flotestro -d flotestro"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: The panel
+        # The control plane serves the built panel itself, so the browser
+        # reaches the API and the pages at one address and the smoke test
+        # needs no second server.
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: The browser
+        # The Chromium build belongs to the @playwright/test version the
+        # lock file pins: the installer takes the build of the installed
+        # version and of no other.
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: The stack, and the panel through a browser
+        # tests/e2e/smoke.sh starts the control plane, orders an enrollment,
+        # raises the fake agent against the real gateway and runs the one
+        # Playwright test that needs no fleet. It uploads nothing: on a
+        # failure it prints the last lines of the logs into this log.
+        env:
+          FLOTESTRO_DATABASE_URL: postgres://flotestro:flotestro@127.0.0.1:5432/flotestro?sslmode=disable
+          FLOTESTRO_E2E_WORK: ${{ runner.temp }}/e2e
+          FLOTESTRO_E2E_BIN: ${{ runner.temp }}/e2e-bin
+        run: bash tests/e2e/smoke.sh
+
+  sbom:
+    name: Bill of materials
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4.1.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: The bills of the binaries
+        # Read out of the built binaries and not out of go.mod: the bill says
+        # what entered the artefact. The release writes the same bills from
+        # the same tool, so a change that makes them impossible is caught
+        # here and not on a tag.
+        run: |
+          set -euo pipefail
+          staged="$RUNNER_TEMP/binaries"
+          mkdir -p "$staged"
+          described=()
+          for component in agent agent-helper agentctl relay relayctl control-plane auditverify; do
+            CGO_ENABLED=0 go build -trimpath -o "$staged/flotestro-$component" "./cmd/$component"
+            described+=(-binary "$staged/flotestro-$component")
+          done
+          go run ./cmd/sbom -out-dir "$RUNNER_TEMP/bills" "${described[@]}"
+
+      - name: The bill of the panel
+        # The panel ships as a bundle, in which nothing resembles a
+        # dependency any more, so the bill is taken from the lock file while
+        # the tree still exists. The build dependencies are left out: they
+        # are not in the artefact.
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund --omit=dev --ignore-scripts
+          # A bill names a version for the artefact it describes, and npm
+          # refuses to write one for a package that has none. The panel takes
+          # its version from the release that packs it, so a build that is not
+          # a release says so in the same way the Go toolchain does.
+          if [ -z "$(jq -r '.version // ""' package.json)" ]; then
+            npm pkg set version=0.0.0
+          fi
+          mkdir -p "$RUNNER_TEMP/bills"
+          npm sbom --sbom-format cyclonedx --omit=dev \
+            > "$RUNNER_TEMP/bills/flotestro-web.cdx.json"
+
+      - name: Every bill describes what it is the bill of
+        # What this gate refuses: a bill that could not be produced at all
+        # (the two steps above fail then), one that is not a CycloneDX
+        # document, one that does not name the artefact it describes, a
+        # component nobody could match against an advisory - no name, no
+        # version or no purl - and a Go module that entered a binary without
+        # a recorded checksum, which is a dependency nobody can verify
+        # afterwards.
+        run: |
+          set -euo pipefail
+          bills="$RUNNER_TEMP/bills"
+          produced=0
+          for bill in "$bills"/*.cdx.json; do
+            [ -e "$bill" ] || continue
+            name="$(basename "$bill")"
+            produced=$((produced + 1))
+            jq -e '.bomFormat == "CycloneDX"' "$bill" >/dev/null ||
+              { echo "$name is not a CycloneDX document" >&2; exit 1; }
+            jq -e '(.metadata.component.name // "") != ""' "$bill" >/dev/null ||
+              { echo "$name names no artefact of its own" >&2; exit 1; }
+            components="$(jq '.components | length' "$bill")"
+            if [ "$components" -lt 1 ]; then
+              echo "$name lists no component at all" >&2
+              exit 1
+            fi
+            unnameable="$(jq -r '[.components[]
+              | select((.name // "") == "" or (.version // "") == "" or (.purl // "") == "")
+              | .name // "(unnamed)"] | join(", ")' "$bill")"
+            if [ -n "$unnameable" ]; then
+              echo "$name carries components without a name, a version or a purl: $unnameable" >&2
+              exit 1
+            fi
+            if [ "$name" != "flotestro-web.cdx.json" ]; then
+              unverifiable="$(jq -r '[.components[]
+                | select(.name != "stdlib")
+                | select([.properties[]? | select(.name == "golang:module.sum")] | length == 0)
+                | .name] | join(", ")' "$bill")"
+              if [ -n "$unverifiable" ]; then
+                echo "$name carries modules with no recorded checksum: $unverifiable" >&2
+                exit 1
+              fi
+            fi
+            echo "$name: $components components"
+          done
+          # Seven binaries and the panel: a bill that silently stopped being
+          # written is a dependency that silently stopped being described.
+          if [ "$produced" -ne 8 ]; then
+            echo "$produced bills were produced, 8 were expected" >&2
+            exit 1
+          fi
+
   web:
     name: Panel
     runs-on: ubuntu-latest
@@ -281,7 +522,8 @@ jobs:
 
       - name: Unit tests
         # Vitest only: the Playwright suite drives the panel of the
-        # laboratory and reaches a commit through lab-gate.yml.
+        # laboratory and reaches a commit through lab-gate.yml. The one
+        # Playwright test that needs no fleet runs in "E2E smoke".
         run: npx vitest run
 
   secrets:
