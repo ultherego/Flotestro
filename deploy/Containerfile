@@ -2,61 +2,15 @@
 
 # The images of one release come out of one file: the control plane (target
 # control-plane), the relay (target relay), the administration tools (target
-# admin-tools) and the package repository of the air-gapped profile (target
-# package-repository). They are built from one source tree, share the build
-# of the panel and the toolchain, and must never drift apart in their
-# version: an agent talks to two of them, and a relay from another release is
-# a support case nobody can see.
-#
-# The two images that run as services are distroless. They carry the
-# binaries, the certificate store of the system and the built panel, and
-# nothing else - no shell, no package manager, no PostgreSQL client and no
-# Docker CLI. Debugging happens through a support bundle, a backup is taken
-# by the tools image, and the database keeps its own lifecycle, its own
-# backup and its own tuning, so it is never in here.
-#
-# The tools image is the one exception to distroless, and the stage says at
-# length why: a dump is written by the client of the server, and that client
-# is a C program with a distribution under it. It is a one-shot image. It
-# never runs as a service, it has no port, and it is not part of "up".
-#
-# Build (one architecture, for a laboratory):
-#   docker build -f deploy/Containerfile --target control-plane \
-#     --build-arg VERSION=0.54.0 -t flotestro-control-plane:0.54.0 .
-#
-# Build (the official platforms, pushed to the registry):
-#   docker buildx build -f deploy/Containerfile --target control-plane \
-#     --platform linux/amd64,linux/arm64 \
-#     --build-arg VERSION=0.54.0 \
-#     --build-arg COMMIT="$(git rev-parse HEAD)" \
-#     --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-#     -t ghcr.io/ultherego/flotestro-control-plane:0.54.0 --push .
-#
-# Build (the package repository of a release, from a tree that is already
-# signed - see packaging/sign-repo.sh; the signing key is never here):
-#   docker build -f deploy/Containerfile --target package-repository \
-#     --build-context repository=/srv/repo \
-#     --build-arg VERSION=0.54.0 -t flotestro-package-repository:0.54.0 .
-#
-# A release builds all four the same way, one after the other, from
-# .github/workflows/images.yml; that workflow also pushes them, attaches the
-# bills of materials and the provenance, and prints the digests a deployment
-# pins.
-#
-# The build context is the repository root, and the allowlist that keeps it
-# to the sources is the .dockerignore file there.
 
 ARG GO_IMAGE=golang:1.25-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
 # The administration tools are the one image that cannot be distroless, and
 # the base is named here so that a production build pins it by digest like
-# the others. Why it has to be this image is written above the stage itself.
 ARG TOOLS_IMAGE=postgres:17-bookworm
 # The tags above name the family of an image. A production build pins each of
 # them by digest (image:tag@sha256:...) and moves a digest in a separate
-# change, after the images behind it were tested; a tag may be rewritten by
-# whoever publishes it, a digest may not.
 
 FROM --platform=$BUILDPLATFORM ${NODE_IMAGE} AS web-build
 WORKDIR /src/web
@@ -68,7 +22,6 @@ RUN --mount=type=cache,id=flotestro-npm,target=/root/.npm \
 COPY web/ ./
 # The panel is built with the network switched off. Everything it needs came
 # from the lockfile above, and a build that could still reach out might pull
-# in something the lockfile does not name.
 RUN --network=none npm run build
 
 FROM --platform=$BUILDPLATFORM ${GO_IMAGE} AS go-build
@@ -77,10 +30,6 @@ ARG TARGETOS TARGETARCH VERSION=dev COMMIT=unknown BUILD_DATE=unknown
 
 # The provenance is written into every binary, not only into the control
 # plane: "which commit is this" is asked about auditverify and about the
-# relay just as often, and a binary that answers with the compiled-in default
-# tells nobody anything. The symbol paths are the ones the release script
-# stamps, so a container build and a package build describe themselves in the
-# same words.
 ENV BUILD_LDFLAGS="-s -w \
     -X github.com/ultherego/flotestro/internal/buildinfo.Version=${VERSION} \
     -X github.com/ultherego/flotestro/internal/buildinfo.Commit=${COMMIT} \
@@ -92,15 +41,10 @@ COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 # The migrations are embedded in the control plane binary (db/embed.go), so
 # the directory has to be in the build context although nothing copies it
-# into the final image.
 COPY db/ ./db/
 
 # CGO is off: the binary is to run on the distroless image, which has no libc
 # to link against. timetzdata carries the time zone database in the binary -
-# the image has no /usr/share/zoneinfo, and a campaign window or a timer
-# written in a named zone must not fall back to UTC in silence. -trimpath
-# removes the paths of the build machine, so the same source gives the same
-# binary wherever it is built.
 RUN --mount=type=cache,id=flotestro-gobuild,target=/root/.cache/go-build \
     --mount=type=cache,id=flotestro-gomod,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
@@ -130,9 +74,6 @@ RUN --mount=type=cache,id=flotestro-gobuild,target=/root/.cache/go-build \
 
 # The state directories are prepared here and copied whole, with their owner
 # and their mode: a named volume mounted over such a directory inherits them
-# from the image, and the container must never be started as root merely to
-# chown its own state. The parents stay as the system has them - only the
-# state itself belongs to the service account alone.
 RUN install -d -m 0755 /out/rootfs-control-plane/var /out/rootfs-control-plane/var/lib \
         /out/rootfs-relay/var /out/rootfs-relay/var/lib && \
     install -d -m 0700 -o 65532 -g 65532 \
@@ -141,13 +82,6 @@ RUN install -d -m 0755 /out/rootfs-control-plane/var /out/rootfs-control-plane/v
 
 # The built artefacts on their own, for a step that has to look at the real
 # binaries rather than at the source tree: the bill of materials of a release
-# is read out of the binary that ships, so it must describe the file the
-# image carries and not the go.mod of whoever ran the tool. The stage is
-# scratch and is built only when it is named as the target, so it costs a
-# release build nothing.
-#
-#   docker buildx build -f deploy/Containerfile --target artifacts \
-#     --platform linux/amd64 --output type=local,dest=out .
 FROM scratch AS artifacts
 COPY --from=go-build /out/flotestro-control-plane /out/flotestro-relay \
      /out/flotestro-relayctl /out/flotestro-auditverify \
@@ -171,9 +105,6 @@ COPY --from=go-build /out/rootfs-control-plane/ /
 
 # The listeners bind to every address, unlike the native installation, where
 # the admin listener stays on the loopback. Between containers the loopback
-# reaches nothing; what limits the exposure here is the port mapping and the
-# network, and the mapping in the Compose file publishes 8080 on the host
-# loopback alone.
 ENV FLOTESTRO_STATE_DIR=/var/lib/flotestro \
     FLOTESTRO_WEB_ROOT=/usr/share/flotestro/web \
     FLOTESTRO_ADMIN_ADDR=0.0.0.0:8080 \
@@ -185,15 +116,12 @@ EXPOSE 8080 8443 8444
 STOPSIGNAL SIGTERM
 # The health client reads FLOTESTRO_ADMIN_ADDR above, so a moved listener
 # moves the check with it. The start period covers the first start of an
-# installation, which migrates the schema before it listens.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD ["/usr/local/bin/flotestro-healthcheck"]
 ENTRYPOINT ["/usr/local/bin/flotestro-control-plane"]
 
 # No VOLUME is declared here. A volume declared in the image is anonymous,
 # and an anonymous volume with the fleet CA in it is the one thing an
-# operator must not be able to lose by accident; the persistent mounts are
-# named explicitly in the Compose files.
 
 FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS relay
 
@@ -214,31 +142,11 @@ EXPOSE 8453
 STOPSIGNAL SIGTERM
 # No HEALTHCHECK in the relay image. The relay is configured by a file and
 # not by the environment, so the image cannot know which address it will
-# listen on, and the liveness check therefore stands in compose.relay.yaml
-# next to the file that decides it.
 ENTRYPOINT ["/usr/local/bin/flotestro-relay"]
 CMD ["run", "-config", "/etc/flotestro/relay.yaml"]
 
 # The administration tools: the backup pair, its restore and the check of an
 # audit export. This is the one image of the set that cannot be distroless,
-# and the reason is pg_dump.
-#
-# pg_dump and pg_restore are C programs linked against libpq, OpenSSL, ICU,
-# LDAP and GSSAPI, and they read the locale and the encoding tables of the
-# distribution at run time. A static-distroless image has no libc for them
-# to link against and none of those files, so they cannot live there - and
-# rewriting a dump format in Go would mean maintaining a second, worse
-# implementation of the thing the database ships. A dump is also refused by
-# a client older than the server, which is why the base is the image of the
-# server itself, pinned to the same major version as the database: the
-# client then always speaks the format the server writes.
-#
-# The base carries the server binaries as well. Nothing ever starts them:
-# the service has no data directory, no port and no daemon entrypoint, it
-# runs one command and ends. It does inherit the VOLUME declaration of the
-# base image, so every run creates an empty anonymous volume for a data
-# directory that is never used - "docker compose run --rm" takes it away
-# again, and that is why the documented invocation carries --rm.
 FROM --platform=$TARGETPLATFORM ${TOOLS_IMAGE} AS admin-tools
 
 ARG VERSION COMMIT BUILD_DATE
@@ -250,9 +158,6 @@ LABEL org.opencontainers.image.title="Flotestro administration tools" \
 
 # zstd for the state archive - the manifest names a .tar.zst and GNU tar
 # calls the program - and jq to write and read the manifest itself, because
-# a manifest assembled by hand out of shell variables is a manifest that
-# breaks on the first value with a quotation mark in it. Nothing else is
-# added: the client, the archiver and one JSON tool.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends zstd jq && \
     rm -rf /var/lib/apt/lists/*
@@ -262,13 +167,6 @@ COPY --from=go-build /out/flotestro-auditverify /usr/local/bin/
 COPY --chmod=0755 <<'TOOL' /usr/local/bin/flotestro-admin-tools
 #!/usr/bin/env bash
 #
-# The administration tool of a containerised installation.
-#
-# One process, one job, and then it is gone. It takes the backup pair - the
-# database and the state directory from one point in time - puts that pair
-# back, or says whether what lies in the backup directory is still what was
-# written. Nothing here listens, nothing runs as a daemon and nothing
-# reaches a managed host.
 set -euo pipefail
 
 backup_root="${FLOTESTRO_BACKUP_DIR:-/backups}"
@@ -285,8 +183,6 @@ note() {
 
 # Percent-decoding for the password of a URI: libpq decodes it out of the
 # DSN, PGPASSWORD is taken literally, so a password written as %40 has to
-# become an at sign here. The backslashes are doubled first, otherwise a
-# password that contains one would be read as an escape.
 urldecode() {
     local escaped="${2//\\/\\\\}"
     printf -v "$1" '%b' "${escaped//%/\\x}"
@@ -294,10 +190,6 @@ urldecode() {
 
 # The DSN is read from a file, as everywhere else in this deployment, and
 # the password is lifted out of it before anything is executed: an argument
-# stands in the process list of the host for as long as the command runs,
-# and the dump of a large installation runs for a long time. What stays in
-# the argument is the host, the user, the database and the TLS mode - the
-# configuration of the connection, which is not a secret.
 connect() {
     local path="${FLOTESTRO_DATABASE_URL_FILE:-}"
     if [ -z "$path" ]; then
@@ -351,8 +243,6 @@ query() {
 
 # A backup is addressed by its identifier and lies in a directory of its
 # own, because the database and the state are one thing: a directory that
-# holds both and the manifest that ties them cannot be half copied without
-# it being visible.
 resolve() {
     local given="$1" dir
     if [ -z "$given" ]; then
@@ -403,12 +293,10 @@ backup() {
 
     # --no-owner and --no-privileges: the restore is done by whoever owns
     # the empty database it goes into, which on a rebuilt installation is
-    # not always the role of the machine that was lost.
     pg_dump --format=custom --no-owner --no-privileges \
         --dbname "$CONNECTION" --file "$dir/database.dump"
     # --numeric-owner: the names of the accounts of this image say nothing
     # about the host the archive goes back onto; 65532 is what matters and
-    # is what the control plane image creates its state directory with.
     tar --numeric-owner --zstd --create --file "$dir/state.tar.zst" \
         --directory "$state_dir" .
 
@@ -419,7 +307,6 @@ backup() {
 
     # The identity of the installation, read from the database it was just
     # taken from. It is what tells two backups of two installations apart
-    # later, when both are only directories on a share.
     local installation_id active_key_id issuer_id
     installation_id="$(query 'select installation_id from crypto_installation_state' 2>/dev/null || true)"
     active_key_id="$(query 'select active_secrets_key_id from crypto_installation_state' 2>/dev/null || true)"
@@ -427,8 +314,6 @@ backup() {
 
     # The digest of the image is not something a container can read about
     # itself: it comes from the deployment that pinned it. An installation
-    # that runs a floating tag has none, and the manifest then says so
-    # rather than naming a version and implying a digest.
     if [ -z "${FLOTESTRO_IMAGE_DIGEST:-}" ]; then
         note "the deployment does not pin this image by digest, so the manifest records none"
     fi
@@ -487,8 +372,6 @@ restore() {
 
     # -p keeps the modes of the archive - the state is 0700 and the keys in
     # it are 0600, and a restore that widened them would be a restore that
-    # published the fleet CA. The owner is this container's own account,
-    # which is the account the image created the directory with.
     tar --numeric-owner --zstd --extract --preserve-permissions \
         --file "$dir/state.tar.zst" --directory "$state_dir"
     pg_restore --no-owner --no-privileges --exit-on-error \
@@ -549,10 +432,6 @@ TOOL
 
 # The version is written in as an environment variable as well as a label,
 # because the manifest of a backup names the release it was taken from and
-# the tool has to be able to read it without a Docker socket to ask. None of
-# these three is a secret: a secret would have to come in through a file or
-# a build secret mount, never through an argument or the environment, since
-# the provenance of an image records both.
 ENV FLOTESTRO_IMAGE_VERSION="${VERSION}" \
     FLOTESTRO_IMAGE_COMMIT="${COMMIT}" \
     FLOTESTRO_IMAGE_CREATED="${BUILD_DATE}" \
@@ -567,27 +446,12 @@ CMD ["help"]
 
 # The package repository of the air-gapped profile: one static tree, served
 # to the hosts of an isolated site over HTTP.
-#
-# The tree is built and signed outside this build, by
-# packaging/build-release.sh and packaging/sign-repo.sh, and arrives through
-# a named build context. The signing key stays where it was used and never
-# enters a layer; what the image carries is the public half,
-# flotestro-repo.asc, which is what a host adds to apt, dnf or pacman before
-# it installs anything. An image whose tree could be signed from inside it
-# would be an image that can sign a package for the whole fleet.
-#
-#   docker build -f deploy/Containerfile --target package-repository \
-#     --build-context repository=/srv/repo .
-#
-# The layout is the one the panel composes its "Add host" commands from:
-# flotestro-repo.asc at the root, the packages under /deb, /rpm and /arch.
 FROM go-build AS repository-build
 ARG TARGETOS TARGETARCH
 WORKDIR /repository-server
 
 # The server is a module of its own, outside the product: it ships in no
 # package, has no import of ours and is deployment furniture, not a binary
-# the fleet talks to.
 COPY <<'SERVER' main.go
 // Command repository-server serves one already-signed repository tree over
 // HTTP, read only: it verifies nothing and decides nothing.
@@ -716,7 +580,6 @@ RUN if [ ! -f /srv/repository/flotestro-repo.asc ]; then \
 
 # The same distroless base as the two other services: a repository is a
 # binary and a directory of files, and everything else in an image that the
-# whole fleet downloads from is surface nobody asked for.
 FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS package-repository
 
 ARG VERSION COMMIT BUILD_DATE

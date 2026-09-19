@@ -119,32 +119,65 @@ task. PostgreSQL is the only source of truth; the panel keeps the fleet state no
 
 ## Quick start
 
-Control plane (PostgreSQL required; the schema is migrated at start):
+Nothing to build and nothing to clone. The panel runs from a published image;
+the hosts take a package from the release.
+
+**The panel**, with a database of its own:
 
 ```
-apt install flotestro-control-plane          # or dnf
-vi /etc/flotestro/control-plane.env          # FLOTESTRO_DATABASE_URL, FLOTESTRO_PUBLIC_URL, FLOTESTRO_OIDC_*, FLOTESTRO_IPA_*
-systemctl enable --now flotestro-control-plane
-cat /var/lib/flotestro/bootstrap-token       # written at first start; maps identity-provider groups to roles
+curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+printf '%s\n' FLOTESTRO_VERSION=0.60.0 FLOTESTRO_GATEWAY_ID=cp-01 \
+  FLOTESTRO_ADVERTISE=panel.example.org FLOTESTRO_PUBLIC_URL=http://panel.example.org:8080 > .env
+mkdir -p secrets && chmod 700 secrets
+printf '%s' 'a-long-random-password' > secrets/postgres-password
+printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable' > secrets/database-url
+sudo chown 65532:65532 secrets/* && chmod 400 secrets/*
+docker compose --profile quickstart up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .
 ```
 
-Host:
+`FLOTESTRO_ADVERTISE` is the name the fleet really reaches this panel at: it
+enters the agent gateway's certificate. The bootstrap token is the first sign-in;
+map the identity provider's groups to roles, then delete it.
+
+Against a database you already run, leave the profile out and point
+`secrets/database-url` at it. Under rootless Podman add
+`-f compose.podman.yaml`. On a host with SELinux,
+`chcon -Rt container_file_t secrets`. The rest - the backup pair, an isolated
+site, pinning a digest, upgrading - is in [deploy/README.md](deploy/README.md).
+
+**A host**, from the release assets:
 
 ```
-apt install flotestro-agent                  # or dnf, pacman
-vi /etc/flotestro/agent.yaml                 # enrollment_url, gateway_urls
-sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token   # token from an enrollment request in the panel
-systemctl enable --now flotestro-agent
-flotestro-agentctl diagnose                  # explains a host that does not show up
+curl -fsSLO https://github.com/ultherego/Flotestro/releases/latest/download/flotestro-agent_0.60.0_amd64.deb
+sha256sum -c <(curl -fsSL https://github.com/ultherego/Flotestro/releases/latest/download/SHA256SUMS | grep flotestro-agent_0.60.0_amd64.deb)
+sudo apt install ./flotestro-agent_0.60.0_amd64.deb
 ```
 
-Runbooks for CA rotation, database restore, queue backlog, a full relay buffer and quarantine are in [docs/runbooks](docs/runbooks/index.md); every environment variable of every binary is in [docs/configuration.md](docs/configuration.md).
-
-A whole inventory with Ansible:
+`.rpm` and `.pkg.tar.zst` are there too. Every asset carries a build
+attestation, so where it came from is a question with an answer:
 
 ```
-ansible-playbook -i inventory.ini site.yml -e flotestro_automation_api_token="$TOKEN"   # deploy/ansible; one-time token ordered per host
+gh attestation verify flotestro-agent_0.60.0_amd64.deb --repo ultherego/Flotestro
 ```
+
+Then enroll the host. The panel writes the exact commands for its own
+addresses under **Add host**; the shape is:
+
+```
+sudo tee /var/lib/flotestro-agent/ca.pem >/dev/null   # the fleet CA, fingerprint shown in the panel
+sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
+            -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
+echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
+sudo systemctl enable --now flotestro-agent
+flotestro-agentctl diagnose                                        # explains a host that does not show up
+```
+
+For a whole inventory at once there is an Ansible role in
+[deploy/ansible](deploy/ansible); for a site behind a relay,
+`deploy/compose.relay.yaml`. Installing from nothing, end to end, is
+[docs/runbooks/install.md](docs/runbooks/install.md); every environment
+variable of every binary is in [docs/configuration.md](docs/configuration.md).
 
 | Port | Service |
 |---|---|

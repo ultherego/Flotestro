@@ -1,25 +1,17 @@
-# The Flotestro control plane, and nothing else.
+# The Flotestro control plane.
 #
-# This file is the whole of the "production basic" profile: one control plane
-# against a PostgreSQL somebody else runs, backs up and tunes. It names no
-# postgres service, no host called postgres and no database volume - those
-# exist only in compose.local-db.yaml, so that an installation which points
-# at an external database cannot quietly start a second one beside it and
-# write half of its truth there.
+#   docker compose --profile quickstart up -d    with a database of its own
+#   docker compose up -d                         with a database somebody else runs
 #
-#   docker compose up -d                                    external database
-#   docker compose -f compose.yaml -f compose.local-db.yaml up -d   quick start
-#
-# The non-secret settings come from ./.env, the secrets from files under
-# ./secrets/ - see README.md.
+# Without the profile no database is started here, so an installation pointed
+# at an external one cannot quietly run a second beside it.
+# Settings come from ./.env, secrets from files under ./secrets/ - see README.md.
 name: flotestro
 
 services:
   control-plane:
     # A tag is readable and is what an example should show. Production pins
     # the digest as well - image:tag@sha256:... - because a tag can be
-    # rewritten by whoever publishes it and a digest cannot; the digest is
-    # moved in a separate change, after the image behind it was tested.
     image: ghcr.io/ultherego/flotestro-control-plane:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     restart: unless-stopped
     user: "65532:65532"
@@ -27,40 +19,27 @@ services:
     environment:
       # The DSN is a secret and travels as a file, never as a value: an
       # environment variable is visible in "docker inspect", in the process
-      # list of the host and in any crash report that dumps the environment.
-      # The control plane reads the path and the content once at start.
       FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
       # The state directory and the panel are already set in the image; they
       # stand here as well because a deployment that has to be read in one
-      # place is a deployment nobody guesses about.
       FLOTESTRO_STATE_DIR: /var/lib/flotestro
       FLOTESTRO_WEB_ROOT: /usr/share/flotestro/web
       # Every listener binds to every address inside the container. The
       # native installation keeps the admin listener on 127.0.0.1, which
-      # between containers would mean "reachable by nobody"; what limits the
-      # exposure here is the port mapping below.
       FLOTESTRO_ADMIN_ADDR: 0.0.0.0:8080
       FLOTESTRO_GATEWAY_ADDR: 0.0.0.0:8443
       FLOTESTRO_ENROLLMENT_ADDR: 0.0.0.0:8444
       # The name of this gateway. Without it the control plane takes the
       # hostname of the machine, and the hostname of a container is a random
-      # string that changes at every recreate - the sessions and the
-      # scheduler leases would then be tagged with a name nothing else knows.
       FLOTESTRO_GATEWAY_ID: ${FLOTESTRO_GATEWAY_ID:?required, for example cp-prod-01}
       # The addresses the agents see the panel under. They enter the
       # certificate of the agent gateway, so they are the public names of the
-      # host, never the name of a Compose service.
       FLOTESTRO_ADVERTISE: ${FLOTESTRO_ADVERTISE:?required, the DNS names or addresses the fleet reaches this panel at}
       # The address the operator sees. The OIDC redirect and the Secure flag
       # of the session cookies follow from it.
       FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:?required, for example https://panel.example.org}
       # Optional, and non-secret; uncomment what the installation uses.
       # FLOTESTRO_PACKAGE_REPOSITORY_URL: https://packages.example.org/flotestro
-      # FLOTESTRO_OIDC_ISSUER: https://login.example.org/realms/flotestro
-      # FLOTESTRO_OIDC_CLIENT_ID: flotestro-panel
-      # FLOTESTRO_OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc_client_secret
-      # FLOTESTRO_WEBHOOK_SECRET_FILE: /run/secrets/webhook_secret
-      # FLOTESTRO_VULN_NVD_KEY_FILE: /run/secrets/nvd_key
 
     secrets:
       - database_url
@@ -68,8 +47,6 @@ services:
     volumes:
       # The state: the fleet CA, the keys of the secret store, the helper
       # signing key, the bootstrap token and the feed cache. The name is
-      # explicit, so renaming the Compose project cannot silently hand the
-      # panel a fresh empty state next to the old database.
       - control_plane_state:/var/lib/flotestro
       # The keytab of the directory connector, when FreeIPA is configured:
       # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
@@ -80,17 +57,19 @@ services:
       - "127.0.0.1:8080:8080"
       # The agent gateway (mTLS) and the enrollment (TLS) are reached by the
       # fleet directly or through an L4 load balancer: their TLS is
-      # end-to-end and must not be terminated by an HTTP proxy.
       - "8443:8443"
       - "8444:8444"
 
     networks:
       - application
       - database_egress
+      - database
+
+    # No depends_on: the panel waits for a database that answers, not for a
+    # container that exists, and says so while it waits.
 
     # The process writes to its state volume and to /tmp, and nowhere else.
     # mode rather than uid/gid: 1777 is what a tmpfs is for, every runtime
-    # takes it, and Podman refuses uid= outright.
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
@@ -104,14 +83,11 @@ services:
         hard: 131072
     # A stop is a chance to finish what is in flight: the gateway ends the
     # agent sessions and the workers release their leases instead of leaving
-    # them to expire.
     stop_grace_period: 30s
 
     healthcheck:
       # The image carries no curl and no shell; this is the static client
       # from cmd/container-healthcheck. It asks /healthz, which pings the
-      # database, so a panel that cannot reach its database is unhealthy
-      # rather than merely unhappy.
       test: ["CMD", "/usr/local/bin/flotestro-healthcheck"]
       interval: 15s
       timeout: 5s
@@ -128,26 +104,72 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  postgres:
+    # A laboratory, a demonstration or a small fleet: one host of failure and
+    # a local backup. Production points FLOTESTRO_DATABASE_URL elsewhere.
+    profiles: ["quickstart"]
+    # A major version is not changed by swapping the tag: that is pg_upgrade.
+    image: docker.io/library/postgres:17-bookworm
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: flotestro
+      POSTGRES_USER: flotestro
+      # The password as a file, like every other secret here.
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+
+    secrets:
+      - postgres_password
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - database
+
+    # No port is published: reachable from this deployment and nowhere else.
+    shm_size: 256m
+    # A database killed mid-checkpoint comes back into recovery.
+    stop_grace_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flotestro -d flotestro"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
 networks:
   # The panel and the edge.
   application:
+  # The quickstart database: no route out, and none in from outside.
+  database:
+    internal: true
   # The way out to the database. It is a separate network so that the rule
   # which lets the control plane reach PostgreSQL is one an operator can see
-  # and a firewall can name.
   database_egress:
 
 volumes:
   control_plane_state:
     name: flotestro-state
+  postgres_data:
+    name: flotestro-postgres
 
 secrets:
+  # Read only under --profile quickstart.
+  postgres_password:
+    file: ./secrets/postgres-password
   database_url:
     # Mode 0600, owned by the account that runs the deployment. The directory
     # is not in Git.
     file: ./secrets/database-url
   # oidc_client_secret:
   #   file: ./secrets/oidc-client-secret
-  # webhook_secret:
-  #   file: ./secrets/webhook-secret
-  # nvd_key:
-  #   file: ./secrets/nvd-key

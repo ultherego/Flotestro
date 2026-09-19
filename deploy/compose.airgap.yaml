@@ -1,62 +1,34 @@
-# The air-gapped profile: the package repository of the release, beside the
-# control plane, on the network the managed hosts reach.
-#
-# An isolated site has no route to GHCR and none to the signed repository the
-# release publishes, so the packages travel with the images: the fourth image
-# of the release carries the already-signed tree, and this overlay serves it
-# to the fleet. Nothing here reaches the Internet.
+# The package repository of the release, beside the control plane, on the
+# network the managed hosts reach.
 #
 #   docker compose -f compose.yaml -f compose.airgap.yaml up -d
-#   docker compose -f compose.yaml -f compose.local-db.yaml -f compose.airgap.yaml up -d
-#
-# The import - saving the four images on the connected side, verifying them on
-# the isolated side and loading them - is in README.md, "Into an isolated
-# site".
 services:
   control-plane:
     environment:
       # The address the managed hosts reach the repository at, which is the
       # published port below on a name or address of this host - never the
-      # name of a Compose service, because the commands it composes are run on
-      # the hosts. The "Add host" screen expects flotestro-repo.asc at the
-      # root and the packages under /deb, /rpm and /arch.
       FLOTESTRO_PACKAGE_REPOSITORY_URL: ${FLOTESTRO_PACKAGE_REPOSITORY_URL:?the address the fleet reaches the repository at, for example http://panel.site.example.org:8090}
       # NVD carries the descriptions and the CVSS scores and settles nothing.
       # It is paginated over a live API, so there is no file to put in its
-      # place; an isolated installation turns it off rather than watching a
-      # timer fail every six hours. The findings stay, without a score.
       FLOTESTRO_VULN_NVD_URL: ""
       # The vulnerability feeds of the distributions, read from copies brought
       # onto this host - see "What an isolated site cannot do" in README.md.
-      # Uncomment what the site actually mirrors; a source left empty is a
-      # source switched off, and the panel says which coverage it lost.
-      # FLOTESTRO_VULN_DEBIAN_URL: file:///srv/feeds/debian.json
-      # FLOTESTRO_VULN_UBUNTU_URL: file:///srv/feeds/ubuntu/
-      # FLOTESTRO_VULN_REDHAT_URL: file:///srv/feeds/redhat/
 
     # The copied feeds, read-only and deliberately outside the state
     # directory: the state is one half of the backup pair, and a feed dump is
-    # not part of the identity of an installation.
-    # volumes:
-    #   - ./feeds:/srv/feeds:ro
 
   # The repository itself. It holds no secret, talks to nothing and answers
   # GET and HEAD for one directory; the signing key that made the tree is not
-  # in it and never was.
   package-repository:
     image: ghcr.io/ultherego/flotestro-package-repository:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     # The reference keeps the registry it was built under although the site
     # cannot reach it: "docker load" restores the image under exactly the name
-    # it was saved with, and a renamed image is one nobody can match against
-    # the digest the release printed.
     restart: unless-stopped
     user: "65532:65532"
 
     ports:
       # The fleet fetches over plain HTTP, and that is not a weakness here:
       # what a package manager trusts is the signature in the tree and the
-      # public key it imported once, not the transport. A site that wants TLS
-      # puts the same edge in front of this port as in front of the panel.
       - "8090:8080"
 
     networks:

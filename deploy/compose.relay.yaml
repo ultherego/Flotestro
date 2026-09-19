@@ -1,16 +1,7 @@
-# The relay of one site.
-#
-# A relay stands where its agents stand - behind the NAT of a branch, in an
-# isolated network, on the other side of a WAN link - and not next to the
-# control plane. That is why this file is run on its own, as its own project,
-# on the site host:
+# The relay of one site, on the site's own host.
 #
 #   docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
 #   docker compose -f compose.relay.yaml up -d
-#
-# It is not an overlay for compose.yaml, and merging the two would put the
-# site component and the centre in one failure domain, which is the opposite
-# of what a relay is for.
 name: flotestro-relay
 
 services:
@@ -27,17 +18,12 @@ services:
     volumes:
       # The configuration is a file and not an environment: the relay is a
       # separate trust boundary with its own name, its own site and its own
-      # advertised addresses, and the file that describes them is read-only
-      # to the process that obeys it.
       - ./relay.yaml:/etc/flotestro/relay.yaml:ro
       # The fleet CA for the first connection, as bootstrap_ca_file in that
       # file points at it. After the enrollment the relay uses the copy in
-      # its own state.
       - ./relay-ca.pem:/etc/flotestro/ca.pem:ro
       # The identity of the relay, its certificate and the durable spool -
       # the results of the site that the centre has not acknowledged yet.
-      # The volume is named: a spool lost with a renamed project is a night
-      # of the site's history lost with it.
       - relay_state:/var/lib/flotestro-relay
 
     ports:
@@ -62,11 +48,6 @@ services:
     healthcheck:
       # Liveness only: the listener of the site is up and accepts. It is
       # deliberately not a question about the link to the centre - a WAN
-      # outage is what the relay exists for, and a health check that failed
-      # during one would restart the process that is holding the site's
-      # results. Readiness - the upstream session, the bound of the spool,
-      # the certificate - is /readyz, for an operator and a load balancer,
-      # never for this check.
       test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8454"]
       interval: 30s
       timeout: 5s
@@ -81,7 +62,6 @@ services:
 
   # The registration. It runs once, with a one-time token, and ends; the
   # token never enters the service above, because that one restarts and the
-  # token must not outlive its use.
   relay-enroll:
     image: ghcr.io/ultherego/flotestro-relay:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     profiles: ["enroll"]

@@ -184,37 +184,38 @@ jobs:
           }
           # Production basic: the control plane against an external database.
           parse -f compose.yaml
-          # Quick start: the same, plus a PostgreSQL of its own.
-          parse -f compose.yaml -f compose.local-db.yaml
+          # Quick start: the same file, with a PostgreSQL of its own.
+          parse -f compose.yaml --profile quickstart
           # The administration tools, over each of the two above.
           parse -f compose.yaml -f compose.tools.yaml --profile tools --profile restore
-          parse -f compose.yaml -f compose.local-db.yaml -f compose.tools.yaml \
-            --profile tools --profile restore
+          parse -f compose.yaml -f compose.tools.yaml \
+            --profile quickstart --profile tools --profile restore
           # Air-gapped: the same, plus the package repository of the release.
           export FLOTESTRO_PACKAGE_REPOSITORY_URL=http://packages.invalid:8090
           parse -f compose.yaml -f compose.airgap.yaml
-          parse -f compose.yaml -f compose.local-db.yaml -f compose.airgap.yaml
+          parse -f compose.yaml --profile quickstart -f compose.airgap.yaml
           # The relay: its own project, on the site host.
           parse -f compose.relay.yaml
           parse -f compose.relay.yaml --profile enroll
 
-      - name: The base file names no database
-        # The rule of the base profile: an installation that points at an
-        # external database must not be able to start a second, empty one
-        # beside it. The check is here because the rule is easy to break by
-        # adding one convenient service.
+      - name: No database starts unless it is asked for by name
+        # An installation on an external database must not be able to start a
+        # second one beside it, so the profile is checked in both directions.
         run: |
           set -euo pipefail
-          services="$(docker compose -f compose.yaml config --services)"
-          if printf '%s\n' "$services" | grep -qx postgres; then
-            echo "compose.yaml names a postgres service; the local database belongs in compose.local-db.yaml alone" >&2
+          if docker compose -f compose.yaml config --services | grep -qx postgres; then
+            echo "compose.yaml starts a postgres service without --profile quickstart" >&2
             exit 1
           fi
-          if docker compose -f compose.yaml config | grep -qE '^ *(postgres_data|database):'; then
-            echo "compose.yaml names a database volume or network of the local profile" >&2
+          if ! docker compose -f compose.yaml --profile quickstart config --services | grep -qx postgres; then
+            echo "--profile quickstart starts no postgres service" >&2
             exit 1
           fi
-          echo "the base profile names no database service and no database volume"
+          if docker compose -f compose.yaml config | grep -qE '^ *depends_on:'; then
+            echo "compose.yaml makes the control plane depend on a service the profile may not start" >&2
+            exit 1
+          fi
+          echo "no database without the profile, one with it, and no dependency either way"
 
       - name: Our own services run as nobody and write nowhere
         # The execution contract of the document, read back out of the files
@@ -223,8 +224,8 @@ jobs:
         # contract.
         run: |
           set -euo pipefail
-          docker compose -f compose.yaml -f compose.local-db.yaml -f compose.tools.yaml \
-            --profile tools --profile restore config --format json > /tmp/deployment.json
+          docker compose -f compose.yaml -f compose.tools.yaml \
+            --profile quickstart --profile tools --profile restore config --format json > /tmp/deployment.json
           docker compose -f compose.relay.yaml --profile enroll config --format json > /tmp/relay.json
           jq -e -r '
             .services | to_entries

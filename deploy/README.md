@@ -8,11 +8,11 @@ the signed repository.
 | File | Role |
 |---|---|
 | `Containerfile` | All four images: the control plane (target `control-plane`), the relay (target `relay`), the administration tools (target `admin-tools`) and the package repository of an isolated site (target `package-repository`). |
-| `compose.yaml` | The control plane alone, against a database somebody else runs. |
-| `compose.local-db.yaml` | The overlay that adds a local PostgreSQL for a laboratory or a small fleet. |
+| `compose.yaml` | The control plane, and under `--profile quickstart` a PostgreSQL of its own. |
 | `compose.relay.yaml` | The relay of one site, run on the site host as its own project. |
 | `compose.airgap.yaml` | The overlay that puts the signed package repository of the release beside the control plane, for a site with no route out. |
 | `compose.tools.yaml` | The overlay with the backup and the restore, behind the profiles `tools` and `restore`. It adds nothing to `up`. |
+| `compose.podman.yaml` | The override rootless Podman needs: `keep-id`, so the secrets stay owned by the deploying account. |
 | `../.dockerignore` | The allowlist of the build context; it lies at the repository root because that is the context the build runs with. |
 | `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three service images, and what a pull request runs to prove the files above still work. |
 
@@ -22,7 +22,7 @@ the signed repository.
 local backup. For a laboratory, a demonstration and a small installation.
 
 ```
-docker compose -f compose.yaml -f compose.local-db.yaml up -d
+docker compose --profile quickstart up -d
 ```
 
 **Production basic** - one control plane against an external, backed-up
@@ -93,6 +93,13 @@ they run as 65532, drop every capability and write only to their volume and to
 and `loginctl enable-linger <account>`, or the panel stops with the session
 that started it. Every port the panel publishes is above 1024, so rootless
 needs no change there.
+
+**Two more differences, both found by running it.** An image named without a
+registry - `postgres:17-bookworm` - is a short name, and Podman refuses to
+resolve one without a terminal to ask at; the files name
+`docker.io/library/postgres` in full, which both runtimes take. And
+`podman-compose` honours `--profile` but not the `COMPOSE_PROFILES`
+environment variable, so the quick start is started with the flag.
 
 `podman-compose` reads the rest of the files as written: `secrets:`,
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
@@ -416,7 +423,7 @@ the DSN at the local database, and start both files together:
 ```
 printf '%s' 'a-long-random-password' > secrets/postgres-password && chmod 600 secrets/postgres-password
 printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable&application_name=flotestro-control-plane' > secrets/database-url
-docker compose -f compose.yaml -f compose.local-db.yaml up -d
+docker compose --profile quickstart up -d
 ```
 
 `sslmode=disable` is acceptable only here, on one host with an internal
@@ -682,7 +689,7 @@ to find out whether it actually works.
 Writing `COMPOSE_FILE=compose.yaml:compose.tools.yaml` into `./.env` shortens
 all of this to `docker compose --profile tools run --rm admin-tools backup`.
 With the quick start profile the local database is on an internal network, so
-add `-f compose.local-db.yaml` as well.
+add `--profile quickstart` as well.
 
 ### Putting it back
 
@@ -789,7 +796,7 @@ state directory holds the key that opens them and the CA the fleet trusts.
 
 ```
 docker compose down
-docker compose -f compose.yaml -f compose.local-db.yaml down    # quick start
+docker compose --profile quickstart down    # quick start
 ```
 
 The volumes survive on purpose: `docker compose down` stops the containers

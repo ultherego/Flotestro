@@ -1,31 +1,10 @@
 # The administration tools: the backup pair, its restore and a check of an
 # audit export, without a PostgreSQL client on the host.
 #
-# It is an overlay of compose.yaml, because the two things it works on - the
-# state volume of the control plane and the database the control plane is
-# configured with - are defined there. It adds no service to "up": both
-# services below stand behind a profile and are started by hand, run once
-# and disappear.
-#
-#   docker compose -f compose.yaml -f compose.tools.yaml \
-#     --profile tools run --rm admin-tools backup
-#
-#   docker compose -f compose.yaml -f compose.tools.yaml \
-#     --profile restore run --rm admin-restore restore 20260919T101500Z
-#
-# Writing COMPOSE_FILE=compose.yaml:compose.tools.yaml into ./.env makes the
-# short form - "docker compose --profile tools run --rm admin-tools backup" -
-# work as it stands.
-#
-# The backups land in ./backups on the host. Create it before the first run
-# and give it to the account the image runs as; nothing in this deployment is
-# ever started as root to fix the owner of a directory afterwards:
-#
-#   mkdir -p backups && chown 65532:65532 backups && chmod 700 backups
+#   docker compose -f compose.yaml -f compose.tools.yaml --profile tools run --rm admin-tools backup
 services:
   # Taking the pair. The state is read-only here: this service never writes
   # into the identity of the installation, and a typed command cannot be
-  # turned into one that does.
   admin-tools:
     image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     profiles: ["tools"]
@@ -35,15 +14,11 @@ services:
     environment:
       # The same DSN the control plane uses, from the same file. The tool
       # takes the password out of it before it runs anything, so the dump
-      # does not stand in the process list of the host with a password in it
-      # for as long as it runs.
       FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
       FLOTESTRO_STATE_DIR: /state
       FLOTESTRO_BACKUP_DIR: /backups
       # The digest this deployment pins, so that the manifest of a backup
       # can name the image the backup was taken with. An installation that
-      # runs a floating tag leaves it empty and the manifest then records no
-      # digest rather than implying one.
       FLOTESTRO_IMAGE_DIGEST: ${FLOTESTRO_TOOLS_DIGEST:-}
 
     secrets:
@@ -60,12 +35,6 @@ services:
     networks:
       # The way out to the database. Both networks are named because one of
       # them exists only in one profile: with an external database the
-      # connection leaves through database_egress, and with the local
-      # PostgreSQL of compose.local-db.yaml it stays on the internal
-      # network. The priorities decide which of the two carries the default
-      # route - the internal network has no way out, and a container whose
-      # default route pointed at it would not reach an external database at
-      # all.
       database_egress:
         priority: 100
       database:
@@ -87,8 +56,6 @@ services:
 
   # Putting the pair back. The same image and the same tool; what differs is
   # that the state is writable and the backups are not. It is a separate
-  # service and a separate profile precisely so that the writable mount
-  # exists only while somebody is deliberately restoring.
   admin-restore:
     image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
     profiles: ["restore"]
@@ -107,7 +74,6 @@ services:
     volumes:
       # Read-write, and the tool refuses to write into a state that is not
       # empty: a restore puts an installation back where there is none, it
-      # never writes over the identity of one that is still running.
       - control_plane_state:/state
       # The backup is the source here and is mounted read-only, so a restore
       # cannot damage the thing it is restoring from.
@@ -134,8 +100,7 @@ services:
         max-file: "5"
 
 networks:
-  # Declared the same way as in compose.local-db.yaml, so that this overlay
+  # Declared the same way as in compose.yaml, so that this overlay
   # can be loaded with or without it. Internal: the local database has no
-  # route out and no foreign container has a route in.
   database:
     internal: true
