@@ -20,6 +20,11 @@ on:
 
 permissions:
   contents: write
+  # The identity the build provenance is made with, and the store it is
+  # written to. Granting them is not the same as receiving them: a run that
+  # gets no OIDC token says so and publishes without an attestation.
+  id-token: write
+  attestations: write
 
 jobs:
   packages:
@@ -221,6 +226,34 @@ jobs:
             --local-user "$key" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
           gpg --batch --quiet --delete-secret-and-public-key --yes "$key" || true
           rm -rf "$GNUPGHOME"
+
+      - name: Is there an identity to attest with
+        id: oidc
+        # The token is injected by the runner, not by the workflow, so a step
+        # condition cannot read it: the answer is turned into an output here.
+        run: |
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=No build provenance::this run received no OIDC identity, so the packages are published without an attestation"
+          fi
+
+      - name: Build provenance
+        # Keyless, against the identity of this workflow and recorded in the
+        # public transparency log: "gh attestation verify <file> --repo
+        # <this repository>" then answers where the file was built, from which
+        # commit and by which run. There is no private key to steal, and the
+        # GPG signature over SHA256SUMS stays beside it - one says who signed,
+        # the other says what built.
+        if: steps.oidc.outputs.available == 'true'
+        uses: actions/attest-build-provenance@v4.2.2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.*
+            dist/SHA256SUMS
 
       - name: The release is not published twice
         # The check stands before the upload so that a re-run of a tag

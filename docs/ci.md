@@ -131,6 +131,17 @@ reported in the job summary rather than refused - tag signing is a repository
 setting the workflow cannot turn on, and refusing would block a release the
 owner never configured for it.
 
+**Where the file came from.** Every `.deb`, `.rpm`, `.pkg.tar.*` and
+`SHA256SUMS` carries a keyless build attestation made against the identity of
+the release run, so anyone can ask where a file was built:
+
+    gh attestation verify flotestro-agent_1.2.3_amd64.deb --repo ultherego/Flotestro
+
+It answers with the commit, the workflow and the run. The GPG signature over
+`SHA256SUMS` stays beside it: one says who signed the release, the other says
+what built it. A run that receives no OIDC identity publishes without an
+attestation and says so in the checks list rather than inventing one.
+
 **Nothing is replaced.** The upload refuses an asset the release already holds
 and names it; there is no `--clobber`. A release is corrected by a new version,
 not by a new file under the old name.
