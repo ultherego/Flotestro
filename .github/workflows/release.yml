@@ -385,7 +385,7 @@ jobs:
           url="https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
           rm -rf pages
           if git clone --quiet --depth 1 --branch "$PAGES_BRANCH" "$url" pages; then
-            echo "the repository carries $(find pages -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' | wc -l) packages"
+            echo "the repository carries $(find pages/packages -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' 2>/dev/null | wc -l) packages"
           else
             mkdir pages
             git -C pages init --quiet --initial-branch "$PAGES_BRANCH"
@@ -413,7 +413,10 @@ jobs:
             echo "allow-loopback-pinentry" >> "$GNUPGHOME/gpg-agent.conf"
             gpg-connect-agent reloadagent /bye >/dev/null
           fi
-          bash source/packaging/sign-repo.sh dist "$key" pages "${{ steps.channel.outputs.version }}"
+          # Under packages/, so the root of the site stays free for the
+          # project's own pages.
+          mkdir -p pages/packages
+          bash source/packaging/sign-repo.sh dist "$key" pages/packages "${{ steps.channel.outputs.version }}"
           gpg --batch --quiet --delete-secret-and-public-key --yes "$key" || true
           rm -rf "$GNUPGHOME"
 
@@ -428,24 +431,24 @@ jobs:
           set -euo pipefail
           export GNUPGHOME="$(mktemp -d)"
           chmod 700 "$GNUPGHOME"
-          [ -s pages/flotestro-repo.asc ] || { echo "the repository carries no public key" >&2; exit 1; }
-          gpg --batch --quiet --import pages/flotestro-repo.asc
+          [ -s pages/packages/flotestro-repo.asc ] || { echo "the repository carries no public key" >&2; exit 1; }
+          gpg --batch --quiet --import pages/packages/flotestro-repo.asc
           checked=0
           while read -r index; do
             gpg --batch --verify "$index" >/dev/null 2>&1 || \
               { echo "$index is not signed by the release key" >&2; exit 1; }
             checked=$((checked + 1))
-          done < <(find pages/deb/dists -name InRelease)
+          done < <(find pages/packages/deb/dists -name InRelease)
           while read -r signature; do
             gpg --batch --verify "$signature" "${signature%.asc}" >/dev/null 2>&1 || \
               { echo "${signature%.asc} is not signed by the release key" >&2; exit 1; }
             checked=$((checked + 1))
-          done < <(find pages/rpm -name repomd.xml.asc)
+          done < <(find pages/packages/rpm -name repomd.xml.asc)
           while read -r signature; do
             gpg --batch --verify "$signature" "${signature%.sig}" >/dev/null 2>&1 || \
               { echo "${signature%.sig} is not signed by the release key" >&2; exit 1; }
             checked=$((checked + 1))
-          done < <(find pages/arch -name 'flotestro.db.tar.gz.sig')
+          done < <(find pages/packages/arch -name 'flotestro.db.tar.gz.sig')
           [ "$checked" -gt 0 ] || { echo "the release produced no repository index at all" >&2; exit 1; }
           echo "$checked indexes verify against flotestro-repo.asc"
           rm -rf "$GNUPGHOME"
@@ -459,7 +462,9 @@ jobs:
           set -euo pipefail
           cd pages
           : > .nojekyll
-          cat > index.html <<'PAGE'
+          # The repository describes itself under packages/; the root of the
+          # site belongs to the project and this release does not touch it.
+          cat > packages/index.html <<'PAGE'
           <!doctype html>
           <meta charset="utf-8">
           <title>Flotestro packages</title>

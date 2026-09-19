@@ -150,8 +150,8 @@ site, pinning a digest, upgrading - is in [deploy/README.md](deploy/README.md).
 
 ```
 sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsS https://ultherego.github.io/Flotestro/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc >/dev/null
-echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list >/dev/null
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc >/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list >/dev/null
 sudo apt update && sudo apt install flotestro-agent
 ```
 
@@ -167,7 +167,7 @@ in. The file name carries the version, so there is no `latest` URL to quote -
 `gh` resolves the newest stable release itself, and pre-releases are not in it:
 
 ```
-curl -fsS https://ultherego.github.io/Flotestro/flotestro-repo.asc | gpg --import
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | gpg --import
 gh release download --repo ultherego/Flotestro --pattern 'flotestro-agent_*_amd64.deb' --pattern 'SHA256SUMS*'
 gpg --verify SHA256SUMS.asc SHA256SUMS
 sha256sum --check --ignore-missing SHA256SUMS

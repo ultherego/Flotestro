@@ -258,7 +258,7 @@ repository: there is no `apt update` against them, no upgrade path, and a URL
 that carries a version number stops resolving the day the next version exists.
 So the same signing job composes the repository and pushes it to the
 `gh-pages` branch, which GitHub Pages serves at
-`https://ultherego.github.io/Flotestro/` - a plain HTTPS directory tree, which
+`https://ultherego.github.io/Flotestro/packages/` - a plain HTTPS directory tree, which
 is all apt, dnf and pacman ever ask for. `FLOTESTRO_PACKAGE_REPOSITORY_URL` set
 to that address makes the commands the panel writes under "Add host" work
 against the project's own packages.
