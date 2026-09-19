@@ -1,15 +1,23 @@
 # syntax=docker/dockerfile:1.7
 
-# The image of the control plane and the image of the relay come out of one
-# file. They are built from one source tree, share the build of the panel and
-# the toolchain, and must never drift apart in their version: an agent talks
-# to both, and a relay from another release is a support case nobody can see.
+# The images of one release come out of one file: the control plane (target
+# control-plane), the relay (target relay) and the administration tools
+# (target admin-tools). They are built from one source tree, share the build
+# of the panel and the toolchain, and must never drift apart in their
+# version: an agent talks to two of them, and a relay from another release is
+# a support case nobody can see.
 #
-# The final images are distroless. They carry the binaries, the certificate
-# store of the system and the built panel, and nothing else - no shell, no
-# package manager, no PostgreSQL client and no Docker CLI. Debugging happens
-# through a support bundle or a separate tools image; the database has its own
-# lifecycle, its own backup and its own tuning, so it is never in here.
+# The two images that run as services are distroless. They carry the
+# binaries, the certificate store of the system and the built panel, and
+# nothing else - no shell, no package manager, no PostgreSQL client and no
+# Docker CLI. Debugging happens through a support bundle, a backup is taken
+# by the tools image, and the database keeps its own lifecycle, its own
+# backup and its own tuning, so it is never in here.
+#
+# The tools image is the one exception to distroless, and the stage says at
+# length why: a dump is written by the client of the server, and that client
+# is a C program with a distribution under it. It is a one-shot image. It
+# never runs as a service, it has no port, and it is not part of "up".
 #
 # Build (one architecture, for a laboratory):
 #   docker build -f deploy/Containerfile --target control-plane \
@@ -23,12 +31,21 @@
 #     --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 #     -t ghcr.io/ultherego/flotestro-control-plane:0.54.0 --push .
 #
+# A release builds all three the same way, one after the other, from
+# .github/workflows/images.yml; that workflow also pushes them, attaches the
+# bills of materials and the provenance, and prints the digests a deployment
+# pins.
+#
 # The build context is the repository root, and the allowlist that keeps it
 # to the sources is the .dockerignore file there.
 
 ARG GO_IMAGE=golang:1.25-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG RUNTIME_IMAGE=gcr.io/distroless/static-debian12:nonroot
+# The administration tools are the one image that cannot be distroless, and
+# the base is named here so that a production build pins it by digest like
+# the others. Why it has to be this image is written above the stage itself.
+ARG TOOLS_IMAGE=postgres:17-bookworm
 # The tags above name the family of an image. A production build pins each of
 # them by digest (image:tag@sha256:...) and moves a digest in a separate
 # change, after the images behind it were tested; a tag may be rewritten by
@@ -115,6 +132,21 @@ RUN install -d -m 0755 /out/rootfs-control-plane/var /out/rootfs-control-plane/v
         /out/rootfs-control-plane/var/lib/flotestro \
         /out/rootfs-relay/var/lib/flotestro-relay
 
+# The built artefacts on their own, for a step that has to look at the real
+# binaries rather than at the source tree: the bill of materials of a release
+# is read out of the binary that ships, so it must describe the file the
+# image carries and not the go.mod of whoever ran the tool. The stage is
+# scratch and is built only when it is named as the target, so it costs a
+# release build nothing.
+#
+#   docker buildx build -f deploy/Containerfile --target artifacts \
+#     --platform linux/amd64 --output type=local,dest=out .
+FROM scratch AS artifacts
+COPY --from=go-build /out/flotestro-control-plane /out/flotestro-relay \
+     /out/flotestro-relayctl /out/flotestro-auditverify \
+     /out/flotestro-healthcheck /
+COPY --from=web-build /src/web/dist/ /web/
+
 FROM --platform=$TARGETPLATFORM ${RUNTIME_IMAGE} AS control-plane
 
 ARG VERSION COMMIT BUILD_DATE
@@ -179,3 +211,349 @@ STOPSIGNAL SIGTERM
 # next to the file that decides it.
 ENTRYPOINT ["/usr/local/bin/flotestro-relay"]
 CMD ["run", "-config", "/etc/flotestro/relay.yaml"]
+
+# The administration tools: the backup pair, its restore and the check of an
+# audit export. This is the one image of the set that cannot be distroless,
+# and the reason is pg_dump.
+#
+# pg_dump and pg_restore are C programs linked against libpq, OpenSSL, ICU,
+# LDAP and GSSAPI, and they read the locale and the encoding tables of the
+# distribution at run time. A static-distroless image has no libc for them
+# to link against and none of those files, so they cannot live there - and
+# rewriting a dump format in Go would mean maintaining a second, worse
+# implementation of the thing the database ships. A dump is also refused by
+# a client older than the server, which is why the base is the image of the
+# server itself, pinned to the same major version as the database: the
+# client then always speaks the format the server writes.
+#
+# The base carries the server binaries as well. Nothing ever starts them:
+# the service has no data directory, no port and no daemon entrypoint, it
+# runs one command and ends. It does inherit the VOLUME declaration of the
+# base image, so every run creates an empty anonymous volume for a data
+# directory that is never used - "docker compose run --rm" takes it away
+# again, and that is why the documented invocation carries --rm.
+FROM --platform=$TARGETPLATFORM ${TOOLS_IMAGE} AS admin-tools
+
+ARG VERSION COMMIT BUILD_DATE
+LABEL org.opencontainers.image.title="Flotestro administration tools" \
+      org.opencontainers.image.source="https://github.com/ultherego/Flotestro" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${COMMIT}" \
+      org.opencontainers.image.created="${BUILD_DATE}"
+
+# zstd for the state archive - the manifest names a .tar.zst and GNU tar
+# calls the program - and jq to write and read the manifest itself, because
+# a manifest assembled by hand out of shell variables is a manifest that
+# breaks on the first value with a quotation mark in it. Nothing else is
+# added: the client, the archiver and one JSON tool.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends zstd jq && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=go-build /out/flotestro-auditverify /usr/local/bin/
+
+COPY --chmod=0755 <<'TOOL' /usr/local/bin/flotestro-admin-tools
+#!/usr/bin/env bash
+#
+# The administration tool of a containerised installation.
+#
+# One process, one job, and then it is gone. It takes the backup pair - the
+# database and the state directory from one point in time - puts that pair
+# back, or says whether what lies in the backup directory is still what was
+# written. Nothing here listens, nothing runs as a daemon and nothing
+# reaches a managed host.
+set -euo pipefail
+
+backup_root="${FLOTESTRO_BACKUP_DIR:-/backups}"
+state_dir="${FLOTESTRO_STATE_DIR:-/state}"
+
+fail() {
+    printf 'admin-tools: %s\n' "$1" >&2
+    exit 1
+}
+
+note() {
+    printf 'admin-tools: %s\n' "$1"
+}
+
+# Percent-decoding for the password of a URI: libpq decodes it out of the
+# DSN, PGPASSWORD is taken literally, so a password written as %40 has to
+# become an at sign here. The backslashes are doubled first, otherwise a
+# password that contains one would be read as an escape.
+urldecode() {
+    local escaped="${2//\\/\\\\}"
+    printf -v "$1" '%b' "${escaped//%/\\x}"
+}
+
+# The DSN is read from a file, as everywhere else in this deployment, and
+# the password is lifted out of it before anything is executed: an argument
+# stands in the process list of the host for as long as the command runs,
+# and the dump of a large installation runs for a long time. What stays in
+# the argument is the host, the user, the database and the TLS mode - the
+# configuration of the connection, which is not a secret.
+connect() {
+    local path="${FLOTESTRO_DATABASE_URL_FILE:-}"
+    if [ -z "$path" ]; then
+        fail "FLOTESTRO_DATABASE_URL_FILE is not set; the DSN travels as a file, never as a value"
+    fi
+    if [ -n "${FLOTESTRO_DATABASE_URL:-}" ]; then
+        fail "FLOTESTRO_DATABASE_URL and FLOTESTRO_DATABASE_URL_FILE are both set; which of the two was meant cannot be guessed"
+    fi
+    if [ -L "$path" ]; then
+        fail "$path is a symbolic link; a secret is read from the file it is mounted as"
+    fi
+    if [ ! -f "$path" ]; then
+        fail "$path is not a file"
+    fi
+    local size
+    size="$(stat -c %s "$path")"
+    if [ "$size" -eq 0 ]; then
+        fail "$path is empty"
+    fi
+    if [ "$size" -gt 8192 ]; then
+        fail "$path holds $size bytes; a DSN is not that long and this is not the file that was meant"
+    fi
+    local dsn
+    dsn="$(cat "$path")"
+    case "$dsn" in
+        postgres://*|postgresql://*) ;;
+        *) fail "the DSN in $path is not a postgres:// URI; the key=value form cannot have its password separated from the arguments and is refused here" ;;
+    esac
+    local scheme rest head tail userinfo user encoded
+    scheme="${dsn%%://*}://"
+    rest="${dsn#*://}"
+    head="${rest%%/*}"
+    tail="${rest#"$head"}"
+    if [ "${head#*@}" != "$head" ]; then
+        userinfo="${head%@*}"
+        if [ "${userinfo#*:}" != "$userinfo" ]; then
+            user="${userinfo%%:*}"
+            encoded="${userinfo#*:}"
+            urldecode PGPASSWORD "$encoded"
+            export PGPASSWORD
+            head="${user}@${head##*@}"
+        fi
+    fi
+    CONNECTION="${scheme}${head}${tail}"
+}
+
+query() {
+    psql --no-psqlrc --quiet --tuples-only --no-align \
+        --set ON_ERROR_STOP=1 --dbname "$CONNECTION" --command "$1"
+}
+
+# A backup is addressed by its identifier and lies in a directory of its
+# own, because the database and the state are one thing: a directory that
+# holds both and the manifest that ties them cannot be half copied without
+# it being visible.
+resolve() {
+    local given="$1" dir
+    if [ -z "$given" ]; then
+        fail "give the identifier of the backup, for example 20260919T101500Z"
+    fi
+    if [ -d "$backup_root/$given" ]; then
+        dir="$backup_root/$given"
+    elif [ -d "$given" ]; then
+        dir="$given"
+    else
+        fail "no backup $given under $backup_root"
+    fi
+    local expected
+    expected="$(jq -r '.backup_id' "$dir/manifest.json")"
+    if [ "$expected" != "$(basename "$dir")" ]; then
+        fail "$dir/manifest.json describes the backup $expected; the manifest and the directory are from different pairs"
+    fi
+    printf '%s' "$dir"
+}
+
+checksums() {
+    local dir="$1"
+    ( cd "$dir" && sha256sum --check --strict --quiet SHA256SUMS ) ||
+        fail "the files of $dir do not match the checksums written with them"
+}
+
+backup() {
+    connect
+    if [ ! -d "$state_dir" ]; then
+        fail "$state_dir is not a directory; the state volume of the control plane is mounted there"
+    fi
+    if [ ! -f "$state_dir/ca.pem" ]; then
+        fail "$state_dir carries no ca.pem, so it is not the state of an installation; half a pair is not a backup"
+    fi
+    if [ ! -w "$backup_root" ]; then
+        fail "$backup_root is not writable by this container (uid $(id -u)); the directory on the host belongs to that user"
+    fi
+    local id dir
+    id="$(date -u +%Y%m%dT%H%M%SZ)"
+    dir="$backup_root/$id"
+    if [ -e "$dir" ]; then
+        fail "$dir already exists"
+    fi
+    mkdir "$dir"
+
+    note "the pair $id: the database and $state_dir"
+    note "the two halves belong to one point in time - stop the control plane for the dump, or at the very least hold the rotation of the CA and of the key encryption keys while it runs"
+
+    # --no-owner and --no-privileges: the restore is done by whoever owns
+    # the empty database it goes into, which on a rebuilt installation is
+    # not always the role of the machine that was lost.
+    pg_dump --format=custom --no-owner --no-privileges \
+        --dbname "$CONNECTION" --file "$dir/database.dump"
+    # --numeric-owner: the names of the accounts of this image say nothing
+    # about the host the archive goes back onto; 65532 is what matters and
+    # is what the control plane image creates its state directory with.
+    tar --numeric-owner --zstd --create --file "$dir/state.tar.zst" \
+        --directory "$state_dir" .
+
+    ( cd "$dir" && sha256sum database.dump state.tar.zst > SHA256SUMS )
+    local database_sha state_sha
+    database_sha="$(awk '$2 == "database.dump" { print $1 }' "$dir/SHA256SUMS")"
+    state_sha="$(awk '$2 == "state.tar.zst" { print $1 }' "$dir/SHA256SUMS")"
+
+    # The identity of the installation, read from the database it was just
+    # taken from. It is what tells two backups of two installations apart
+    # later, when both are only directories on a share.
+    local installation_id active_key_id issuer_id
+    installation_id="$(query 'select installation_id from crypto_installation_state' 2>/dev/null || true)"
+    active_key_id="$(query 'select active_secrets_key_id from crypto_installation_state' 2>/dev/null || true)"
+    issuer_id="$(query 'select active_agent_ca_id from crypto_installation_state' 2>/dev/null || true)"
+
+    # The digest of the image is not something a container can read about
+    # itself: it comes from the deployment that pinned it. An installation
+    # that runs a floating tag has none, and the manifest then says so
+    # rather than naming a version and implying a digest.
+    if [ -z "${FLOTESTRO_IMAGE_DIGEST:-}" ]; then
+        note "the deployment does not pin this image by digest, so the manifest records none"
+    fi
+
+    jq -n \
+        --arg backup_id "$id" \
+        --arg created_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg version "${FLOTESTRO_IMAGE_VERSION:-}" \
+        --arg commit "${FLOTESTRO_IMAGE_COMMIT:-}" \
+        --arg installation_id "$installation_id" \
+        --arg active_key_id "$active_key_id" \
+        --arg issuer_id "$issuer_id" \
+        --arg database_archive "database.dump" \
+        --arg database_sha256 "$database_sha" \
+        --arg state_archive "state.tar.zst" \
+        --arg state_sha256 "$state_sha" \
+        --arg image_digest "${FLOTESTRO_IMAGE_DIGEST:-}" \
+        'def orNull: if . == "" then null else . end;
+         {backup_id: $backup_id,
+          created_at: $created_at,
+          flotestro_version: ($version | orNull),
+          commit: ($commit | orNull),
+          installation_id: ($installation_id | orNull),
+          active_key_id: ($active_key_id | orNull),
+          issuer_id: ($issuer_id | orNull),
+          database_method: "pg_dump-custom",
+          database_archive: $database_archive,
+          database_sha256: $database_sha256,
+          state_archive: $state_archive,
+          state_sha256: $state_sha256,
+          image_digest: ($image_digest | orNull)}' \
+        > "$dir/manifest.json"
+
+    note "written to $dir: database.dump, state.tar.zst, manifest.json, SHA256SUMS"
+    note "the manifest carries no DSN, no password and no secret - the backup itself does, so it belongs on encrypted storage away from this host"
+    note "put it back with: restore $id"
+}
+
+restore() {
+    local dir
+    dir="$(resolve "${1:-}")"
+    checksums "$dir"
+    connect
+
+    if [ ! -w "$state_dir" ]; then
+        fail "$state_dir is read only; the restore is run from the restore profile, which mounts the state read-write, and not from the backup one"
+    fi
+    if [ -n "$(ls -A "$state_dir")" ]; then
+        fail "$state_dir is not empty; a restore never writes over the identity of an installation that is still there - empty the volume deliberately first"
+    fi
+    local tables
+    tables="$(query "select count(*) from information_schema.tables where table_schema = 'public'")"
+    if [ "$tables" != "0" ]; then
+        fail "the target database already holds $tables tables in the public schema; a restore goes into an empty database"
+    fi
+
+    # -p keeps the modes of the archive - the state is 0700 and the keys in
+    # it are 0600, and a restore that widened them would be a restore that
+    # published the fleet CA. The owner is this container's own account,
+    # which is the account the image created the directory with.
+    tar --numeric-owner --zstd --extract --preserve-permissions \
+        --file "$dir/state.tar.zst" --directory "$state_dir"
+    pg_restore --no-owner --no-privileges --exit-on-error \
+        --dbname "$CONNECTION" "$dir/database.dump"
+
+    note "the pair $(basename "$dir") is back: the state in $state_dir and the schema in the database"
+    note "next: start one control plane - it runs the migrator itself - and check that the installation identifier, the CA and the agents are the ones the manifest names"
+}
+
+verify() {
+    local dir
+    dir="$(resolve "${1:-}")"
+    checksums "$dir"
+    note "the files of $dir are the ones that were written"
+    jq . "$dir/manifest.json"
+}
+
+usage() {
+    cat <<'USAGE'
+flotestro-admin-tools <command>
+
+  backup              take the database and the state directory as one pair
+  restore <id>        put that pair back into an empty database and an empty state
+  verify <id>         check the checksums and show the manifest
+  auditverify <file>  check an export of the audit trail
+  version             the version of this image
+
+Anything else is run as it stands, so psql, pg_dump and pg_restore are
+available by hand:
+
+  docker compose --profile tools run --rm admin-tools psql --version
+USAGE
+}
+
+subcommand="${1:-help}"
+if [ "$#" -gt 0 ]; then
+    shift
+fi
+case "$subcommand" in
+    backup) backup "$@" ;;
+    restore) restore "${1:-}" ;;
+    verify) verify "${1:-}" ;;
+    # The binary carries the full name in the image, as it does in the
+    # packages; the short word is what a runbook writes.
+    auditverify) exec flotestro-auditverify "$@" ;;
+    version)
+        printf 'flotestro-admin-tools %s (%s, %s)\n' \
+            "${FLOTESTRO_IMAGE_VERSION:-unknown}" \
+            "${FLOTESTRO_IMAGE_COMMIT:-unknown}" \
+            "${FLOTESTRO_IMAGE_CREATED:-unknown}"
+        flotestro-auditverify version
+        pg_dump --version
+        ;;
+    help|-h|--help) usage ;;
+    *) exec "$subcommand" "$@" ;;
+esac
+TOOL
+
+# The version is written in as an environment variable as well as a label,
+# because the manifest of a backup names the release it was taken from and
+# the tool has to be able to read it without a Docker socket to ask. None of
+# these three is a secret: a secret would have to come in through a file or
+# a build secret mount, never through an argument or the environment, since
+# the provenance of an image records both.
+ENV FLOTESTRO_IMAGE_VERSION="${VERSION}" \
+    FLOTESTRO_IMAGE_COMMIT="${COMMIT}" \
+    FLOTESTRO_IMAGE_CREATED="${BUILD_DATE}" \
+    FLOTESTRO_BACKUP_DIR=/backups \
+    FLOTESTRO_STATE_DIR=/state \
+    HOME=/tmp
+
+USER 65532:65532
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/usr/local/bin/flotestro-admin-tools"]
+CMD ["help"]

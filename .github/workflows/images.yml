@@ -1,0 +1,588 @@
+# The container images: what a tag publishes, and what a pull request proves
+# before a tag exists.
+#
+# A release of the images is a supply chain and not a build. The three images
+# of deploy/Containerfile are built for both official platforms, pushed under
+# a tag that is never rewritten, described by a bill of materials and a
+# provenance statement, signed where the run has an identity to sign with,
+# and finally reported as digests - because a digest is what a deployment
+# pins and a tag is only what a human reads.
+#
+# The packages of a release are built by release.yml from the same tag. The
+# two are deliberately separate workflows: a machine that can build an .rpm
+# is not a machine that needs to push to a registry, and a failure in one
+# must not hide the other.
+name: Images
+
+on:
+  # A tag is the only thing that publishes. The version of the image is the
+  # tag without its "v", so v0.56.0 becomes 0.56.0.
+  push:
+    tags:
+      - "v*"
+  # A pull request builds and pushes nothing. It exists so that a broken
+  # Containerfile, a Compose file that does not parse and a build context
+  # that carries a secret are found while there is still something to fix,
+  # rather than at the moment somebody tags a release.
+  pull_request:
+    paths:
+      - "deploy/**"
+      - ".dockerignore"
+      - "cmd/**"
+      - "internal/**"
+      - "db/**"
+      - "web/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/images.yml"
+  # A dry run of the whole thing on a branch, for the day somebody changes
+  # the build itself. It pushes nothing either.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # "Nothing but the sources reaches the builder" is a sentence that has to
+  # be checked, not believed. The check builds the context itself - one
+  # scratch stage that copies everything it is given - and looks at what
+  # came out. That is exactly the set of files the builder sees, after
+  # .dockerignore, and not an interpretation of the ignore file.
+  context:
+    name: Build context
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: docker/setup-buildx-action@v3.7.1
+
+      - name: What reaches the builder
+        run: |
+          set -euo pipefail
+          dump="$RUNNER_TEMP/context"
+          mkdir -p "$dump"
+          # The miniature Containerfile lies outside the context on purpose:
+          # writing it into the working tree would change the very thing
+          # being measured.
+          printf '%s\n' \
+            '# syntax=docker/dockerfile:1.7' \
+            'FROM scratch AS context' \
+            'COPY . /' > "$RUNNER_TEMP/context.Containerfile"
+          docker buildx build --file "$RUNNER_TEMP/context.Containerfile" \
+            --target context --output "type=local,dest=$dump" .
+          echo "the builder is given $(find "$dump" -type f | wc -l) files:"
+          ls -A "$dump" | sed 's/^/  /'
+
+      - name: The context carries no secret
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/context"
+          refused=0
+
+          report() {
+            printf '%s\n' "$2" >&2
+            printf '%s\n' "$1" | sed 's/^/  /' >&2
+            refused=1
+          }
+
+          # An environment file is where a deployment keeps its settings and
+          # where somebody eventually keeps a password as well. The sources
+          # of a build have none.
+          found="$(find . \( -name '.env' -o -name '.env.*' \) -print | sort)"
+          if [ -n "$found" ]; then
+            report "$found" "an environment file reaches the builder:"
+          fi
+
+          # Key material by name. A certificate and a key look alike from
+          # the outside, so both are refused: a build needs neither, and the
+          # trust store of the images comes from the base image.
+          found="$(find . -type f \( -name '*.pem' -o -name '*.key' -o -name '*.p12' \
+            -o -name '*.pfx' -o -name '*.jks' -o -name '*.keytab' \) -print | sort)"
+          if [ -n "$found" ]; then
+            report "$found" "key material reaches the builder:"
+          fi
+
+          # Key material by content, for a key that was given an innocent
+          # name. Binary files are skipped; a PEM block is text.
+          found="$(grep -rlIE '^-----BEGIN ([A-Z]+ )*PRIVATE KEY-----' . | sort || true)"
+          if [ -n "$found" ]; then
+            report "$found" "a private key block stands in a file that reaches the builder:"
+          fi
+
+          # The two directories of a deployment: ./secrets holds the files
+          # the containers are given at run time, ./state holds the identity
+          # of an installation. Neither has anything to do with a build.
+          # Go sources are exempt by extension alone, because internal/secrets
+          # is the package that implements the secret store and belongs in
+          # every image.
+          found="$(find . -type f \( -path '*/secrets/*' -o -path '*/state/*' \) \
+            ! -name '*.go' -print | sort)"
+          if [ -n "$found" ]; then
+            report "$found" "a file from a secrets or state directory reaches the builder:"
+          fi
+
+          # Not secrets, but a context that carries them is a context nobody
+          # has an allowlist for any more: the repository history, an
+          # installed dependency tree, a built panel from somebody's laptop.
+          found="$(find . \( -name '.git' -o -name 'node_modules' -o -name 'dist' \
+            -o -name '.vagrant' \) -print | sort)"
+          if [ -n "$found" ]; then
+            report "$found" "a directory that the allowlist is meant to keep out reaches the builder:"
+          fi
+
+          if [ "$refused" != "0" ]; then
+            echo "" >&2
+            echo "the build context is an allowlist in .dockerignore; nothing but the sources belongs in it" >&2
+            exit 1
+          fi
+          echo "no environment file, no key, no secrets or state directory, nothing but the sources"
+
+  # A Compose file that does not parse is found by an operator at the worst
+  # possible moment: during an installation or during a restore. Every
+  # combination that the documentation tells somebody to run is parsed here.
+  compose:
+    name: Compose files
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: deploy
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: The settings and the secret files that a parse needs
+        # Compose refuses a file whose required variables are unset, and the
+        # values below are placeholders for a parse and nothing else. They
+        # are written in this job alone: the build context job runs on its
+        # own checkout, and these files would be exactly what it refuses.
+        run: |
+          set -euo pipefail
+          {
+            echo "FLOTESTRO_VERSION=0.0.0-parse-only"
+            echo "FLOTESTRO_GATEWAY_ID=cp-parse-only"
+            echo "FLOTESTRO_ADVERTISE=panel.invalid"
+            echo "FLOTESTRO_PUBLIC_URL=https://panel.invalid"
+          } > .env
+          mkdir -p secrets backups
+          for name in database-url postgres-password relay-enrollment-token; do
+            printf '%s' 'placeholder-for-a-parse' > "secrets/$name"
+          done
+
+      - name: Every combination parses
+        run: |
+          set -euo pipefail
+          parse() {
+            echo "-> docker compose $*"
+            docker compose "$@" config --quiet
+          }
+          # Production basic: the control plane against an external database.
+          parse -f compose.yaml
+          # Quick start: the same, plus a PostgreSQL of its own.
+          parse -f compose.yaml -f compose.local-db.yaml
+          # The administration tools, over each of the two above.
+          parse -f compose.yaml -f compose.tools.yaml --profile tools --profile restore
+          parse -f compose.yaml -f compose.local-db.yaml -f compose.tools.yaml \
+            --profile tools --profile restore
+          # The relay: its own project, on the site host.
+          parse -f compose.relay.yaml
+          parse -f compose.relay.yaml --profile enroll
+
+      - name: The base file names no database
+        # The rule of the base profile: an installation that points at an
+        # external database must not be able to start a second, empty one
+        # beside it. The check is here because the rule is easy to break by
+        # adding one convenient service.
+        run: |
+          set -euo pipefail
+          services="$(docker compose -f compose.yaml config --services)"
+          if printf '%s\n' "$services" | grep -qx postgres; then
+            echo "compose.yaml names a postgres service; the local database belongs in compose.local-db.yaml alone" >&2
+            exit 1
+          fi
+          if docker compose -f compose.yaml config | grep -qE '^ *(postgres_data|database):'; then
+            echo "compose.yaml names a database volume or network of the local profile" >&2
+            exit 1
+          fi
+          echo "the base profile names no database service and no database volume"
+
+      - name: Our own services run as nobody and write nowhere
+        # The execution contract of the document, read back out of the files
+        # that implement it. It covers our images alone: the PostgreSQL of
+        # the quick start profile is somebody else's image with its own
+        # contract.
+        run: |
+          set -euo pipefail
+          docker compose -f compose.yaml -f compose.local-db.yaml -f compose.tools.yaml \
+            --profile tools --profile restore config --format json > /tmp/deployment.json
+          docker compose -f compose.relay.yaml --profile enroll config --format json > /tmp/relay.json
+          jq -e -r '
+            .services | to_entries
+            | map(select(.value.image | test("ghcr.io/ultherego/flotestro-")))
+            | map(select(
+                (.value.user != "65532:65532")
+                or (.value.read_only != true)
+                or ((.value.cap_drop // []) != ["ALL"])
+                or (((.value.security_opt // []) | index("no-new-privileges:true")) == null)))
+            | if length == 0 then "every service of ours is 65532, read-only, without capabilities and without new privileges"
+              else ("these services break the execution contract: " + (map(.key) | join(", ")) + "\n" | halt_error(1))
+              end' /tmp/deployment.json /tmp/relay.json
+
+  # The images themselves. One leg of the matrix per target: they are
+  # independent, and a relay that fails to build must not hide a control
+  # plane that builds.
+  images:
+    name: ${{ matrix.target }}
+    needs: [context, compose]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      # The registry of the repository owner.
+      packages: write
+      # The identity the keyless signature is made with. It is granted here;
+      # whether a run actually receives it is a different question, and the
+      # signing step below answers it out loud instead of assuming.
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: control-plane
+            image: flotestro-control-plane
+            binaries: flotestro-control-plane flotestro-auditverify flotestro-healthcheck
+          - target: relay
+            image: flotestro-relay
+            binaries: flotestro-relay flotestro-relayctl flotestro-healthcheck
+          - target: admin-tools
+            image: flotestro-admin-tools
+            binaries: flotestro-auditverify
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: What is being built
+        id: facts
+        run: |
+          set -euo pipefail
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          repository="$REGISTRY/$owner/${{ matrix.image }}"
+          commit="$(git rev-parse HEAD)"
+          # The date of the commit and not the date of the run: two builds
+          # of one tag then describe themselves identically, which is what
+          # makes the artefacts comparable at all. SOURCE_DATE_EPOCH is the
+          # same instant, and BuildKit writes it into the layers.
+          created="$(git show --no-patch --format=%cI HEAD)"
+          epoch="$(git show --no-patch --format=%ct HEAD)"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            push=true
+            # The full SemVer tag, which is never rewritten, and the commit
+            # tag, for diagnostics and for a laboratory that wants exactly
+            # this build. No moving alias is published: "stable" and "0.56"
+            # are a convenience of a test bench, and a convenience that can
+            # be repointed has no place on a production registry.
+            tags="$repository:$version,$repository:sha-${commit:0:12}"
+          else
+            version="0.0.0-sha-${commit:0:12}"
+            push=false
+            tags="$repository:$version"
+          fi
+          {
+            echo "repository=$repository"
+            echo "version=$version"
+            echo "commit=$commit"
+            echo "created=$created"
+            echo "epoch=$epoch"
+            echo "push=$push"
+            echo "tags=$tags"
+          } >> "$GITHUB_OUTPUT"
+          echo "$repository $version ($commit, $created), push=$push"
+
+      - uses: docker/setup-qemu-action@v3.2.0
+        # Only the tools image needs it, and only for one step: it installs
+        # two packages of the distribution, which is a program that has to
+        # run on the architecture it installs for. Everything else is
+        # cross-compiled by a Go and a Node that run natively, and the
+        # distroless stages only copy files, so nothing there is emulated.
+        if: matrix.target == 'admin-tools'
+
+      - uses: docker/setup-buildx-action@v3.7.1
+
+      - uses: docker/login-action@v3.3.0
+        if: steps.facts.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: The version tag is not published twice
+        # A full SemVer tag is immutable, so it is checked before anything is
+        # built: a correction takes a new tag, exactly as a corrected release
+        # takes one. The check stands after the login because a private
+        # package does not answer an anonymous reader.
+        if: steps.facts.outputs.push == 'true'
+        run: |
+          set -euo pipefail
+          reference="${{ steps.facts.outputs.repository }}:${{ steps.facts.outputs.version }}"
+          if docker buildx imagetools inspect "$reference" >/dev/null 2>&1; then
+            echo "$reference is already published; a published tag is never rewritten, so build the correction under a new tag" >&2
+            exit 1
+          fi
+          echo "$reference is free"
+
+      - uses: docker/build-push-action@v6.9.0
+        id: build
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.facts.outputs.epoch }}
+        with:
+          context: .
+          file: deploy/Containerfile
+          target: ${{ matrix.target }}
+          # The two official platforms. Nothing else is published: a
+          # platform that is published is a platform that is supported.
+          platforms: linux/amd64,linux/arm64
+          # A pull request builds the whole thing and keeps nothing but the
+          # cache: a multi-platform build cannot be loaded into the local
+          # daemon, and there is nothing here to load it for. What is being
+          # proved is that the Containerfile builds at all.
+          push: ${{ steps.facts.outputs.push == 'true' }}
+          tags: ${{ steps.facts.outputs.tags }}
+          build-args: |
+            VERSION=${{ steps.facts.outputs.version }}
+            COMMIT=${{ steps.facts.outputs.commit }}
+            BUILD_DATE=${{ steps.facts.outputs.created }}
+          # The bill of materials of the image and the provenance of the
+          # build, attached to the manifest as attestations. mode=max records
+          # the whole build, including which base images were resolved to
+          # which digest - the question a vulnerability report asks first.
+          # Neither can be attached to a build that is not pushed.
+          sbom: ${{ steps.facts.outputs.push == 'true' }}
+          provenance: ${{ steps.facts.outputs.push == 'true' && 'mode=max' || 'false' }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: The bill of materials of the binaries themselves
+        # The attestation above describes the image; this one describes the
+        # binaries in it, module by module, in the form the release of the
+        # packages already uses. It is read out of the built binary and not
+        # out of the go.mod of the working tree, so it says what actually
+        # shipped. The artefacts stage is the same build as the image and
+        # comes out of the cache.
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            architecture="${platform#linux/}"
+            built="$RUNNER_TEMP/artefacts/$architecture"
+            SOURCE_DATE_EPOCH="${{ steps.facts.outputs.epoch }}" \
+            docker buildx build --file deploy/Containerfile --target artifacts \
+              --platform "$platform" \
+              --build-arg "VERSION=${{ steps.facts.outputs.version }}" \
+              --build-arg "COMMIT=${{ steps.facts.outputs.commit }}" \
+              --build-arg "BUILD_DATE=${{ steps.facts.outputs.created }}" \
+              --cache-from "type=gha,scope=${{ matrix.target }}" \
+              --output "type=local,dest=$built" .
+            described=()
+            for binary in ${{ matrix.binaries }}; do
+              described+=(-binary "$built/$binary")
+            done
+            SOURCE_DATE_EPOCH="${{ steps.facts.outputs.epoch }}" \
+            go run ./cmd/sbom "${described[@]}" \
+              -version "${{ steps.facts.outputs.version }}" \
+              -out-dir "$RUNNER_TEMP/bills/$architecture"
+          done
+
+      - uses: actions/setup-node@v4.1.0
+        if: matrix.target == 'control-plane'
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: The bill of materials of the panel
+        # The panel ships as a bundle, so nothing in the image resembles a
+        # dependency any more and no scanner of an image filesystem can name
+        # what went into it. The bill is therefore taken where the tree still
+        # exists, from the same lock file the image was built from, and the
+        # build dependencies are left out: they are not in the artefact.
+        if: matrix.target == 'control-plane'
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund --omit=dev --ignore-scripts
+          mkdir -p "$RUNNER_TEMP/bills"
+          npm sbom --sbom-format cyclonedx --omit=dev \
+            > "$RUNNER_TEMP/bills/flotestro-web.cdx.json"
+
+      - uses: sigstore/cosign-installer@v3.7.0
+        if: steps.facts.outputs.push == 'true'
+
+      - name: Sign the manifest
+        # Keyless: the signature is made against the identity of this
+        # workflow, recorded in the public transparency log, and there is no
+        # private key anywhere to be stolen or rotated. The identity comes
+        # from the OIDC token of the run, and a run that has none - a pull
+        # request from a fork, a repository where the permission is withheld
+        # - simply does not have one. It then says so, in the log and in the
+        # checks list, and publishes the image unsigned. It does not make up
+        # a key so that a step can be green.
+        if: steps.facts.outputs.push == 'true'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REFERENCE: ${{ steps.facts.outputs.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::warning title=Unsigned image::this run received no OIDC identity, so $REFERENCE@$DIGEST is published without a cosign signature"
+            echo "the run has no OIDC identity; nothing was signed and nothing pretends to be"
+            exit 0
+          fi
+          # --recursive: the signature covers the multi-platform index and
+          # each platform manifest under it, so a deployment that pins the
+          # index and one that pins a platform both have something to verify.
+          cosign sign --yes --recursive "$REFERENCE@$DIGEST"
+          echo "signed $REFERENCE@$DIGEST"
+
+          # The CycloneDX bills are attached to the platform they describe.
+          # The index itself gets none: a bill that names one architecture's
+          # binaries and hangs off something that is not one architecture is
+          # a bill that will be read wrongly.
+          docker buildx imagetools inspect --raw "$REFERENCE@$DIGEST" > "$RUNNER_TEMP/index.json"
+          jq -r '.manifests[]
+                 | select(.platform.os == "linux")
+                 | select(.platform.architecture == "amd64" or .platform.architecture == "arm64")
+                 | "\(.platform.architecture) \(.digest)"' "$RUNNER_TEMP/index.json" |
+          while read -r architecture child; do
+            for bill in "$RUNNER_TEMP/bills/$architecture"/*.cdx.json; do
+              cosign attest --yes --type cyclonedx --predicate "$bill" "$REFERENCE@$child"
+              echo "attested $(basename "$bill") to $architecture"
+            done
+          done
+
+      - name: The digest of this image
+        if: steps.facts.outputs.push == 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/digests"
+          printf '%s %s %s\n' "${{ matrix.image }}" \
+            "${{ steps.facts.outputs.version }}" \
+            "${{ steps.build.outputs.digest }}" \
+            > "$RUNNER_TEMP/digests/${{ matrix.target }}.txt"
+
+      - uses: actions/upload-artifact@v4.4.3
+        if: steps.facts.outputs.push == 'true'
+        with:
+          name: digest-${{ matrix.target }}
+          path: ${{ runner.temp }}/digests
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: bills-${{ matrix.target }}
+          path: ${{ runner.temp }}/bills
+          if-no-files-found: error
+
+  # What an operator actually needs out of a release: three lines to paste.
+  # The job exists because a digest that has to be fished out of three other
+  # jobs' logs is a digest nobody pins.
+  pins:
+    name: The digests to pin
+    needs: images
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          pattern: digest-*
+          merge-multiple: true
+          path: digests
+
+      - name: The block an operator copies
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          control_plane="$(awk '$1 == "flotestro-control-plane" { print $3 }' digests/*.txt)"
+          relay="$(awk '$1 == "flotestro-relay" { print $3 }' digests/*.txt)"
+          tools="$(awk '$1 == "flotestro-admin-tools" { print $3 }' digests/*.txt)"
+          for value in "$control_plane" "$relay" "$tools"; do
+            case "$value" in
+              sha256:*) ;;
+              *) echo "one of the three images reported no digest; the release is incomplete" >&2; exit 1 ;;
+            esac
+          done
+
+          # The override file is generated rather than described, because a
+          # digest copied by hand is a digest with a character missing.
+          {
+            echo "# The images of $GITHUB_REF_NAME, pinned by digest."
+            echo "#"
+            echo "# Put this file next to compose.yaml and load it last:"
+            echo "#   docker compose -f compose.yaml -f compose.pins.yaml up -d"
+            echo "#"
+            echo "# The tag stays in the reference because it is what a human reads;"
+            echo "# the digest is what is deployed. Verify the signature before"
+            echo "# pinning - the command is in deploy/README.md."
+            echo "services:"
+            echo "  control-plane:"
+            echo "    image: ghcr.io/$owner/flotestro-control-plane:$version@$control_plane"
+            echo "  admin-tools:"
+            echo "    image: ghcr.io/$owner/flotestro-admin-tools:$version@$tools"
+            echo "  admin-restore:"
+            echo "    image: ghcr.io/$owner/flotestro-admin-tools:$version@$tools"
+          } > compose.pins.yaml
+
+          {
+            echo "### The digests of $GITHUB_REF_NAME"
+            echo
+            echo 'In `deploy/.env`:'
+            echo
+            echo '```'
+            echo "FLOTESTRO_VERSION=$version"
+            echo "FLOTESTRO_TOOLS_DIGEST=$tools"
+            echo '```'
+            echo
+            echo 'The whole references, for a manifest that pins them directly:'
+            echo
+            echo '```'
+            echo "ghcr.io/$owner/flotestro-control-plane:$version@$control_plane"
+            echo "ghcr.io/$owner/flotestro-relay:$version@$relay"
+            echo "ghcr.io/$owner/flotestro-admin-tools:$version@$tools"
+            echo '```'
+            echo
+            echo 'As a Compose override (`compose.pins.yaml`, attached to this run):'
+            echo
+            echo '```yaml'
+            cat compose.pins.yaml
+            echo '```'
+            echo
+            echo 'The relay is deployed from its own file on the site host:'
+            echo
+            echo '```yaml'
+            echo "services:"
+            echo "  relay:"
+            echo "    image: ghcr.io/$owner/flotestro-relay:$version@$relay"
+            echo "  relay-enroll:"
+            echo "    image: ghcr.io/$owner/flotestro-relay:$version@$relay"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          cat compose.pins.yaml
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: compose.pins.yaml
+          path: compose.pins.yaml
+          if-no-files-found: error
