@@ -109,6 +109,24 @@ module in `go.mod` and run `go mod tidy`. When there is no fixed version yet,
 the finding holds the merge until the owner decides otherwise; that decision
 belongs in the pull request, in writing.
 
+## The release
+
+`.github/workflows/release.yml` fires on a `v*` tag and publishes the packages,
+their bills, the provenance and one signature over `SHA256SUMS`. Two rules
+decide whether it publishes at all.
+
+**Every architecture, or none.** `rpmbuild` refuses a foreign architecture, so a
+run on an amd64 machine cannot produce the arm64 `.rpm` and writes the names
+into `dist/missing-rpm.txt`. For a stable tag that stops the release: either tag
+a pre-release, or build the missing packages on a native machine and tag again.
+A tag with a suffix - `v1.2.3-rc1` - is a pre-release and may ship incomplete.
+The same comparison runs without the note: `.deb`, `.rpm` and `.pkg.tar` each
+have to carry both architectures or neither.
+
+**Nothing is replaced.** The upload refuses an asset the release already holds
+and names it; there is no `--clobber`. A release is corrected by a new version,
+not by a new file under the old name.
+
 ## The laboratory gate
 
 `.github/workflows/lab-gate.yml` records what the laboratory reports, and runs
