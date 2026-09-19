@@ -183,6 +183,9 @@ type bundleEntry struct {
 	Name   string `json:"name"`
 	Source string `json:"source"`
 	Bytes  int    `json:"bytes"`
+	// SHA256 is the digest of this file as it was written, so a file taken
+	// out of the archive can be held against the manifest.
+	SHA256 string `json:"sha256"`
 	// Fields is what the collector declared this file carries.
 	Fields []field `json:"fields,omitempty"`
 	// Redactions counts the values hidden in this file.
@@ -288,7 +291,20 @@ func supportBundleCommand(args []string, out, errOut io.Writer) int {
 		}
 		return 1
 	}
+	digest := digestOf(assembled.Bytes())
+	// The digest of the archive cannot live inside it - the manifest is one of
+	// the files it would describe - so it lies beside it, in the form
+	// "sha256sum -c" reads.
+	checksum := target + ".sha256"
+	if err := os.WriteFile(checksum, []byte(digest+"  "+filepath.Base(target)+"\n"), 0o600); err != nil {
+		fmt.Fprintf(errOut, "the digest was not written next to the bundle: %v\n", err)
+		checksum = ""
+	}
 	fmt.Fprintf(out, "Bundle:       %s\n", target)
+	fmt.Fprintf(out, "Digest:       sha256:%s\n", digest)
+	if checksum != "" {
+		fmt.Fprintf(out, "Checksum:     %s\n", checksum)
+	}
 	fmt.Fprintf(out, "Files:        %d\n", len(manifest.Entries))
 	redactions, partial := 0, 0
 	for _, entry := range manifest.Entries {
@@ -320,6 +336,15 @@ func verifyBundle(path string, out, errOut io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(out, "Bundle:       %s\n", path)
+	fmt.Fprintf(out, "Digest:       sha256:%s\n", digestOf(content))
+	if stated, present := statedDigest(path); present {
+		if stated == digestOf(content) {
+			fmt.Fprint(out, "Checksum:     matches the digest written beside the bundle\n")
+		} else {
+			fmt.Fprint(errOut, "the bundle is not the one the digest beside it describes\n")
+			return 1
+		}
+	}
 	fmt.Fprintf(out, "Files:        %d\n", len(files))
 	if manifest, ok := manifestOf(files); ok {
 		policy := manifest.RedactionPolicy
@@ -344,6 +369,27 @@ func verifyBundle(path string, out, errOut io.Writer) int {
 	}
 	fmt.Fprint(errOut, "do not send this bundle; make a new one and report the finding\n")
 	return 1
+}
+
+// digestOf is the SHA-256 of a file of the bundle, in the form the manifest
+// and the checksum beside the archive write it.
+func digestOf(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
+// statedDigest reads the digest written beside a bundle. A bundle without one
+// is not an error: saying nothing was written beside it is the answer.
+func statedDigest(path string) (string, bool) {
+	content, err := os.ReadFile(path + ".sha256")
+	if err != nil {
+		return "", false
+	}
+	digest, _, _ := strings.Cut(strings.TrimSpace(string(content)), " ")
+	if len(digest) != sha256.Size*2 {
+		return "", false
+	}
+	return digest, true
 }
 
 // unsafeInName matches what a host name must not put into a file name:
@@ -508,6 +554,7 @@ func writeSupportBundle(ctx context.Context, sources bundleSources, name string,
 	archive := tar.NewWriter(compressed)
 	add := func(entry bundleEntry, content []byte) error {
 		entry.Bytes = len(content)
+		entry.SHA256 = digestOf(content)
 		manifest.Entries = append(manifest.Entries, entry)
 		header := &tar.Header{
 			Name:    name + "/" + entry.Name,

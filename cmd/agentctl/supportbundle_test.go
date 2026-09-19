@@ -238,6 +238,9 @@ func TestSupportBundleRedactsAndDescribesItself(t *testing.T) {
 		if entry.Bytes != len(files[entry.Name]) {
 			t.Fatalf("%s: manifest says %d bytes, the archive holds %d", entry.Name, entry.Bytes, len(files[entry.Name]))
 		}
+		if entry.SHA256 != digestOf(files[entry.Name]) {
+			t.Fatalf("%s: the manifest digest does not describe the file in the archive", entry.Name)
+		}
 		byName[entry.Name] = entry
 	}
 	if byName["agent.env"].Redactions != 1 || byName["journal-agent.txt"].Redactions != 1 || byName["agent.yaml"].Redactions != 0 {
@@ -300,6 +303,61 @@ func TestSupportBundleWritesTheArchiveWhereAsked(t *testing.T) {
 	}
 	if !strings.Contains(errOut.String(), "exist") {
 		t.Fatalf("the refusal does not say why: %q", errOut.String())
+	}
+}
+
+// The archive has a digest of its own. It cannot live inside the archive - the
+// manifest is one of the files it would describe - so it lies beside it, and
+// the verification reads it.
+func TestTheBundleCarriesADigestOfItself(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	real := bundleSourcesFor
+	bundleSourcesFor = func(string, string) bundleSources { return fakeBundleSources(t, certPEM) }
+	defer func() { bundleSourcesFor = real }()
+
+	output := filepath.Join(t.TempDir(), "bundle.tar.gz")
+	var out, errOut bytes.Buffer
+	if code := run([]string{"support-bundle", "--output", output}, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d: %s%s", code, out.String(), errOut.String())
+	}
+	archive, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := digestOf(archive)
+	if !strings.Contains(out.String(), "sha256:"+digest) {
+		t.Fatalf("the summary does not name the digest of the archive: %q", out.String())
+	}
+	stated, err := os.ReadFile(output + ".sha256")
+	if err != nil {
+		t.Fatalf("nothing was written beside the bundle: %v", err)
+	}
+	if string(stated) != digest+"  bundle.tar.gz\n" {
+		t.Fatalf("the checksum file reads %q", string(stated))
+	}
+
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"support-bundle", "--verify", output}, &out, &errOut); code != 0 {
+		t.Fatalf("the verification refused a bundle that matches its digest: %d %s", code, errOut.String())
+	}
+	if !strings.Contains(out.String(), "matches the digest") {
+		t.Fatalf("the verification says nothing about the digest: %q", out.String())
+	}
+
+	// A bundle that is not the one the digest describes is refused: a digest
+	// nobody compares is decoration.
+	other := digestOf([]byte("another bundle"))
+	if err := os.WriteFile(output+".sha256", []byte(other+"  bundle.tar.gz\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errOut.Reset()
+	if code := run([]string{"support-bundle", "--verify", output}, &out, &errOut); code != 1 {
+		t.Fatalf("code = %d for a bundle that does not match its digest", code)
+	}
+	if !strings.Contains(errOut.String(), "not the one the digest") {
+		t.Fatalf("the refusal does not say what is wrong: %q", errOut.String())
 	}
 }
 

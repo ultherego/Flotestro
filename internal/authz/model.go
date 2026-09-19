@@ -348,6 +348,10 @@ const (
 	// The effective configuration of the installation: which provider signs
 	// people in, which directory the panel reads, what the step-up policy is.
 	PermSettingsRead Permission = "settings.read"
+	// The support bundle of the panel. Asking for one reads everything the panel
+	// knows about itself, so it is a right of its own.
+	PermSupportBundleCreate Permission = "support.bundle.create"
+	PermSupportBundleRead   Permission = "support.bundle.read"
 )
 
 // Role groups permissions. The split matches the roles from the document:
@@ -546,6 +550,9 @@ var rolePermissions = map[Role][]Permission{
 		PermNotificationRead, PermNotificationManage,
 		PermVulnerabilityRead,
 		PermSettingsRead,
+		// A bundle is a reading of the whole panel; it belongs to whoever
+		// administers the panel and to nobody else.
+		PermSupportBundleCreate, PermSupportBundleRead,
 	},
 }
 

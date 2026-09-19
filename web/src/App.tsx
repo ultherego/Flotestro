@@ -62,6 +62,7 @@ import { Schedules as CampaignSchedules } from "./pages/Schedules";
 import { Setup } from "./pages/Setup";
 import { Status } from "./pages/Status";
 import { Reports } from "./pages/Reports";
+import { Support } from "./pages/Support";
 import { Notifications } from "./pages/Notifications";
 import { Profile } from "./pages/Profile";
 import { Tags } from "./pages/Tags";
@@ -134,6 +135,9 @@ export function App() {
   // The settings screen is read by whoever administers the panel: the
   // permission of its own, or the one to decide who may do what.
   const seesSettings = permissions.has("settings.read") || managesAccess;
+  // A support bundle reads the whole panel, so the section shows only for
+  // whoever may ask for one.
+  const seesSupport = permissions.has("support.bundle.read");
   // The relays are read with the right that reads the installations: the
   // list is the same one the add-host wizard picks a route from.
   const seesRelays = permissions.has("host.enroll.read");
@@ -233,7 +237,9 @@ export function App() {
     {
       key: "settings",
       items: seesSettings
-        ? [{ to: "/status", label: "Status", icon: "settings" as const }, { to: "/settings", label: "Settings", icon: "settings" as const }]
+        ? [{ to: "/status", label: "Status", icon: "settings" as const },
+           { to: "/settings", label: "Settings", icon: "settings" as const },
+           ...(seesSupport ? [{ to: "/support", label: "Support bundle", icon: "logs" as const }] : [])]
         : [],
     },
   ];
@@ -348,6 +354,7 @@ export function App() {
               {managesAccess && <Route path="/access" element={<Access />} />}
               {seesAudit && <Route path="/audit" element={<Audit />} />}
               {seesSettings && <Route path="/settings" element={<Settings />} />}
+              {seesSupport && <Route path="/support" element={<Support />} />}
               {seesSettings && <Route path="/status" element={<Status />} />}
               <Route path="*" element={<div className="empty">{t("Page not found.")}</div>} />
             </Routes>

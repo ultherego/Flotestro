@@ -422,6 +422,14 @@ func (s *Server) Routes() http.Handler {
 	// Desired-state policies: a draft, its publications, the verdicts the loop
 	// writes, and one evaluation on demand.
 	s.route(mux, "GET /api/v1/reports/{name}", s.handleReport)
+
+	// The support bundle of the panel: asked for with step-up, fetched through
+	// a link that expires (security remediation, chapter 14.6).
+	s.route(mux, "GET /api/v1/support/bundles", s.handleListSupportBundles)
+	s.route(mux, "POST /api/v1/support/bundles", s.handleCreateSupportBundle)
+	s.route(mux, "GET /api/v1/support/bundles/{id}", s.handleGetSupportBundle)
+	s.route(mux, "POST /api/v1/support/bundles/{id}/download", s.handleSupportBundleToken)
+	s.route(mux, "GET /api/v1/support/bundles/{id}/archive", s.handleDownloadSupportBundle)
 	s.route(mux, "GET /api/v1/policies", s.handleListPolicies)
 	s.route(mux, "POST /api/v1/policies", s.handleCreatePolicy)
 	s.route(mux, "GET /api/v1/policies/{id}", s.handleGetPolicy)

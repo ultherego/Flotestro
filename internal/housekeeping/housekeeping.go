@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/ultherego/flotestro/internal/audit"
+	"github.com/ultherego/flotestro/internal/support"
 )
 
 // SessionRetention is how long an ended agent session stays on record.
@@ -23,6 +24,13 @@ const (
 	JobRetention      = 90 * 24 * time.Hour
 	CampaignRetention = 365 * 24 * time.Hour
 	OutboxRetention   = 30 * 24 * time.Hour
+)
+
+// The retentions of the support bundles: how long one is kept at all, and how
+// long one nobody fetched is kept (security remediation, chapter 14.6).
+const (
+	SupportBundleRetention          = support.DefaultRetention
+	SupportBundleUnfetchedRetention = support.DefaultUnfetchedRetention
 )
 
 // SweepBatch bounds what one sweep deletes of one kind.
@@ -39,6 +47,11 @@ type Options struct {
 	Jobs      time.Duration
 	Campaigns time.Duration
 	Outbox    time.Duration
+	// SupportBundles is the retention of a support bundle, and
+	// SupportBundlesUnfetched of one nobody downloaded. An archive of the
+	// panel's own state is not kept for the sake of keeping it.
+	SupportBundles          time.Duration
+	SupportBundlesUnfetched time.Duration
 	// Interval is how often the sweep runs.
 	Interval time.Duration
 }
@@ -104,6 +117,8 @@ func New(pool *pgxpool.Pool, log *slog.Logger, options Options) *Sweeper {
 	if options.Outbox <= 0 {
 		options.Outbox = OutboxRetention
 	}
+	bundles := support.Retention{Age: options.SupportBundles, Unfetched: options.SupportBundlesUnfetched}.WithDefaults()
+	options.SupportBundles, options.SupportBundlesUnfetched = bundles.Age, bundles.Unfetched
 	if options.Interval <= 0 {
 		options.Interval = time.Hour
 	}
@@ -124,10 +139,12 @@ func (s *Sweeper) Report() Report {
 		Removed:   make(map[string]int64, len(s.removed)),
 		LastError: s.lastErr,
 		Retention: map[string]string{
-			"agent_sessions": s.options.Sessions.String(),
-			"jobs":           s.options.Jobs.String(),
-			"campaigns":      s.options.Campaigns.String(),
-			"outbox_events":  s.options.Outbox.String(),
+			"agent_sessions":            s.options.Sessions.String(),
+			"jobs":                      s.options.Jobs.String(),
+			"campaigns":                 s.options.Campaigns.String(),
+			"outbox_events":             s.options.Outbox.String(),
+			"support_bundles":           s.options.SupportBundles.String(),
+			"support_bundles_unfetched": s.options.SupportBundlesUnfetched.String(),
 		},
 	}
 	if s.options.Audit > 0 {
@@ -200,6 +217,7 @@ func (s *Sweeper) Sweep(ctx context.Context) (err error) {
 		{"campaigns", s.SweepCampaigns},
 		{"jobs", s.SweepJobs},
 		{"outbox_events", s.SweepOutbox},
+		{"support_bundles", s.SweepSupportBundles},
 	} {
 		removed, err := kind.run(ctx)
 		if err != nil {
@@ -306,6 +324,16 @@ func (s *Sweeper) SweepOutbox(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("sweeping the durable trail: %w", err)
 	}
 	return tag.RowsAffected(), nil
+}
+
+// SweepSupportBundles removes the support bundles past their retention, and
+// the download tokens that can no longer open anything. A bundle nobody came
+// for goes sooner than one somebody did.
+func (s *Sweeper) SweepSupportBundles(ctx context.Context) (int64, error) {
+	store := support.NewStore(s.pool, nil)
+	return store.Sweep(ctx, support.Retention{
+		Age: s.options.SupportBundles, Unfetched: s.options.SupportBundlesUnfetched,
+	}, time.Now())
 }
 
 // interval renders a duration for a PostgreSQL interval parameter.
