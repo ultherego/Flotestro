@@ -74,6 +74,18 @@ deployment that runs the image with a bare `podman run` gets none and should
 either add `--health-cmd /usr/local/bin/flotestro-healthcheck` or build with
 `--format docker`.
 
+**The secrets need one more thing than the file mode.** A Compose secret is a
+bind mount of a file the deploying account owns, and the container runs as
+65532. Under Docker, give the file to that account: `chown 65532:65532
+./secrets/*` and `chmod 0400`. Rootless Podman cannot use that - host uid 65532
+is outside the account's subuid range, so the container would see the file as
+nobody's - so `compose.podman.yaml` turns the mapping round instead with
+`keep-id`, and the files stay owned by the deploying account at mode 0600. On a
+host with SELinux the file also needs the container label, or the read fails
+with a plain "permission denied" that says nothing about SELinux:
+
+    chcon -Rt container_file_t ./secrets
+
 **Rootless is the sensible way to run it,** and the images are built for it:
 they run as 65532, drop every capability and write only to their volume and to
 `/tmp`. The account that runs the deployment needs subuid and subgid ranges
@@ -82,9 +94,13 @@ and `loginctl enable-linger <account>`, or the panel stops with the session
 that started it. Every port the panel publishes is above 1024, so rootless
 needs no change there.
 
-The Compose files themselves need no Podman variant: `podman-compose` reads
-`secrets:`, `read_only`, `tmpfs` with `uid`/`gid`, `cap_drop`,
-`security_opt`, `pids_limit`, `ulimits` and `stop_grace_period` as written.
+`podman-compose` reads the rest of the files as written: `secrets:`,
+`read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
+`stop_grace_period`. Two options had to change to be portable at all, and both
+changed in the shipped files rather than in an overlay: the tmpfs is declared
+with `mode=1777` instead of `uid=`/`gid=`, which Podman refuses, and the log
+driver is `json-file` instead of Docker's `local`, which Podman does not know.
+Rotation is the same either way.
 
 ## Building the images
 

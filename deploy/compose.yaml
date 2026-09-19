@@ -89,9 +89,11 @@ services:
       - database_egress
 
     # The process writes to its state volume and to /tmp, and nowhere else.
+    # mode rather than uid/gid: 1777 is what a tmpfs is for, every runtime
+    # takes it, and Podman refuses uid= outright.
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
@@ -119,7 +121,9 @@ services:
       start_period: 60s
 
     logging:
-      driver: local
+      # json-file rather than Docker's local: every runtime reads it, and
+      # Podman refuses local outright. Rotation is the same either way.
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"

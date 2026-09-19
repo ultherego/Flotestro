@@ -1,0 +1,17 @@
+# Rootless Podman. Use it beside compose.yaml:
+#
+#   podman-compose -f compose.yaml -f compose.podman.yaml up -d
+#
+# What it changes and why: a Compose secret is a bind mount of a file the
+# deploying account owns, and the container runs as 65532. Under Docker that
+# is settled by giving the file to 65532 on the host. Rootless Podman cannot
+# do that - host uid 65532 is outside the account's subuid range, so the
+# container would see the file as nobody's - so the mapping is turned round
+# instead: keep-id makes the container's 65532 the deploying account, and the
+# secrets stay owned by that account with mode 0600.
+#
+# Nothing else differs. The image, the ports, the read-only root, the dropped
+# capabilities and the healthcheck are the ones in compose.yaml.
+services:
+  control-plane:
+    userns_mode: "keep-id:uid=65532,gid=65532"

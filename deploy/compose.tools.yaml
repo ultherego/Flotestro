@@ -73,14 +73,14 @@ services:
 
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
 
     logging:
-      driver: local
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
@@ -121,14 +121,14 @@ services:
 
     read_only: true
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
     pids_limit: 64
 
     logging:
-      driver: local
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"

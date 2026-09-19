@@ -86,7 +86,7 @@ services:
       start_period: 10s
 
     logging:
-      driver: local
+      driver: json-file
       options:
         max-size: "20m"
         max-file: "5"
