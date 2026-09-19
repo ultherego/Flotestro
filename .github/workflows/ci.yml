@@ -420,14 +420,14 @@ jobs:
         working-directory: web
         run: |
           set -euo pipefail
-          npm ci --no-audit --no-fund --omit=dev --ignore-scripts
+          # The whole tree, even though the bill omits the development
+          # dependencies: npm sbom validates every edge of package-lock.json
+          # first and refuses a tree with anything missing from it.
+          npm ci --no-audit --no-fund --ignore-scripts
           # A bill names a version for the artefact it describes, and npm
           # refuses to write one for a package that has none. The panel takes
           # its version from the release that packs it, so a build that is not
           # a release says so in the same way the Go toolchain does.
-          if [ -z "$(jq -r '.version // ""' package.json)" ]; then
-            npm pkg set version=0.0.0
-          fi
           mkdir -p "$RUNNER_TEMP/bills"
           npm sbom --sbom-format cyclonedx --omit=dev \
             > "$RUNNER_TEMP/bills/flotestro-web.cdx.json"
