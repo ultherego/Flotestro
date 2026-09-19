@@ -95,6 +95,13 @@ Every message carries a class, and the class decides what happens when the room 
 | metrics | 3 | oldest dropped first, counted in `dropped_total` |
 | interactive logs | 4 | the stream is cut with `resource_exhausted` |
 
+Which class is written **ahead** of the send is a separate question from which class is kept
+during an outage. While the link is up, control messages, job results and inventories go to
+the disk before the socket, and metrics and log lines do not - a sample about to be
+acknowledged would be written twice for nothing. While the link is down every class goes to
+the disk, so a site cut off keeps its samples too, within the metric quota and oldest-dropped
+first once that quota is spent.
+
 The last `critical_reserve_bytes` of the quota (128 MiB by default) are for classes 0 and 1
 alone, so a site streaming metrics cannot starve the acknowledgement of a job. A message of a
 light class is refused with `resource_exhausted` and one of a durable class with

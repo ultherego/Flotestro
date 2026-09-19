@@ -56,7 +56,9 @@ func PriorityOf(stream string) uint8 {
 
 // Durable says whether a stream is written ahead of the live forward: a
 // message of a durable stream goes to the disk before the socket, so a restart
-// of the relay between the send and the panel's commit loses nothing.
+// of the relay between the send and the panel's commit loses nothing. It does
+// not say what the spool keeps during an outage - a link that is down sends
+// every class to the disk, metrics and log lines included.
 func Durable(stream string) bool {
 	return PriorityOf(stream) <= PriorityInventory
 }
