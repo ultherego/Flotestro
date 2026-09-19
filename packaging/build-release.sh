@@ -213,10 +213,18 @@ EOF
 }
 
 # The checksums are computed by file name, so they are computed from what
-# really goes into the repository - not from intermediate artefacts.
+# really goes into the repository - not from intermediate artefacts. The list
+# is the same one the release publishes: a file left out of it is a file the
+# customer has no way to check.
 checksums() {
     echo "==> checksums"
-    ( cd "$OUT" && sha256sum ./*.deb ./*.rpm ./*.cdx.json 2>/dev/null > SHA256SUMS ) || true
+    local published=() file
+    for file in "$OUT"/*.deb "$OUT"/*.rpm "$OUT"/*.pkg.tar.* "$OUT"/*.cdx.json \
+                "$OUT"/modules-*.txt "$OUT"/provenance.json; do
+        [ -f "$file" ] && published+=("$(basename "$file")")
+    done
+    [ ${#published[@]} -gt 0 ] || { echo "nothing to write the checksums of" >&2; return 1; }
+    ( cd "$OUT" && sha256sum "${published[@]}" > SHA256SUMS )
 }
 
 for arch in "${ARCHITECTURES[@]}"; do

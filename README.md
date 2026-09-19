@@ -120,7 +120,7 @@ task. PostgreSQL is the only source of truth; the panel keeps the fleet state no
 ## Quick start
 
 Nothing to build and nothing to clone. The panel runs from a published image;
-the hosts take a package from the release.
+the hosts take a package from the project's signed repository.
 
 **The panel**, with a database of its own:
 
@@ -146,19 +146,39 @@ Against a database you already run, leave the profile out and point
 `chcon -Rt container_file_t secrets`. The rest - the backup pair, an isolated
 site, pinning a digest, upgrading - is in [deploy/README.md](deploy/README.md).
 
-**A host**, from the release assets:
+**A host**, from the package repository:
 
 ```
-curl -fsSLO https://github.com/ultherego/Flotestro/releases/latest/download/flotestro-agent_0.60.0_amd64.deb
-sha256sum -c <(curl -fsSL https://github.com/ultherego/Flotestro/releases/latest/download/SHA256SUMS | grep flotestro-agent_0.60.0_amd64.deb)
-sudo apt install ./flotestro-agent_0.60.0_amd64.deb
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsS https://ultherego.github.io/Flotestro/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc >/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list >/dev/null
+sudo apt update && sudo apt install flotestro-agent
+```
+
+Every index in it is signed by the release key, and there is no version in any
+of those lines: `apt update` is how a host learns a newer version exists and
+`apt upgrade` is what moves it. A pre-release goes to a `testing` channel that
+a host asking for `stable` never reads. `dnf` and `pacman` read the same tree
+under `rpm/stable` and `arch/stable`; the panel writes all three for its own
+repository address under **Add host**.
+
+Without a route out, a package is fetched on a connected machine and carried
+in. The file name carries the version, so there is no `latest` URL to quote -
+`gh` resolves the newest stable release itself, and pre-releases are not in it:
+
+```
+curl -fsS https://ultherego.github.io/Flotestro/flotestro-repo.asc | gpg --import
+gh release download --repo ultherego/Flotestro --pattern 'flotestro-agent_*_amd64.deb' --pattern 'SHA256SUMS*'
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+sudo apt install ./flotestro-agent_*_amd64.deb
 ```
 
 `.rpm` and `.pkg.tar.zst` are there too. Every asset carries a build
 attestation, so where it came from is a question with an answer:
 
 ```
-gh attestation verify flotestro-agent_0.60.0_amd64.deb --repo ultherego/Flotestro
+gh attestation verify flotestro-agent_1.2.3_amd64.deb --repo ultherego/Flotestro
 ```
 
 Then enroll the host. The panel writes the exact commands for its own
@@ -197,7 +217,7 @@ make test                                    # unit tests
 make lint                                    # gofmt and go vet
 (cd web && npm ci && npm run build)          # the panel
 packaging/build-release.sh all 1.0.0 dist    # packages for amd64 and arm64 with a CycloneDX SBOM
-packaging/sign-repo.sh dist <gpg-key> repo   # signed apt, dnf and pacman repositories
+packaging/sign-repo.sh dist <gpg-key> repo 1.0.0  # adds the release to the signed apt, dnf and pacman repositories
 ```
 
 GitHub Actions in `.github/workflows` run the same checks, the vulnerability scan and the fuzz targets on every push, and build the packages of a `v*` tag.

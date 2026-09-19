@@ -344,7 +344,7 @@ jobs:
           {
             echo "### The package repository was not published"
             echo
-            echo 'There is no `RELEASE_SIGNING_KEY` in the `release-signing` environment, so there was nothing to sign the repository indexes with. The release assets are published; the repository still carries the previous release.'
+            echo 'There is no `RELEASE_SIGNING_KEY` in the `release-signing` environment, so there was nothing to sign the repository indexes with. The release assets are attached as usual; the repository keeps the release before this one.'
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::warning title=No repository publication::the signing key is missing, so the repository keeps the previous release"
 
@@ -370,6 +370,7 @@ jobs:
           path: source
           sparse-checkout: packaging/sign-repo.sh
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: The repository as it stands today
         if: env.RELEASE_SIGNING_KEY != ''
@@ -451,8 +452,6 @@ jobs:
 
       - name: Publish the repository
         if: env.RELEASE_SIGNING_KEY != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
         # Jekyll would try to build the tree it is given; .nojekyll says to
         # serve it as it is. The commit is the publication: an unchanged tree
         # is a re-run of the same tag and there is nothing to say.

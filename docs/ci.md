@@ -253,6 +253,69 @@ the rpm and pacman families only; on an apt host the panel names none and the
 host reports which key signed the index it installed from. `deploy/README.md`,
 under "What proves a package's origin", has the whole table.
 
+**Where the fleet installs from.** Loose files on a release page are not a
+repository: there is no `apt update` against them, no upgrade path, and a URL
+that carries a version number stops resolving the day the next version exists.
+So the same signing job composes the repository and pushes it to the
+`gh-pages` branch, which GitHub Pages serves at
+`https://ultherego.github.io/Flotestro/` - a plain HTTPS directory tree, which
+is all apt, dnf and pacman ever ask for. `FLOTESTRO_PACKAGE_REPOSITORY_URL` set
+to that address makes the commands the panel writes under "Add host" work
+against the project's own packages.
+
+The publication runs **before** the assets are attached to the release. A
+missing tool, a key that cannot sign, an index that does not verify - all of it
+stops while the tag can still be built again; once an asset is on the release
+page the no-replacement rule has closed that door.
+
+**The repository is added to, never rewritten.** `packaging/sign-repo.sh`
+drops the new packages beside the ones already published and composes every
+index again over all of them: `--multiversion` for the apt `Packages`,
+`createrepo_c` over the whole channel directory for dnf. A host that still runs
+1.2.3 therefore still finds 1.2.3 after 1.2.4 is published, and `apt update`
+followed by `apt upgrade` is how it learns of the newer one and takes it - apt
+and dnf install the highest version they can see, and pacman's database names
+the newest by construction. A file already published with different bytes stops
+the publication by name; identical bytes are a re-run and change nothing, so the
+step is safe to repeat. The branch keeps the history of the tree itself: a bad
+publication is backed out like any other commit.
+
+**A pre-release does not reach a stable host.** `v1.2.3-rc1` publishes to the
+`testing` channel - its own pool, its own `dists` suite, its own `rpm` and
+`arch` directories. Nothing a stable host reads is touched, and `stable` is what
+the panel writes unless somebody typed another channel.
+
+**What the owner sets once.** GitHub Pages for this repository has to be served
+from the branch `gh-pages`, at the root - the workflow pushes the branch, the
+setting is what publishes it. And `RELEASE_SIGNING_KEY` has to be a key the
+runner can use without a person: rpm's package signature and pacman's database
+signature are made by `gpg` called from inside those tools, so a passphrase
+belongs in `RELEASE_SIGNING_KEY_PASSPHRASE` beside it. Without the key there is
+no repository publication at all and the run says so - an unsigned index would
+be taken by apt with a warning nobody reads.
+
+**When the publication fails after the release is out.** The repository is
+composed from a finished release, so it is reproducible by hand on the machine
+that holds the key:
+
+    gh release download v1.2.3 --repo ultherego/Flotestro --dir release
+    git clone --branch gh-pages https://github.com/ultherego/Flotestro repo
+    packaging/sign-repo.sh release <gpg-key-id> repo 1.2.3
+    git -C repo add -A && git -C repo commit -m "Publish v1.2.3" && git -C repo push
+
+The script refuses to replace anything it finds already published, so running
+it against a release that is partly there finishes the job rather than
+repeating it.
+
+**The `.rpm` in the repository is not the `.rpm` on the release page.**
+`rpmsign --addsign` writes the signature into the package header, so the
+repository's copy differs from the loose asset by exactly that. The loose asset
+is what `SHA256SUMS` and the build attestation describe; the repository's copy
+is what `rpm --checksig` and `repo_gpgcheck` describe. Both manifests travel
+with the tree: `releases/<version>/` holds that release's `SHA256SUMS`, its
+signature and its `provenance.json`, one directory per release and never a file
+the next release overwrites.
+
 ## The laboratory gate
 
 `.github/workflows/lab-gate.yml` records what the laboratory reports, and runs
