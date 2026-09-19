@@ -47,11 +47,6 @@ const MODULE_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /**
  * Kernel settings and modules.
- *
- * The panel does not enumerate the whole of /proc/sys: there are a few
- * thousand keys there, most of which answer no operator's question. We show
- * the profile and what the panel wrote itself; the rest can be read on
- * request.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const KERNEL_CHANGES = ["sysctl.ensure", "kernel.module.blacklist", "kernel.module.load"];

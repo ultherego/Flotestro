@@ -8,14 +8,6 @@ import { useT } from "../i18n";
 /**
  * The order and the shape of a list screen: which column it is sorted by,
  * which columns are on the screen and how many rows a page holds.
- *
- * A fleet list is read in more than one way - by name to find a host, by
- * "last seen" to find the ones that went quiet, by pending updates to
- * plan a campaign - and the columns one operator needs are noise to
- * another. The sort is part of the view, so it lives where the filters
- * live: in the address for the server-paged lists, in the component for
- * the bounded ones. The columns and the page size are how one person
- * likes their screen, so they stay in the browser.
  */
 
 /** The order of a list: a column and a direction; null is the list's own order. */
@@ -58,9 +50,9 @@ function compareKeys(x: SortKey, y: SortKey): number {
 }
 
 /**
- * The rows in the given order, the list's own order kept between equal
- * keys: a list sorted by state stays sorted by deadline inside each
- * state, so a click adds an order rather than shuffling the rest.
+ * The rows in the given order, the list's own order kept between equal keys:
+ * a list sorted by state stays sorted by deadline inside each state, so a
+ * click adds an order rather than shuffling the rest.
  */
 export function sortRows<T>(rows: T[], sort: SortValue, keyOf: (row: T, column: string) => SortKey): T[] {
   if (!sort) return rows;
@@ -107,13 +99,7 @@ export type Columns = {
 const columnsKey = (table: string) => `flotestro.columns.${table}`;
 
 /**
- * The columns with at least one that cannot be taken off the screen. A
- * row has to stay recognisable whatever the preference says: a table of
- * units without the unit name, or of processes without the PID and the
- * command, is a table of nothing. A screen names its identity columns
- * with `fixed`; one that names none gets its first column fixed, so no
- * stored preference - from this release or an older one - can hide every
- * field that identifies a record.
+ * The columns with at least one that cannot be taken off the screen.
  */
 export function withIdentityColumn(columns: ColumnDef[]): ColumnDef[] {
   if (columns.length === 0 || columns.some((column) => column.fixed)) return columns;
@@ -122,10 +108,6 @@ export function withIdentityColumn(columns: ColumnDef[]): ColumnDef[] {
 
 /**
  * The visible columns of a table, remembered per table in the browser.
- * What is stored is the list of the columns switched off their default -
- * a shown one hidden, a hidden one shown - so a column added to a screen
- * later takes its own default instead of the fate an old preference that
- * never named it would give it.
  */
 export function useColumns(table: string, definitions: ColumnDef[]): Columns {
   const columns = withIdentityColumn(definitions);
@@ -162,9 +144,7 @@ const SORT_BUTTON: CSSProperties = {
 };
 
 /**
- * A header cell of a column set. A column with an order is a button with
- * an arrow and an aria-sort, so a screen reader hears the order a sighted
- * operator sees; a column off the screen renders nothing.
+ * A header cell of a column set.
  */
 export function Th({ columns, name, sort, onSort, children, className, ...rest }: {
   columns: Columns;
@@ -222,18 +202,17 @@ const POPOVER: CSSProperties = {
 };
 
 /**
- * The column chooser: a button that opens the list of the columns with a
- * box each, and a way back to the default set. The choice is written to
- * the browser as it is made; there is nothing to confirm.
+ * The column chooser: a button that opens the list of the columns with a box
+ * each, and a way back to the default set.
  */
 export function ColumnChooser({ columns }: { columns: Columns }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const container = useRef<HTMLSpanElement>(null);
   const id = useId();
-  // The popover closes on a click outside it or on Escape, like the menus
-  // of the top bar; a checkbox inside it keeps it open, because the
-  // operator usually changes more than one column at a time.
+  // The popover closes on a click outside it or on Escape, like the menus of
+  // the top bar; a checkbox inside it keeps it open, because the operator
+  // usually changes more than one column at a time.
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => {

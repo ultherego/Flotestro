@@ -78,11 +78,8 @@ const KINDS: Record<SearchKind, { group: RowGroup; icon: IconName }> = {
 const KIND_ORDER: SearchKind[] = ["host", "campaign", "job", "policy", "group", "relay", "secret", "principal", "cve"];
 
 /**
- * The places of the panel this person may go to: the sidebar entries,
- * gated the way the sidebar gates them. The list is written here again
- * rather than read from the sidebar, because the sidebar is drawn from the
- * application shell and the palette sits in the top bar; the two must
- * agree, and the gating is by the same permissions.
+ * The places of the panel this person may go to: the sidebar entries, gated
+ * the way the sidebar gates them.
  */
 export function navigationCommands(permissions: Iterable<string>, capabilities: Pick<Capabilities, "directory">): Command[] {
   const has = new Set(permissions);
@@ -115,9 +112,7 @@ export function navigationCommands(permissions: Iterable<string>, capabilities: 
 
 /**
  * How well a title answers the query: the whole of it, its beginning, the
- * beginning of one of its words, somewhere inside, or not at all. The
- * server already found the row; the rank only orders a group, so the one
- * the operator most likely meant stands first.
+ * beginning of one of its words, somewhere inside, or not at all.
  */
 export function rank(title: string, query: string): number {
   const needle = query.trim().toLowerCase();
@@ -134,7 +129,6 @@ export function rank(title: string, query: string): number {
  * The hits of the server as rows, in the order of the kinds and, inside a
  * kind, by how well the title answers the query; the server's own order
  * decides between equals, so two hosts named alike keep their names in
- * order.
  */
 export function groupResults(items: SearchItem[], query: string): Row[] {
   // A kind this build does not know has no heading and no page; a newer
@@ -161,7 +155,7 @@ export function groupResults(items: SearchItem[], query: string): Row[] {
 /**
  * The commands the query names, by their label in either language: the
  * operator types what they read on the screen, and the catalogue is what
- * they read. An empty query keeps every command.
+ * they read.
  */
 export function matchCommands(commands: Command[], query: string, translate: (label: string) => string): Row[] {
   const needle = query.trim().toLowerCase();
@@ -185,10 +179,7 @@ export function matchCommands(commands: Command[], query: string, translate: (la
 
 /**
  * Where a host switch leads: the same module on the new host if the module
- * is known to work there, otherwise the overview with the reason. A host
- * the palette has no record of keeps the module too; the host workspace
- * then says itself when the module has no backing there, on the module's
- * own address.
+ * is known to work there, otherwise the overview with the reason.
  */
 export function hostPath(target: { id: string; host?: Host }, segment: string, installation: Capabilities):
   { path: string; state?: { rejected: string; reason: string } } {
@@ -202,21 +193,8 @@ export function hostPath(target: { id: string; host?: Host }, segment: string, i
 }
 
 /**
- * The command palette: the search field of the top bar, and the one
- * control for jumping anywhere in the panel. It reads as a search rather
- * than as the name of the open host, because the trail beside it already
- * names the host; on a narrow screen it folds to an icon that opens the
- * same list.
- *
- * Empty, it shows the hosts this person starred and opened last, and the
- * places of the panel. With a query it asks the server, which answers with
- * everything the text names - hosts, campaigns, jobs, policies, groups,
- * relays, secrets, identities, a CVE - each with the address of its page,
- * and only of the kinds this person may read.
- *
- * A host switch keeps the open module if the new host supports it.
- * Otherwise it leads to the overview and says what was missing - a quiet
- * tab change would look like an interface bug.
+ * The command palette: the search field of the top bar, and the one control
+ * for jumping anywhere in the panel.
  */
 export function HostPicker() {
   const t = useT();
@@ -230,9 +208,7 @@ export function HostPicker() {
   const onHost = root === "hosts" && urlID !== "" && urlID !== "new";
   const segment = onHost ? (urlSegment || DEFAULT_MODULE) : "";
 
-  // The palette has no host in hand, so it asks for the one in the
-  // address. The key is the one the host workspace uses, so the request
-  // is shared with it rather than doubled.
+  // The palette has no host in hand, so it asks for the one in the address.
   const fromAddress = useQuery({
     queryKey: ["host", urlID],
     queryFn: () => api.get<Host>(`/api/v1/hosts/${urlID}`),
@@ -262,8 +238,7 @@ export function HostPicker() {
   const listID = useId();
 
   // The hosts this person keeps coming back to, remembered in the browser:
-  // the ones they starred and the ones they opened last. Neither is fleet
-  // data, so neither goes to the server.
+  // the ones they starred and the ones they opened last.
   const [favourites, setFavourites] = useStoredState<string[]>(FAVOURITES_KEY, [], isStringList);
   const [, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
   useEffect(() => {
@@ -289,9 +264,7 @@ export function HostPicker() {
   const searching = settled.length >= MINIMUM;
 
   // Empty, the palette is the places of the panel; the hosts to pick from
-  // stand in the host selector beside it. With a query it is what the
-  // server found, in groups by kind, and the places whose name the query
-  // matches.
+  // stand in the host selector beside it.
   const rows = useMemo<Row[]>(() => {
     if (!searching) {
       // A query too short for the server still narrows the places: one
@@ -301,10 +274,9 @@ export function HostPicker() {
     return [...groupResults(search.data?.items ?? [], settled), ...matchCommands(commands, settled, t)];
   }, [searching, settled, query, search.data, commands, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Ctrl+K (Cmd+K on a Mac) opens the palette from anywhere: jumping
-  // between places is the most frequent move in the panel, and it should
-  // not need the mouse. The top bar holds the only palette, so one
-  // listener is all.
+  // Ctrl+K (Cmd+K on a Mac) opens the palette from anywhere: jumping between
+  // places is the most frequent move in the panel, and it should not need
+  // the mouse.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "k") {

@@ -409,7 +409,7 @@ function DeleteTeam({ team, busy, onConfirm, onCancel }: {
 /**
  * The teams as every other screen reads them: the filter on the host list,
  * the placement on a host page and the binding form of the access screen all
- * need the same names, and they all narrow nothing - a team name is printed
+ * need the same names, and they all narrow nothing - a team name is printed.
  */
 export function useTeams(enabled = true) {
   return useQuery({

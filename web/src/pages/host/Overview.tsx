@@ -46,7 +46,7 @@ export function Overview() {
   const hardware = module.data?.payload?.hardware;
   // The owner and the address are facts recorded in the panel, edited in
   // place by whoever may write the host's tags: the same right, because they
-  // are the same kind of thing - what the panel knows, not what the host
+  // are the same kind of thing - what the panel knows, not what the host.
   const whoami = useQuery({
     queryKey: ["whoami"],
     queryFn: () => api.get<Whoami>("/api/v1/whoami"),
@@ -1415,7 +1415,7 @@ function linkOf(host: Host, item: HostTimelineItem): string | undefined {
 /**
  * The state of the record, coloured by what it means: a task or a campaign
  * target uses the shared state badge, an audit entry its outcome, a
- * lifecycle change the state the host went into, an alert whether it still
+ * lifecycle change the state the host went into, an alert whether it still.
  */
 function ActivityState({ item }: { item: HostTimelineItem }) {
   const t = useT();

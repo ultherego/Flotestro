@@ -14,10 +14,7 @@ export function Forbidden() {
 }
 
 /**
- * What a change does, in words. The action type is the contract
- * identifier the API and the trail use; the operator reading the recent
- * changes wants to know what was ordered, not how it is keyed. A type
- * the screen does not know is shown as it came.
+ * What a change does, in words.
  */
 const ACTION_NAMES: Record<string, string> = {
   "identity.user.create": "Create an account",
@@ -68,10 +65,9 @@ export function ListField({ label, value, onChange, placeholder, disabled }: {
 }
 
 /**
- * The impact of a planned change, shown as the plan came back: the hosts
- * and users the rule reaches, the diff against the rule of the same name,
- * the warnings and the conflicts. The approval by a second person happens
- * on the change itself; this is what that person is going to read.
+ * The impact of a planned change, shown as the plan came back: the hosts and
+ * users the rule reaches, the diff against the rule of the same name, the
+ * warnings and the conflicts.
  */
 export function PlanImpact({ change }: { change: DirectoryChange }) {
   const t = useT();
@@ -149,10 +145,7 @@ export function ReasonField({ value, onChange, placeholder }: {
 
 /**
  * The confirmation of a directory change that cannot be undone from the
- * panel: preserving an account, resetting its password. The fleet version
- * takes a host and repeats its address; a directory object has neither, so
- * the operator types the name of the object itself - a uid, a host group -
- * and gives the reason that stays in the audit trail.
+ * panel: preserving an account, resetting its password.
  */
 export function DirectoryConfirmation({
   target, description, label, onConfirm, onCancel, busy, danger,

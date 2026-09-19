@@ -14,12 +14,7 @@ import { useT } from "../../i18n";
 
 /**
  * The groups whose membership is root by another name: sudo and wheel give
- * root directly, docker and lxd through the engine socket. The same list
- * the accounts module of the control plane carries, so the panel names as
- * privileged what the server will judge as privileged. An installation
- * that extends the list is not known here - the server has the final word
- * on every order, and a group missing from this list only means the badge
- * is absent, never that the order goes through unjudged.
+ * root directly, docker and lxd through the engine socket.
  */
 const PRIVILEGED_GROUPS = ["sudo", "wheel", "docker", "lxd"];
 
@@ -30,11 +25,8 @@ type Panel = "keys" | "groups" | "expiry" | "delete";
 type AccountKey = LocalAccount["ssh_keys"][number];
 
 /**
- * The file a key lives in: the user's own `~/.ssh/authorized_keys`, or the
- * file the panel manages under `/etc/ssh/authorized_keys.d`. Every key
- * operation edits one file, so the file a key came from decides where its
- * removal goes. A report from an agent that did not name the source comes
- * from the user's file - the only one such an agent read.
+ * The file a key lives in: the user's own `~/. ssh/authorized_keys`, or the
+ * file the panel manages under `/etc/ssh/authorized_keys.
  */
 type KeyFile = "authorized_keys" | "managed";
 
@@ -52,16 +44,8 @@ function shortFingerprint(fingerprint: string): string {
 }
 
 /**
- * The host's local accounts.
- *
- * The module is meant for installations without an identity directory.
- * Where FreeIPA or another directory runs, people's accounts come from the
- * directory and the panel does not duplicate them - the view then shows
- * that the account is from the directory and offers no changes that belong
- * in the directory.
- *
- * The data comes from the agent's last report, not from querying the host
- * on request; hence the observation marker by the table.
+ * The host's local accounts. The module is meant for installations without
+ * an identity directory.
  */
 export function HostAccounts() {
   const t = useT();
@@ -221,9 +205,7 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
         <td><Expiry account={account} /></td>
         <td>
           {fromDirectory ? (
-            // Changing a directory account belongs to the directory. A
-            // local change would drift the state between hosts at the next
-            // synchronisation.
+            // Changing a directory account belongs to the directory.
             <span className="source">{t("managed by directory")}</span>
           ) : (
             <div className="operations">
@@ -299,8 +281,7 @@ function Row({ host, account }: { host: Host; account: LocalAccount }) {
 
 /**
  * The groups of an account, with a badge on the ones that are root by
- * another name. The badge is a warning before the click: changing such a
- * membership asks for a permission of its own and for an approval.
+ * another name.
  */
 export function AccountGroups({ groups }: { groups: string[] }) {
   const t = useT();
@@ -344,13 +325,6 @@ function Expiry({ account }: { account: LocalAccount }) {
 
 /**
  * The keys of one account, edited one key at a time.
- *
- * The editor never opens empty and never replaces the list by accident: it
- * lists the keys the inventory knows, with the file each one lives in, and
- * offers an add and a removal by fingerprint. Writing the whole list anew
- * is a separate, confirmed order that carries the fingerprints the operator
- * saw, so a key added by somebody else in the meantime makes the order
- * stale instead of disappearing under it.
  */
 export function KeysPanel({
   hostID, account, request, onClose,
@@ -366,9 +340,8 @@ export function KeysPanel({
   const privileged = account.groups.filter((group) => PRIVILEGED_GROUPS.includes(group));
 
   // Taking this key away leaves the account with no key at all, and the
-  // account cannot log in with a password - an unread password state is
-  // not "a password is set" either. The host refuses such a removal with
-  // last_key_lockout unless the order says the lockout is meant.
+  // account cannot log in with a password - an unread password state is not
+  // "a password is set" either.
   const cutsOff = (fingerprint: string) =>
     account.password_set !== true && keys.every((key) => key.fingerprint === fingerprint);
 
@@ -496,13 +469,6 @@ export function KeysPanel({
 
 /**
  * Writing the key file of an account anew.
- *
- * The order carries the fingerprints the operator saw in this very list,
- * so a key added between the read and the click makes it stale and the
- * host refuses it rather than overwriting what nobody reviewed. The
- * confirmation names every key that goes away, one by one: a list of
- * twelve-character prefixes is what tells the operator that the key they
- * were keeping is among them.
  */
 function ReplaceAllKeys({
   account, request, onClose,
@@ -595,11 +561,8 @@ function ReplaceAllKeys({
 }
 
 /**
- * The supplementary groups of an account, as a complete list: what is not
- * on it is taken away. A privileged group on the list is root by another
- * name; the panel says so before the order goes out, the control plane
- * treats such an order as critical, and it asks for a permission of its
- * own beside the one for changing groups at all.
+ * The supplementary groups of an account, as a complete list: what is not on
+ * it is taken away.
  */
 function GroupsPanel({
   hostID, account, request, onClose,
@@ -684,10 +647,8 @@ function ExpiryPanel({
 }
 
 /**
- * Deleting an account is destructive: a removed home directory does not
- * come back, and neither does the UID's ownership of what it left behind.
- * The operator types the account name - the thing that goes away - and
- * two people approve.
+ * Deleting an account is destructive: a removed home directory does not come
+ * back, and neither does the UID's ownership of what it left behind.
  */
 function DeletePanel({ host, account, request, onClose }: { host: Host; account: LocalAccount; request: Request; onClose: () => void }) {
   const t = useT();
@@ -742,8 +703,7 @@ function Access({ account }: { account: LocalAccount }) {
   if (account.password_set === true) return <span className="badge warn">{t("password")}</span>;
   if (account.password_set === false) {
     // An account without a password and without a key is reachable by
-    // nobody. It is usually a trace of access half taken away, and worth
-    // seeing.
+    // nobody.
     return <span className="badge error">{t("no access")}</span>;
   }
   return <span className="badge unknown">{t("unknown")}</span>;
@@ -763,8 +723,7 @@ function NewAccount({ host, onClose }: { host: Host; onClose: () => void }) {
   const keyList = keys.split("\n").map((key) => key.trim()).filter(Boolean);
   const privileged = groupList.filter((group) => PRIVILEGED_GROUPS.includes(group));
   // An account with neither a key nor a password is an account nobody can
-  // enter. The panel sets no passwords, so the operator has to say that
-  // such an account is what they mean.
+  // enter.
   const ready = name.trim() !== "" && (keyList.length > 0 ? !inactive : inactive)
     && (privileged.length === 0 || reason.trim().length >= 8);
 

@@ -22,10 +22,8 @@ const RANGES: { value: MetricRange; label: string }[] = [
 ];
 
 /**
- * How an instant reads on the time axis: the hour in a short window, the
- * day in a long one. The parts are cut from the same absolute time every
- * other screen shows - the 24-hour clock, in the zone the operator
- * prefers - so a chart and the trail beside it agree on when.
+ * How an instant reads on the time axis: the hour in a short window, the day
+ * in a long one.
  */
 export function axisLabel(range: MetricRange): (iso: string) => string {
   const time = (iso: string) => absoluteTime(iso).slice(11, 16);
@@ -39,9 +37,8 @@ const percent = (value: number) => `${Math.round(value)}%`;
 const rate = (value: number) => `${bytes(value)}/s`;
 
 /**
- * The busiest interface of the window: the one that moved the most bytes
- * in both directions. A host with one interface has it; a host with ten
- * gets the one worth a chart, named, and the count of the rest.
+ * The busiest interface of the window: the one that moved the most bytes in
+ * both directions.
  */
 function busiestInterface(points: MetricPoint[]): { name: string; count: number } | undefined {
   const totals = new Map<string, number>();
@@ -56,12 +53,6 @@ function busiestInterface(points: MetricPoint[]): { name: string; count: number 
 
 /**
  * Host monitoring.
- *
- * The agent samples the host once a minute and the panel keeps the samples:
- * what the charts show is what the agent saw, with the time it saw it. A
- * host that has not sent a sample yet has no numbers, and is shown as
- * such - a chart of zeros would say the host is idle, which nobody knows.
- * The alerts are the panel's own rules applied to the same samples.
  */
 export function Monitoring() {
   const t = useT();
@@ -159,9 +150,8 @@ export function Monitoring() {
     { name: t("Memory used"), tone: "accent", values: points.map((point) => point.memory_used) },
     { name: t("Swap used"), tone: "warn", values: points.map((point) => point.swap_used), line: true },
   ];
-  // The agent's own cost, drawn like the host's: a gap where the agent
-  // did not report the value, never a zero. The helper is a second line
-  // that exists only while it runs.
+  // The agent's own cost, drawn like the host's: a gap where the agent did
+  // not report the value, never a zero.
   const agentMemorySeries: AreaSeries[] = [
     { name: t("Agent RSS"), tone: "accent", values: points.map((point) => point.agent_rss_bytes) },
     { name: t("Helper RSS"), tone: "warn", values: points.map((point) => point.helper_rss_bytes), line: true },
@@ -528,10 +518,7 @@ type ProbeResult = {
 /**
  * A probe on demand: the host checks a service from where it stands and
  * reports what it saw - reachable or not, the answer it got, and whether
- * that answer met the expectation. The probe takes an address, not a rule:
- * the alert rules judge the samples, and this asks a question the samples
- * do not answer, "does this service answer from this host right now". The
- * result belongs to the job and is shown here, not in the inventory.
+ * that answer met the expectation.
  */
 function ProbeNow({ host }: { host: Host }) {
   const t = useT();

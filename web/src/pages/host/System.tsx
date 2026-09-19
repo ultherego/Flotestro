@@ -14,8 +14,7 @@ import { useT } from "../../i18n";
 
 /**
  * The reason a fact is missing, or nothing when the fact was read. A fact
- * inherits the reason of its parent: "dmi.serial" is unknown for the same
- * reason "dmi" is when the host has no DMI tables at all.
+ * inherits the reason of its parent: "dmi.
  */
 export function factReason(missing: Record<string, string> | undefined, fact: string): string | undefined {
   if (!missing) return undefined;
@@ -42,8 +41,6 @@ export function uptimeText(seconds: number): string {
 
 /**
  * The processor layout in one phrase: "2 sockets × 4 cores, 16 threads".
- * A layout the host did not describe - most virtual machines, every ARM
- * board - is the thread count alone, never "0 sockets".
  */
 export function layoutText(cpu: { sockets?: number; cores?: number; threads?: number } | undefined): string {
   if (!cpu) return "";
@@ -60,9 +57,7 @@ export function layoutText(cpu: { sockets?: number; cores?: number; threads?: nu
 
 /**
  * The platform of the host: what the machine is, as procfs, sysfs and the
- * DMI tables say. Everything here is static - it changes when somebody
- * changes the machine - so the page says when it was last read and keeps
- * the kernels and releases the panel has seen the host on.
+ * DMI tables say.
  */
 export function System() {
   const t = useT();

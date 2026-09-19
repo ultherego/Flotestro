@@ -1,12 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * The colour theme of the panel.
- *
- * The themes are defined in styles.css as sets of custom properties under
- * [data-theme]; this hook only decides which name stands on the root
- * element. Nothing here paints anything, so a page never needs to know
- * which theme is on.
+ * The colour theme of the panel. The themes are defined in styles.
  */
 export type Theme = "mocha-peach" | "mocha-green" | "latte";
 
@@ -16,9 +11,8 @@ export const THEMES: { code: Theme; label: string; description: string }[] = [
   { code: "latte", label: "Latte", description: "Light theme" },
 ];
 
-// The value is kept as a bare string, not JSON, because the inline script
-// in index.html reads the same key before React mounts and must not parse
-// anything to avoid a flash of the wrong theme.
+// The value is kept as a bare string, not JSON, because the inline script in
+// index.
 const STORAGE_KEY = "flotestro.theme";
 
 function isTheme(value: unknown): value is Theme {
@@ -58,9 +52,8 @@ export function useTheme(): { theme: Theme; setTheme: (theme: Theme) => void } {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
-  // Somebody who never chose a theme follows the operating system, also
-  // when it switches between day and night while the panel stays open. An
-  // explicit choice is never overridden by the system.
+  // Somebody who never chose a theme follows the operating system, also when
+  // it switches between day and night while the panel stays open.
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const query = window.matchMedia("(prefers-color-scheme: light)");

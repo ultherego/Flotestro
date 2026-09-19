@@ -4,17 +4,8 @@ import {
 } from "./fleet";
 
 /**
- * The fleet pages added after the host workspace: groups, reads,
- * monitoring, relays, settings, access and the audit trail. Each page is
- * opened, its header band and widgets are compared with what the API
- * answers, and one read-only interaction is exercised.
- *
- * Two tests leave a mark and clean it up: the group test tags a host and
- * creates a dynamic group around the tag, both removed at the end; the
- * read test orders a journal read on two hosts, which is a record the API
- * keeps - a fan-out cannot be deleted, and it changes nothing on the
- * hosts. A page the token may not see is skipped with the permission it
- * would need, not failed.
+ * The fleet pages added after the host workspace: groups, reads, monitoring,
+ * relays, settings, access and the audit trail.
  */
 
 let hosts: Host[] = [];
@@ -57,9 +48,8 @@ test.describe("groups", () => {
     test.slow();
     const { errors } = watchErrors(page);
 
-    // A tag is a fact the panel records; the host is not asked, so any
-    // host serves, online or not. The tag and the group carry a stamp so
-    // a run that died half-way leaves something recognisable behind.
+    // A tag is a fact the panel records; the host is not asked, so any host
+    // serves, online or not.
     const host = onlineHosts(hosts)[0] ?? hosts[0];
     const stamp = Date.now().toString(36);
     const tag = `e2e=t${stamp}`;

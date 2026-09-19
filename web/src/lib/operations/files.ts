@@ -5,11 +5,6 @@ import {
 
 /**
  * Configuration files.
- *
- * A write is never blind: the planning step reads what the host has now and
- * returns the digest of it, and the write comes back carrying that digest.
- * A file somebody else changed in the meantime stops the change instead of
- * overwriting their work, which is why the digest is not a field here.
  */
 
 const GROUP = "Files";

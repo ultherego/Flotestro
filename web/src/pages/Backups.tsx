@@ -69,17 +69,14 @@ function AgeBadge({ status, age }: { status: string; age?: number }) {
 }
 
 /**
- * Fleet backups.
- *
- * A backup breaks quietly: nobody notices there has been no new copy for
- * three weeks until one has to be restored. That is why the fleet view is
- * the primary mode here, with the worst rows on top.
+ * Fleet backups. A backup breaks quietly: nobody notices there has been no
+ * new copy for three weeks until one has to be restored.
  */
 export function FleetBackups() {
   const t = useT();
-  // The list grows page by page with the cursor the server hands back,
-  // the worst rows first; the counters above it come from the first page
-  // and describe the whole fleet, whatever part of the list is loaded.
+  // The list grows page by page with the cursor the server hands back, the
+  // worst rows first; the counters above it come from the first page and
+  // describe the whole fleet, whatever part of the list is loaded.
   const list = useInfiniteQuery({
     queryKey: ["backups", "fleet"],
     queryFn: ({ pageParam }) => api.get<View>(
@@ -91,8 +88,7 @@ export function FleetBackups() {
   const data = list.data?.pages[0];
   const items = loadedItems<Item>(list.data);
   // A heading reorders the rows already loaded, in the browser; a cleared
-  // sort goes back to the server's order. The age of a copy that never
-  // ran is unknown, not zero, and sorts apart from the fresh ones.
+  // sort goes back to the server's order.
   const columns = useColumns("backups", [
     { key: "age", label: t("Age"), sort: "age" },
     { key: "host", label: t("Host"), sort: "host", fixed: true },
@@ -258,12 +254,8 @@ export function FleetBackups() {
 }
 
 /**
- * The backends the fleet writes to.
- *
- * The backup list says which host has an old copy. It does not say which
- * backend is the bottleneck - and that is what decides how many copies run
- * at once. An unset capacity is a missing policy here, not zero: then
- * nothing limits the parallelism, and that had better be visible.
+ * The backends the fleet writes to. The backup list says which host has an
+ * old copy.
  */
 function Repositories({ repositories }: { repositories: Repository[] }) {
   const t = useT();
@@ -314,11 +306,6 @@ function Repositories({ repositories }: { repositories: Repository[] }) {
 
 /**
  * The last two weeks of copies, day by day.
- *
- * The list says which host has an old copy; the calendar says whether the
- * fleet backs up at all and when it stopped. A row of full days followed by
- * empty ones is a broken schedule, and that shows here before any single
- * copy is old enough to turn red.
  */
 function Calendar({ items, wide }: { items: Item[]; wide: boolean }) {
   const t = useT();

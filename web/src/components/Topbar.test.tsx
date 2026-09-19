@@ -36,9 +36,8 @@ const host = {
 
 /**
  * The bar as the application mounts it: the text size comes from the hook
- * that remembers it, so a click in the menu goes through the same path as
- * in the panel - the hook stamps the root element and the storage, and
- * the bar re-renders with the new choice.
+ * that remembers it, so a click in the menu goes through the same path as in
+ * the panel - the hook stamps the root element and the storage, and the bar
  */
 function Bar({ trail, who }: { trail: Trail; who: Whoami | undefined }) {
   const { scale, setScale } = useScale();
@@ -60,8 +59,7 @@ function Bar({ trail, who }: { trail: Trail; who: Whoami | undefined }) {
 
 function draw(props: { trail?: Trail; who?: Whoami | undefined } = {}) {
   // An explicit `who: undefined` means nobody is signed in; a call without
-  // the key means the usual person. A default parameter cannot tell the
-  // two apart, so the decision is made here.
+  // the key means the usual person.
   const who = "who" in props ? props.who : user;
   return render(<MemoryRouter><Bar trail={props.trail ?? { section: "Dashboard" }} who={who} /></MemoryRouter>);
 }

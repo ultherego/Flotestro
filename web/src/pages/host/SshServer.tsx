@@ -39,21 +39,15 @@ type Snapshot = {
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
 /**
- * Whether the snapshot carries nothing of what "sshd -T" prints. The
- * server always names a port and a root login policy; a snapshot with
- * neither came from a read that got no output and left no reason.
+ * Whether the snapshot carries nothing of what "sshd -T" prints.
  */
 export function effectiveConfigurationMissing(snapshot: Pick<Snapshot, "ports" | "permit_root_login" | "password_authentication" | "pubkey_authentication">): boolean {
   return (snapshot.ports ?? []).length === 0 && !snapshot.permit_root_login && !snapshot.password_authentication && !snapshot.pubkey_authentication;
 }
 
 /**
- * The sshd server.
- *
- * The panel writes only its own file in sshd_config.d: the main file belongs
- * to the distribution and the host administrator. The state is shown as the
- * server itself reports it - in sshd the first value wins, so assembling it
- * from file contents would give a picture the host does not confirm.
+ * The sshd server. The panel writes only its own file in sshd_config. d: the
+ * main file belongs to the distribution and the host administrator.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const SSH_CHANGES = ["ssh.config.apply", "ssh.hostkey.rotate"];
@@ -92,11 +86,7 @@ export function SshServer() {
     [t("Keyboard interactive"), snapshot?.kbd_interactive_authentication],
     ["GSSAPI", snapshot?.gssapi_authentication],
   ];
-  // An unread configuration has nothing to count; the bar shows dashes
-  // then. A snapshot without a reason but without a single setting from
-  // "sshd -T" is unread too: the host keys came from the disk, the
-  // effective configuration did not, and a zero port count would say the
-  // server listens nowhere.
+  // An unread configuration has nothing to count; the bar shows dashes then.
   const effectiveMissing = !!snapshot && !snapshot.unavailable_reason && effectiveConfigurationMissing(snapshot);
   const known = snapshot?.unavailable_reason || effectiveMissing ? undefined : snapshot;
   const knownMethods = known ? methods : undefined;
@@ -287,9 +277,7 @@ export function SshServer() {
 }
 
 /**
- * The managed file editor. An empty field means "do not change": the panel
- * does not rewrite the whole server configuration, only what the operator
- * asked for.
+ * The managed file editor.
  */
 function SshEditor({
   state, onIntent,

@@ -11,15 +11,8 @@ export type Progress = {
 };
 
 /**
- * The operation progress stream.
- *
- * The stream carries only the signal "something changed"; the content is
- * always the API answer. If the state travelled over the stream, a screen
- * after a broken connection would show something other than recorded - and
- * the operator would have no way to notice.
- *
- * The browser resumes a broken EventSource itself, so a momentary loss of
- * the connection does not stop the preview for good.
+ * The operation progress stream. The stream carries only the signal
+ * "something changed"; the content is always the API answer.
  */
 export function useProgressStream(path: string | null, keys: unknown[][]) {
   const queryClient = useQueryClient();
@@ -34,9 +27,7 @@ export function useProgressStream(path: string | null, keys: unknown[][]) {
       }
     };
     source.addEventListener("job", refresh);
-    // A durable event of the trail refreshes as well. It carries an
-    // identifier, so after a broken connection the browser resumes the
-    // stream from the last one it saw and nothing in between is lost.
+    // A durable event of the trail refreshes as well.
     source.addEventListener("timeline", refresh);
     // Connecting refreshes too: the screen may have missed changes before
     // the stream opened.
@@ -61,12 +52,6 @@ export type EnrollmentTurn = {
 
 /**
  * The turns of one installation order, from the fleet stream.
- *
- * The event is a signal like a job event: the screen reads the order from
- * the API and shows what is recorded. The hook says whether the stream is
- * open, so the screen can keep its poll as the fallback and slow it down
- * while the stream carries the news; a browser or a proxy that cannot hold
- * the stream leaves the poll at its usual pace.
  */
 export function useEnrollmentStream(requestId: string | null, keys: unknown[][]) {
   const queryClient = useQueryClient();
@@ -117,8 +102,7 @@ export function useEnrollmentStream(requestId: string | null, keys: unknown[][])
 
 /**
  * The polling interval for the aggregate views that have no stream of their
- * own. The fleet list and the dashboard change on their own - through the
- * host heartbeats - not only through operator actions.
+ * own.
  */
 export const REFRESH_INTERVAL = 5000;
 
@@ -126,12 +110,8 @@ export const REFRESH_INTERVAL = 5000;
 export const OPERATIONS_INTERVAL = 2000;
 
 /**
- * The progress of operations in flight, straight from the stream.
- *
- * Progress is transient: it is not in the API and cannot be read after the
- * fact. A screen attached halfway through a transaction sees only the next
- * report - and that is enough, because the result is durable in the
- * database anyway.
+ * The progress of operations in flight, straight from the stream. Progress
+ * is transient: it is not in the API and cannot be read after the fact.
  */
 export function useProgress(path: string | null): Map<string, Progress> {
   const [progress, setProgress] = useState<Map<string, Progress>>(new Map());
@@ -181,11 +161,8 @@ export function useProgress(path: string | null): Map<string, Progress> {
 export type LogChunk = { lines: string[]; dropped?: number };
 
 /**
- * The live journal preview.
- *
- * The lines are transient: they are not in the API and cannot be read after
- * the fact. A pause stops only appending on the screen - the host keeps
- * sending, and the stream ends on its own after its time limit.
+ * The live journal preview. The lines are transient: they are not in the API
+ * and cannot be read after the fact.
  */
 export function useJournalPreview(path: string | null, paused: boolean) {
   const [lines, setLines] = useState<string[]>([]);

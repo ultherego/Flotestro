@@ -7,11 +7,7 @@ import { Card, Columns, Stat, StatGrid } from "../../components/layout";
 import { useT } from "../../i18n";
 
 /**
- * The health of the integration, in two independent halves. The connector
- * half is what the panel itself can say: its keytab, its last call, its
- * cache. The fleet half is what the hosts reported: which of them lost
- * the directory and what the panel makes of their logins. A directory the
- * panel cannot reach says nothing about the hosts, and the reverse.
+ * The health of the integration, in two independent halves.
  */
 export function Health() {
   const t = useT();

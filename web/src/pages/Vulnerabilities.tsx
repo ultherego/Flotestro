@@ -130,16 +130,8 @@ export const GATE_REASONS: Record<string, string> = {
 };
 
 /**
- * Whether a host's verdict was produced by the generation in force.
- *
- * Three answers, not two. A host whose verdict names the generation the
- * feed holds now was judged against today's data; one that names another
- * generation was judged against older data and has not been looked at
- * since. "Not recorded" is the third: a verdict from before generations,
- * or one whose findings came from the host's own repositories, where
- * there is no central generation to be current against. It is never
- * folded into "current" - that would say the panel checked something it
- * did not.
+ * Whether a host's verdict was produced by the generation in force. Three
+ * answers, not two.
  */
 export function generationState(item: Item, sources: Source[]): "current" | "older" | "unknown" {
   if (!item.generation_id) return "unknown";
@@ -218,32 +210,11 @@ export function packagesPreview(packages: string[], shown = 4): { shown: string[
 }
 
 /**
- * Fleet vulnerabilities.
- *
- * The screen has two numbers, not one: how many vulnerabilities and what
- * part of the fleet could be assessed at all. Without the second the first
- * is a promise, not a result - a host the feed does not cover has the same
- * zero as a clean host.
- *
- * Below the numbers the same findings are read two ways: by host, which
- * answers "which machine is in the worst shape", and by CVE, which answers
- * "which vulnerability touches the most of the fleet" - the question an
- * operator asks when a number from the news lands on the desk.
+ * Fleet vulnerabilities. The screen has two numbers, not one: how many
+ * vulnerabilities and what part of the fleet could be assessed at all.
  */
 /**
  * The fetches the sanity gate is holding back.
- *
- * The gate refuses a fetch that lost most of the findings in force, or
- * that stopped covering a release: the vendors do not fix everything at
- * once, so such a fetch is a truncated download or a parser that gave up,
- * and activating it would report most of the fleet as clean. The snapshot
- * in force stays in force and ages into a source the panel shows as
- * stale; nothing is silently swapped underneath the numbers.
- *
- * Accepting is a deliberate act. The two counts are shown side by side,
- * because that comparison is the whole decision, and the acceptance asks
- * for a reason and fresh authentication - it changes what the panel will
- * say about every host of that distribution.
  */
 export function FeedCandidates({ candidates }: { candidates: Candidate[] }) {
   const t = useT();
@@ -400,10 +371,9 @@ export function FleetVulnerabilities() {
   // distribution, a family without a feed - is neither fully assessed nor
   // unassessed; it is the rest of the fleet.
   const partlyAssessed = Math.max(0, data.hosts_total - data.hosts_assessed - data.hosts_without_assessment);
-  // The hosts with the most open findings, the gravest first, as the
-  // server sorted them: a host with a vendor fix waiting outranks one with
-  // more findings and nothing to apply. A host that could not be assessed
-  // is not on this list - its zero is not a result.
+  // The hosts with the most open findings, the gravest first, as the server
+  // sorted them: a host with a vendor fix waiting outranks one with more
+  // findings and nothing to apply.
   const affectedHosts = data.items.filter((item) => !item.coverage_reason && item.affected > 0);
   const hostTone = (item: Item): WidgetTone => (item.affected_with_vendor_fix > 0 ? "error" : "warn");
 
@@ -680,10 +650,7 @@ export function FleetVulnerabilities() {
                           {reason(item.coverage_reason)}
                         </span>
                       ) : (
-                        // Rounding to a whole number turned 99.7% into "100%":
-                        // "everything checked" where dozens of packages stayed
-                        // outside the assessment. The bar shows the share, the
-                        // badge the exact figure.
+                        // Rounding to a whole number turned 99.
                         <Meter
                           value={item.coverage_percent}
                           max={100}

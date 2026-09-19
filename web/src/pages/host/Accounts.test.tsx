@@ -7,20 +7,8 @@ import type { HostActions } from "../../lib/actions";
 import type { LocalAccount } from "../../lib/types";
 import { AccountGroups, KeysPanel, type Request } from "./Accounts";
 
-/*
+/**
  * The SSH key editor of an account.
- *
- * The screen is the answer to the gap chapter 3 of the roadmap names:
- * editing keys through a single text area replaced the whole list from
- * whatever the operator happened to see, and a key added in the meantime
- * disappeared with it. The tests below hold the editor to the opposite:
- * it opens on the keys the inventory knows, a removal names one
- * fingerprint, an add carries the new key alone, and writing the list anew
- * carries the fingerprints the operator saw so the host can refuse a stale
- * order.
- *
- * The server is replaced by a fixed preview of the host's actions, the one
- * ActionGuard reads before it draws a control.
  */
 
 const preview: HostActions = {

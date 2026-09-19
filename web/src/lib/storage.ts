@@ -2,9 +2,7 @@ import { useCallback, useState } from "react";
 
 /**
  * A piece of interface state remembered in the browser: the theme, the
- * sidebar width, which navigation groups are folded. None of it belongs to
- * the server - it is how one person likes their screen, not fleet data -
- * so it lives in localStorage and survives a reload, nothing more.
+ * sidebar width, which navigation groups are folded.
  */
 export function readStored<T>(key: string, fallback: T, valid: (value: unknown) => value is T): T {
   try {

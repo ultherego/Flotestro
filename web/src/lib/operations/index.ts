@@ -17,15 +17,6 @@ export * from "./fields";
 
 /**
  * The registry of operation forms.
- *
- * One entry per operation, assembled from the module files: what the
- * operation is called, which fields it has, how they become the payload and
- * what the panel refuses before the server ever sees it. The Bulk wizard
- * and a host page draw from this same registry, so an operation gains a
- * form once rather than once per screen.
- *
- * An operation missing here is not a refusal - it is an operation whose
- * payload is still typed as JSON. The screens say so where it happens.
  */
 export const OPERATION_FORMS: OperationEntry[] = [
   ...units, ...packages, ...files, ...schedules, ...accounts, ...network,
@@ -60,9 +51,7 @@ export function startingForm(action: string | undefined): FormValue {
 
 /**
  * The form a payload written as JSON fills in, or null when it is not JSON,
- * not an object, or carries something the fields cannot show. Null is what
- * keeps such a payload in the advanced view instead of quietly losing half
- * of it.
+ * not an object, or carries something the fields cannot show.
  */
 export function readPayloadText(entry: OperationEntry, raw: string): FormValue | null {
   let parsed: unknown;

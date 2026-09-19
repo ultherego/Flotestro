@@ -10,10 +10,7 @@ import { HostSelect } from "./HostSelect";
 import { Icon } from "./icons";
 
 /**
- * Where the operator is, as the top bar tells it. The section is the
- * navigation item the page belongs to; on a host page the host stands
- * between the section and the module, so the target of every operation
- * is named at the top of the screen whatever the module shows.
+ * Where the operator is, as the top bar tells it.
  */
 export type Trail = {
   /** The English label of the section; it goes through the translation catalogue. */
@@ -28,10 +25,7 @@ export type Trail = {
 
 /**
  * The top bar: the sidebar fold, the trail, the host selector, the search
- * and the user menu, across the whole width above the content. The
- * navigation stays in the sidebar; everything about the session and the
- * person at the screen lives here, so the sidebar can be only a list of
- * places.
+ * and the user menu, across the whole width above the content.
  */
 export function Topbar({
   trail, user, collapsed, onToggleCollapsed, onOpenDrawer, onSignOut, theme, setTheme, scale, setScale,
@@ -122,10 +116,8 @@ function ConnectionDot({ state }: { state: Host["connection_state"] }) {
 }
 
 /**
- * The person at the screen and their settings: the identity with its
- * roles, the language, the theme and the text size, and the way out of
- * the session. A popover rather than a page, because none of it needs
- * more than a glance.
+ * The person at the screen and their settings: the identity with its roles,
+ * the language, the theme and the text size, and the way out of the session.
  */
 function UserMenu({ user, onSignOut, theme, setTheme, scale, setScale }: {
   user: Whoami | undefined;
@@ -227,10 +219,9 @@ function initial(name: string): string {
 }
 
 /**
- * The interface language; the choice is remembered in the browser and,
- * for a signed-in person, under their identity on the server, so it
- * follows them to the next browser. A server that cannot take the write
- * changes nothing here: the browser's copy already applies.
+ * The interface language; the choice is remembered in the browser and, for a
+ * signed-in person, under their identity on the server, so it follows them
+ * to the next browser.
  */
 export function LanguageSwitch() {
   const { locale, setLocale } = useLocale();

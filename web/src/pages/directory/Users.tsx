@@ -13,9 +13,6 @@ import {
 /**
  * The accounts of the directory and their lifecycle: creation, lock and
  * unlock, expiry, the POSIX data, preservation and the password reset.
- * Every one of them is a change: planned here, approved by a second
- * person, carried out phase by phase - the panel never writes the
- * directory from a click.
  */
 
 type Intent =
@@ -72,8 +69,8 @@ export function Users() {
     retry: false,
   });
   // The preserved accounts are read separately: they are not accounts
-  // anybody signs in with, and a list that mixed them in would count them
-  // as users.
+  // anybody signs in with, and a list that mixed them in would count them as
+  // users.
   const preserved = useQuery({
     queryKey: ["identity-users-preserved"],
     queryFn: () => api.get<Collection<DirectoryUser>>("/api/v1/identity/users?preserved=true"),
@@ -295,9 +292,7 @@ export function Users() {
 
 /**
  * The expiry of an account: the Kerberos principal (no ticket after the
- * date) and the password (a change forced at the next login). Each may be
- * set, left alone or cleared; clearing is a value of its own, because
- * "no date" typed in a field would otherwise mean "do not touch".
+ * date) and the password (a change forced at the next login).
  */
 function ExpireForm({ user, busy, message, onSubmit, onClose }: {
   user: DirectoryUser; busy: boolean; message: string;
@@ -398,10 +393,7 @@ function PosixForm({ user, busy, message, onSubmit, onClose }: {
 
 /**
  * The recent directory changes and, for a finished password reset, the
- * one-time password. The password is read once from the panel's memory
- * with a reason and fresh authentication, shown in this card and nowhere
- * else: not in the address, not in the browser's storage, not in a toast
- * that outlives the page.
+ * one-time password.
  */
 function RecentChanges() {
   const t = useT();

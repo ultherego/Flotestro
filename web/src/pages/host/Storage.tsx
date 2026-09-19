@@ -190,7 +190,7 @@ type MountRow = { mount: Mount; times: number };
 /**
  * The mounts folded by mount point and source: a shared folder mounted twice
  * at the same path (what a provisioning tool does when it runs again) is one
- * row that says "twice", not two rows that read as two different
+ * row that says "twice", not two rows that read as two different.
  */
 export function mountRows(mounts: Mount[]): MountRow[] {
   const rows: MountRow[] = [];

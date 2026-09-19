@@ -74,10 +74,9 @@ export function describeCondition(rule: { metric: string; operator: RuleOperator
 }
 
 /**
- * The scope of a rule as the server takes it: the flat fields, the tags
- * the host has to carry, the groups it may be in, its owner, and an
- * expression in the text form of a campaign selector for what the fields
- * cannot say. Every set field holds at once.
+ * The scope of a rule as the server takes it: the flat fields, the tags the
+ * host has to carry, the groups it may be in, its owner, and an expression
+ * in the text form of a campaign selector for what the fields cannot say.
  */
 export type RuleScope = RuleSelector & {
   tags?: string[];
@@ -127,9 +126,7 @@ export function AlertStateBadge({ state, silenced }: { state: AlertState; silenc
 }
 
 /**
- * An alert with what an operator wrote on it. The acknowledgement says
- * somebody took it: the alert keeps firing, the counts of what waits for
- * a person leave it out, and the row names who and what they wrote.
+ * An alert with what an operator wrote on it.
  */
 export type NotedAlert = Alert & {
   acknowledged_by?: string;
@@ -172,13 +169,8 @@ function errorText(error: unknown): string {
 }
 
 /**
- * Fleet monitoring.
- *
- * Every agent samples its host once a minute and the panel keeps the
- * samples; the rules written here turn them into alerts. There is no
- * other system behind this page: what fires, fires by a rule an operator
- * can read on the same screen, and a silence is a decision with a reason
- * and an owner, never an open-ended one.
+ * Fleet monitoring. Every agent samples its host once a minute and the panel
+ * keeps the samples; the rules written here turn them into alerts.
  */
 export function FleetMonitoring() {
   const t = useT();
@@ -527,12 +519,9 @@ export function FleetMonitoring() {
 }
 
 /**
- * What the agents cost the hosts they run on: the release gate of the
- * agent asks for its memory and CPU on a real fleet, and this is where the
- * fleet answers. The median says what an agent costs, the maximum where
- * one is out of line, and the list names the hosts over the budget so a
- * leak is a host to look at rather than a number to wonder about. A fleet
- * where no agent reports its footprint yet shows dashes, not zeros.
+ * What the agents cost the hosts they run on: the release gate of the agent
+ * asks for its memory and CPU on a real fleet, and this is where the fleet
+ * answers.
  */
 function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint; loaded: boolean }) {
   const t = useT();
@@ -587,9 +576,7 @@ function AgentFootprintCard({ footprint, loaded }: { footprint?: FleetFootprint;
 }
 
 /**
- * The firing alerts with a silence at each row. The reason is asked for
- * in the row itself: the operator silences what they are looking at, and
- * the audit trail gets a sentence about why.
+ * The firing alerts with a silence at each row.
  */
 function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
   alerts: NotedAlert[]; canAcknowledge: boolean; onChanged: () => void; onMessage: (text: string) => void;
@@ -796,13 +783,7 @@ function ruleBody(rule: RuleDraft): RuleDraft {
 }
 
 /**
- * The form of a rule, new or edited. The metric, the operator and the
- * severity are chosen from what the server accepts, so a typo cannot make
- * a rule that never fires. The scope is by site, environment, system
- * family, tags, groups, owner and an expression for the rest; a rule with
- * none of them watches the whole fleet. The expression is checked as it
- * is typed, with the same grammar the server reads, so a scope the server
- * would refuse is said so under the field rather than after the save.
+ * The form of a rule, new or edited.
  */
 function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: RuleCatalogue; onDone: (message?: string) => void }) {
   const t = useT();

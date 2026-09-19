@@ -16,12 +16,6 @@ import { useT } from "../i18n";
 
 /**
  * Diagnostic reads on many hosts at once.
- *
- * A read fan-out is the same read the operator orders on one host - the
- * process list, the journal, a security scan - ordered on a handful at
- * once. It is not a campaign: nothing changes, nothing is approved, and
- * there are no waves. One ordinary job per host carries the result; this
- * page merges what the hosts brought back.
  */
 export function Reads() {
   const { id } = useParams();
@@ -42,9 +36,9 @@ function ReadsList() {
   // A link from a host page opens the form already filled in; the plain
   // page opens on the list.
   const [building, setBuilding] = useState(prefill.has("action"));
-  // The list grows page by page from the newest read: an operator who
-  // reads a lot keeps the old fan-outs one click away rather than losing
-  // them past a fixed ceiling.
+  // The list grows page by page from the newest read: an operator who reads
+  // a lot keeps the old fan-outs one click away rather than losing them past
+  // a fixed ceiling.
   const list = useInfiniteQuery({
     queryKey: ["reads", "list"],
     queryFn: ({ pageParam }) => {
@@ -171,9 +165,7 @@ const DEFAULT_PAYLOADS: Record<string, unknown> = {
 type TargetMode = "filters" | "expression" | "hosts";
 
 /**
- * The order form: the read, its payload, the hosts and the reason. The
- * operations come from the catalogue with the ceiling of hosts each one
- * fans out to; the selector is the one a campaign takes.
+ * The order form: the read, its payload, the hosts and the reason.
  */
 function NewRead({ onDone }: { onDone: () => void }) {
   const t = useT();
@@ -518,11 +510,7 @@ function FanOutPage({ id }: { id: string }) {
 }
 
 /**
- * Withdrawing the hosts that have not answered. A fan-out is nothing but
- * its jobs, so the cancel goes to each open job through the job's own
- * route, with one reason for all of them; a host already running a read
- * the agent cannot stop is refused by that route and counted here, not
- * hidden. The finished hosts keep their answers.
+ * Withdrawing the hosts that have not answered.
  */
 function CancelFanOut({ view }: { view: ReadFanOutView }) {
   const t = useT();
@@ -578,9 +566,7 @@ type ProcessRow = { pid: number; user?: string; name: string; command?: string; 
 type DNSQuery = { name: string; addresses?: string[]; server?: string; error?: string; took_millis: number };
 
 /**
- * The result of a structured read for one host. The process list and the
- * resolver test get a table, because those are what the operator reads
- * across hosts; everything else is shown as the host gave it.
+ * The result of a structured read for one host.
  */
 function StructuredResult({ action, host }: { action: string; host: ReadFanOutHost }) {
   const t = useT();

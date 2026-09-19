@@ -12,14 +12,8 @@ import { Actions, Card, Field, FieldGrid, PageHeader } from "../components/layou
 import { useToast } from "../components/Toast";
 
 /**
- * The person at the screen: who the panel takes them for, what they may
- * do and where, where they are signed in, and how they like the panel.
- *
- * The access screen answers the same questions about everybody, for
- * whoever manages the identities. This page answers them about oneself
- * and needs no right beyond being signed in: an operator is entitled to
- * see their own roles before asking why a button is missing, and their
- * own sessions before asking whether somebody else holds one.
+ * The person at the screen: who the panel takes them for, what they may do
+ * and where, where they are signed in, and how they like the panel.
  */
 
 /** A live browser session of the caller, as the API lists it. */
@@ -46,10 +40,8 @@ function anyScope(value: string | undefined): boolean {
 }
 
 /**
- * Two hundred permission names in one cloud are read by nobody. They
- * are named area.action, so they fold by area: one row per part of the
- * panel, with the actions allowed in it. A name without a dot is its own
- * area.
+ * Two hundred permission names in one cloud are read by nobody. They are
+ * named area.
  */
 export function groupPermissions(permissions: string[]): { area: string; actions: string[] }[] {
   const areas = new Map<string, string[]>();
@@ -258,11 +250,8 @@ export function Profile({ theme, setTheme }: {
 }
 
 /**
- * The preferences, edited whole: the zone, the page size, the landing
- * page, and the language and the theme the top bar also switches. The
- * language and the theme apply at once, as the top bar does; the rest
- * is saved with the button, so a zone half typed does not reformat every
- * time on the screen.
+ * The preferences, edited whole: the zone, the page size, the landing page,
+ * and the language and the theme the top bar also switches.
  */
 function PreferencesCard({ theme, setTheme }: { theme: Theme; setTheme: (theme: Theme) => void }) {
   const t = useT();

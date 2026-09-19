@@ -9,9 +9,7 @@ import { useT } from "../i18n";
 
 /**
  * The answer for one host of a bulk edit: applied, or the code the host's
- * own route would have refused with. The list is the whole point of the
- * route - three hosts out of the operator's scope are answered, not
- * hidden behind a refusal of the whole selection or a silent skip.
+ * own route would have refused with.
  */
 type Outcome = { host_id: string; ok: boolean; code: string; detail?: string };
 type BulkResponse = { results: Outcome[]; applied: number; failed: number };
@@ -48,12 +46,9 @@ function instantOf(local: string): string {
 }
 
 /**
- * The inline panel of the fleet list that edits what the panel records
- * about the selected hosts by hand: tags, the owner, the failure domain,
- * the placement and the maintenance window. One call, one reason, and an
- * answer per host; the outcomes stay on the screen until the panel is
- * closed, so the operator reads which hosts were refused and why before
- * the selection is cleared.
+ * The inline panel of the fleet list that edits what the panel records about
+ * the selected hosts by hand: tags, the owner, the failure domain, the
+ * placement and the maintenance window.
  */
 export function HostsMetadata({ hosts, permissions, onClose }: {
   hosts: Host[];

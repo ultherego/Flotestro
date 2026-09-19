@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * The text size of the panel, chosen by the person at the screen the way
- * the theme is: a 4K monitor at arm's length and a laptop on a lap want
- * different sizes of the same interface. The choice scales everything -
- * text, spacing, controls - so the composition stays the same.
+ * The text size of the panel, chosen by the person at the screen the way the
+ * theme is: a 4K monitor at arm's length and a laptop on a lap want
+ * different sizes of the same interface.
  */
 export type Scale = "small" | "normal" | "large" | "larger";
 

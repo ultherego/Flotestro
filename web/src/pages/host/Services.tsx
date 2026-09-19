@@ -68,10 +68,7 @@ const UNIT_PAGE = 50;
 const UNIT_CHANGES = ["unit.restart", "unit.start", "unit.stop", "unit.reset_failed", "unit.enable.set", "unit.mask.set"];
 
 /**
- * The detail of a read, typed by the panel from the result of the agent. An
- * agent from before the typed result prints the same document on stdout, so
- * stdout stays the fallback for one release; drop it together with the
- * support for those agents.
+ * The detail of a read, typed by the panel from the result of the agent.
  */
 function detailDocumentOf(attempt: Attempt): DetailDocument {
   const detail = attempt.detail;
@@ -178,9 +175,7 @@ export function Services() {
     if (refresh || !details[unit]) detail.mutate(unit);
   }
 
-  // A dependency chip links to its unit with ?unit=: the list narrows to it
-  // and its own detail opens, so the operator walks the graph link by link
-  // and the browser history walks back.
+  // A dependency chip links to its unit with ?
   const wanted = params.get("unit") ?? "";
   useEffect(() => {
     if (!wanted) return;
@@ -206,7 +201,6 @@ export function Services() {
   }
   // The state counts come from the full listing, which exists only after a
   // read; the failed count comes from the inventory and is known earlier.
-  // Neither is zero before it is known.
   const listed = listing.data ? allUnits : undefined;
   const failedCount = known ? failed.length : countWhere(listed, (unit) => unit.active_state === "failed");
   const bootStates = ["enabled", "disabled", "static", "masked"];
@@ -515,9 +509,8 @@ function UnitRow({
 }
 
 /**
- * The detail of one unit: the facts, the dependencies, the overrides and
- * the last journal lines. Every dependency is a link to its own unit, so the
- * graph is walked link by link rather than read from a dump.
+ * The detail of one unit: the facts, the dependencies, the overrides and the
+ * last journal lines.
  */
 function UnitDetailPanel({
   unit, detail, loading, error, onRefresh,

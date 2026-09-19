@@ -7,9 +7,7 @@ const KEY = "flotestro.theme";
 type Listener = (event: MediaQueryListEvent) => void;
 
 /**
- * jsdom has no matchMedia. This stand-in answers the light-scheme query
- * with a chosen value and lets a test flip it, as an operating system
- * switching between day and night would.
+ * jsdom has no matchMedia.
  */
 function installMatchMedia(light: boolean) {
   const listeners = new Set<Listener>();

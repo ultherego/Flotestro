@@ -2,9 +2,7 @@ import { expect, test } from "@playwright/test";
 import { expectHealthy, fleetHosts, navigation, openHostList, watchErrors, type Host } from "./fleet";
 
 /**
- * The host list and the host workspace. The fleet is read through the
- * API first, so the assertions compare the screen with what the server
- * knows rather than with names hard-coded for one laboratory.
+ * The host list and the host workspace.
  */
 
 let hosts: Host[] = [];
@@ -41,10 +39,7 @@ test.describe("host list", () => {
     // screen reader; the label is that sentence.
     const search = page.getByRole("textbox", { name: "Search hostname, address, machine ID or owner" });
     await search.fill(fragment);
-    // The filter runs on the server after a pause. The search also reads
-    // addresses, machine IDs and owners, so the list may keep a row the
-    // hostname alone would not explain; it must keep every matching name
-    // and drop at least one host.
+    // The filter runs on the server after a pause.
     if (hosts.length > 1) await expect.poll(() => rows.count()).toBeLessThan(hosts.length);
     for (const host of expected) {
       await expect(table.getByRole("link", { name: host.hostname, exact: true })).toBeVisible();
@@ -59,9 +54,9 @@ test.describe("host list", () => {
   });
 
   test("the reboot filter keeps the hosts the server says need one", async ({ page, request }) => {
-    // The server is the reference: the list must show exactly the hosts
-    // the API answers with for the same filter, not what a first page
-    // happens to carry.
+    // The server is the reference: the list must show exactly the hosts the
+    // API answers with for the same filter, not what a first page happens to
+    // carry.
     const response = await request.get("/api/v1/hosts?limit=200&reboot_required=true");
     expect(response.ok(), `GET /api/v1/hosts?reboot_required=true answered ${response.status()}`).toBeTruthy();
     const needing = ((await response.json()) as { items: Host[] }).items;
@@ -86,13 +81,13 @@ test.describe("host list", () => {
 
   test("the owner and the management address stand in their own columns", async ({ page }) => {
     const table = await openHostList(page);
-    // The address is a column of its own on every screen; a sortable
-    // heading carries a button with an arrow, so the heading is found by
-    // its text rather than by its whole accessible name.
+    // The address is a column of its own on every screen; a sortable heading
+    // carries a button with an arrow, so the heading is found by its text
+    // rather than by its whole accessible name.
     await expect(table.locator("thead th", { hasText: heading("Address") })).toBeVisible();
-    // The owner is empty on most fleets, so its column stays off the
-    // screen until chosen: the chooser offers it unticked, and ticking it
-    // adds the column with the owner, or a dash, in every row.
+    // The owner is empty on most fleets, so its column stays off the screen
+    // until chosen: the chooser offers it unticked, and ticking it adds the
+    // column with the owner, or a dash, in every row.
     await expect(table.locator("thead th", { hasText: heading("Owner") })).toHaveCount(0);
     await page.getByTestId("column-chooser").click();
     const owner = page.getByRole("group", { name: "Columns" }).getByRole("checkbox", { name: "Owner" });
@@ -226,8 +221,7 @@ function heading(text: string): RegExp {
 
 /**
  * The shortest prefix of a hostname that does not name every host in the
- * fleet, so the filter demonstrably leaves rows out. With a fleet of one,
- * or hosts that share the name up to the end, the whole name is used.
+ * fleet, so the filter demonstrably leaves rows out.
  */
 function distinctiveFragment(hostname: string, all: string[]): string {
   for (let length = 3; length < hostname.length; length += 1) {

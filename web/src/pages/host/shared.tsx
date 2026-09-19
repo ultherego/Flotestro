@@ -25,9 +25,7 @@ export function useInventory(hostID: string) {
 }
 
 /**
- * A tab fetches its own inventory module. Each has its own revision and its
- * own observation timestamp, so the freshness describes what the operator
- * looks at, not the whole host report.
+ * A tab fetches its own inventory module.
  */
 export function useModule<T>(hostID: string, module: string) {
   return useQuery({
@@ -40,11 +38,7 @@ export function useModule<T>(hostID: string, module: string) {
 /**
  * A read whose answer lands in the inventory - the full list of the units,
  * the snapshot of the processes - is settled when the job is over, not when
- * it is queued: the order answers at once, the host later, and the module
- * is written right before the result. The hook follows the job and refetches
- * the modules then, so the listing appears when it exists rather than at the
- * next timed refetch. A job that does not land in time - one waiting for
- * approval, say - is left to that refetch.
+ * it is queued: the order answers at once, the host later, and the module is
  */
 export function useModuleRefresh(hostID: string, modules: string[]) {
   const queryClient = useQueryClient();
@@ -79,8 +73,7 @@ export type Span = 3 | 4 | 5 | 6 | 7 | 8 | 9 | 12;
 
 /**
  * The widget grid of a module page: twelve columns, and every section says
- * how many it spans. Short blocks sit beside each other instead of each
- * taking a row of its own with nothing at its right.
+ * how many it spans.
  */
 export function Widgets({ children }: { children: ReactNode }) {
   return <div className="widgets">{children}</div>;
@@ -109,9 +102,8 @@ export function Summary({
 }
 
 /**
- * The tone of a share of a whole: a filesystem or a memory at four fifths
- * is a warning, at nine tenths an error. An undetermined share is not a
- * state at all and stays neutral.
+ * The tone of a share of a whole: a filesystem or a memory at four fifths is
+ * a warning, at nine tenths an error.
  */
 export function usageTone(used?: number, total?: number): WidgetTone {
   if (used === undefined || total === undefined || total <= 0) return "neutral";
@@ -128,11 +120,7 @@ export function countWhere<T>(items: T[] | undefined, test: (item: T) => boolean
 
 /**
  * The module header: a band with the module's mark on an accent tile, the
- * title, one line on what the module shows and the module's primary
- * actions. The actions live here on every page, so the operator does not
- * hunt for "read from host" at a different place in every module. The mark
- * is the one of the module in the registry, found from the address, so a
- * page does not have to name it.
+ * title, one line on what the module shows and the module's primary actions.
  */
 export function ModuleHeader({
   title, description, actions, icon,
@@ -161,8 +149,6 @@ export function ModuleHeader({
 /**
  * A titled section. The count beside the title says how many rows it holds;
  * the tools (a filter, a toggle, a secondary action) sit at its right edge.
- * The body is padded unless the content is a table, which runs edge to
- * edge and brings its own inset.
  */
 export function Section({
   title, count, tools, description, flush, span, children,
@@ -300,9 +286,7 @@ export function FormNote({ children }: { children: ReactNode }) {
 }
 
 /**
- * The freshness line: where the data comes from and how fresh it is. An
- * unread module says why - an empty module and an unread module are two
- * different things.
+ * The freshness line: where the data comes from and how fresh it is.
  */
 export function ModuleFreshness({ fragment }: { fragment?: InventoryFragment<unknown> }) {
   const t = useT();
@@ -326,8 +310,7 @@ export const MIN_REASON_LENGTH = 8;
 /**
  * The answer to an order, with the job linked: "waiting for approval" is a
  * sentence the operator acts on, so the job it names is one click away and
- * so is the list of this host's jobs. The sentence stays one translated
- * string; the identifier is spliced into it where the language puts it.
+ * so is the list of this host's jobs.
  */
 export function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
   const t = useT();
@@ -351,11 +334,6 @@ export function JobNotice({ job, hostID }: { job: Job; hostID: string }) {
 /**
  * Ordering an operation leads to a plan, not to an immediate change. A
  * mutating operation lands in the awaiting-approval state.
- *
- * A critical operation asks for a reason before the button works: the API
- * refuses the order without one, and the refusal is better read before
- * the click than after it. The reason of any other operation is optional
- * and goes to the trail when given.
  */
 export function RequestOperation({
   host, description, action, payload, label, span, critical,
@@ -426,13 +404,8 @@ export function RequestOperation({
 export type ReadAttempt<T> = { status?: string; error_code?: string; message?: string; detail?: T };
 
 /**
- * A read ordered through a job.
- *
- * The order goes out, the screen polls the attempts until the host answers,
- * and the last attempt is the result. The hook keeps the job identifier and
- * the error of the order; the page decides what the detail looks like. A
- * refusal is a result too: the attempt carries the reason, and the page is
- * to show it rather than an empty list.
+ * A read ordered through a job. The order goes out, the screen polls the
+ * attempts until the host answers, and the last attempt is the result.
  */
 export function useReadOperation<T>(host: Host) {
   const queryClient = useQueryClient();

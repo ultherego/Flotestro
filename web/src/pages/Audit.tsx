@@ -11,10 +11,9 @@ import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
- * The actor of an event as it was when the event was written: the
- * immutable identifier, the name then, the kind, and the resource that
- * acted for a non-person. The trail keeps it with the row; nothing here
- * is joined with the live tables.
+ * The actor of an event as it was when the event was written: the immutable
+ * identifier, the name then, the kind, and the resource that acted for a
+ * non-person.
  */
 export type AuditActor = {
   principal_id?: string;
@@ -40,11 +39,9 @@ const LINKED_RESOURCES: Record<string, (id: string) => string> = {
 };
 
 /**
- * How an actor is shown: the name it had, the immutable identifier it
- * keeps, and a way to it only where the snapshot names a resource the
- * panel has a page for - a host, a relay, a campaign. The text of
- * actor_id decides nothing: a machine identifier parses as a host
- * identifier and is not one, and a name is not a page.
+ * How an actor is shown: the name it had, the immutable identifier it keeps,
+ * and a way to it only where the snapshot names a resource the panel has a
+ * page for - a host, a relay, a campaign.
  */
 export function actorView(
   event: Pick<AuditEvent, "actor_type" | "actor_id">,
@@ -78,14 +75,6 @@ export function actorKey(event: Pick<AuditEvent, "actor_type" | "actor_id">): st
 
 /**
  * The audit trail. Denials are as visible as successes.
- *
- * The trail is filtered on the server and read page by page: it grows
- * with every request the panel answers, and "the denials of this actor"
- * is a question for an index, not for a screen holding the last two
- * hundred rows.
- *
- * The filters live in the address as well: a view of the trail is a
- * thing to hand to somebody, and the address is how it is handed over.
  */
 export function Audit() {
   const t = useT();
@@ -96,8 +85,8 @@ export function Audit() {
   const [targetType, setTargetType] = useState(initial.get("target_type") ?? "");
   const [targetID, setTargetID] = useState(initial.get("target_id") ?? "");
   // One actor by its immutable identifier and its kind: set from the
-  // breakdown or handed over in the address, never typed - a name is
-  // typed into the actor field, which reads actor_id as it was written.
+  // breakdown or handed over in the address, never typed - a name is typed
+  // into the actor field, which reads actor_id as it was written.
   const [actorKind, setActorKind] = useState(initial.get("actor_kind") ?? "");
   const [actorPrincipalID, setActorPrincipalID] = useState(initial.get("actor_principal_id") ?? "");
   const [actorResourceID, setActorResourceID] = useState(initial.get("actor_resource_id") ?? "");
@@ -146,9 +135,9 @@ export function Audit() {
     retry: false,
   });
 
-  // The export is the trail between the bounds as one file, linked by a
-  // hash chain; the browser carries the session, and the file is saved
-  // through a link the page makes for it and removes again.
+  // The export is the trail between the bounds as one file, linked by a hash
+  // chain; the browser carries the session, and the file is saved through a
+  // link the page makes for it and removes again.
   const exportTrail = async () => {
     setExporting(true);
     setExportError(null);
@@ -432,9 +421,8 @@ export function Audit() {
 }
 
 /**
- * The listed events in hourly buckets, from the oldest listed to the
- * newest, with the outcomes side by side. An hour with no event keeps
- * its bucket, so a quiet night shows as a gap and not as a jump.
+ * The listed events in hourly buckets, from the oldest listed to the newest,
+ * with the outcomes side by side.
  */
 function eventsPerHour(events: AuditEvent[]): { labels: string[]; success: number[]; failure: number[]; denied: number[] } {
   const empty = { labels: [], success: [], failure: [], denied: [] };
@@ -467,10 +455,8 @@ function eventsPerHour(events: AuditEvent[]): { labels: string[]; success: numbe
 }
 
 /**
- * Where the target of an event lives in the panel, or null for a target
- * the panel has no page for. A host opens on its overview; an identity
- * opens the access screen searched for it, because identities have no
- * page of their own.
+ * Where the target of an event lives in the panel, or null for a target the
+ * panel has no page for.
  */
 export function targetLink(targetType?: string, targetID?: string): string | null {
   if (!targetType || !targetID) return null;
@@ -499,9 +485,8 @@ export function targetLink(targetType?: string, targetID?: string): string | nul
 }
 
 /**
- * The value of a datetime-local input for an instant, in the browser's
- * local time; empty for no instant or one that cannot be read. The
- * inverse of toInstant, for a bound that arrives in the address.
+ * The value of a datetime-local input for an instant, in the browser's local
+ * time; empty for no instant or one that cannot be read.
  */
 export function toLocalInput(instant?: string | null): string {
   if (!instant) return "";
@@ -512,9 +497,9 @@ export function toLocalInput(instant?: string | null): string {
 }
 
 /**
- * The file name the server gave the export, read off the disposition
- * header; the server names the file after its bounds, and the saved file
- * is to carry that name. Without a header the file is the plain trail.
+ * The file name the server gave the export, read off the disposition header;
+ * the server names the file after its bounds, and the saved file is to carry
+ * that name.
  */
 export function exportFileName(disposition?: string | null): string {
   const match = /filename="([^"]+)"/.exec(disposition ?? "");
@@ -536,8 +521,7 @@ const ACTOR_KINDS: Record<string, string> = {
 /**
  * The target of an event: the host by the name and the address it had when
  * the event was written, where the trail kept them, else the type and the
- * start of the identifier. The full identifier stays in the title, and
- * the cell links to the object where the panel has a page for it.
+ * start of the identifier.
  */
 function TargetCell({ event }: { event: AuditEvent }) {
   if (!event.target_type) return <>—</>;
@@ -573,10 +557,8 @@ function OutcomeBadge({ outcome }: { outcome: AuditEvent["outcome"] }) {
 
 /**
  * The actor of an event as the trail kept it: the name it had then, the
- * immutable identifier on hover and, where the name is not the
- * identifier, beside it in small print; a link only to a host, a relay
- * or a campaign the snapshot names. `plain` leaves the link out, for a
- * cell that is itself a button.
+ * immutable identifier on hover and, where the name is not the identifier,
+ * beside it in small print; a link only to a host, a relay or a campaign the
  */
 function ActorCell({ event, plain }: { event: AuditEvent; plain?: boolean }) {
   const t = useT();
@@ -594,10 +576,8 @@ function ActorCell({ event, plain }: { event: AuditEvent; plain?: boolean }) {
 type Change = { key: string; before: string; after: string };
 
 /**
- * The keys whose value differs between the two sides of a change, each
- * side rendered for a line. A side the event does not carry - the
- * creation has nothing before it, the deletion nothing after - reads as a
- * dash, so every key of the other side is listed.
+ * The keys whose value differs between the two sides of a change, each side
+ * rendered for a line.
  */
 function changedKeys(before: unknown, after: unknown): Change[] {
   if (before === undefined && after === undefined) return [];
@@ -623,9 +603,8 @@ function renderSide(value: unknown): string {
 }
 
 function digest(detail: Record<string, unknown>, t: (key: string) => string): string {
-  // The keys of the detail as the trail keeps them, with the word each
-  // is read by: "action_type=packages.plan" is a record, "type: packages
-  // plan" is a sentence.
+  // The keys of the detail as the trail keeps them, with the word each is
+  // read by: "action_type=packages.
   const interesting: [string, string][] = [
     ["reason", "reason"], ["action_type", "type"], ["hostname", "host"],
     ["state", "state"], ["permission", "permission"], ["scope", "scope"],

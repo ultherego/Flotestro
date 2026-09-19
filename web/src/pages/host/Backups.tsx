@@ -121,12 +121,6 @@ function StatusBadge({ status, age }: { status: string; age?: number }) {
 
 /**
  * The host's backups.
- *
- * The data does not flow through the panel: the host talks to the
- * repository directly, and the panel sees the metadata - when a copy
- * succeeded, how much it takes and whether anyone ever checked it. The
- * repository password is named by a secret; the host fetches its value once,
- * at the moment of the operation.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const BACKUP_CHANGES = ["backup.run", "backup.verify", "backup.restore"];
@@ -248,8 +242,8 @@ export function Backups() {
   });
 
   // A restore asks for its target first and for the host and the reason
-  // second: the directory is a detail of the operation, the confirmation
-  // of the target is the decision.
+  // second: the directory is a detail of the operation, the confirmation of
+  // the target is the decision.
   const askRestoreTarget = async (snapshot: Snapshot) => {
     if (!definition) return;
     const answer = await confirm({

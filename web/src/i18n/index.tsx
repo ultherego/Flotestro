@@ -3,11 +3,6 @@ import { pl } from "./pl";
 
 /**
  * The interface language.
- *
- * English is the source: the texts in the components are the English
- * strings themselves, and a translation is a catalogue keyed by that text.
- * A string missing from the catalogue falls back to English, so an
- * untranslated screen is still readable instead of showing bare keys.
  */
 export type Locale = "en" | "pl";
 
@@ -24,7 +19,7 @@ type Params = Record<string, string | number>;
 
 // The current locale is also kept outside React, so that helpers used
 // outside components (formatting, notifications) translate the same way as
-// the screens. The provider keeps both in step.
+// the screens.
 let currentLocale: Locale = initialLocale();
 
 function initialLocale(): Locale {

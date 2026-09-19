@@ -78,11 +78,6 @@ const TIME_CHANGES = ["time.config.apply", "time.timezone.set"];
 
 /**
  * The host's clock and its synchronisation.
- *
- * The clock is the assumption everything else stands on: Kerberos rejects
- * tickets outside its window, mTLS - certificates not yet valid, and a
- * journal from a shifted host sorts into the wrong order. That is why the
- * tab measures the offset instead of only showing that the time daemon runs.
  */
 export function Time() {
   const t = useT();

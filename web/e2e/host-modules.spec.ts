@@ -4,15 +4,8 @@ import {
 } from "./fleet";
 
 /**
- * The host modules that read from the host on request: services,
- * schedules, processes and logs, with a look at the security and SSH
- * pages. Every read here is a diagnostic - a unit detail, a preview of a
- * cron expression, a process snapshot, a page of the journal - and the
- * one job that outlives its screen, the journal follow, is canceled
- * before the test ends. Nothing is changed on any host.
- *
- * A read needs a host that answers: a test picks an online host with the
- * adapter it needs and skips, with the reason, when the lab has none.
+ * The host modules that read from the host on request: services, schedules,
+ * processes and logs, with a look at the security and SSH pages.
  */
 
 let hosts: Host[] = [];
@@ -25,10 +18,8 @@ test.beforeAll(async ({ request }) => {
 });
 
 /**
- * The cron unit of a family: Debian and Ubuntu ship cron.service, the Red
- * Hat family crond.service. Another family gets the journal daemon, which
- * every systemd host has, so the detail read still has a unit to answer
- * with.
+ * The cron unit of a family: Debian and Ubuntu ship cron. service, the Red
+ * Hat family crond.
  */
 function cronUnit(host: Host): string {
   if (host.os_family === "debian") return "cron.service";
@@ -254,8 +245,8 @@ test.describe("processes", () => {
     await expect(rows).toHaveCount(flat);
     const indents = list.getByTestId("process-indent");
     // A cut-off slice may hold children whose parents were left out, and
-    // those stand as roots; a whole host always nests something under
-    // its init process.
+    // those stand as roots; a whole host always nests something under its
+    // init process.
     const truncated = (await list.locator(".warning").count()) > 0;
     if (!truncated) expect(await indents.count(), "a whole host has at least one parent with a child").toBeGreaterThan(0);
     for (const indent of await indents.all()) {
@@ -301,9 +292,7 @@ test.describe("logs", () => {
       await expect(value).toHaveText("—");
     }
 
-    // A page of the journal, bounded by the line count. The fields carry
-    // their label and a hint under it in one label element, so a field
-    // is found by the label it starts with.
+    // A page of the journal, bounded by the line count.
     const form = section(page, "Read");
     await form.locator("label.hm-field", { hasText: /^Unit/ }).locator("input").fill("");
     await form.locator("label.hm-field", { hasText: /^Lines/ }).locator("input[type=number]").fill("50");

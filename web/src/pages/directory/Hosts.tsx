@@ -9,11 +9,7 @@ import { useT } from "../../i18n";
 import { Forbidden } from "./shared";
 
 /**
- * The host entries of the directory next to the fleet. An entry and a
- * panel host are two records with separate lifecycles: the directory knows
- * a host by FQDN, the panel by its machine identifier, and the name is the
- * only bridge between them. A directory host the fleet does not have is a
- * fact worth showing, not an error.
+ * The host entries of the directory next to the fleet.
  */
 export function Hosts() {
   const t = useT();
@@ -24,9 +20,9 @@ export function Hosts() {
     queryFn: () => api.get<Collection<DirectoryHost>>("/api/v1/identity/hosts"),
     retry: false,
   });
-  // The fleet is read once for the whole table; a lookup per row would be
-  // a query per host, and the fleet list is paged by the same limit the
-  // host list uses.
+  // The fleet is read once for the whole table; a lookup per row would be a
+  // query per host, and the fleet list is paged by the same limit the host
+  // list uses.
   const fleet = useQuery({
     queryKey: ["hosts", "directory-link"],
     queryFn: () => api.get<Collection<Host>>("/api/v1/hosts?limit=500"),

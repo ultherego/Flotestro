@@ -35,9 +35,7 @@ type Snapshot = {
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
 /**
- * A boot identifier in the dashed form the kernel prints. The journal
- * lists the same identifier without dashes, and the two spellings side by
- * side read as two different boots.
+ * A boot identifier in the dashed form the kernel prints.
  */
 export function dashedBootID(id: string): string {
   const bare = id.replace(/-/g, "");
@@ -46,9 +44,7 @@ export function dashedBootID(id: string): string {
 }
 
 /**
- * The Logs tab of the host narrowed to one boot. The address carries the
- * journal's bare form of the identifier, which is what the host takes;
- * the Logs tab says whether the agent applies the filter.
+ * The Logs tab of the host narrowed to one boot.
  */
 export function bootLogsPath(hostID: string, bootID: string): string {
   const bare = bootID.replace(/-/g, "").toLowerCase();
@@ -66,11 +62,8 @@ function uptime(seconds: number) {
 }
 
 /**
- * Power, boot and the maintenance window.
- *
- * A reboot does not end with the command being sent, but when the host
- * comes back with a new boot_id. A shutdown does not end at all: the panel
- * cannot power the machine back on, and the tab says so plainly.
+ * Power, boot and the maintenance window. A reboot does not end with the
+ * command being sent, but when the host comes back with a new boot_id.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const POWER_CHANGES = ["system.reboot", "system.shutdown"];
@@ -356,8 +349,7 @@ export function Power() {
               action: intent.action,
               reason,
               // A shutdown requires the target name typed out: the panel
-              // cannot power this machine back on. The other operations do
-              // not need it, but sending it does no harm.
+              // cannot power this machine back on.
               target_confirmation: confirmation,
               payload: intent.payload,
             })
@@ -370,10 +362,8 @@ export function Power() {
 }
 
 /**
- * The maintenance window. It is not an operation on the host and does not
- * go through the job queue: it changes what the panel thinks about the
- * host. Campaigns skip a host in a window, and its alerts do not wake the
- * on-call.
+ * The maintenance window. It is not an operation on the host and does not go
+ * through the job queue: it changes what the panel thinks about the host.
  */
 function MaintenanceWindow({ host }: { host: Host }) {
   const t = useT();

@@ -10,11 +10,9 @@ import { BarChart, Breakdown, StatusBar } from "../components/widgets";
 import { useT } from "../i18n";
 
 /**
- * The summary with the counters of what waits for a person: the jobs and
- * the campaigns awaiting approval, the campaigns at a manual gate, the
- * directory changes with a plan and no signature, the hosts a policy
- * found drifted, and the alerts firing. A counter the server could not
- * answer for this reader is missing, not zero.
+ * The summary with the counters of what waits for a person: the jobs and the
+ * campaigns awaiting approval, the campaigns at a manual gate, the directory
+ * changes with a plan and no signature, the hosts a policy found drifted,
  */
 type DecisionSummary = FleetSummary & {
   jobs_awaiting_approval?: number;
@@ -29,11 +27,6 @@ type DecisionSummary = FleetSummary & {
 /**
  * The dashboard shows only data that needs a decision. It is not a wall of
  * decorative charts: every tile leads to a specific action.
- *
- * The counters come from the fleet summary, computed in the database over
- * the hosts the operator may see. The dashboard does not fetch the fleet
- * to count it: a fleet of five thousand hosts is five thousand rows the
- * browser would download every few seconds to learn one number.
  */
 export function Dashboard() {
   const t = useT();
@@ -44,9 +37,9 @@ export function Dashboard() {
   });
   const campaigns = useQuery({
     queryKey: ["campaigns"],
-    // The list takes one state at a time, so the ones that need a person
-    // are picked out here: a hundred newest rows reach back far enough for
-    // a campaign parked at a gate weeks ago, where twenty did not.
+    // The list takes one state at a time, so the ones that need a person are
+    // picked out here: a hundred newest rows reach back far enough for a
+    // campaign parked at a gate weeks ago, where twenty did not.
     queryFn: () => api.get<Collection<Campaign>>("/api/v1/campaigns?limit=100"),
   });
   // The activity feeds the chart and the composition widgets: computed in
@@ -76,8 +69,8 @@ export function Dashboard() {
   const s = summary.data;
 
   // A campaign in progress is one a person may still have to act on: the
-  // ones at work, the ones waiting for a consent or a go-ahead, and the
-  // ones still computing their plans.
+  // ones at work, the ones waiting for a consent or a go-ahead, and the ones
+  // still computing their plans.
   const activeCampaigns = (campaigns.data?.items ?? []).filter((campaign) =>
     ["planning", "planned", "awaiting_approval", "canary", "manual_gate", "running", "pausing", "paused"].includes(campaign.state),
   );
@@ -165,8 +158,8 @@ export function Dashboard() {
             { label: t("Security findings"), value: securityFailed, tone: "error", to: "/security" },
             { label: t("Failed jobs, 24 h"), value: s?.failed_jobs_24h, tone: "error", to: `/jobs?state=failed&since=${encodeURIComponent(dayAgo)}` },
             // A segment at zero is the narrowest of the bar, and a label
-            // longer than a dozen characters is cut off in it; these two
-            // are the short names of the tiles below.
+            // longer than a dozen characters is cut off in it; these two are
+            // the short names of the tiles below.
             { label: t("Reboot due"), value: s?.reboot_required, tone: "warn", to: "/hosts?reboot_required=true" },
             { label: t("Unpatched"), value: s?.hosts_with_security_updates, tone: "warn", to: "/hosts?security_updates=true" },
             { label: t("Unknown checks"), value: securityUnknown, tone: "unknown", to: "/security" },
@@ -390,8 +383,8 @@ export function Dashboard() {
 
 /**
  * What the server's reasons for a refusal mean, for the hover: the code
- * stays on screen as the trail spells it, and the sentence says whether
- * the person lacked a right or the request came at the wrong moment.
+ * stays on screen as the trail spells it, and the sentence says whether the
+ * person lacked a right or the request came at the wrong moment.
  */
 const DENIAL_MEANINGS: Record<string, string> = {
   permission_denied: "The person has no role that grants this operation.",

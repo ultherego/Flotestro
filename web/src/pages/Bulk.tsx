@@ -414,7 +414,7 @@ export type WindowProblem = "start_invalid" | "end_invalid" | "start_past" | "en
 /**
  * The maintenance window as typed, checked against the clock: both ends are
  * optional, a given end has to lie ahead of the start and of now, and a
- * given start ahead of now - a window that already closed would create a
+ * given start ahead of now - a window that already closed would create a.
  */
 export function windowProblem(start: string, end: string, now: Date): WindowProblem | null {
   const from = start ? new Date(start) : null;
@@ -601,7 +601,7 @@ export function scheduleProblem(choice: ScheduleChoice, now: Date): "start_inval
 /**
  * The body of a schedule as the API takes it: the order as it would be
  * placed now, kept for the moment, with the reason on the schedule as well -
- * it is what the trail keeps next to the schedule and what every campaign it
+ * it is what the trail keeps next to the schedule and what every campaign
  */
 export function scheduleBody(order: Order): Record<string, unknown> {
   const rule = recurrenceText(order.schedule.recurrence);
@@ -666,7 +666,7 @@ export function useOperation(action: string | undefined): Operation | undefined 
 /**
  * The facets of the visible fleet - sites, environments, OS families with
  * their host counts - counted in the database, under the same key the host
- * list and the dashboard read them by, so one screen does not fetch what
+ * list and the dashboard read them by, so one screen does not fetch what.
  */
 export function useFleetFacets() {
   return useQuery({
@@ -679,7 +679,7 @@ export function useFleetFacets() {
 /**
  * The values a target field may take, offered under an input that still
  * takes free text: the sites the fleet really has are a hint, not a boundary
- * - a site with no host yet is a valid selector that matches nobody, and the
+ * - a site with no host yet is a valid selector that matches nobody, and
  */
 export function FacetList({ id, facets }: { id: string; facets?: Facet[] }) {
   return (
@@ -831,7 +831,7 @@ function orderPayload(order: Order): Record<string, unknown> | null {
   if (order.action === RENAME_OPERATION) {
     // A rename across the fleet carries one name per host and nothing
     // shared, so it keeps its own editor: the registry's form describes a
-    // rename of one host and would give every host the same name - the one
+    // rename of one host and would give every host the same name - the one.
     const mapping = Object.fromEntries(
       Object.entries(order.mapping).map(([id, name]) => [id, name.trim()] as const).filter(([, name]) => name !== ""),
     );

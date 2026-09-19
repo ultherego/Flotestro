@@ -32,10 +32,9 @@ const JOB_STATES: { value: string; label: string }[] = [
 ];
 
 /**
- * The campaign a job belongs to, as the chip names it: the campaign's
- * name where the job's author carries it ("campaign:<name>"), else the
- * first letters of its identifier. The name is what the operator knows
- * the campaign by; the identifier is what the link needs.
+ * The campaign a job belongs to, as the chip names it: the campaign's name
+ * where the job's author carries it ("campaign:<name>"), else the first
+ * letters of its identifier.
  */
 export function campaignLabel(job: Pick<Job, "campaign_id" | "created_by">): string {
   const author = job.created_by;
@@ -48,10 +47,8 @@ const JOBS_PAGE = 50;
 
 /**
  * Whether a cancel request would stop this job, from the contract of its
- * operation: before the start every operation is cancellable, once the
- * host reported a start only one that stops cleanly. The server accepts
- * a cancel in more states than that; the button is shown only where it
- * does what its label says.
+ * operation: before the start every operation is cancellable, once the host
+ * reported a start only one that stops cleanly.
  */
 export function cancellable(job: Job, contract: OperationContract | undefined): boolean {
   if (BEFORE_START.includes(job.state)) return true;
@@ -60,13 +57,8 @@ export function cancellable(job: Job, contract: OperationContract | undefined): 
 }
 
 /**
- * The jobs of one host.
- *
- * The list is the fleet list narrowed to the host: the same filters, the
- * same pages, the same row that opens on its attempts. A host with a long
- * history is browsed page by page rather than cut off at the newest
- * fifty, and "the failed package operations since Monday" is asked here
- * the way it is asked on the fleet page.
+ * The jobs of one host. The list is the fleet list narrowed to the host: the
+ * same filters, the same pages, the same row that opens on its attempts.
  */
 export function HostJobs() {
   const t = useT();
@@ -103,9 +95,7 @@ export function HostJobs() {
 
   // The cancel button follows the contract of the operation and the
   // operator's permission: a button that leads only to a refusal is an
-  // interface defect, and one drawn on a running package transaction
-  // would promise a stop the host cannot make. The approve button
-  // follows the permission alone; the payload it binds to is shown first.
+  // interface defect, and one drawn on a running package transaction would
   const catalogue = useOperations();
   const whoami = useQuery({
     queryKey: ["whoami"],
@@ -148,8 +138,7 @@ export function HostJobs() {
     return acc;
   }, {})).sort((a, b) => b[1] - a[1]).slice(0, 8);
   // Who ordered the listed jobs: a person by name, every campaign as one
-  // requester. It stands under the outcomes, so the bar and the breakdown
-  // by module read as one row.
+  // requester.
   const requesters = Object.entries((jobs ?? []).reduce<Record<string, number>>((acc, job) => {
     const who = job.created_by.startsWith("campaign:") ? t("campaigns") : job.created_by;
     acc[who] = (acc[who] ?? 0) + 1;
@@ -413,10 +402,9 @@ export function HostJobs() {
 }
 
 /**
- * The attempts of a job with the result typed for its operation: the
- * same head the fleet list and the job page show, so the three screens
- * agree on what an attempt did. The output is cut short here; the job
- * page carries all of it.
+ * The attempts of a job with the result typed for its operation: the same
+ * head the fleet list and the job page show, so the three screens agree on
+ * what an attempt did.
  */
 function Attempts({ jobId }: { jobId: string }) {
   const t = useT();

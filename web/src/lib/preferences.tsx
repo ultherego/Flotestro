@@ -8,14 +8,6 @@ import { THEMES, type Theme } from "./theme";
 /**
  * The preferences of the person at the screen, kept on the server under
  * their identity.
- *
- * The theme and the language have lived in the browser's storage since
- * the first screens, and still do: the inline script reads them before
- * React mounts so the page does not flash. The server copy is what makes
- * them follow the person to the next browser - and it carries what the
- * browser never held: the zone the times are read in, the size of a
- * page, the page the panel opens on. The browser copy is a cache of the
- * server's; a switch in the top bar writes both.
  */
 export type Preferences = {
   /** An IANA zone name the times are read in; empty for the browser's own zone. */
@@ -38,9 +30,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
 export const PREFERENCES_PATH = "/api/v1/me/preferences";
 
 /**
- * The zones offered by the profile screen. Any IANA name is accepted by
- * the API; the list only saves the typing for the zones a fleet is
- * likely to stand in, and the browser's own zone always heads it.
+ * The zones offered by the profile screen.
  */
 export const COMMON_TIME_ZONES = [
   "UTC", "Europe/Warsaw", "Europe/Berlin", "Europe/London", "Europe/Paris", "Europe/Madrid", "Europe/Kyiv",
@@ -87,11 +77,7 @@ function isTheme(value: string): value is Theme {
 }
 
 /**
- * Mounts once around the signed-in application. It reads the server's
- * copy and, on the first answer, applies the language and the theme it
- * names over the browser's: the person who chose them on another
- * workstation chose them here too. A later change made at this screen
- * goes to the server through save() and never fights the answer.
+ * Mounts once around the signed-in application.
  */
 export function PreferencesProvider({ children, applyTheme }: {
   children: ReactNode;
@@ -113,8 +99,8 @@ export function PreferencesProvider({ children, applyTheme }: {
   );
 
   // The formatting helpers outside React are told the zone as soon as the
-  // answer is in, before the screens re-render with it; a zone this
-  // browser cannot format in leaves them on the browser's own.
+  // answer is in, before the screens re-render with it; a zone this browser
+  // cannot format in leaves them on the browser's own.
   setPreferredTimeZone(validTimeZone(preferences.time_zone) ? preferences.time_zone : "");
 
   const applied = useRef(false);

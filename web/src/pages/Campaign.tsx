@@ -26,11 +26,7 @@ import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
- * The record as the API returns it. The shared Campaign type names the
- * fields every screen reads; the order itself - the selector as given,
- * the window, the units, the timeouts - and the links to other campaigns
- * are read here through this shape, so the approver reads the whole
- * order off the page rather than the parts the list needs.
+ * The record as the API returns it.
  */
 type CampaignRecord = CampaignType & CompensationLinks & {
   selector?: {
@@ -61,10 +57,9 @@ type CampaignRecord = CampaignType & CompensationLinks & {
 };
 
 /**
- * The cancel protocol as a target row carries it: when the cancel was
- * asked of the host, and what the host answered - the outcome and the
- * phase it was in. Read off the host's task by the server; absent for a
- * host nobody asked.
+ * The cancel protocol as a target row carries it: when the cancel was asked
+ * of the host, and what the host answered - the outcome and the phase it was
+ * in.
  */
 export type CancelState = {
   cancel_requested_at?: string;
@@ -73,11 +68,8 @@ export type CancelState = {
 };
 
 /**
- * One line about the cancel of a host's task, for the row: what the
- * host answered, or that the answer is still awaited. Empty for a host
- * nobody asked. The outcome is the protocol's word; the sentence says
- * what it means for the host, because "not_interruptible" on its own
- * reads as an error to somebody who did not write the protocol.
+ * One line about the cancel of a host's task, for the row: what the host
+ * answered, or that the answer is still awaited.
  */
 export function cancelOutcomeLine(target: CancelState, t: (key: string, params?: Record<string, string | number>) => string): string {
   if (!target.cancel_requested_at && !target.cancel_outcome) return "";
@@ -96,10 +88,9 @@ export function cancelOutcomeLine(target: CancelState, t: (key: string, params?:
 }
 
 /**
- * Whether the operator may skip the host by name: only a host waiting
- * for its connection in a campaign that has not settled - the offline
- * canary the barrier waits for. The server refuses everything else with
- * skip_not_allowed; the button is not drawn where the answer is known.
+ * Whether the operator may skip the host by name: only a host waiting for
+ * its connection in a campaign that has not settled - the offline canary the
+ * barrier waits for.
  */
 export function canSkipTarget(target: { state: string }, campaignState: string): boolean {
   return target.state === "queued_offline" && !SETTLED_CAMPAIGN_STATES.includes(campaignState);
@@ -119,8 +110,8 @@ export function Campaign() {
   const [eventKind, setEventKind] = useState("");
   const [eventHost, setEventHost] = useState("");
   // The control that is being confirmed: pausing and cancelling say what
-  // they do to the hosts under way before anything happens, and resuming
-  // is recorded with a reason like they are.
+  // they do to the hosts under way before anything happens, and resuming is
+  // recorded with a reason like they are.
   const [pendingStop, setPendingStop] = useState<"pause" | "cancel" | "resume" | null>(null);
   const [stopReason, setStopReason] = useState("");
   // The retry: a new campaign on the hosts that failed, ordered with a
@@ -137,14 +128,9 @@ export function Campaign() {
   // decision somebody signs with a reason, like every other control.
   const [advancing, setAdvancing] = useState(false);
   const [advanceReason, setAdvanceReason] = useState("");
-  // The plan the operator opened from the target table. A plan summary is
-  // several lines and the windowed table needs rows of one fixed height, so
-  // the plan is shown below the table for one host at a time.
+  // The plan the operator opened from the target table.
   const [selectedPlanJob, setSelectedPlanJob] = useState<{ jobId: string; host: string } | null>(null);
-  // The host whose steps are open below the table. The strip of one host
-  // is five pills with their tasks and reasons; the windowed table has no
-  // room for that in a row of fixed height, and a strip per row would be
-  // one request per host on a campaign of thousands.
+  // The host whose steps are open below the table.
   const [selectedStepsHost, setSelectedStepsHost] = useState<{ hostId: string; host: string } | null>(null);
 
   const campaign = useQuery({
@@ -177,7 +163,6 @@ export function Campaign() {
   // The timeline comes from the durable trail, not from notifications: an
   // event sent while the panel restarted no longer exists anywhere, and an
   // operator coming back to a campaign is to see how it went, not only how
-  // it ended.
   const timeline = useQuery({
     queryKey: ["campaign-timeline", id],
     queryFn: () => api.get<Collection<TimelineEntry>>(`/api/v1/campaigns/${id}/timeline`),
@@ -204,10 +189,7 @@ export function Campaign() {
   // The progress of the campaign's running operations, per host.
   const progress = useProgress(id ? `/api/v1/campaigns/${id}/events` : null);
 
-  // Every control carries a reason. The approval carries the fingerprint of
-  // the campaign currently on screen as well: when the campaign changed
-  // since it was loaded, the server refuses instead of transferring the
-  // consent onto something else.
+  // Every control carries a reason.
   const controlBody = (operation: string) => {
     if (operation === "approve") {
       return {
@@ -234,9 +216,8 @@ export function Campaign() {
       navigate(`/campaigns/${created.id}`);
     },
   });
-  // The skip of a host waiting for its connection: the offline canary
-  // the barrier waits for, let go by name with a reason the dialog asks
-  // for. The row and the totals are read again once the server answered.
+  // The skip of a host waiting for its connection: the offline canary the
+  // barrier waits for, let go by name with a reason the dialog asks for.
   const skip = useMutation({
     mutationFn: ({ hostId, reason }: { hostId: string; reason: string }) =>
       api.post(`/api/v1/campaigns/${id}/targets/${hostId}/skip`, { reason }),
@@ -293,42 +274,37 @@ export function Campaign() {
   // campaign action here interrupts work on a host or rolls it back.
   const totals = report.data?.totals ?? {};
   const offlineQueued = totals.queued_offline ?? 0;
-  // A host whose task is handed over and not started, or waits for a lock
-  // on the host, is waiting like the offline one: it has changed nothing
-  // yet, and a cancel would leave its task to finish.
+  // A host whose task is handed over and not started, or waits for a lock on
+  // the host, is waiting like the offline one: it has changed nothing yet,
+  // and a cancel would leave its task to finish.
   const waitingToStart = (totals.dispatched ?? 0) + (totals.awaiting_lock ?? 0);
   const notStarted = (totals.pending ?? 0) + (totals.awaiting_budget ?? 0) + (totals.planning ?? 0) + offlineQueued;
   const underWay = (totals.running ?? 0) + (totals.rebooting ?? 0) + (totals.verifying ?? 0) + waitingToStart;
 
-  // No change is a success: the host has the desired state. Unknown is
-  // not - and it is not a failure of the change either, so it has a
-  // segment of its own rather than a place in the red one.
+  // No change is a success: the host has the desired state.
   const succeeded = totals.succeeded ?? 0;
   const noChange = totals.no_change ?? 0;
   const unknown = totals.unknown ?? 0;
   const failed = (totals.failed ?? 0) + (totals.timed_out ?? 0) + (totals.partially_applied ?? 0);
   // What a retry would run on: the failed hosts, and the unknown ones on
-  // request. Offered only once the campaign settled - the server refuses
-  // a retry before that, and the counts move until then.
+  // request.
   const settled = SETTLED_CAMPAIGN_STATES.includes(data.state);
   const failedHosts = totals.failed ?? 0;
   const canRetry = settled && report.data !== undefined && failedHosts + unknown > 0;
   const retryable = canRetry ? failedHosts + (includeUnknown ? unknown : 0) : 0;
-  // The approval of a critical or destructive operation needs a reason
-  // the server accepts: the same rule as the fresh authentication it asks
-  // for, checked here so the button says so instead of the refusal.
+  // The approval of a critical or destructive operation needs a reason the
+  // server accepts: the same rule as the fresh authentication it asks for,
+  // checked here so the button says so instead of the refusal.
   const reasonForced = approvalReasonRequired(operation?.risk);
   const approvalReady = !reasonForced || reasonValid(approvalReason);
   // A plan the panel cannot read on any host blocks the consent: nobody can
-  // approve what nobody has seen. The host is excluded with a reason, or
-  // the campaign is planned again.
+  // approve what nobody has seen.
   const unknownPlans = unknownPlanHosts(plans.data?.items ?? []);
   const staleHosts = loaded.filter((target) => STALE_PLAN_CODES.has(target.error_code ?? "")).map((target) => target.hostname ?? target.host_id);
   const approvalBlocked = unknownPlans.length > 0;
 
   // What the hosts under way do when the campaign stops, from the cancel
-  // mode of the operation. The campaign stop itself never interrupts a
-  // host; the sentence says whether such a host could be stopped at all.
+  // mode of the operation.
   const underWayFate = (() => {
     switch (operation?.cancel_mode) {
       case "safe":
@@ -360,10 +336,7 @@ export function Campaign() {
     }
   })();
   const rollbackPlannable = PLANNABLE_ROLLBACK.includes(operation?.rollback ?? "");
-  // What the compensation card offers. The catalogue decides the class and
-  // whether the reverse runs as a campaign; the record says whether the
-  // campaign settled and how many hosts it changed. Until the catalogue is
-  // in, nothing is offered rather than something guessed.
+  // What the compensation card offers.
   const offer: CompensationOffer = operation
     ? compensationOffer({
       state: data.state,
@@ -840,8 +813,7 @@ export function Campaign() {
           <Empty>{t("No targets.")}</Empty>
         ) : (
           // The rows are windowed: a campaign of ten thousand hosts is ten
-          // thousand rows on the server and a few dozen in the browser. The
-          // next page is fetched as the operator nears the end of the list.
+          // thousand rows on the server and a few dozen in the browser.
           <VirtualRows
             items={loaded}
             rowHeight={40}
@@ -1020,12 +992,9 @@ export function Campaign() {
 }
 
 /**
- * The order as it was given: the operation with its contract, the payload
- * as the hosts will get it, the targets as they were named, and the whole
- * rollout policy. Every field is the record's - nothing is inferred - and
- * a value the order left to the default shows resolved, the way it will
- * apply. A secret in the payload is a reference by name: the value never
- * travels in the order, and the list says so next to the names.
+ * The order as it was given: the operation with its contract, the payload as
+ * the hosts will get it, the targets as they were named, and the whole
+ * rollout policy.
  */
 function OrderCard({ campaign, operation }: {
   campaign: CampaignRecord;
@@ -1125,11 +1094,7 @@ function OrderCard({ campaign, operation }: {
 }
 
 /**
- * The secrets a payload refers to, as "name" or "name@version". A
- * reference is an object with a name under a key ending in _secret, or
- * a map of them under a key ending in _secrets, wherever it sits in the
- * payload; the panel never carries the value, so there is nothing to
- * hide - only the names to point out.
+ * The secrets a payload refers to, as "name" or "name@version".
  */
 export function secretReferences(payload: unknown): string[] {
   const found: string[] = [];
@@ -1157,9 +1122,7 @@ export function secretReferences(payload: unknown): string[] {
 
 /**
  * timelineCSV renders the filtered trail as a file the browser saves: the
- * same columns as the table, one row per event. A cell that starts like a
- * spreadsheet formula gets a leading apostrophe, the way the server's
- * export guards its cells.
+ * same columns as the table, one row per event.
  */
 export function timelineCSV(entries: TimelineEntry[], targets: CampaignTarget[]): string {
   const cell = (value: string) => {
@@ -1184,10 +1147,8 @@ const STEP_NAMES: Record<string, string> = {
 
 /**
  * The strip of one host's steps: plan → execute → reboot → verify →
- * compensate, each with its state, its task and - where it did not run -
- * the reason. The order comes from the server's contract, not from this
- * file. A step the host has not reached has no record and is drawn as
- * unknown rather than as pending: nothing decided about it yet.
+ * compensate, each with its state, its task and - where it did not run - the
+ * reason.
  */
 function TargetSteps({ campaignID, hostID, compensation }: {
   campaignID: string;
@@ -1259,13 +1220,7 @@ function TargetSteps({ campaignID, hostID, compensation }: {
 const PLANNABLE_ROLLBACK = ["exact_restore", "compensating", "automatic_local"];
 
 /**
- * What the compensation card offers on a campaign. Nothing until the
- * campaign settled - the server refuses a compensation of a campaign that
- * may still change hosts, and the count of changed hosts is zero until
- * then. A plain statement for an operation with no reverse the panel could
- * plan. Otherwise the reverse operation with the count of changed hosts:
- * as a campaign where the reverse runs as one, and as a note where it runs
- * host by host today.
+ * What the compensation card offers on a campaign.
  */
 export type CompensationOffer =
   | { kind: "not_settled" }
@@ -1276,10 +1231,7 @@ export type CompensationOffer =
 
 /**
  * compensationOffer decides the variant from the record and the catalogue
- * alone, so the decision reads without a screen. The rollback class and
- * the reverse operation both come from the catalogue: a class that can be
- * planned along without a declared reverse is no offer, and a reverse
- * under a best-effort or absent way back is none either.
+ * alone, so the decision reads without a screen.
  */
 export function compensationOffer(input: {
   state: string;
@@ -1306,10 +1258,6 @@ function eventHostName(entry: TimelineEntry, targets: CampaignTarget[]): string 
 
 /**
  * eventDescription shows what tells one event from another.
- *
- * The error code and the pause reason matter more here than the event type
- * itself: "host failed" without a reason says nothing beyond something
- * having gone wrong.
  */
 function eventDescription(entry: TimelineEntry): string {
   const parts = [
@@ -1325,9 +1273,7 @@ function eventDescription(entry: TimelineEntry): string {
 
 /**
  * The progress of a campaign target is looked up by the operation that
- * belongs to it. A campaign schedules several operations on a host in turn -
- * the upgrade, the reboot, the health check - so the host identifier alone
- * is not enough.
+ * belongs to it.
  */
 function targetProgress(
   progress: Map<string, { step?: number; total?: number; percent?: number; message?: string }>,

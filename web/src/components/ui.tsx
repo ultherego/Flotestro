@@ -20,16 +20,11 @@ export function JobState({ state }: { state: string }) {
   const succeeded = ["succeeded", "completed", "active", "no_change"].includes(state);
   const failed = ["failed", "timed_out", "expired", "partially_applied", "plan_failed"].includes(state);
   // Incapability and a skip are not a failure: the host broke nothing, it
-  // simply took no part. Red would call it an error that did not happen.
-  // A superseded attempt did no work of its own: the result came in on
-  // the attempt before it, and this one was closed to keep the record
-  // straight. Neither a failure nor a success of its own.
+  // simply took no part.
   const skipped = ["ineligible", "skipped", "superseded_by_result"].includes(state);
   // A campaign that finished with issues, a host that ended unknown, and
-  // every wait are drawn as attention rather than as an error: the
-  // operator has something to look at, not something that broke. Unknown
-  // is not grey: grey is the colour of "took no part", and an unknown host
-  // may have changed.
+  // every wait are drawn as attention rather than as an error: the operator
+  // has something to look at, not something that broke.
   const waiting = ["awaiting_approval", "queued", "planned", "planning", "paused",
     "awaiting_budget", "queued_offline", "awaiting_lock", "dispatched", "manual_gate",
     "cancel_requested", "completed_with_issues", "unknown"].includes(state);
@@ -84,13 +79,7 @@ export function stateMeaning(state: string): string {
 
 /**
  * The states come from the database as contract identifiers and looked like
- * that in the interface: "awaiting_approval" or "partially_applied". A name
- * readable for the operator cannot be the only record of the state - the
- * identifier stays in the API and in the audit log - but it is the operator
- * who looks at the screen.
- *
- * A state outside the list is shown as it came. Guessing a translation
- * would hide the fact that the panel saw something it does not know.
+ * that in the interface: "awaiting_approval" or "partially_applied".
  */
 export function stateName(state: string): string {
   const names: Record<string, string> = {
@@ -104,8 +93,7 @@ export function stateName(state: string): string {
     // The host is ready, but the fleet or the site has no capacity now.
     awaiting_budget: "waiting for capacity",
     // The host will not carry out this operation: it lacks the adapter or
-    // does not meet the condition. That is not an execution failure and
-    // does not count towards the failure threshold.
+    // does not meet the condition.
     ineligible: "cannot run this",
     // The agent holds the task and waits for a resource of the host.
     awaiting_lock: "waiting for a lock",
@@ -165,8 +153,7 @@ export function Empty({ children }: { children: ReactNode }) {
 
 /**
  * A refusal is not a panel failure, only the server's answer to the user's
- * permissions. A red error message would suggest a defect where the system
- * works correctly.
+ * permissions.
  */
 export function ErrorBox({ error }: { error: unknown }) {
   const t = useT();
@@ -193,11 +180,8 @@ export function Pair({ label, children }: { label: string; children: ReactNode }
 export { optional };
 
 /**
- * The progress bar of an operation in flight.
- *
- * Undetermined progress is not drawn as zero - a bar at zero looks like
- * work that stands still. Without a percentage and without steps only the
- * description of what is happening right now remains.
+ * The progress bar of an operation in flight. Undetermined progress is not
+ * drawn as zero - a bar at zero looks like work that stands still.
  */
 export function ProgressBar({
   percent, step, total, caption,
@@ -226,8 +210,7 @@ export function ProgressBar({
 
 /**
  * An error code with its guide on hover: what happened, whether a retry
- * helps and what to do next. The code stays visible as it came - it is
- * the identifier automation and the audit log use.
+ * helps and what to do next.
  */
 export function ErrorCode({ code }: { code?: string | null }) {
   const t = useT();

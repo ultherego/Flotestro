@@ -11,14 +11,8 @@ import {
 } from "./Secrets";
 
 /**
- * One secret: its metadata and the history of its versions.
- *
- * The content is nowhere on this page. What can be read is when each
- * version came into being, who put it in and how large it was; what can
- * be done is to destroy the content of a version nobody should get any
- * more. The row stays after that: the history is meant to show that the
- * version existed and when it stopped, and a database backup does not
- * bring destroyed content back.
+ * One secret: its metadata and the history of its versions. The content is
+ * nowhere on this page.
  */
 export function SecretPage() {
   const t = useT();
@@ -171,8 +165,7 @@ export function SecretPage() {
 
 /**
  * One version with its state and, when opened, the form that destroys its
- * content. The current version of an issuable secret has no such form:
- * it is what the next job gets.
+ * content.
  */
 function VersionRow({
   secret, version, open, onToggle, onClose, canDestroy, copied, onCopy, destroying, error, onDestroy,
@@ -234,8 +227,8 @@ function VersionRow({
 
 /**
  * The destruction says twice what it does: the content of the version is
- * gone from the store and from every backup of the database, and a host
- * with a lease on it gets a refusal instead.
+ * gone from the store and from every backup of the database, and a host with
+ * a lease on it gets a refusal instead.
  */
 function DestroyForm({
   secret, version, busy, error, onDestroy, onClose,

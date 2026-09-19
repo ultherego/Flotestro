@@ -38,9 +38,8 @@ describe("bufferSummary", () => {
     const summary = bufferSummary([
       point({ dropped_total: 0, dropped_delta: null }),
       point({ dropped_total: 5, dropped_delta: 5 }),
-      // The relay restarted: the counter starts again and the point
-      // carries no delta at all. A difference of the counters at the ends
-      // of the window would have reported two drops instead of seven.
+      // The relay restarted: the counter starts again and the point carries
+      // no delta at all.
       point({ dropped_total: 0, dropped_delta: null, restarted: true, instance_id: "second" }),
       point({ dropped_total: 2, dropped_delta: 2, instance_id: "second" }),
     ], 60);

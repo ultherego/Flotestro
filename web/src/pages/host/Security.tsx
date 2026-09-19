@@ -17,8 +17,6 @@ import { useT } from "../../i18n";
 /**
  * One listening socket, with its reach as the host names it: on the
  * loopback, on one of the host's own addresses, or on every interface.
- * Neither says "visible from the internet" - that cannot be read off an
- * address - so the panel names the reach and leaves the judgement.
  */
 type Listener = {
   protocol: string;
@@ -57,7 +55,7 @@ type Snapshot = {
     active?: boolean | null;
     // The rules the kernel knows and the rules written in files are two
     // numbers: a file written but not loaded describes an audit that does
-    // not exist. A null is a read that failed, not an absence of rules.
+    // not exist.
     rules_loaded?: number | null;
     rules_configured?: number | null;
     reason?: string;
@@ -133,9 +131,9 @@ function severityLabel(severity: string, t: (key: string) => string): string {
 }
 
 /**
- * Why a check could not be judged, as a sentence: the code says which
- * side has to move - the host, the agent or the operator - and the sentence
- * says it in words. A code without a sentence is shown as it came.
+ * Why a check could not be judged, as a sentence: the code says which side
+ * has to move - the host, the agent or the operator - and the sentence says
+ * it in words.
  */
 function reasonText(code: string, t: (key: string) => string): string {
   const names: Record<string, string> = {
@@ -161,13 +159,7 @@ function SeverityBadge({ finding }: { finding: Finding }) {
 }
 
 /**
- * Security and hardening.
- *
- * The host reports facts, the panel judges them. The checks are versioned
- * and computed from what is in the inventory anyway, so the result can be
- * repeated and two hosts are judged by the same check. A fix is not a
- * separate mechanism: each maps to a typed operation of the module that
- * owns the given thing.
+ * Security and hardening. The host reports facts, the panel judges them.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const SECURITY_CHANGES = ["selinux.mode.set", "security.audit.reload", "security.remediate"];
@@ -280,8 +272,8 @@ export function Security() {
   const failing = report.data ? findings.filter((f) => f.applicable && !f.passed && !f.unknown) : undefined;
   const severities = ["high", "medium", "low", "info"];
   // The mode switch exists only where SELinux runs and the adapter writes:
-  // the panel does not disable SELinux and does not turn it on, only
-  // moves between enforcing and permissive.
+  // the panel does not disable SELinux and does not turn it on, only moves
+  // between enforcing and permissive.
   const selinux = snapshot?.mac?.system?.toLowerCase() === "selinux" && !!capability(host, "security.mac")?.available
     && !capability(host, "security.mac")?.read_only;
   const otherMode = snapshot?.mac?.mode === "enforcing" ? "permissive" : "enforcing";

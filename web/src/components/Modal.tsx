@@ -6,14 +6,6 @@ import { useT } from "../i18n";
 
 /**
  * The confirmation dialog of the panel.
- *
- * The browser's own confirm() and prompt() served the first screens, but
- * they cannot be styled, cannot say which button is the dangerous one,
- * cannot validate a reason before the request leaves, and a prompt shows
- * the rule "at least 8 characters" only as text the operator has to read.
- * This dialog does all of that and is asked the same way: one awaited
- * call that resolves when the operator decides, so a call site reads as a
- * question and its answer rather than as a state machine.
  */
 
 /** A reason the API records: the audit trail wants at least eight characters. */
@@ -26,9 +18,8 @@ export type ReasonRule = {
 };
 
 /**
- * A value the operation needs that is not a reason: a target directory of
- * a restore, say. It is validated like a reason, but travels under its own
- * name so a call site does not send a path where a reason is expected.
+ * A value the operation needs that is not a reason: a target directory of a
+ * restore, say.
  */
 export type InputRule = {
   label: string;
@@ -70,11 +61,6 @@ const ModalContext = createContext<Confirm | null>(null);
 
 /**
  * The question a screen asks, as a function that resolves with the answer.
- *
- * The function is stable across renders, so it can sit in an effect or a
- * memoised callback without re-running them. Outside a ModalProvider it
- * throws when called: a dialog that cannot open would otherwise look like
- * an operator who never confirms.
  */
 export function useConfirm(): Confirm {
   const confirm = useContext(ModalContext);
@@ -90,14 +76,13 @@ type Pending = { id: number; request: ConfirmRequest; resolve: (result: ConfirmR
 
 /**
  * Mounts once around the application and draws the dialog when a screen
- * asks. One question at a time: a second call while a dialog is open
- * waits for the first to close, so two dialogs never stack.
+ * asks.
  */
 export function ModalProvider({ children }: { children: ReactNode }) {
   const [current, setCurrent] = useState<Pending | null>(null);
   // The open question and the waiting ones live in refs: the promise
-  // callbacks read them outside a render, and a state updater must not
-  // shift a queue, because React may run it twice.
+  // callbacks read them outside a render, and a state updater must not shift
+  // a queue, because React may run it twice.
   const open = useRef<Pending | null>(null);
   const queue = useRef<Pending[]>([]);
   const sequence = useRef(0);
@@ -157,10 +142,9 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
     onSettle(result);
   }, [ready, request.reason, request.input, reason, value, onSettle]);
 
-  // Focus moves into the dialog when it opens and back to the control
-  // that opened it when it closes: a keyboard operator must not be left
-  // on a page whose dialog just vanished. The page behind does not
-  // scroll while the dialog is up.
+  // Focus moves into the dialog when it opens and back to the control that
+  // opened it when it closes: a keyboard operator must not be left on a page
+  // whose dialog just vanished.
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const previousOverflow = document.body.style.overflow;
@@ -177,9 +161,8 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
     };
   }, []);
 
-  // Escape is the cancel; Tab stays inside the dialog and wraps at the
-  // ends, so the page behind cannot be reached until the question is
-  // answered. Enter in a field is the confirm, when the fields allow it.
+  // Escape is the cancel; Tab stays inside the dialog and wraps at the ends,
+  // so the page behind cannot be reached until the question is answered.
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -206,10 +189,7 @@ function ConfirmDialog({ request, onSettle }: { request: ConfirmRequest; onSettl
     }
   };
 
-  // With a field the field takes the initial focus. Without one the
-  // routine confirm does, so a plain question is answered with one key;
-  // the dangerous confirm does not, because a stray Enter must not
-  // delete anything - the cancel takes it instead.
+  // With a field the field takes the initial focus.
   const hasField = Boolean(request.reason || request.input);
   const initialFocus = hasField ? "field" : request.danger ? "cancel" : "confirm";
   const describedBy = [request.body ? bodyId : "", request.reason ? `${reasonId}-hint` : ""].filter(Boolean).join(" ") || undefined;

@@ -2,10 +2,9 @@ import { expect, test } from "@playwright/test";
 import { fleetHosts, hostWith, openHostList, type Host } from "./fleet";
 
 /**
- * The acceptance criteria of the host management document (HOST-UI):
- * unknown is shown as unknown and never as zero, a change asks before it
- * runs, and every module says where its data came from and how fresh it
- * is. No confirmation is ever completed here, so the fleet is untouched.
+ * The acceptance criteria of the host management document (HOST-UI): unknown
+ * is shown as unknown and never as zero, a change asks before it runs, and
+ * every module says where its data came from and how fresh it is.
  */
 
 let hosts: Host[] = [];
@@ -17,9 +16,9 @@ test.beforeAll(async ({ request }) => {
 
 test.describe("HOST-UI: unknown is not zero", () => {
   test("a host whose update count is undetermined shows unknown in the list", async ({ page }) => {
-    // The Arch host reports no security count and, before its first
-    // package read, no update count at all; any host with a null count
-    // serves the check.
+    // The Arch host reports no security count and, before its first package
+    // read, no update count at all; any host with a null count serves the
+    // check.
     const undetermined = hosts.find((host) => host.pending_updates === null);
     test.skip(!undetermined, "every host reports an update count; nothing on the list is undetermined right now");
     const host = undetermined as Host;

@@ -8,14 +8,7 @@ import { useT } from "../../i18n";
 import { DirectoryConfirmation, Forbidden, PlanImpact, TriState, useDirectoryChange } from "./shared";
 
 /**
- * The Kerberos service principals of the directory. Whether a principal
- * holds a keytab is what the directory said; a directory that did not say
- * leaves the column unknown rather than "no". The keytab itself never
- * leaves the directory for a browser: the one change here, a rotation,
- * retires the keytab in the directory and has the fleet host fetch its
- * own new one - under a permission of its own, a reason, fresh
- * authentication and a second person's approval, like every change of
- * access.
+ * The Kerberos service principals of the directory.
  */
 export function Services() {
   const t = useT();
@@ -43,9 +36,9 @@ export function Services() {
   const needle = filter.trim().toLowerCase();
   const items = (data?.items ?? []).filter((service) =>
     !needle || service.principal.toLowerCase().includes(needle) || service.host.toLowerCase().includes(needle));
-  // The host's own principal is not rotated here: its keytab is replaced
-  // by a re-join, and retiring it would cut the host off from the
-  // directory it fetches from.
+  // The host's own principal is not rotated here: its keytab is replaced by
+  // a re-join, and retiring it would cut the host off from the directory it
+  // fetches from.
   const rotatable = (service: DirectoryService) => service.service.toLowerCase() !== "host" && service.host !== "";
 
   return (

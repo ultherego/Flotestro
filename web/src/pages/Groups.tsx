@@ -38,9 +38,7 @@ export function filterGroups<T extends Pick<HostGroup, "name" | "description">>(
 }
 
 /**
- * The groups in the chosen order. By size the biggest comes first and a
- * group whose size is not known comes last: unknown is not zero, so it
- * must not sort as the smallest.
+ * The groups in the chosen order.
  */
 export function sortGroups<T extends Pick<HostGroup, "name" | "member_count">>(items: T[], sort: GroupSort): T[] {
   const sorted = [...items];
@@ -54,12 +52,9 @@ export function sortGroups<T extends Pick<HostGroup, "name" | "member_count">>(i
 }
 
 /**
- * The address of the campaign wizard with the group as the target, or -
- * when hosts were ticked on the group's table - those hosts alone by
- * identifier: an expression decides alone in an order, so a group next
- * to a list would silently outvote the ticks. The order is named after
- * the group; the operator renames it in the wizard. The group travels
- * under `group`, the way the wizard keeps it.
+ * The address of the campaign wizard with the group as the target, or - when
+ * hosts were ticked on the group's table - those hosts alone by identifier:
+ * an expression decides alone in an order, so a group next to a list would
  */
 export function bulkAddress(groupName: string, hostIDs: string[] = []): string {
   const params = new URLSearchParams({ name: groupName });
@@ -77,9 +72,6 @@ export function readsAddress(groupName: string): string {
 /**
  * The saved expression as rows of the builder: one leaf per row, a `not`
  * around a leaf as the row's negation, and the rows joined by all or any.
- * `exact` is false when the expression is deeper than rows can say - an
- * `any` inside an `all`, a `not` around a branch - and then the rows are
- * only a start: saving them would replace what was written.
  */
 export function rulesOf(expression?: SelectorExpression | null): { rules: Rule[]; combine: "all" | "any"; exact: boolean } {
   const empty = { rules: [{ field: "tag", value: "", negated: false } as Rule], combine: "all" as const, exact: false };
@@ -107,9 +99,9 @@ function leafRule(leaf: SelectorExpression): Rule | null {
 }
 
 /**
- * The sentence a delete dialog says about what names the group: nothing
- * when nothing does, otherwise the campaigns and policies by name so the
- * operator knows what stops resolving.
+ * The sentence a delete dialog says about what names the group: nothing when
+ * nothing does, otherwise the campaigns and policies by name so the operator
+ * knows what stops resolving.
  */
 export function usageSentence(usage: GroupUsage | undefined, t: (key: string, vars?: Record<string, string | number>) => string): string {
   if (!usage) return "";
@@ -123,13 +115,6 @@ export function usageSentence(usage: GroupUsage | undefined, t: (key: string, va
 
 /**
  * Host groups: a saved answer to "which hosts".
- *
- * A static group is a list somebody keeps by hand; a dynamic one is a
- * selector the server resolves every time it is read, so a host tagged
- * tomorrow is in the group tomorrow. A campaign names a group instead of
- * repeating the list, and the snapshot it freezes says what the group
- * resolved to at that moment. The page lists the groups with their sizes,
- * creates one, and opens one to show the hosts it resolves to now.
  */
 export function Groups() {
   const { id = "" } = useParams();
@@ -146,10 +131,7 @@ function usePermissions(): Set<string> {
 }
 
 /**
- * The question "delete this group?" with what it reaches: the group is
- * read once more before the dialog, because the list does not carry the
- * campaigns and policies that name it, and the dialog is where they are
- * to be read. The answer resolves true when the group is gone.
+ * The question "delete this group?
  */
 function useDeleteGroup(): (group: Pick<HostGroup, "id" | "name">) => Promise<boolean> {
   const t = useT();
@@ -299,10 +281,7 @@ function KindBadge({ kind }: { kind: HostGroup["kind"] }) {
 }
 
 /**
- * The form for a new group. The kind is chosen up front, because it does
- * not change afterwards: a list turned into a selector would keep members
- * nobody sees, and the other way round would lose a selector somebody
- * wrote.
+ * The form for a new group.
  */
 function CreateGroup({ onDone }: { onDone: () => void }) {
   const t = useT();
@@ -381,10 +360,7 @@ function CreateGroup({ onDone }: { onDone: () => void }) {
 }
 
 /**
- * The host list with a checkbox per row, for a static group. It reads the
- * same paged list as the host page and grows the same way; the chosen
- * hosts are kept by identifier, so a host chosen on one page stays chosen
- * when the search changes.
+ * The host list with a checkbox per row, for a static group.
  */
 export function HostChooser({ selected, onChange, title }: {
   selected: Set<string>;
@@ -483,7 +459,6 @@ const YES_NO_FIELDS: RuleField[] = ["security_updates", "reboot_required", "fail
 /**
  * The rows as the expression the server will read: one leaf per row, a
  * negated row wrapped in `not`, and the rows joined by `all` or `any`.
- * Null means nothing to send - no row has a value yet.
  */
 export function buildExpression(rules: Rule[], combine: "all" | "any"): SelectorExpression | null {
   const leaves = rules
@@ -511,9 +486,6 @@ export function describeExpression(expression?: SelectorExpression | null): stri
 
 /**
  * The selector builder: rows of field and value, joined by all or any.
- * It builds the typed structure the server compiles, so what is shown as
- * the expression is exactly what will be sent - there is no text to
- * parse and nothing to get wrong in translation.
  */
 export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
   rules: Rule[];
@@ -571,9 +543,7 @@ export function SelectorBuilder({ rules, combine, onRules, onCombine }: {
 }
 
 /**
- * The value of a rule. A state is picked from the states that exist; a
- * group from the saved groups; the rest is typed, because the panel does
- * not keep a list of sites or owners.
+ * The value of a rule.
  */
 function RuleValue({ rule, onChange }: { rule: Rule; onChange: (value: string) => void }) {
   const t = useT();
@@ -632,11 +602,9 @@ function RuleValue({ rule, onChange }: { rule: Rule; onChange: (value: string) =
 }
 
 /**
- * What the selector under construction resolves to now, asked of the
- * server as the rows change and answered with the count against the
- * caller's scope and a sample of names. The call waits for the typing to
- * settle; a selector the server refuses - a group that does not exist, a
- * cycle - shows the refusal in place of a count, not a zero.
+ * What the selector under construction resolves to now, asked of the server
+ * as the rows change and answered with the count against the caller's scope
+ * and a sample of names.
  */
 export function SelectorPreview({ expression }: { expression: SelectorExpression | null }) {
   const t = useT();
@@ -673,15 +641,8 @@ export function SelectorPreview({ expression }: { expression: SelectorExpression
 }
 
 /**
- * The form that changes a group in place: the name, the description and,
- * for a dynamic group, the selector. The write goes back with the tag the
- * group was read with, so an edit over somebody else's change is refused
- * rather than winning quietly. The kind does not change here; that is a
- * new group.
- *
- * A selector too deep for the builder's rows is edited as its JSON: the
- * rows would only approximate it, and a save from them would replace
- * what somebody wrote by hand.
+ * The form that changes a group in place: the name, the description and, for
+ * a dynamic group, the selector.
  */
 function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; onDone: () => void }) {
   const t = useT();
@@ -725,9 +686,9 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
     },
     onError: (error) => {
       if (error instanceof ApiError && error.status === 412) {
-        // The record moved under the editor; the page refetches, the form
-        // is rebuilt from the current version, and the word about it has
-        // to outlive the form.
+        // The record moved under the editor; the page refetches, the form is
+        // rebuilt from the current version, and the word about it has to
+        // outlive the form.
         queryClient.invalidateQueries({ queryKey: ["host-group", group.id] });
         toast.error(t("The group changed since it was read; the form now shows the current version, start the edit again."));
         return;
@@ -803,10 +764,7 @@ function EditGroup({ group, etag, onDone }: { group: GroupDetail; etag: string; 
 }
 
 /**
- * The campaigns and the policies whose selector names the group. A
- * campaign that ended keeps its selector for the trail and is listed with
- * its state; an enabled policy resolves the group at every check, so an
- * edit of the selector reaches it at the next one.
+ * The campaigns and the policies whose selector names the group.
  */
 function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] }) {
   const t = useT();
@@ -845,9 +803,7 @@ function UsedBy({ usage, kind }: { usage: GroupUsage; kind: HostGroup["kind"] })
 }
 
 /**
- * One group: what it is, and the hosts it resolves to now. For a static
- * group the member list can be replaced here; for a dynamic one the
- * selector is the definition, and the list under it is today's answer.
+ * One group: what it is, and the hosts it resolves to now.
  */
 function GroupPage({ id }: { id: string }) {
   const t = useT();
@@ -912,9 +868,9 @@ function GroupPage({ id }: { id: string }) {
       return next;
     });
   };
-  // The header box ticks what is loaded, not what the group resolves to:
-  // a page not yet fetched has hosts nobody has seen, and a campaign
-  // must not reach them from a box that looked like "all".
+  // The header box ticks what is loaded, not what the group resolves to: a
+  // page not yet fetched has hosts nobody has seen, and a campaign must not
+  // reach them from a box that looked like "all".
   const allLoadedSelected = rows.length > 0 && rows.every((host) => selected.has(host.id));
 
   return (

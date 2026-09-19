@@ -47,10 +47,7 @@ export type BudgetState = Budget & {
 export type BudgetKind = "global" | "site" | "domain" | "gateway" | "backend" | "other";
 
 /**
- * A budget key taken apart. The keys are three colon-separated parts -
- * the family, the scope and the resource - and an asterisk in the scope
- * is the default policy of the family: the capacity every site or backend
- * gets until somebody describes it on its own.
+ * A budget key taken apart.
  */
 export type BudgetKey = {
   kind: BudgetKind;
@@ -63,9 +60,7 @@ export type BudgetKey = {
 };
 
 /**
- * Reads a key the way the store builds it. A key the panel does not know
- * the shape of is still shown whole under "other" rather than dropped: the
- * capacity is real even when its name is new.
+ * Reads a key the way the store builds it.
  */
 export function describeBudgetKey(key: string): BudgetKey {
   const [family, scope, resource, ...rest] = key.split(":");
@@ -81,8 +76,7 @@ export function describeBudgetKey(key: string): BudgetKey {
 /**
  * The portion of a budget one claimant may hold while others ask for it,
  * computed the way the store computes it: the capacity split between the
- * claimants, never below one token. Shown so the operator sees why a
- * campaign holds three tokens of a budget with ten free.
+ * claimants, never below one token.
  */
 export function fairShare(capacity: number, claimants: number): number {
   return Math.max(1, Math.floor(capacity / Math.max(claimants, 1)));
@@ -99,10 +93,7 @@ export function waiting(budget: Pick<BudgetState, "waiting_jobs" | "waiting_targ
 }
 
 /**
- * The colour of a budget's usage. Full is an error only in the sense that
- * work is waiting on it; a queue behind a budget with room is the fair
- * share at work, and it is a warning so the operator looks. A row of the
- * first shape, without the waiting hosts, is read the same way.
+ * The colour of a budget's usage.
  */
 export function budgetTone(budget: Pick<Budget, "used" | "capacity" | "waiting_jobs"> & { waiting_targets?: number }): WidgetTone {
   if (saturated(budget)) return "error";
@@ -114,8 +105,6 @@ export function budgetTone(budget: Pick<Budget, "used" | "capacity" | "waiting_j
 /**
  * The priority classes in the order of their urgency, and how long each
  * waits before its fair share stops binding, as the design fixes them.
- * The API reports the tokens in use per class; the promotion age is the
- * page's hint of what the class means.
  */
 export const CLASSES: { name: string; promotion: string }[] = [
   { name: "incident", promotion: "at once" },
@@ -125,10 +114,9 @@ export const CLASSES: { name: string; promotion: string }[] = [
 ];
 
 /**
- * The tokens in use per class across every budget, the known classes
- * always and in their order - zero is information too - and a class the
- * API named on its own, "unknown" among them, after them only when it
- * holds something. A token the panel cannot place is still a token taken.
+ * The tokens in use per class across every budget, the known classes always
+ * and in their order - zero is information too - and a class the API named
+ * on its own, "unknown" among them, after them only when it holds something.
  */
 export function classTotals(budgets: Pick<BudgetState, "by_class">[]): { name: string; tokens: number }[] {
   const totals = new Map<string, number>();
@@ -146,11 +134,7 @@ export function classTotals(budgets: Pick<BudgetState, "by_class">[]): { name: s
 }
 
 /**
- * Where a holder leads. A campaign host leads to its campaign, a fan-out
- * to its read, and a job to the job list filtered by the author who
- * ordered it - the list has no filter by id, and the author's running
- * jobs are the ones holding tokens. A holder of a shape the panel does not
- * know leads nowhere and is shown by its owner as it is.
+ * Where a holder leads.
  */
 export function holderLink(holder: Pick<BudgetHolder, "owner" | "claimant">): { to: string; label: string } | null {
   const campaign = holder.claimant.startsWith("campaign:") ? holder.claimant.slice("campaign:".length) : "";
@@ -180,19 +164,14 @@ async function readLimit(key: string): Promise<{ limit: BudgetLimit; etag: strin
 }
 
 /**
- * Writes the capacity and the note on the version named by the tag. A
- * capacity written over somebody else's change a minute ago is a policy
- * nobody decided, so the tag goes in If-Match and the server refuses a
- * stale one.
+ * Writes the capacity and the note on the version named by the tag.
  */
 async function writeLimit(key: string, body: { capacity: number; note: string }, etag: string): Promise<void> {
   await api.put<unknown>(budgetPath(key), body, { headers: etag ? { "If-Match": etag } : {} });
 }
 
 /**
- * Takes a configured budget away on the version named by the tag. The
- * server refuses while somebody holds tokens of it: a ceiling is not
- * pulled from under running work.
+ * Takes a configured budget away on the version named by the tag.
  */
 async function deleteLimit(key: string, reason: string, etag: string): Promise<void> {
   await api.del<unknown>(budgetPath(key), { reason }, { headers: etag ? { "If-Match": etag } : {} });
@@ -210,12 +189,6 @@ const BUDGETS_INTERVAL = 10 * 1000;
 
 /**
  * The capacity budgets of the fleet.
- *
- * A host waiting on a budget looks like a forgotten host: the campaign
- * does not move, the job stands in the queue, and nothing says why. This
- * page is where the reason is seen as a budget - how much it carries, how
- * much is taken, who is asking - and where the capacity is changed when
- * the policy, not the fleet, is what stands in the way.
  */
 export function Budgets() {
   const t = useT();
@@ -377,9 +350,7 @@ function ClassLabel({ name }: { name: string }) {
 }
 
 /**
- * The budgets, one per key. A pattern row is marked as the default of its
- * family: its numbers are the sites nobody described separately, added
- * up under the one policy they share.
+ * The budgets, one per key.
  */
 function BudgetTable({ budgets, canWrite }: { budgets: BudgetState[]; canWrite: boolean }) {
   const t = useT();
@@ -493,10 +464,7 @@ function BudgetRows({ budget, described, tone, canWrite, open, onEdit, onDone }:
 const HOLDERS_SHOWN = 4;
 
 /**
- * Who holds the tokens of one budget, newest first. A holder is named by
- * where it leads - the campaign, the author's jobs, the read - with its
- * class and its weight; the row names a few and counts the rest, because
- * a budget of two hundred reads is not a column of two hundred lines.
+ * Who holds the tokens of one budget, newest first.
  */
 function Holders({ holders }: { holders: BudgetHolder[] }) {
   const t = useT();
@@ -541,11 +509,7 @@ function holderName(label: string, t: Translate): string {
 }
 
 /**
- * Taking one budget away. The key then falls back to the pattern of its
- * family or to no limit at all, which the dialog says; the reason goes
- * to the trail. A budget with tokens held is refused by the server, and
- * the refusal is shown as what it is - work in flight - rather than as
- * an error of the page.
+ * Taking one budget away.
  */
 function DeleteBudget({ budget }: { budget: BudgetState }) {
   const t = useT();
@@ -593,9 +557,8 @@ function DeleteBudget({ budget }: { budget: BudgetState }) {
     });
     if (ok && reason) remove.mutate(reason);
   };
-  // The row button is plain: a column of two dozen red buttons is a wall
-  // of alarm where nothing is wrong. The confirmation that follows is
-  // the one drawn as a danger.
+  // The row button is plain: a column of two dozen red buttons is a wall of
+  // alarm where nothing is wrong.
   return (
     <button className="secondary" onClick={ask} disabled={remove.isPending} data-testid="budget-delete" data-key={budget.key}>
       {t("Delete")}
@@ -605,11 +568,7 @@ function DeleteBudget({ budget }: { budget: BudgetState }) {
 
 /**
  * A budget configured for the first time: the key, its capacity and the
- * note. The key is typed, because the families and their resources are
- * the store's vocabulary and a menu of every combination would be longer
- * than the explanation; the field checks the shape before the request
- * leaves and refuses a key that is already on the list, which is edited
- * in place instead.
+ * note.
  */
 function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => void }) {
   const t = useT();
@@ -679,12 +638,6 @@ function NewBudget({ existing, onDone }: { existing: string[]; onDone: () => voi
 
 /**
  * The capacity of one budget, changed in place.
- *
- * The record is read first for its tag: the write is refused when
- * somebody changed it since, and the editor says so rather than winning
- * quietly. The note goes to the audit trail with the change, because a
- * limit raised without a word takes the meaning away from every limit
- * below it.
  */
 function CapacityEditor({ budget, onDone }: { budget: BudgetState; onDone: () => void }) {
   const t = useT();
@@ -699,9 +652,8 @@ function CapacityEditor({ budget, onDone }: { budget: BudgetState; onDone: () =>
     staleTime: 0,
     refetchOnWindowFocus: false,
   });
-  // The note of the last change is the starting point of this one: a
-  // policy is usually adjusted, not rewritten. A record read again after a
-  // conflict brings the other editor's note the same way.
+  // The note of the last change is the starting point of this one: a policy
+  // is usually adjusted, not rewritten.
   useEffect(() => {
     if (record.data) setNote(record.data.limit.note);
   }, [record.data]);

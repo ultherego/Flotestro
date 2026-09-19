@@ -4,9 +4,8 @@
 import { t } from "../i18n";
 
 // The zone the absolute times are read in, kept outside React like the
-// locale: the helpers here are plain functions called from anywhere, and
-// the preferences provider tells them the zone once it knows it. Empty
-// means the browser's own zone.
+// locale: the helpers here are plain functions called from anywhere, and the
+// preferences provider tells them the zone once it knows it.
 let preferredZone = "";
 
 /** The zone the times are formatted in: the preferred one, or empty for the browser's. */
@@ -40,13 +39,6 @@ export function relativeTime(value?: string | null): string {
 /**
  * The absolute time in ISO form, in the zone the operator prefers or,
  * without a preference, in the browser's local zone.
- *
- * A format dependent on the browser language would diverge between
- * operators looking at the same incident, and the order of day and month is
- * sometimes reversed in it. The operational trail must read the same for
- * everybody. The zone is the one exception: an operator on call for a
- * fleet in another zone reads the trail in the fleet's clock, and says so
- * in their preferences.
  */
 export function absoluteTime(value?: string | null): string {
   if (!value) return "";
@@ -60,9 +52,8 @@ export function absoluteTime(value?: string | null): string {
 }
 
 /**
- * The absolute time in the same ISO shape, in a named zone: what the
- * profile screen shows for a zone the operator is still choosing. A zone
- * this browser cannot format in falls back to the browser's own.
+ * The absolute time in the same ISO shape, in a named zone: what the profile
+ * screen shows for a zone the operator is still choosing.
  */
 export function absoluteTimeIn(value: string, zone: string): string {
   const date = new Date(value);
@@ -75,9 +66,7 @@ export function absoluteTimeIn(value: string, zone: string): string {
 }
 
 /**
- * The same ISO shape in a named zone. The parts come from the browser's
- * own zone tables, in the 24-hour clock, and are put together by hand so
- * the text is the one every screen shows rather than a locale's own.
+ * The same ISO shape in a named zone.
  */
 function inZone(date: Date, zone: string): string {
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -113,10 +102,7 @@ export function bytes(value?: number): string {
 
 /**
  * Turns the value of a datetime-local input into the RFC 3339 instant the
- * API reads. The input speaks the browser's local time without a zone; the
- * API wants an instant, so the conversion happens here rather than on the
- * server guessing the operator's zone. An empty or unreadable value is no
- * bound.
+ * API reads.
  */
 export function toInstant(local: string): string {
   if (!local) return "";

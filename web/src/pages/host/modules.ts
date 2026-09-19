@@ -3,9 +3,7 @@ import type { Capabilities as InstallationCapabilities } from "../../lib/capabil
 import type { IconName } from "../../components/icons";
 
 /**
- * The host module registry. One source of truth for the tabs, the routes
- * and the host switch: if each of them computed availability separately, a
- * tab could lead to a route that does not exist, or the other way round.
+ * The host module registry.
  */
 export type Module = {
   /** The path segment: /hosts/:id/<segment>. Part of the address contract. */
@@ -13,9 +11,7 @@ export type Module = {
   /** The English tab name; it goes through the translation catalogue. */
   name: string;
   /**
-   * The heading the module sits under in the host navigation. Two dozen
-   * modules in one flat list are read by scanning; grouped by what they
-   * concern they are found by knowing.
+   * The heading the module sits under in the host navigation.
    */
   group: ModuleGroup;
   /** The icon beside the name in the host navigation. */
@@ -23,9 +19,7 @@ export type Module = {
   /** The unavailability reason, or empty when the module works on this host. */
   reason: (host: Host, installation: InstallationCapabilities) => string;
   /**
-   * The inventory module the tab lives off. None means the tab does not read
-   * the inventory (Jobs, Audit) or reads it whole (Overview) - and that a
-   * refresh from that tab covers the whole host.
+   * The inventory module the tab lives off.
    */
   inventory?: string;
 };
@@ -38,8 +32,8 @@ export type ModuleGroup =
 
 /**
  * The groups in the order the navigation shows them: the machine itself
- * first, what it talks to next, what it keeps, what it runs, and the
- * records last. The titles are English and go through the catalogue.
+ * first, what it talks to next, what it keeps, what it runs, and the records
+ * last.
  */
 export const MODULE_GROUPS: { key: ModuleGroup; title: string }[] = [
   { key: "system", title: "System" },
@@ -57,9 +51,7 @@ export function capability(host: Host, name: string): Capability | undefined {
 }
 
 /**
- * A module works when any of the adapters serving it works. When none does,
- * the operator gets the reasons of all of them - because each is a separate
- * answer to the question "why is this not here".
+ * A module works when any of the adapters serving it works.
  */
 function requires(...names: string[]) {
   return (host: Host): string => {
@@ -86,10 +78,7 @@ const MODULES: Module[] = [
   { segment: "kernel", name: "Kernel", group: "system", icon: "kernel", reason: requires("kernel"), inventory: "kernel" },
   { segment: "time", name: "Time", group: "system", icon: "time", reason: requires("time"), inventory: "time" },
   { segment: "power", name: "Power", group: "system", icon: "power", reason: requires("systemd"), inventory: "power" },
-  // The verdicts of the desired-state policies that select the host. The
-  // panel judges them from the inventory, so the tab reads no module of
-  // its own and is never unavailable: a host nobody declared anything
-  // about shows so.
+  // The verdicts of the desired-state policies that select the host.
   { segment: "policies", name: "Policies", group: "system", icon: "security", reason: () => "" },
 
   { segment: "network", name: "Network", group: "network", icon: "network", reason: requires("network"), inventory: "network" },
@@ -150,10 +139,7 @@ export function module(segment: string): Module | undefined {
 }
 
 /**
- * The visible modules under their group headings, in the group order. The
- * group list is the registry's, not the host's: an unavailable module
- * stays under its heading. A heading with nothing under it is dropped, so
- * a group added before its modules does not show as an empty title.
+ * The visible modules under their group headings, in the group order.
  */
 export function groupedModules(list: VisibleModule[]): { key: ModuleGroup; title: string; items: VisibleModule[] }[] {
   return MODULE_GROUPS.map((group) => ({
@@ -163,9 +149,7 @@ export function groupedModules(list: VisibleModule[]): { key: ModuleGroup; title
 }
 
 /**
- * The module an operation belongs to, by the prefix of its type. A campaign
- * links its hosts to that module, so the operator lands where the change
- * shows rather than on the overview.
+ * The module an operation belongs to, by the prefix of its type.
  */
 export function moduleForAction(action: string): string {
   const prefix = action.split(".")[0];

@@ -302,8 +302,7 @@ describe("AreaChart", () => {
       />,
     );
     // One dashed path per run: the lone first peak is a path of one point,
-    // the second run a path of two. One path of three points would have
-    // bridged the gap.
+    // the second run a path of two.
     const dashed = container.querySelectorAll("path.line[stroke-dasharray]");
     expect(dashed).toHaveLength(2);
     expect(dashed[0].getAttribute("d")?.split(" ")).toHaveLength(1);

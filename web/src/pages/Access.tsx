@@ -598,7 +598,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                       : (principal.bindings ?? []).map((binding, index) => {
                           // The team is read first: a team binding leaves
                           // the site and the environment at the asterisk,
-                          // and as a site scope it would read as the whole
+                          // and as a site scope it would read as the whole.
                           const scope = binding.scope as BindingScope;
                           return (
                           <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }} data-testid="binding">

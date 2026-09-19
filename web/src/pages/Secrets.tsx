@@ -44,9 +44,7 @@ export function reasonGiven(reason: string): boolean {
 }
 
 /**
- * The reference a job payload takes for a secret, as JSON. Without a
- * version the host gets the one current at delivery; with a version it
- * gets that one and no other, also after a rotation.
+ * The reference a job payload takes for a secret, as JSON.
  */
 export function secretReference(name: string, version?: number): string {
   return version ? JSON.stringify({ name, version }) : JSON.stringify({ name });
@@ -61,9 +59,9 @@ export function filterSecrets<T extends Pick<Secret, "name" | "description">>(se
 }
 
 /**
- * The store at a glance: what can still be issued, what is retired, and
- * what has never been rotated - a secret at its first version since the
- * day it was created is the one to ask about.
+ * The store at a glance: what can still be issued, what is retired, and what
+ * has never been rotated - a secret at its first version since the day it
+ * was created is the one to ask about.
  */
 export function storeCounts(secrets: Pick<Secret, "current_version" | "retired_at">[]) {
   return {
@@ -74,10 +72,7 @@ export function storeCounts(secrets: Pick<Secret, "current_version" | "retired_a
 }
 
 /**
- * Whether a version's content may be destroyed from the panel. The
- * current version of an issuable secret is what the next job gets, so it
- * is not offered; once the secret is retired nothing is issued and every
- * version may go. Content destroyed once is not destroyed again.
+ * Whether a version's content may be destroyed from the panel.
  */
 export function destroyable(secret: Pick<Secret, "current_version" | "retired_at">, version: Pick<SecretVersion, "version" | "destroyed_at">): boolean {
   if (version.destroyed_at) return false;
@@ -98,9 +93,8 @@ export function usePermissions(): Set<string> {
 }
 
 /**
- * The clipboard with a short acknowledgement: the button that copied
- * says so until another one does. Nothing here reads a value back - the
- * only thing there is to copy is the reference a payload names.
+ * The clipboard with a short acknowledgement: the button that copied says so
+ * until another one does.
  */
 export function useCopy() {
   const [copied, setCopied] = useState("");
@@ -116,9 +110,7 @@ export function useCopy() {
 /* ---------------------------------------------------------------------- */
 
 /**
- * The reason field with the rule under it. The same rule gates every
- * button of the store: the server records the reason next to the
- * fresh authentication, and refuses without either.
+ * The reason field with the rule under it.
  */
 export function ReasonField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
   const t = useT();
@@ -130,9 +122,7 @@ export function ReasonField({ value, onChange }: { value: string; onChange: (val
 }
 
 /**
- * The value on its way in, hidden by default. Shown, the field becomes a
- * text area: a hidden field keeps to one line, and a private key pasted
- * into it would lose its line breaks without a word.
+ * The value on its way in, hidden by default.
  */
 function ValueField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   const t = useT();
@@ -162,11 +152,6 @@ type RowAction = "rotate" | "retire";
 
 /**
  * The secret store.
- *
- * A value goes in and does not come out: the API cannot read it back, and
- * the only way out leads through a short lease issued to a host for the
- * duration of one job. This screen shows the metadata - what exists, who
- * created it, when it was rotated - and never the content.
  */
 export function Secrets() {
   const t = useT();
@@ -178,9 +163,7 @@ export function Secrets() {
   const [description, setDescription] = useState("");
   const [value, setValue] = useState("");
   // Every change of the store is taken with fresh authentication and a
-  // reason: the values land as root-readable files on hosts. The reason
-  // of the creation stays with the creation; every row action has one of
-  // its own.
+  // reason: the values land as root-readable files on hosts.
   const [reason, setReason] = useState("");
   const [search, setSearch] = useState("");
   // The one row whose form is open. Its value and reason live in the form,
@@ -338,9 +321,7 @@ type RotateMutation = UseMutationResult<Secret, Error, { name: string; value: st
 type RetireMutation = UseMutationResult<Secret, Error, { name: string; reason: string }>;
 
 /**
- * One secret of the list with its actions. The form of an action opens
- * under the row it belongs to, with a value and a reason of its own: what
- * is typed for one secret cannot land on another.
+ * One secret of the list with its actions.
  */
 function SecretRow({
   secret, open, onToggle, onClose, canRotate, canRetire, copied, onCopy, rotate, retire,
@@ -418,9 +399,7 @@ function SecretRow({
 }
 
 /**
- * A rotation adds a version and makes it current. The previous versions
- * stay: a host with a lease on an earlier version is meant to get it also
- * after the rotation.
+ * A rotation adds a version and makes it current.
  */
 function RotateForm({ secret, rotate, onClose }: { secret: Secret; rotate: RotateMutation; onClose: () => void }) {
   const t = useT();
@@ -450,8 +429,7 @@ function RotateForm({ secret, rotate, onClose }: { secret: Secret; rotate: Rotat
 
 /**
  * Retiring does not erase the history: the trace of the secret having
- * existed is part of the audit. It does end the issuing, so the operator
- * says so twice - once by opening the form, once by the checkbox.
+ * existed is part of the audit.
  */
 function RetireForm({ secret, retire, onClose }: { secret: Secret; retire: RetireMutation; onClose: () => void }) {
   const t = useT();

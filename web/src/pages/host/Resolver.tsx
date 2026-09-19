@@ -77,10 +77,6 @@ type Snapshot = {
 
 /**
  * The host's resolver.
- *
- * The panel shows the actual state together with its owner: a resolver file
- * owned by a service gets overwritten on the next network event, so the
- * owner decides whether the panel may change anything here.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const RESOLVER_CHANGES = ["dns.host.apply"];
@@ -366,9 +362,7 @@ export function Resolver() {
 }
 
 /**
- * The resolver change form. The change goes through the connection profile,
- * so it asks for the interface: the resolver belongs to the interface, and
- * the file is only what the service computed from it.
+ * The resolver change form.
  */
 function ResolverChange({
   defaultInterface, defaultServers, defaultDomains, onIntent,

@@ -4,12 +4,6 @@ import { useT } from "../../i18n";
 
 /**
  * The confirmation of an irreversible operation.
- *
- * A click is not a sufficient decision for a change that cannot be undone:
- * the host list tends to be long and alike, and a confirmation dialog opened
- * on the wrong row looks the same as on the right one. That is why the
- * operator types the hostname and gives a reason - one protects against a
- * mistaken target, the other stays in the audit log.
  */
 export function TargetConfirmation({
   host, description, label, onConfirm, onCancel, busy, danger, target,

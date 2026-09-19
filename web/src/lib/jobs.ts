@@ -1,8 +1,4 @@
 // Waiting for a job from a screen.
-//
-// A read ordered from the panel answers twice: the order at once, with the
-// job, and the host later, with the attempt. A screen that wants the answer
-// waits for the attempt.
 
 /** One attempt of a job as a screen reads it: the status, the refusal and the typed detail. */
 export type JobAttempt<T = unknown> = {
@@ -22,12 +18,7 @@ export const JOB_POLL_TRIES = 30;
 
 /**
  * Waits for the host to answer a job: polls its attempts and returns the
- * last one as soon as it has a status. A refusal is an answer too - the
- * attempt carries the reason, and the caller decides what to show.
- *
- * The wait is bounded: after the last try it returns undefined rather than
- * holding the screen for good. A job waiting for approval, or a host that
- * went away, is then left to the job list.
+ * last one as soon as it has a status.
  */
 export async function awaitJob<T = unknown>(
   api: Reader,

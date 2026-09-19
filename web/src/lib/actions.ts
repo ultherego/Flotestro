@@ -3,13 +3,6 @@ import { api } from "./api";
 
 /**
  * What one host lets the signed-in operator do, action by action.
- *
- * The server judges every operation of the catalogue the way it judges an
- * order at the door - the permission in the host's scope, the lifecycle
- * state, the adapter registry - and answers ahead of the click, so a
- * screen draws no button the order would refuse. The answer is a preview:
- * the order is judged again when it is placed, and a 403 or a 409 from
- * the order still reaches the screen as the backstop.
  */
 
 /** The codes a refused action carries; the server owns the list. */
@@ -45,10 +38,7 @@ export function hostActionsKey(hostID: string) {
 }
 
 /**
- * The preview of the host's actions. It is asked again when the tab comes
- * back into focus and once a minute besides: a binding granted or a host
- * reconnected in the meantime shows up without a reload, and a minute of
- * staleness costs at most one refused order.
+ * The preview of the host's actions.
  */
 export function useHostActions(hostID: string) {
   return useQuery({
@@ -86,13 +76,6 @@ const unknownAllowance: Allowance = {
 
 /**
  * Reads the verdict on one action out of the preview.
- *
- * Before the answer the control is held back, so a button never appears
- * and vanishes a moment later. When the preview itself failed there is
- * nothing to refuse the control with: it is drawn as before the preview
- * existed, and the refusal of the order, if any, is the backstop. An
- * action the catalogue does not know is refused: a screen that names an
- * operation the server has no contract for would only order a 400.
  */
 export function allowanceOf(
   data: HostActions | undefined,
@@ -128,8 +111,8 @@ export function useAllowed(hostID: string, action: string): Allowance {
 
 /**
  * What a page can say when every one of its changes is refused: which
- * permissions are missing when the refusals are about permissions, and
- * the host's reasons otherwise.
+ * permissions are missing when the refusals are about permissions, and the
+ * host's reasons otherwise.
  */
 export type ModuleAccess = {
   /** Whether at least one of the listed actions may be ordered. */

@@ -909,7 +909,7 @@ function LayerBuild({
   const byName = new Map<string, Interface>(interfaces.map((iface) => [iface.name, iface]));
   // The lower interfaces are the host's own: an interface is called whatever
   // the host calls it - enp2s0, ens192, eno1np0 - so the form offers the
-  // names this host reports rather than an example that would be wrong on
+  // names this host reports rather than an example that would be wrong on.
   const lower = interfaces.filter((iface) => iface.name !== "lo").map((iface) => iface.name);
 
   // The refusals, in the order the questions come: is the name free, is the

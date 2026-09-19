@@ -12,12 +12,7 @@ import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
- * The first run. A fresh panel has a bootstrap token, an empty fleet and
- * no rule that says who may sign in; the operator would otherwise learn
- * what is missing one refusal at a time. The checklist comes from the
- * server - it counts what is there - and the page adds what each step
- * means for a company fleet, the page each is done on, and the two forms
- * that need no page of their own.
+ * The first run.
  */
 
 export type SetupState = "done" | "undone" | "warning" | "optional";
@@ -56,9 +51,7 @@ const REASON_MIN_LENGTH = 8;
 
 /**
  * The detail of a step is a sentence from the server, and a moment in it
- * comes in the RFC 3339 shape the server writes. The operator reads
- * moments in the zone of their preference, like everywhere else on the
- * panel, so the moment is rewritten and the rest of the sentence kept.
+ * comes in the RFC 3339 shape the server writes.
  */
 export function readableDetail(detail: string): string {
   return detail.replace(
@@ -83,11 +76,7 @@ export function stepTone(state: SetupState): "ok" | "warn" | "error" | "unknown"
 }
 
 /**
- * Whether the reader may press the test button of a step. The identity
- * provider test reveals the issuer and its keys, so it is for whoever
- * reads the settings; the directory test is for whoever reads the
- * identity views it decides the fate of; the mapping form is for whoever
- * manages access.
+ * Whether the reader may press the test button of a step.
  */
 export function mayAct(permissions: Set<string>, key: string): boolean {
   switch (key) {
@@ -99,9 +88,7 @@ export function mayAct(permissions: Set<string>, key: string): boolean {
 }
 
 /**
- * The name of the page a path leads to, as the navigation calls it. The
- * server sends the path; the button beside a step is named after where
- * it goes, and a step done on the hosts list is not "Add host".
+ * The name of the page a path leads to, as the navigation calls it.
  */
 export function pageName(path: string): string {
   const [pathname] = path.split("?");
@@ -252,9 +239,7 @@ export function Setup() {
 }
 
 /**
- * A test button with its verdict beside it. The server answers 200 either
- * way: ok with what the other side said, or a typed reason - a directory
- * that does not answer is a finding, not a failure of the panel.
+ * A test button with its verdict beside it.
  */
 function ConnectionTester({ path, label }: { path: string; label: string }) {
   const t = useT();
@@ -293,9 +278,7 @@ function ConnectionTester({ path, label }: { path: string; label: string }) {
 }
 
 /**
- * The first mapping, in place. The body and the step-up handling are the
- * ones the access screen uses: the same route, the same reason, the same
- * sign-in-again when the server wants a fresh authentication.
+ * The first mapping, in place.
  */
 function MappingForm({ open: initiallyOpen }: { open: boolean }) {
   const t = useT();
@@ -367,9 +350,7 @@ function MappingForm({ open: initiallyOpen }: { open: boolean }) {
 }
 
 /**
- * The refusal of a change to the access rules. A demand for a fresh
- * authentication is the one case the page can act on: it offers signing
- * in again and coming back here. Any other refusal is shown as it is.
+ * The refusal of a change to the access rules.
  */
 function StepUpWarning({ error, close }: { error: ApiError | null; close: () => void }) {
   const t = useT();

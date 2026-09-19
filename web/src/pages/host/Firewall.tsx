@@ -67,13 +67,8 @@ function adapterLabel(adapter: string): string {
 }
 
 /**
- * The host's firewall.
- *
- * The panel changes only its own nftables table or firewalld zone. Other
- * people's chains - docker's, firewalld's, iptables-nft's - are rewritten
- * without its participation, so a rule in them would vanish at the first
- * container start or service reload. The operator sees them but does not
- * edit them.
+ * The host's firewall. The panel changes only its own nftables table or
+ * firewalld zone.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const FIREWALL_CHANGES = ["firewall.rule.ensure", "firewall.rule.remove", "firewall.zone.port", "firewall.zone.service"];
@@ -122,7 +117,6 @@ export function Firewall() {
   const zones = (snapshot?.zones ?? []).filter((zone) => zone.active || zone.default || (zone.ports ?? []).length > 0);
   // The rules by who wrote them: ours are the durable ones, the rest belong
   // to docker, firewalld or whoever else rewrites its table without asking.
-  // An unread rule set has no counts, only dashes.
   const knownRules = snapshot?.unavailable_reason ? undefined : snapshot?.rules ?? [];
   const otherSources = Array.from(new Set((knownRules ?? []).map((rule) => rule.source))).filter((source) => source !== "managed").sort();
   const tables = Object.entries((knownRules ?? []).reduce<Record<string, number>>((acc, rule) => {
@@ -368,9 +362,7 @@ function ruleName(rule: Rule): string {
 }
 
 /**
- * The rule wizard. The panel does not accept raw nft syntax: the rule text
- * is a language, and accepting a language would mean the host executes
- * everything that can be written in it.
+ * The rule wizard.
  */
 function RuleWizard({ fingerprint, onIntent }: { fingerprint: string; onIntent: (intent: Intent) => void }) {
   const t = useT();
@@ -528,9 +520,7 @@ function ZonePort({
 const SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9_.-]{0,31}$/;
 
 /**
- * Adding or removing a firewalld service in a zone. A service is a named
- * set of ports (ssh, https, nfs) that firewalld ships or the administrator
- * defined; the change is permanent and reloaded at once, like a port.
+ * Adding or removing a firewalld service in a zone.
  */
 function ZoneService({
   zone, services, onIntent, hostname,

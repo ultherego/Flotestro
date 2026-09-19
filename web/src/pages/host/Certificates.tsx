@@ -106,9 +106,8 @@ type Deployment = {
 type Intent = { action: string; label: string; description: string; payload: Record<string, unknown> };
 
 /**
- * The list soonest deadline first: the certificate that expires next week
- * is the one to look at, wherever certmonger listed it. A certificate
- * without a deadline (unreadable, unknown) goes last.
+ * The list soonest deadline first: the certificate that expires next week is
+ * the one to look at, wherever certmonger listed it.
  */
 function byDeadline(list: Certificate[]): Certificate[] {
   return list.slice().sort((a, b) => {
@@ -141,15 +140,8 @@ function StatusBadge({ status, days }: { status: string; days?: number }) {
 }
 
 /**
- * The host's certificates.
- *
- * The scope is enumerated, not searched: the panel looks at the files it
- * was pointed to and at those certmonger watches. Searching the whole
- * filesystem would find above all the trust store - a few hundred authority
- * certificates that belong to no service.
- *
- * The panel never looks at the private key: it only knows where it lies,
- * what permissions it has and which secret it comes from.
+ * The host's certificates. The scope is enumerated, not searched: the panel
+ * looks at the files it was pointed to and at those certmonger watches.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const CERTIFICATE_CHANGES = ["certificate.deploy", "certificate.renew"];

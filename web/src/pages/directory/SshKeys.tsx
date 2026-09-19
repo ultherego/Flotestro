@@ -8,10 +8,8 @@ import { useT } from "../../i18n";
 import { Forbidden, PlanImpact, ReasonField, lines, useDirectoryChange } from "./shared";
 
 /**
- * The SSH public keys of the fleet, seen from the directory: who has
- * keys, which fingerprints, and who has none. The directory keeps the
- * key and its fingerprint but not the day the key arrived, so there is
- * no key age to show - and none is invented.
+ * The SSH public keys of the fleet, seen from the directory: who has keys,
+ * which fingerprints, and who has none.
  */
 export function SshKeys() {
   const t = useT();

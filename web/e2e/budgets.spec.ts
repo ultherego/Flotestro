@@ -4,13 +4,6 @@ import { expectHealthy, permissions, watchErrors } from "./fleet";
 /**
  * The budgets page: the capacity of the fleet, the sites and the backup
  * backends, and the editor of one capacity.
- *
- * The rows are compared with what the API answers rather than with the
- * numbers of the lab: the tokens held change with every task. One test
- * leaves a mark and takes it back: it raises the capacity of one budget by
- * a token through the editor and restores the original through the API,
- * with the tag of the record, the way the editor writes it. A token that
- * may not read the budgets skips with the permission it would need.
  */
 
 type Holder = { owner: string; claimant: string; class: string; tokens: number; since: string };
@@ -120,9 +113,9 @@ test.describe("budgets", () => {
       return;
     }
 
-    // The headings are found by their text: a heading that sorts the
-    // table carries a button with an arrow after the label, and a plain
-    // one has no scope a screen reader would call a column by.
+    // The headings are found by their text: a heading that sorts the table
+    // carries a button with an arrow after the label, and a plain one has no
+    // scope a screen reader would call a column by.
     const table = page.locator("table").first();
     for (const column of ["Key", "Capacity", "In use", "Held by", "Claimants", "Share per claimant", "Waiting jobs", "Waiting hosts"]) {
       await expect(table.locator("thead th", { hasText: heading(column) })).toBeVisible();
@@ -186,8 +179,8 @@ test.describe("budgets", () => {
     test.skip(items.length === 0, "no budget is configured in this installation");
     const { errors } = watchErrors(page);
 
-    // A site's own key is the narrowest scope the right can be held in,
-    // so it is the one most tokens may write; the fleet-wide keys are the
+    // A site's own key is the narrowest scope the right can be held in, so
+    // it is the one most tokens may write; the fleet-wide keys are the
     // fallback.
     const chosen = items.find((item) => {
       const [family, scope] = item.key.split(":");

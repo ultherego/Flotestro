@@ -11,12 +11,6 @@ import { useT } from "../i18n";
 
 /**
  * The fleet CA.
- *
- * The rotation has two phases, because a one-phase one does not work: a
- * server certificate issued by a CA the agent does not know cuts the host
- * off at the next panel restart. The screen leads through both phases and
- * shows the condition for moving between them - the number of hosts that do
- * not know the new CA yet.
  */
 export function CertificateAuthority({ reportError }: { reportError: (error: ApiError | null) => void }) {
   const t = useT();
@@ -55,9 +49,9 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
     },
     onError,
   });
-  // The removal is a step-up operation: the API records the reason and
-  // wants at least eight characters of it, so the dialog holds the confirm
-  // back until there are.
+  // The removal is a step-up operation: the API records the reason and wants
+  // at least eight characters of it, so the dialog holds the confirm back
+  // until there are.
   const askToRemove = async (ca: Authority) => {
     const answer = await confirm({
       title: t("Remove from trust set"),
@@ -79,7 +73,6 @@ export function CertificateAuthority({ reportError }: { reportError: (error: Api
   const reasonReady = reason.trim().length >= 8;
   // The trust set by state: one authority signs, at most one is prepared,
   // and the retired ones stay until no host holds a certificate of theirs.
-  // Before the answer arrives nothing is known, and the bar shows dashes.
   const count = (state: Authority["state"]) => (query.data ? list.filter((ca) => ca.state === state).length : undefined);
   const holding = list.filter((ca) => ca.hosts_using > 0);
   const holdingTone = (state: Authority["state"]): WidgetTone => (state === "active" ? "ok" : state === "pending" ? "warn" : "info");

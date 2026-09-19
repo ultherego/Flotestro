@@ -4,14 +4,6 @@ import { useT } from "../i18n";
 
 /**
  * The export of a list screen as a CSV file.
- *
- * The button asks the list's own address with format=csv and the filter
- * the screen is showing, so the file holds what the operator is looking
- * at - every page of it, because the server ignores the page for a file.
- * The browser carries the session; the file is saved through a link the
- * page makes for it and removes again, and a refusal is announced rather
- * than written into the screen: the list itself is untouched by a failed
- * export.
  */
 export function ExportButton({ path, params, disabled = false, label }: {
   /** The address of the list, without a query: /api/v1/hosts. */
@@ -73,10 +65,9 @@ export function exportAddress(path: string, params?: URLSearchParams): string {
 }
 
 /**
- * The file name the server gave the export, read off the disposition
- * header; the server names the file after the list and the day, and the
- * saved file is to carry that name. Without a header the file is a plain
- * export.
+ * The file name the server gave the export, read off the disposition header;
+ * the server names the file after the list and the day, and the saved file
+ * is to carry that name.
  */
 export function exportFileName(disposition?: string | null): string {
   const match = /filename="([^"]+)"/.exec(disposition ?? "");

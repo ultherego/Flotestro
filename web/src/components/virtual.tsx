@@ -2,19 +2,6 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * VirtualRows: a table whose body is windowed.
- *
- * Only the rows in view, plus a margin of `overscan` on each side, exist as
- * React elements; two spacer rows of computed height stand in for everything
- * above and below them, so the scrollbar has the length of the whole list.
- * A campaign of ten thousand hosts must not become ten thousand rows in the
- * browser: the targets already arrive page by page, and this keeps what the
- * pages add up to from turning into ten thousand elements and DOM nodes.
- *
- * The spacers are real <tr> elements inside a real <tbody>, not absolutely
- * positioned rows: the table keeps its own layout, so the header, the column
- * widths and the existing table styling work unchanged. The price is that
- * every row has to be the same height, which the callers enforce with a
- * single line of text per cell.
  */
 export function VirtualRows<T>({
   items, rowHeight, height, overscan = 6, columns, head, rowKey, render, onNearEnd, loading = false,
@@ -41,10 +28,7 @@ export function VirtualRows<T>({
   const container = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(height);
-  // The stride the browser actually drew. A table row does not honour a
-  // pixel height to the pixel - the cell borders add their own - and one
-  // pixel of drift per row is a whole screen off after a few hundred rows,
-  // so the arithmetic uses the measured row and not the requested one.
+  // The stride the browser actually drew.
   const [stride, setStride] = useState(rowHeight);
   // The list length at which the next page was last asked for: the scroll
   // handler fires many times before the fetch is reported as in flight.
@@ -55,8 +39,7 @@ export function VirtualRows<T>({
 
   // The viewport is measured rather than taken from the prop: the container
   // is allowed to be shorter than `height` while the list is short, and it
-  // grows as pages arrive. The measure is taken after every render and on a
-  // resize of the window; a value that did not change renders nothing.
+  // grows as pages arrive.
   useEffect(() => {
     const measure = () => {
       const node = container.current;

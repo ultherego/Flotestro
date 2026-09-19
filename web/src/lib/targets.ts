@@ -5,9 +5,8 @@ import { OPERATIONS_INTERVAL } from "./stream";
 
 /**
  * A target as the targets endpoint returns it: the campaign target and,
- * while the host's operation waits on its host, the resource lock it
- * waits on as the agent named it ("units held by task <id>
- * (schedule.run_now)"). Empty once the operation starts.
+ * while the host's operation waits on its host, the resource lock it waits
+ * on as the agent named it ("units held by task <id> (schedule.
  */
 export type TargetRow = CampaignTarget & { blocker?: string };
 
@@ -27,11 +26,6 @@ export const TARGET_PAGE = 200;
 
 /**
  * The targets of a campaign, page by page and filtered on the server.
- *
- * A campaign on ten thousand hosts must not become ten thousand rows in
- * the browser, and "the failed ones" is a question the database answers
- * better than a screen scanning a list. The query key starts with the
- * campaign, so a stream event refreshing the campaign refreshes every page.
  */
 export function useTargets(campaignID: string, filter: TargetFilter) {
   return useInfiniteQuery({
@@ -57,13 +51,8 @@ export function loadedTargets(data?: { pages: TargetPage[] }): TargetRow[] {
 }
 
 /**
- * The link between a campaign and the campaign that compensates it, as
- * the server returns it on a campaign. A compensating campaign names the
- * original by identifier and name; the original lists the campaigns
- * ordered to undo it. Both sides come from the compensating campaign's
- * record - the original is never rewritten. The count of changed hosts is
- * the number a compensation runs on; the server keeps it at zero until
- * the campaign settles, since a compensation is refused before that.
+ * The link between a campaign and the campaign that compensates it, as the
+ * server returns it on a campaign.
  */
 export type CompensationLinks = {
   compensates_campaign_id?: string;
@@ -74,17 +63,13 @@ export type CompensationLinks = {
 
 /**
  * The bounds of the wait for a rebooted host, in seconds, as the server
- * validates them. The default is what a campaign waits when the order
- * says nothing; the form starts there so the approver reads the bound
- * that will apply.
+ * validates them.
  */
 export const REBOOT_TIMEOUT = { min: 60, max: 7200, default: 900 };
 
 /**
  * The states a target can be in, for the filter, in the order a host moves
- * through them. The task of a host shows in three of them: dispatched
- * until the agent reports a start, awaiting_lock while it waits for a
- * resource of the host, running once it started.
+ * through them.
  */
 export const TARGET_STATES = [
   "pending", "awaiting_budget", "queued_offline", "planning", "dispatched", "awaiting_lock",
@@ -94,8 +79,7 @@ export const TARGET_STATES = [
 
 /**
  * The states a campaign has settled in: nothing changes on any host any
- * more, the report is on record, and a compensation can be ordered. A
- * canceling campaign is not among them - its hosts are still at work.
+ * more, the report is on record, and a compensation can be ordered.
  */
 export const SETTLED_CAMPAIGN_STATES = [
   "completed", "completed_with_issues", "failed", "plan_failed", "expired", "canceled",
@@ -138,11 +122,6 @@ export type StepPage = {
 
 /**
  * The steps of one host in a campaign.
- *
- * The strip is read for one host at a time - the one the operator opened
- * from the target table - so the request names the host and gets a page
- * of one. The key starts with the campaign, so a stream event refreshing
- * the campaign refreshes the strip too.
  */
 export function useTargetSteps(campaignID: string, hostID: string) {
   return useQuery({
@@ -159,11 +138,8 @@ export function useTargetSteps(campaignID: string, hostID: string) {
 
 /**
  * A selector leaf as the server reads it: the fields of the campaign
- * selector plus the facts a live selector may name - the health signals,
- * the agent version as a comparison, the relay, the failure domain. The
- * values are strings throughout: 'true' and 'false' for the health facts,
- * '< 0.49.0' for a version, so the rows of a builder and the words of an
- * expression carry the same thing.
+ * selector plus the facts a live selector may name - the health signals, the
+ * agent version as a comparison, the relay, the failure domain.
  */
 export type SelectorNode = Omit<SelectorExpression, "all" | "any" | "not"> & {
   os_version?: string;
@@ -195,9 +171,7 @@ export const LIFECYCLE_STATES = ["active", "quarantined", "recovery", "retiring"
 const BOOLEANS = ["true", "false"];
 
 /**
- * The keys of an expression, in the order the field suggests them. The
- * names are the JSON fields of the selector; the list mirrors the
- * server's, so a key the field suggests is a key the server reads.
+ * The keys of an expression, in the order the field suggests them.
  */
 export const SELECTOR_KEYS: SelectorKey[] = [
   { name: "site" },
@@ -255,10 +229,8 @@ class ExpressionError extends Error {
 
 /**
  * Cuts the text into words, operators, parentheses and quoted strings the
- * way the server does: a key runs over letters, digits and '_' and ends
- * at its operator; the value after an operator runs to the next space,
- * parenthesis or quote whatever it holds, so "tag=role=db" is the key
- * tag, the operator = and the value role=db.
+ * way the server does: a key runs over letters, digits and '_' and ends at
+ * its operator; the value after an operator runs to the next space,
  */
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
@@ -444,11 +416,7 @@ function leaf(key: SelectorKey, value: string, at: number): SelectorNode {
 
 /**
  * Reads the text form of a selector - "site = warsaw and (tag = role=db or
- * not environment = prod)", "agent_version < 0.49.0 and security_updates
- * = true" - into the selector the server takes, or says where it goes
- * wrong. The grammar is the server's: and binds tighter than or, not
- * binds to one condition, parentheses override, a value with spaces
- * stands in double quotes. An empty text is not an expression.
+ * not environment = prod)", "agent_version < 0.
  */
 export function parseExpression(text: string): ExpressionCheck {
   try {
@@ -467,10 +435,8 @@ export function parseExpression(text: string): ExpressionCheck {
 
 /**
  * The words that could come next, for the list under the field: the keys
- * where a condition starts, the values of a key that takes a fixed set
- * after its operator, and the keywords after a complete condition. The
- * prefix already typed narrows the list; a list of none means the field
- * has nothing to add.
+ * where a condition starts, the values of a key that takes a fixed set after
+ * its operator, and the keywords after a complete condition.
  */
 export function expressionSuggestions(text: string): string[] {
   let tokens: Token[];
@@ -516,9 +482,8 @@ function operatorsOf(key: SelectorKey | undefined): string[] {
 }
 
 /**
- * The expression in one line as the server describes it and the field
- * reads it back: "(site=warsaw and not tag=role=db)". A version leaf
- * carries its operator - "agent_version < 0.49.0".
+ * The expression in one line as the server describes it and the field reads
+ * it back: "(site=warsaw and not tag=role=db)".
  */
 export function expressionText(expression?: SelectorNode | null): string {
   if (!expression) return "";

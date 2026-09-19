@@ -8,10 +8,7 @@ import { useT } from "../../i18n";
 import { Forbidden, ListField, PlanImpact, ReasonField, names, useDirectoryChange } from "./shared";
 
 /**
- * The host groups of the directory. HBAC and sudo rules point at host
- * groups, so moving a host into one changes who may enter it: the
- * membership goes the same way as a rule - a plan with the rules that
- * reach the group, a reason, fresh authentication, a second person.
+ * The host groups of the directory.
  */
 export function HostGroups() {
   const t = useT();

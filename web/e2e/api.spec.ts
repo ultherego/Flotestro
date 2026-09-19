@@ -1,9 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 /**
- * The API the panel is built on, asked directly. The request context
- * carries the same Authorization header as the browser, so a failure here
- * separates a broken server from a broken screen.
+ * The API the panel is built on, asked directly.
  */
 
 test.describe("API", () => {

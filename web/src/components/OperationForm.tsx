@@ -195,7 +195,7 @@ function control(
 ) {
   // What the host has is offered, not imposed: a list beside the field
   // rather than a select, because an operator ordering something the host
-  // does not report yet - a volume about to be created, a unit from a
+  // does not report yet - a volume about to be created, a unit from a.
   const listID = suggestions && suggestions.length > 0 ? "operation-field-" + field.name : undefined;
   const list = listID ? (
     <datalist id={listID}>

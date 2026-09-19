@@ -43,12 +43,7 @@ const CAMPAIGN_STATES = [
 const PAGE = 50;
 
 /**
- * The campaign list. The filters run on the server and live in the
- * address, so a page filtered to "the failed ones since Monday" can be
- * sent as a link; the rows come one page at a time with the count of the
- * whole. A new campaign is ordered in the Bulk workspace: the wizard there
- * knows the reason, the offline policy and the typed selector, and a
- * second, smaller wizard here would order campaigns without them.
+ * The campaign list.
  */
 export function Campaigns() {
   const t = useT();
@@ -61,8 +56,8 @@ export function Campaigns() {
   const settledRequester = useDebounced(requester.trim());
   const sinceInstant = toInstant(since);
   // The page size is the operator's preference, kept in the browser; a
-  // change of it starts from the first page, because an offset measured
-  // in pages of fifty means nothing in pages of two hundred.
+  // change of it starts from the first page, because an offset measured in
+  // pages of fifty means nothing in pages of two hundred.
   const [pageSize, setStoredPageSize] = usePageSize("campaigns", PAGE);
   const setPageSize = (next: number) => { setStoredPageSize(next); setOffset(0); };
 
@@ -95,9 +90,8 @@ export function Campaigns() {
   if (action && !actions.includes(action)) actions.push(action);
   actions.sort();
   // The page comes newest first from the server; a click on a heading
-  // reorders the rows of this page in the browser, and a cleared sort
-  // goes back to the server's order. The list is one page of at most two
-  // hundred rows, so the browser can afford it.
+  // reorders the rows of this page in the browser, and a cleared sort goes
+  // back to the server's order.
   const columns = useColumns("campaigns", [
     { key: "name", label: t("Name"), sort: "name", fixed: true },
     { key: "state", label: t("State"), sort: "state" },
@@ -124,9 +118,8 @@ export function Campaigns() {
 
   if (error) return <ErrorBox error={error} />;
 
-  // The bar counts the listed campaigns: this page, not the whole
-  // history, and the caption says so. Before the list arrives nothing is
-  // known, and the segments show dashes.
+  // The bar counts the listed campaigns: this page, not the whole history,
+  // and the caption says so.
   const campaigns = data?.items ?? [];
   const count = (states: string[]) => (data ? campaigns.filter((campaign) => states.includes(campaign.state)).length : undefined);
   const awaiting = count(["awaiting_approval", "planned"]);
@@ -134,8 +127,8 @@ export function Campaigns() {
   const paused = count(["paused", "manual_gate"]);
   const completed = count(["completed"]);
   // A campaign that got through with hosts failed or unknown is neither a
-  // clean completion nor a failure; it has a segment of its own, because
-  // it is the one the operator has hosts to look at in.
+  // clean completion nor a failure; it has a segment of its own, because it
+  // is the one the operator has hosts to look at in.
   const withIssues = count(["completed_with_issues"]);
   const failed = count(["failed", "plan_failed", "expired", "partially_applied"]);
   // A canceling campaign still has hosts at work; it is counted with the
@@ -281,10 +274,9 @@ export function Campaigns() {
 }
 
 /**
- * The progress of one row: succeeded, failed and pending as numbers with
- * the campaign's colours, the unknown and skipped ones named where there
- * are any. A row of zeros is a campaign that has not started; a dash
- * would read as "not known".
+ * The progress of one row: succeeded, failed and pending as numbers with the
+ * campaign's colours, the unknown and skipped ones named where there are
+ * any.
  */
 function ProgressCells({ progress }: { progress: Progress }) {
   const t = useT();

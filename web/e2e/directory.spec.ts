@@ -2,11 +2,7 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { expectHealthy, permissions, watchErrors } from "./fleet";
 
 /**
- * The identity directory page, one tab at a time. Every tab is opened and
- * what it renders is compared with what the API answers for the same
- * resource; nothing is ordered, approved or written. The whole file skips
- * on an installation without a directory connection: the tabs would only
- * show the notice saying so.
+ * The identity directory page, one tab at a time.
  */
 
 type Status = { configured: boolean; reachable?: boolean; principal?: string };

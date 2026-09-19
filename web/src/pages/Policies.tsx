@@ -14,10 +14,8 @@ import { useT } from "../i18n";
 /* ---------------------------------------------------------------------- */
 
 /**
- * The colour of a verdict. Drift is a warning: the host is where the
- * policy does not want it, and somebody decides what happens. An error is
- * red because the panel does not know - and unknown is never compliant.
- * Not applicable is neutral: the rule does not concern the host.
+ * The colour of a verdict. Drift is a warning: the host is where the policy
+ * does not want it, and somebody decides what happens.
  */
 export function verdictTone(verdict: PolicyVerdict | string): WidgetTone {
   switch (verdict) {
@@ -33,8 +31,7 @@ export const VERDICT_ORDER: PolicyVerdict[] = ["compliant", "drift", "error", "n
 
 /**
  * The shares of a compliance bar: one segment per verdict, in the fixed
- * order, as fractions of the total. A policy nobody evaluated has no
- * total and no bar - an empty bar is not a compliant one.
+ * order, as fractions of the total.
  */
 export function complianceShares(counts: Partial<Record<PolicyVerdict, number>> | undefined): { verdict: PolicyVerdict; count: number; share: number }[] {
   const total = VERDICT_ORDER.reduce((sum, verdict) => sum + (counts?.[verdict] ?? 0), 0);
@@ -99,9 +96,8 @@ export function modeLabel(mode: PolicyRemediationMode | string, t: Translate): s
 /* ---------------------------------------------------------------------- */
 
 /**
- * The verdicts of a policy as one stacked bar, compliant first and the
- * rest in the fixed order, with the counts beside it. The colours are the
- * tones of the panel, so the bar reads like the status bars elsewhere.
+ * The verdicts of a policy as one stacked bar, compliant first and the rest
+ * in the fixed order, with the counts beside it.
  */
 export function ComplianceBar({ counts }: { counts: Policy["counts"] | undefined }) {
   const t = useT();
@@ -142,12 +138,6 @@ const POLICIES_INTERVAL = 60 * 1000;
 
 /**
  * The desired-state policies of the fleet.
- *
- * A policy declares what is to be true on a group of hosts and the panel
- * judges every host against it from the inventory. The list shows, per
- * policy, how the fleet stands: how many hosts comply, drift, cannot be
- * judged or are not concerned - and a bar that is empty because nobody
- * has evaluated yet is shown as such, not as green.
  */
 export function Policies() {
   const t = useT();

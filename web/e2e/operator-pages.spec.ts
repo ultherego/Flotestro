@@ -2,18 +2,9 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 import { expectHealthy, fleetHosts, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
- * The pages that give the operator a working day: the job list and one
- * job, the campaigns and their calendar, the secrets, the access tabs,
- * the audit export, the CVE view, the tag catalogue, the reports, the
- * status and first-run pages, the notification channels, the profile,
- * the command palette, and two faces of a host - its overview and its
- * package table.
- *
- * Every test only reads. Nothing is ordered, saved or confirmed: a
- * button that would change the fleet is looked at, never pressed. A page
- * the token may not see is skipped with the permission it would need, and
- * a fleet without a job, a secret or a package list skips the test that
- * needs one instead of failing on an empty screen.
+ * The pages that give the operator a working day: the job list and one job,
+ * the campaigns and their calendar, the secrets, the access tabs, the audit
+ * export, the CVE view, the tag catalogue, the reports, the status and
  */
 
 let hosts: Host[] = [];
@@ -62,10 +53,8 @@ test.describe("jobs", () => {
     await expect(header(page, "Jobs")).toBeVisible();
     await expect(card(page, "State").getByTestId("status-bar")).toBeVisible();
 
-    // The table or the honest empty state; the host column is a header
-    // of its own when there is a table.
-    // The job table is the one headed by the operation; the widgets
-    // above it are tables of their own.
+    // The table or the honest empty state; the host column is a header of
+    // its own when there is a table.
     const table = page.locator("table:has(th:has-text(\"Operation\"))").first();
     await expect(table.or(page.getByText(exact("No jobs."))).first()).toBeVisible();
     if (await table.isVisible()) {
@@ -147,9 +136,9 @@ test.describe("campaigns", () => {
       await expect(list.locator("tbody tr").first()).toBeVisible();
     }
 
-    // A state that no campaign is likely to be in: the list narrows on
-    // the server and either shows rows of that state or says there is
-    // nothing, with a way back.
+    // A state that no campaign is likely to be in: the list narrows on the
+    // server and either shows rows of that state or says there is nothing,
+    // with a way back.
     const narrowed = page.waitForResponse((response) => response.url().includes("/api/v1/campaigns?") && response.url().includes("state=canceled"));
     await state.selectOption("canceled");
     expect((await narrowed).ok()).toBeTruthy();

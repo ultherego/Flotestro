@@ -21,9 +21,9 @@ type JobDetail = Job & {
   approved_at?: string;
   canceled_by?: string;
   cancel_reason?: string;
-  // The cancel protocol: when the cancel was asked of the host holding
-  // the task, when the host answered, and what it answered - the outcome
-  // and the phase it was in. Absent for a job canceled in the queue.
+  // The cancel protocol: when the cancel was asked of the host holding the
+  // task, when the host answered, and what it answered - the outcome and the
+  // phase it was in.
   cancel_requested_at?: string;
   cancel_ack_at?: string;
   cancel_outcome?: string;
@@ -50,11 +50,8 @@ export function outputFilename(jobID: string, attempt: number, stream: string): 
 }
 
 /**
- * The payload as a list of fields: a dotted path and a value for every
- * leaf, so "unit.name: cron.service" reads without the braces. A payload
- * that is not an object, or that is deeper than a form would be, gives no
- * list and stays as JSON. A payload arrives as an object or as a JSON
- * text, the way prettyJSON takes it.
+ * The payload as a list of fields: a dotted path and a value for every leaf,
+ * so "unit.
  */
 export function payloadPairs(value: unknown): { path: string; value: string }[] | null {
   let payload = value;
@@ -88,11 +85,8 @@ export function payloadPairs(value: unknown): { path: string; value: string }[] 
 }
 
 /**
- * The host's answer to a cancel, in a sentence: what the request found
- * and what the host was doing. The outcome is the protocol's word; the
- * sentence says what it means, because "not_interruptible" reads as an
- * error to somebody who did not write the protocol. Empty until the
- * host answered.
+ * The host's answer to a cancel, in a sentence: what the request found and
+ * what the host was doing.
  */
 export function cancelAckLine(job: { cancel_outcome?: string; cancel_phase?: string },
   t: (key: string, params?: Record<string, string | number>) => string): string {
@@ -113,11 +107,8 @@ export function cancelAckLine(job: { cancel_outcome?: string; cancel_phase?: str
 
 /**
  * The host's reading of itself after a change, as the attempt carries it:
- * which verifier of the contract looked, whether it saw the state the
- * order asked for, what it expected, what it found, and why it did not
- * match. An attempt without one reported none - a read, an operation the
- * panel settles on the host's return, or an agent from before the
- * verifiers - which is not the same as a change nobody confirmed.
+ * which verifier of the contract looked, whether it saw the state the order
+ * asked for, what it expected, what it found, and why it did not match.
  */
 export type Verification = {
   verifier?: string;
@@ -132,10 +123,7 @@ type AttemptDetail = Attempt & { verification?: Verification; output_truncated?:
 
 /**
  * The verification in one line: the verifier, what it expected, what it
- * observed, and the reason when the two differ. The words come from the
- * host - a state word, a digest, a version - and a field the host left
- * empty reads as unknown rather than as an empty string, because an
- * unread state is not an empty one.
+ * observed, and the reason when the two differ.
  */
 export function verificationLine(verification: Verification,
   t: (key: string, params?: Record<string, string | number>) => string): string {
@@ -150,10 +138,8 @@ export function verificationLine(verification: Verification,
 }
 
 /**
- * The sentence a job carries when the change was made and the state was
- * not observed. It is said in full words rather than by the code alone:
- * applied_unverified is not a failure to change the host, and an operator
- * reading "failed" alone would repeat a change that already happened.
+ * The sentence a job carries when the change was made and the state was not
+ * observed.
  */
 export function appliedUnverifiedNote(job: { result_error_code?: string },
   t: (key: string) => string): string {
@@ -168,9 +154,9 @@ export function hasContent(value: unknown): boolean {
 }
 
 /**
- * The job page: everything the row shows, and what the row has no room
- * for - the whole payload, the plan the host computed, the output of every
- * attempt in full, and who approved or canceled it and why.
+ * The job page: everything the row shows, and what the row has no room for -
+ * the whole payload, the plan the host computed, the output of every attempt
+ * in full, and who approved or canceled it and why.
  */
 export function JobPage() {
   const t = useT();
@@ -212,11 +198,9 @@ export function JobPage() {
   const data = job.data;
   const host = data.hostname || data.host_id.slice(0, 8);
   const awaiting = data.state === "awaiting_approval";
-  // The plan the host computed, from the last attempt that carries one:
-  // a planning operation ends with it, and an apply that replans first
-  // carries it too.
-  // A package plan is the detail itself: its packages and facts sit at the
-  // top level, next to the kind, not under a "plan" of their own.
+  // The plan the host computed, from the last attempt that carries one: a
+  // planning operation ends with it, and an apply that replans first carries
+  // it too.
   const planned = [...(attempts.data?.items ?? [])].reverse()
     .find((item) => isHostPlan(item.detail?.kind as string) || item.detail?.kind === "package_plan");
   const packagePlan = planned?.detail?.kind === "package_plan";
@@ -225,8 +209,7 @@ export function JobPage() {
   const report = progress.get(id);
   const fields = payloadPairs(data.payload);
   // The verifications of the job, in the order of the attempts that made
-  // them. A retried job has one per attempt, and they may differ: the
-  // reason the first one gives is what the operator is looking for.
+  // them.
   const verifications = (attempts.data?.items ?? [])
     .map((item) => ({ attempt: item.id, verification: (item as AttemptDetail).verification }))
     .filter((entry): entry is { attempt: string; verification: Verification } => !!entry.verification);
@@ -526,9 +509,7 @@ export function JobPage() {
 }
 
 /**
- * One stream of an attempt. A long output opens at its first pages and
- * unfolds on request; the whole of it can be saved as a file, because a
- * transaction log is read in an editor, not in a table cell.
+ * One stream of an attempt.
  */
 function Output({ label, text, filename }: { label: string; text: string; filename: string }) {
   const t = useT();

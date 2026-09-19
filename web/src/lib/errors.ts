@@ -12,9 +12,7 @@ export type ErrorGuide = {
 };
 
 /**
- * The guide to error codes, read once per session. A code answers what
- * happened and what can safely be done next; the screens show that on
- * hover instead of leaving the operator with a bare identifier.
+ * The guide to error codes, read once per session.
  */
 export function useErrorGuides(): Map<string, ErrorGuide> {
   const { data } = useQuery({

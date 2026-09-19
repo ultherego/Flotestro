@@ -2,10 +2,9 @@ import { expect, test } from "@playwright/test";
 import { expectHealthy, fleetHosts, watchErrors, type Host } from "./fleet";
 
 /**
- * The Bulk workspace up to the preview: an operation is chosen, the scope
- * is narrowed to one site, and the eligibility step shows which hosts
- * would take part. The wizard stops there: no campaign is created, so
- * the fleet is left as it was.
+ * The Bulk workspace up to the preview: an operation is chosen, the scope is
+ * narrowed to one site, and the eligibility step shows which hosts would
+ * take part.
  */
 
 let hosts: Host[] = [];
@@ -34,15 +33,13 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await expect(scope.or(noEngine).first()).toBeVisible();
   test.skip(await noEngine.isVisible(), "this installation has no campaign engine; the wizard is not offered");
 
-  // Step 1: the order. The second step stays shut until the order is
-  // complete: the pill above and the button at the end of the step are
-  // both off, and both say why.
+  // Step 1: the order.
   const steps = page.locator(".bulk-steps");
   const targetsStep = steps.getByRole("button", { name: /Targets/ });
   await expect(targetsStep).toBeDisabled();
   // The first step says the first thing that is missing, in order: the
-  // operation, then the name, then whatever the operation's own form
-  // still wants. An empty wizard is missing the operation.
+  // operation, then the name, then whatever the operation's own form still
+  // wants.
   await expect(targetsStep).toContainText("pick an operation and name the campaign");
   const next = (title: string) => page.getByRole("button", { name: `Next: ${title}`, exact: true });
   await expect(next("Targets")).toBeDisabled();
@@ -68,9 +65,7 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   await expect(next("Targets")).toBeEnabled();
   await next("Targets").click();
 
-  // Step 2: the site. The hosts are chosen by their filters, the way the
-  // step starts in; the count comes from the database and the sample
-  // names the hosts.
+  // Step 2: the site.
   await expect(page.getByRole("heading", { name: "2. Targets" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "by site, environment and OS" })).toBeChecked();
   const siteField = page.locator("label.field").filter({ hasText: /^Site/ }).locator("input");
@@ -109,12 +104,8 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   const eligibleCount = Number((await eligibleRow.getByRole("cell").nth(1).textContent())?.trim());
   expect(eligibleCount).toBeGreaterThan(0);
   expect(eligibleCount).toBeLessThanOrEqual(count);
-  // A host without systemd cannot restart a unit, so the eligible count
-  // is bounded by the adapters the API reports, when it reports them. A
-  // host whose adapters are not known yet - never connected, or offline
-  // since before its report - stays eligible under the offline policy and
-  // is judged when it connects; the preview names those in a bucket of
-  // their own, so they are allowed for on top of the capable ones.
+  // A host without systemd cannot restart a unit, so the eligible count is
+  // bounded by the adapters the API reports, when it reports them.
   if (inSite.some((host) => host.capabilities?.length)) {
     const capable = inSite.filter((host) => host.capabilities?.some((item) => item.name === "systemd" && item.available)).length;
     const unknownRow = page.getByRole("row").filter({ has: page.locator(".badge", { hasText: "adapter unknown" }) });
@@ -129,9 +120,8 @@ test("the Bulk workspace previews a unit restart scoped to one site without crea
   }
   await expect(scopeBar).toContainText(`targets: ${eligibleCount}`);
 
-  // The wizard goes no further: the rollout, the window and the order
-  // are not touched. The next step is offered, the create step is not
-  // opened.
+  // The wizard goes no further: the rollout, the window and the order are
+  // not touched.
   await expect(next("Rollout")).toBeEnabled();
   await expect(steps.getByRole("button", { name: /Create/ })).toBeVisible();
   await expect(page.getByRole("heading", { name: "6. Create" })).toHaveCount(0);

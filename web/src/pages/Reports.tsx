@@ -13,16 +13,8 @@ import { FacetList, useFleetFacets } from "./Bulk";
 import { useT } from "../i18n";
 
 /**
- * The management reports: the patch status of the fleet, the campaigns
- * of a period and the compliance with the policies.
- *
- * A report is the same records the other screens show, read over one
- * period and narrowed to a part of the fleet, laid out to be handed on:
- * printed as a document with a head that says what it is a report of, or
- * exported as a file a spreadsheet opens. The page computes nothing of
- * its own - every number comes from the server, the way the screens it
- * summarises get theirs - so a report never disagrees with the list it
- * stands for.
+ * The management reports: the patch status of the fleet, the campaigns of a
+ * period and the compliance with the policies.
  */
 
 /** The periods offered with one click, and the one typed by hand. */
@@ -37,10 +29,9 @@ export const PRESETS: { key: Preset; label: string }[] = [
 ];
 
 /**
- * The bounds of a preset as instants: the last days end now; a month
- * runs from its first midnight to the next one in the browser's clock,
- * because "September" is the operator's September, not the server's.
- * The custom preset keeps what the operator typed.
+ * The bounds of a preset as instants: the last days end now; a month runs
+ * from its first midnight to the next one in the browser's clock, because
+ * "September" is the operator's September, not the server's.
  */
 export function presetRange(preset: Preset, now: Date, custom: { from: string; to: string }): { from: string; to: string } {
   const monthStart = (shift: number) => new Date(now.getFullYear(), now.getMonth() + shift, 1);
@@ -67,10 +58,9 @@ export type ReportFilters = {
 };
 
 /**
- * The query every report and every export is asked with: the bounds
- * and the filter, and nothing when a bound is missing - a half period
- * is refused by the server, and the page does not ask until both ends
- * are set.
+ * The query every report and every export is asked with: the bounds and the
+ * filter, and nothing when a bound is missing - a half period is refused by
+ * the server, and the page does not ask until both ends are set.
  */
 export function reportParams(filters: ReportFilters): URLSearchParams {
   const params = new URLSearchParams();
@@ -292,9 +282,9 @@ export function Reports() {
   });
   const permissions = new Set(whoami.data?.permissions ?? []);
 
-  // The bounds are fixed when the choice is made, not on every render:
-  // "the last 30 days" is the thirty days before the click, and the
-  // three reports of one page are asked with the same instant.
+  // The bounds are fixed when the choice is made, not on every render: "the
+  // last 30 days" is the thirty days before the click, and the three reports
+  // of one page are asked with the same instant.
   const range = useMemo(() => presetRange(preset, new Date(), custom), [preset, custom]);
   const filters: ReportFilters = { from: range.from, to: range.to, site, environment };
   const query = reportParams(filters);
@@ -522,9 +512,9 @@ export const FOLDED_ROWS = 25;
 function CampaignsCard({ report, error, ready, params }: { report?: CampaignsReport; error: unknown; ready: boolean; params: URLSearchParams }) {
   const t = useT();
   const totals = report?.totals;
-  // A month of a busy fleet closes a hundred campaigns; the screen shows
-  // the first rows in the server's order and unfolds the rest on request,
-  // while the printed document and the file always carry them all.
+  // A month of a busy fleet closes a hundred campaigns; the screen shows the
+  // first rows in the server's order and unfolds the rest on request, while
+  // the printed document and the file always carry them all.
   const [unfolded, setUnfolded] = useState(false);
   const folded = report ? Math.max(0, report.campaigns.length - FOLDED_ROWS) : 0;
   return (

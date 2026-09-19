@@ -2,19 +2,6 @@ import { useT } from "../i18n";
 
 /**
  * The head of a fleet view.
- *
- * Every screen of the whole fleet answers the same three numbers before
- * anything else: how many hosts are in scope, how many of them the
- * numbers on the screen really describe, and how many nothing is known
- * about - a host without the fact, with one too old to trust, or without
- * the adapter that reports it. An unknown host is never a zero: a fleet
- * of a thousand with findings on nine hundred and silence about the rest
- * is not a fleet with a hundred clean hosts, and a screen that showed the
- * same number for both would be believed.
- *
- * When the answer is not complete the view says so with a stable reason,
- * and the badge here says it out loud rather than letting a plausible
- * number stand.
  */
 export type Coverage = {
   total_hosts: number;

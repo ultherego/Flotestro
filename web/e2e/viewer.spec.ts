@@ -2,17 +2,7 @@ import { expect, test, type APIRequestContext, type Browser, type BrowserContext
 import { expectHealthy, fleetHosts, jobState, onlineHostWith, openModule, permissions, watchErrors, type Host } from "./fleet";
 
 /**
- * What a viewer sees. The server previews every action of a host for the
- * signed-in operator, and the screens draw a mutating control only where
- * the order would be taken: the Services page of the same host shows the
- * restart button to the administrator's session and none to a viewer's,
- * and every module page still renders for the viewer, with the one line
- * saying what changing it would take.
- *
- * The viewer is created through the API with the suite's token, which
- * needs principal.manage for that; without it the suite skips. The
- * principal is left behind: identities are not deleted, and one more
- * viewer of the lab site changes nothing.
+ * What a viewer sees.
  */
 
 const SEGMENTS = [

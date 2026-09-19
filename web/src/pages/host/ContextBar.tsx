@@ -10,12 +10,7 @@ import { hostTitle, useDocumentTitle } from "../../lib/title";
 import { useT } from "../../i18n";
 
 /**
- * The persistent host header. An operator switching modules must know
- * without checking anything which machine they work on - the top bar
- * names it, and this card under the bar carries its state and facts, so
- * the identity is part of the layout, not text repeated by the individual
- * screens. The first line is the state, the second the facts as chips: a
- * fact read at a glance is a fact that gets read.
+ * The persistent host header.
  */
 export function ContextBar({ host, segment, campaign }: {
   host: Host;
@@ -25,8 +20,7 @@ export function ContextBar({ host, segment, campaign }: {
 }) {
   const t = useT();
   // The tab carries the machine and the module: the bar is the one place
-  // that knows both, whichever screen is open under it. The module goes by
-  // its name in the registry, in the operator's language.
+  // that knows both, whichever screen is open under it.
   const moduleName = findModule(segment)?.name;
   useDocumentTitle(hostTitle(host, moduleName ? t(moduleName) : segment));
   return (
@@ -66,14 +60,6 @@ export function ContextBar({ host, segment, campaign }: {
 
 /**
  * The tags of the host as chips, with an editor in place.
- *
- * Tags are what the operator recorded about the machine - its role, its
- * tier, its team - and a campaign selector reads them, so they stand in the
- * bar next to the facts the host reports. Editing replaces the whole list:
- * the field shows what is there and the save sends what is typed, so two
- * operators editing at once see the second write in full rather than a
- * merge nobody asked for. The editor is gated like every other host write:
- * whoever cannot change the tags sees them and no button.
  */
 function Tags({ host }: { host: Host }) {
   const t = useT();
@@ -153,20 +139,11 @@ function splitTags(text: string): string[] {
 
 /**
  * An inventory refresh on demand.
- *
- * The panel shows the image from before the last cycle, so an operator who
- * just changed something on the host by hand or prepares a campaign must be
- * able to ask "how is it now". The button is in the bar, not in a tab,
- * because it concerns the whole host; the scope follows from the open tab -
- * what the operator looks at is refreshed, not the whole host at every
- * click.
  */
 function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
   const t = useT();
   // The scope is taken from the tab registry: it knows which inventory
-  // module the open view lives off. A tab without a module (Jobs,
-  // Overview) refreshes the whole host - narrowing to something that does
-  // not exist would refresh nothing.
+  // module the open view lives off.
   const scope = findModule(segment)?.inventory;
   const refresh = useInventoryRefresh(host, scope);
 
@@ -190,10 +167,7 @@ function RefreshInventory({ host, segment }: { host: Host; segment: string }) {
 }
 
 /**
- * The order of an inventory refresh and its outcome. The job ends only
- * once the new revision is saved, so the hook follows it to the end:
- * otherwise "refreshed" would only mean "ordered", and the operator would
- * look at the old image believing it is new.
+ * The order of an inventory refresh and its outcome.
  */
 function useInventoryRefresh(host: Host, scope?: string) {
   const t = useT();
@@ -219,8 +193,7 @@ function useInventoryRefresh(host: Host, scope?: string) {
     }
     setMessage(result.result_message || t("inventory refreshed"));
     // The new image is in the panel, so the views of this host are to show
-    // it. There is no single inventory key: every tab reads its own, so
-    // everything concerning this machine is invalidated.
+    // it.
     queryClient.invalidateQueries({
       predicate: (query) => query.queryKey.includes(host.id),
     });
@@ -248,10 +221,7 @@ function useInventoryRefresh(host: Host, scope?: string) {
 }
 
 /**
- * The identifier of the host, short, with a copy of the whole. The panel
- * knows the host by identifier and so do its API, its jobs and its audit
- * entries; an operator writing a ticket or a script needs it in the
- * clipboard, not read off the address bar.
+ * The identifier of the host, short, with a copy of the whole.
  */
 function HostIdentifier({ host }: { host: Host }) {
   const t = useT();
@@ -272,11 +242,9 @@ function HostIdentifier({ host }: { host: Host }) {
 }
 
 /**
- * The actions an operator reaches for from any tab: a whole-host
- * inventory refresh, the logs, and a reboot - the last one a link to the
- * power tab, where the order is confirmed, not a button that reboots
- * from a menu. A disclosure rather than a dropdown component: it needs no
- * script to close and no class of its own.
+ * The actions an operator reaches for from any tab: a whole-host inventory
+ * refresh, the logs, and a reboot - the last one a link to the power tab,
+ * where the order is confirmed, not a button that reboots from a menu.
  */
 function HostActions({ host }: { host: Host }) {
   const t = useT();
@@ -317,11 +285,6 @@ function finished(state: string | undefined): boolean {
 
 /**
  * The refusal badge: the gateway turned the host away, and this is why.
- *
- * It stands next to the connection state because it changes what that
- * state means - an offline host with a refusal is alive and knocking, not
- * away - and it leads to the lifecycle card of the overview, where the
- * identity recovery that answers it is ordered.
  */
 function ConnectionRefusal({ host }: { host: Host }) {
   const t = useT();
@@ -343,9 +306,7 @@ function ConnectionRefusal({ host }: { host: Host }) {
 }
 
 /**
- * The maintenance window badge. It is in the bar, not in the power tab,
- * because it concerns every operation on this host: whoever starts doing
- * anything is to know that somebody else already works on this machine.
+ * The maintenance window badge.
  */
 function MaintenanceWindow({ host }: { host: Host }) {
   const t = useT();
@@ -363,9 +324,7 @@ function MaintenanceWindow({ host }: { host: Host }) {
 }
 
 /**
- * The management address with its origin. An undetermined address is shown
- * as undetermined: a host may have many addresses and giving any of them as
- * the management address would mislead the operator.
+ * The management address with its origin.
  */
 function ManagementAddress({ host }: { host: Host }) {
   const t = useT();

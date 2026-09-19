@@ -11,15 +11,8 @@ import { useToast } from "../components/Toast";
 import { useT } from "../i18n";
 
 /**
- * The tag catalogue: every tag the visible hosts carry, in one place.
- *
- * A tag is set on the host page, one host at a time, and that is where
- * it belongs. But "which tags does this fleet use" and "is web the same
- * thing as www" cannot be answered host by host, and a tag spelled two
- * ways is a selector that matches half the hosts it should. This page
- * answers the first question and mends the second: a rename moves every
- * host the operator may change from the old name to the new one, in one
- * transaction, with a reason on the trail.
+ * The tag catalogue: every tag the visible hosts carry, in one place. A tag
+ * is set on the host page, one host at a time, and that is where it belongs.
  */
 
 /** One tag of the catalogue with the number of visible hosts carrying it. */
@@ -176,11 +169,7 @@ export function Tags() {
 }
 
 /**
- * Renaming one tag on every host that carries it. The new name is
- * checked the way a tag on the host page is; the reason is required,
- * because the rename touches every host at once and the trail must say
- * why. A host the operator may not change keeps the old tag, and the
- * answer says how many moved.
+ * Renaming one tag on every host that carries it.
  */
 function RenameTag({ tag, onDone }: { tag: TagCount; onDone: () => void }) {
   const t = useT();

@@ -16,11 +16,9 @@ import { useT } from "../../i18n";
 const AUDIT_PAGE = 50;
 
 /**
- * Who an actor is, in the operator's words: a person by the name it had,
- * a campaign by a link to it, the agent of this host by the host's name,
- * the panel as itself. The immutable identifier stays on hover - it is
- * what the trail keeps. The snapshot decides the words and the link; the
- * text of actor_id only stands in for an event written before it.
+ * Who an actor is, in the operator's words: a person by the name it had, a
+ * campaign by a link to it, the agent of this host by the host's name, the
+ * panel as itself.
  */
 export function actorLabel(
   event: Pick<AuditEvent, "actor_type" | "actor_id">,
@@ -69,13 +67,6 @@ export function digest(detail: Record<string, unknown> | undefined): string {
 
 /**
  * The audit trail of one host.
- *
- * The trail is the fleet trail narrowed to the host, with the same
- * filters and the same pages: "the denials on this host since Monday" is
- * asked here the way it is asked on the fleet page, and a host with a long
- * history is browsed rather than cut off at the newest rows. Every event
- * opens on the whole record, because a digest of a few keys is not what an
- * incident review reads.
  */
 export function HostAudit() {
   const t = useT();

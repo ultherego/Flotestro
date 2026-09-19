@@ -1,8 +1,6 @@
 /**
- * The navigation icons: hand-drawn 16px strokes on a 24-unit grid, drawn
- * in currentColor so they take the colour of the text next to them. They
- * are decorative - every icon stands beside a label or a title - so they
- * are hidden from assistive technology.
+ * The navigation icons: hand-drawn 16px strokes on a 24-unit grid, drawn in
+ * currentColor so they take the colour of the text next to them.
  */
 export type IconName =
   | "dashboard" | "hosts" | "add-host" | "groups" | "relays" | "jobs" | "bulk" | "campaigns" | "reads"

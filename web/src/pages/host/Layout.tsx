@@ -12,9 +12,7 @@ import { REFRESH_INTERVAL } from "../../lib/stream";
 import { useT } from "../../i18n";
 
 /**
- * The host workspace. The active module is a segment of the address, not
- * component state: thanks to that a refresh, the browser history, a direct
- * link and opening in a new tab all work.
+ * The host workspace.
  */
 export function HostLayout() {
   const t = useT();

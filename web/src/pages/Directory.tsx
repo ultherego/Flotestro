@@ -33,8 +33,7 @@ const TABS: Tab[] = ["users", "groups", "hbac", "sudo", "hosts", "host-groups", 
 
 /**
  * The identity directory view: the objects the document names as managed
- * from the panel, one tab each. HBAC and sudo rules have a permission of
- * their own: they describe who may enter a host and raise their privileges.
+ * from the panel, one tab each.
  */
 export function Directory() {
   const t = useT();
@@ -81,9 +80,7 @@ export function Directory() {
 }
 
 /**
- * The user groups and their membership. A membership change ends the panel
- * sessions of the moved users: a session carries the groups of the moment
- * of login, and the only honest thing to do with the old scope is to end it.
+ * The user groups and their membership.
  */
 function Groups() {
   const t = useT();
@@ -321,8 +318,7 @@ function HBACRules() {
 
 /**
  * The directory's own answer to "may this user use this service on this
- * host". The verdict comes from the directory rather than from the panel,
- * so it is the one the host applies.
+ * host".
  */
 function SimulateAccess() {
   const t = useT();
@@ -552,11 +548,6 @@ type DNSRecord = { zone: string; name: string; type: string; values: string[]; t
 
 /**
  * The directory DNS.
- *
- * This is a different scope than the host resolver: there the panel tells
- * one host whom to ask, here - what the directory answers to the whole
- * network. That is why a record goes the same way as an account change:
- * plan, approval, execution phase by phase - not as a job for the agent.
  */
 function DirectoryDNS() {
   const t = useT();

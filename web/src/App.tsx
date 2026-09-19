@@ -453,7 +453,7 @@ function sectionOf(groups: NavGroup[], pathname: string): Pick<Trail, "section" 
 /**
  * The host context of the shell: on a host page the fleet groups of the
  * sidebar give way to the modules of that host, under the same headings the
- * registry knows, with the way back to the list above them; the top bar
+ * registry knows, with the way back to the list above them; the top bar.
  */
 function useHostContext(installation: ReturnType<typeof useCapabilities>): { face: NavFace; host?: Host; module?: string } | undefined {
   const match = useMatch("/hosts/:id/*");

@@ -34,11 +34,7 @@ const SORT_COLUMNS = ["created_at", "finished_at", "state", "action_type", "host
 export const DEFAULT_SORT: NonNullable<SortValue> = { column: "created_at", descending: true };
 
 /**
- * The filters of the list, as they stand in the address bar. Every one of
- * them is a string so the address and the screen say the same thing; the
- * instants stay in the local form the datetime input speaks and turn into
- * RFC 3339 only for the request. The sort travels with them, though it
- * narrows nothing: a link to "the failed ones, oldest first" is one view.
+ * The filters of the list, as they stand in the address bar.
  */
 export type JobFilters = {
   state: string;
@@ -63,12 +59,7 @@ export const EMPTY_FILTERS: JobFilters = {
 };
 
 /**
- * The sort after a click on a column, as the address carries it. The
- * list's own order is a column's - the creation time, newest first - so
- * that column goes round between newest and oldest first rather than
- * through a "no order" that would look the same as its start; any other
- * column goes ascending, descending, then back to the list's own order,
- * which the address spells as nothing.
+ * The sort after a click on a column, as the address carries it.
  */
 export function nextSort(current: string, column: string): string {
   const effective = parseSort(current) ?? DEFAULT_SORT;
@@ -100,9 +91,7 @@ export function anyFilter(filters: JobFilters): boolean {
 
 /**
  * The moment a number of hours ago, in the form a datetime-local input
- * takes: the browser's local time to the minute, with no zone. The value
- * goes through toInstant like a typed one, so a preset and a typed bound
- * follow the same path to the request.
+ * takes: the browser's local time to the minute, with no zone.
  */
 export function localInput(at: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -115,9 +104,7 @@ export function hoursAgo(hours: number, now: Date = new Date()): string {
 
 /**
  * The address of the Bulk workspace with the same order written in again:
- * the operation, the payload and the one host of the job. The operator
- * decides there whether to send it as it was or to change it first; a
- * failed job is not repeated blind.
+ * the operation, the payload and the one host of the job.
  */
 export function orderAgainAddress(job: Pick<Job, "action_type" | "payload" | "host_id" | "hostname">): string {
   const name = `${job.action_type} again on ${job.hostname || job.host_id.slice(0, 8)}`;
@@ -144,22 +131,18 @@ export function prettyJSON(value: unknown): string {
 
 /**
  * The job list with approvals. An approval confirms the plan hash.
- *
- * The filters run on the server and the list grows page by page: the fleet
- * orders thousands of tasks a week, and "the failed ones since Monday" is a
- * question the database answers better than a screen scanning a list.
  */
 export function Jobs() {
   const t = useT();
   // The address carries the filters: a tile on the dashboard and a read
   // fan-out link here with one already set, and a bookmark brings back a
-  // view. Every change goes back into the address for the same reason.
+  // view.
   const [searchParams, setSearchParams] = useSearchParams();
   const [filters, setFilters] = useState<JobFilters>(() => readFilters(searchParams));
   const setFilter = (key: keyof JobFilters, value: string) => setFilters((previous) => ({ ...previous, [key]: value }));
   // The address last written or adopted: it tells a change typed on the
-  // screen from a link followed to this page, so each side follows the
-  // other without the two chasing each other.
+  // screen from a link followed to this page, so each side follows the other
+  // without the two chasing each other.
   const written = useRef(searchParams.toString());
   useEffect(() => {
     const next = filterParams(filters).toString();
@@ -241,9 +224,8 @@ export function Jobs() {
   // One stream per tab carries the progress of all the running operations
   // and wakes the list when one of them changes state.
   const progress = useProgress("/api/v1/events");
-  // The jobs name their campaign by identifier only; the names come from
-  // the campaign list, read once the list shows a job that has one. A
-  // reader without the right to the campaigns keeps the identifiers.
+  // The jobs name their campaign by identifier only; the names come from the
+  // campaign list, read once the list shows a job that has one.
   const anyCampaign = loadedItems(list.data).some((job) => job.campaign_id);
   const campaigns = useQuery({
     queryKey: ["campaigns", "names"],
@@ -280,8 +262,7 @@ export function Jobs() {
   });
   // A batch decision is the per-job call repeated: the trail then carries
   // one record per job, as it would had the operator clicked them one by
-  // one. The loop stops at the first refusal so the operator sees which
-  // job refused and why, with the rest still ticked.
+  // one.
   const batch = useMutation({
     mutationFn: async ({ operation, jobs, reason }: { operation: "approve" | "cancel"; jobs: Job[]; reason: string }) => {
       setBatchError("");
@@ -312,10 +293,8 @@ export function Jobs() {
 
   if (list.error) return <ErrorBox error={list.error} />;
 
-  // The bar counts what is on the list, nothing more: the list is the
-  // pages loaded so far of the newest jobs, and the caption says so. While
-  // the list has not arrived the counts are not known, and the segments
-  // show dashes rather than zeros.
+  // The bar counts what is on the list, nothing more: the list is the pages
+  // loaded so far of the newest jobs, and the caption says so.
   const jobs = loadedItems(list.data);
   const loaded = list.data !== undefined;
   const count = (states: string[]) => (loaded ? jobs.filter((job) => states.includes(job.state)).length : undefined);
@@ -326,9 +305,7 @@ export function Jobs() {
   const succeeded = count(["succeeded"]);
   const canceled = count(["canceled", "cancelled", "rejected"]);
   const listed = t("among the {n} listed", { n: jobs.length });
-  // The listed jobs by operation, the most frequent first. The list is
-  // one page of the newest jobs, so this is what the fleet did lately,
-  // not what it does in general.
+  // The listed jobs by operation, the most frequent first.
   const byOperation = Object.entries(
     jobs.reduce<Record<string, number>>((acc, job) => { acc[job.action_type] = (acc[job.action_type] ?? 0) + 1; return acc; }, {}),
   ).sort((x, y) => y[1] - x[1]);
@@ -713,9 +690,8 @@ function Attempts({ jobId }: { jobId: string }) {
 }
 
 /**
- * The head of an attempt: its number, state and exit code, the unit
- * before and after, the message and the typed result. The job page shows
- * the same head over the full output, so the two screens agree.
+ * The head of an attempt: its number, state and exit code, the unit before
+ * and after, the message and the typed result.
  */
 export function AttemptHead({ attempt }: { attempt: Attempt }) {
   const t = useT();
@@ -746,11 +722,7 @@ type SpaceFact = {
 };
 
 /**
- * Where the bytes of a package change go, file system by file system. A
- * separate /var or /boot can be full while "/" has room; the host refuses
- * such a change before the transaction, and the plan is where the operator
- * sees it coming. A fact whose need was not measured says so - an unknown
- * size is not zero.
+ * Where the bytes of a package change go, file system by file system.
  */
 function SpaceFacts({ facts }: { facts?: SpaceFact[] }) {
   const t = useT();

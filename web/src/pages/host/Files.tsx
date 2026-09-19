@@ -15,12 +15,8 @@ import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard"
 import { useT } from "../../i18n";
 
 /**
- * A copy of the file the host itself kept before a write took its place.
- *
- * The panel's own history covers only what the panel sent. The content a
- * host had before it was ever managed from here, and the content somebody
- * changed outside the panel, exist on that host alone - so the host reports
- * them and the return is ordered by the checksum it reports.
+ * A copy of the file the host itself kept before a write took its place. The
+ * panel's own history covers only what the panel sent.
  */
 type HostVersion = {
   // No checksum means a version whose content came from the secret store:
@@ -63,9 +59,6 @@ type ManagedFile = {
 /**
  * Why a version the host keeps cannot be ordered back, or an empty string
  * when it can.
- *
- * A disabled button with no reason is the worst of both: the operator sees
- * the version, cannot ask for it and is not told why.
  */
 export function hostVersionRefusal(version: HostVersion): "" | "from_secret" | "no_checksum" {
   if (version.from_secret) return "from_secret";
@@ -75,11 +68,6 @@ export function hostVersionRefusal(version: HostVersion): "" | "from_secret" | "
 
 /**
  * The order that puts a version the host kept back in place.
- *
- * The version is named by its checksum rather than by "the last one": the
- * operator picks a content, and the host refuses a checksum it never kept
- * instead of writing the newest copy. The permissions travel with it, so
- * the file comes back as the inode it was, not as the bytes alone.
  */
 export function hostRollbackPayload(file: ManagedFile, version: HostVersion) {
   return {
@@ -106,11 +94,6 @@ type Intent = { action: string; label: string; description: string; payload: Rec
 
 /**
  * The host's configuration files.
- *
- * This is not root's file manager: the path range is set by the host
- * administrator, and files with password hashes, private keys and sudo
- * rules are not editable here at all - each of those things has a module of
- * its own.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const FILE_CHANGES = ["file.ensure", "file.remove", "file.rollback"];
@@ -341,9 +324,6 @@ export function Files() {
 
 /**
  * The file's version history together with a difference preview.
- *
- * The return is to a specific version, not "undo the last change": the
- * operator picks the content they saw.
  */
 function History({
   hostID, hostname, file, onIntent,
@@ -455,12 +435,6 @@ function History({
 
 /**
  * The copies of the file the host itself kept.
- *
- * The panel's history holds what the panel sent; this holds what the file
- * really was on this machine before each write - including content the
- * panel never had, because somebody changed the file outside it. Offering
- * the list is the point: without it a return to such a content would mean
- * asking the operator for the checksum of something they cannot see.
  */
 function HostVersions({
   hostID, hostname, file, onIntent,
@@ -545,10 +519,6 @@ function HostVersions({
 
 /**
  * A line-by-line difference preview.
- *
- * A simple split into lines is enough for configuration files: the
- * operator asks which line changed, not about a change halfway through a
- * word.
  */
 function Difference({ before, after }: { before: string; after: string }) {
   const old = before.split("\n");

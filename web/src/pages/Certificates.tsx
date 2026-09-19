@@ -47,7 +47,7 @@ type View = Coverage & {
 /**
  * A deadline is read as a date, not as a distance: the badge beside it
  * already says how many days are left, and a rotation is planned on the
- * calendar. The exact time and the distance are on hover.
+ * calendar.
  */
 function Deadline({ value }: { value: string }) {
   const absolute = absoluteTime(value);
@@ -69,18 +69,14 @@ function ExpiryBadge({ status, days }: { status: string; days?: number }) {
 }
 
 /**
- * The certificate deadlines of the whole fleet.
- *
- * A certificate expires quietly and always at the worst moment. The only
- * defence is a list on which all the deadlines stand next to each other,
- * sorted from the nearest - and on which one can see whether anything will
- * renew those certificates.
+ * The certificate deadlines of the whole fleet. A certificate expires
+ * quietly and always at the worst moment.
  */
 export function FleetCertificates() {
   const t = useT();
-  // The list grows page by page with the cursor the server hands back;
-  // the counters above it come from the first page and describe the whole
-  // fleet, whatever part of the list is loaded.
+  // The list grows page by page with the cursor the server hands back; the
+  // counters above it come from the first page and describe the whole fleet,
+  // whatever part of the list is loaded.
   const list = useInfiniteQuery({
     queryKey: ["certificates", "fleet"],
     queryFn: ({ pageParam }) => api.get<View>(
@@ -91,10 +87,9 @@ export function FleetCertificates() {
   const error = list.error;
   const data = list.data?.pages[0];
   const items = loadedItems<Item>(list.data);
-  // A heading reorders the rows already loaded, in the browser; the
-  // server's order - the nearest deadline first - is the one a cleared
-  // sort goes back to. A deadline nobody could read sorts as unknown,
-  // apart from the far ones.
+  // A heading reorders the rows already loaded, in the browser; the server's
+  // order - the nearest deadline first - is the one a cleared sort goes back
+  // to.
   const columns = useColumns("certificates", [
     { key: "expires", label: t("Expires"), sort: "expires" },
     { key: "host", label: t("Host"), sort: "host", fixed: true },
@@ -121,9 +116,7 @@ export function FleetCertificates() {
   const critical = counts.critical ?? 0;
   const warning = counts.warning ?? 0;
   // The hosts that reported a certificate: the judged ones minus the ones
-  // that reported an empty list. A host nobody has pointed at a path is
-  // not a host without certificates, and neither is one that never
-  // reported at all - the coverage line above counts the second kind.
+  // that reported an empty list.
   const reporting = Math.max(0, data.evaluated_hosts - data.hosts_without_certificates);
   // What renews the loaded certificates: the list starts at the closest
   // deadlines, so this says whether the next wave renews itself.
@@ -275,12 +268,6 @@ const AUTHORITIES_SHOWN = 8;
 
 /**
  * The authorities the fleet trusts.
- *
- * This is the rotation screen: during one, some hosts trust the old and the
- * new authority at once, and only this view says whether the old one may be
- * withdrawn yet. Only the anchors placed by the panel are shown - the store
- * holds hundreds of distribution authorities, and they are no information
- * here.
  */
 function Trust({ leaves }: { leaves: Item[] }) {
   const t = useT();
@@ -294,18 +281,15 @@ function Trust({ leaves }: { leaves: Item[] }) {
 
   // The rotation goes in four stages - distribute the trust, verify it
   // reached every host, rotate the leaves, withdraw the old trust - and
-  // every stage is an ordinary campaign. The table says where each
-  // authority stands: how many hosts trust it and how many leaves still
-  // hang on it, because the last stage is only safe at zero.
+  // every stage is an ordinary campaign.
   const issuedBy = (anchor: TrustView["items"][number]) =>
     leaves.filter((leaf) => anchor.subject && leaf.issuer === anchor.subject).length;
   const bulk = (action: string, name: string, payload: Record<string, unknown>) =>
     `/bulk?action=${encodeURIComponent(action)}&name=${encodeURIComponent(name)}&payload=${encodeURIComponent(JSON.stringify(payload, null, 2))}`;
 
-  // A rotation involves two authorities, three at most; a table of fifty
-  // is a lab that has rotated fifty times, and it folds so the page under
-  // it is still reached. The nearest to withdrawal stand first as the
-  // server lists them.
+  // A rotation involves two authorities, three at most; a table of fifty is
+  // a lab that has rotated fifty times, and it folds so the page under it is
+  // still reached.
   const folded = !allAuthorities && data.items.length > AUTHORITIES_SHOWN;
   const shown = folded ? data.items.slice(0, AUTHORITIES_SHOWN) : data.items;
 
@@ -404,11 +388,8 @@ function Trust({ leaves }: { leaves: Item[] }) {
 }
 
 /**
- * The expiry timeline of the fleet's certificates.
- *
- * The list sorted by deadline says what burns now. The timeline says when
- * the next wave comes - and that is what decides whether the rotation is
- * planned for this week or for the quarter.
+ * The expiry timeline of the fleet's certificates. The list sorted by
+ * deadline says what burns now.
  */
 function ExpiryTimeline({ timeline }: { timeline: { reason: string; count: number }[] }) {
   const t = useT();

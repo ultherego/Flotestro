@@ -163,8 +163,7 @@ export function severityRung(severity?: string): string {
 /**
  * The address of the Bulk workspace with a package upgrade of this host
  * written in: one package from a finding's row, or every package with a
- * vendor fix from "Patch all fixable". Null when there is nothing to
- * install - a finding without a fix is a risk to weigh, not an order.
+ * vendor fix from "Patch all fixable".
  */
 export function patchAddress(host: { id: string; hostname?: string }, findings: Pick<Finding, "state" | "vendor_fix" | "binary_package" | "source_package">[]): string | null {
   const packages: string[] = [];
@@ -207,12 +206,6 @@ function SeverityBadge({ severity }: { severity?: string }) {
 
 /**
  * The host's vulnerabilities.
- *
- * The distribution vendor's tracker decides: it knows which version carries
- * the fix, because fixes are backported and by upstream numbering look
- * vulnerable. The panel guesses nothing - the finding count stands next to
- * the coverage here, because without it it means nothing: a host the feed
- * does not cover and a host without vulnerabilities both show zero.
  */
 export function Vulnerabilities() {
   const t = useT();
@@ -249,12 +242,7 @@ export function Vulnerabilities() {
   const state = data?.state;
   const findings = data?.findings ?? [];
 
-  // The affected findings by the vendor's severity and by package. Both are
-  // unknown until the report arrives - and even then they stand next to the
-  // coverage, because a host the feed does not cover shows zero too.
-  // Without a feed nothing was assessed: the counts are then not known
-  // rather than zero, and the bar shows dashes. A host the feed covers in
-  // part has counts, read next to the coverage.
+  // The affected findings by the vendor's severity and by package.
   const assessed = !!data && !!state && (state.packages_covered > 0 || !state.coverage_reason);
   const affected = assessed ? findings.filter((finding) => finding.state === "affected") : undefined;
   const severities = ["critical", "high", "medium", "low"];

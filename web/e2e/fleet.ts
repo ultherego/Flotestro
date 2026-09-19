@@ -13,9 +13,7 @@ export type Host = {
 };
 
 /**
- * The hosts the token may see, straight from the API. The tests do not
- * assume the names of the lab machines: what the list shows is compared
- * with what the API returns, so the same tests run against any fleet.
+ * The hosts the token may see, straight from the API.
  */
 export async function fleetHosts(request: APIRequestContext): Promise<Host[]> {
   const response = await request.get("/api/v1/hosts?limit=200");
@@ -30,9 +28,7 @@ export function hostWith(hosts: Host[], capability: string): Host | undefined {
 }
 
 /**
- * Collects the uncaught exceptions of the page. A React error boundary
- * would print "Error:", but an exception in an event handler only reaches
- * the console; both are failures of the screen, so both are watched.
+ * Collects the uncaught exceptions of the page.
  */
 export function watchErrors(page: Page): { errors: string[] } {
   const errors: string[] = [];
@@ -71,8 +67,7 @@ export async function openHostList(page: Page) {
 
 /**
  * The permissions of the token, as the panel reads them to show or hide a
- * section. A test of a gated page skips without the permission instead of
- * failing on the refusal the page would show.
+ * section.
  */
 export async function permissions(request: APIRequestContext): Promise<Set<string>> {
   const response = await request.get("/api/v1/whoami");
@@ -94,7 +89,7 @@ export function onlineHostWith(hosts: Host[], capability: string): Host | undefi
 /**
  * Opens a module of the host workspace and waits for it to settle: the
  * module header when the host backs it, or the notice saying why it does
- * not. The notice is returned so the test can skip with the reason.
+ * not.
  */
 export async function openModule(page: Page, host: Host, segment: string, name: string): Promise<string | null> {
   await page.goto(`/hosts/${host.id}/${segment}`);

@@ -11,23 +11,12 @@ import { useT } from "../i18n";
 
 /**
  * Notification channels.
- *
- * A channel is where the fleet reports to when nobody is looking at the
- * panel: a webhook of the installation's own, a mailbox, a chat room. It
- * names the subjects it carries and, for a fleet of many sites, the part
- * of the fleet it speaks for. A platform administrator writes one with a
- * reason; the test button says at once whether the address answers, and
- * the log below keeps every attempt with its typed reason, so a receiver
- * that is down is a row to read rather than a silence to wonder about.
  */
 
 export type ChannelKind = "webhook" | "email" | "slack_webhook";
 
 /**
- * A channel as the API serves it. The credential is never in it: the
- * address of an incoming webhook, the key a webhook is signed with and a
- * mail password live in the secret store, and the channel carries only
- * that one is configured and when it was last replaced.
+ * A channel as the API serves it.
  */
 export type Channel = {
   id: string;
@@ -66,10 +55,8 @@ export type DeliverySummary = {
 };
 
 /**
- * One row of the queue: one event for one channel, with the attempts
- * counted on it and the outcome so far. A row is durable - a receiver
- * that is down delays it rather than losing it - so the table shows the
- * state, the attempt, when the next one is due and what went wrong last.
+ * One row of the queue: one event for one channel, with the attempts counted
+ * on it and the outcome so far.
  */
 export type Delivery = {
   id: string;
@@ -182,8 +169,6 @@ export function recipients(text: string): string[] {
 
 /**
  * The body the API takes, or what stops the form from being a channel.
- * The checks are the ones the server makes before writing, so a refusal
- * is read under the field rather than after the save.
  */
 export function channelBody(form: ChannelForm): { body?: Record<string, unknown>; problem?: string } {
   if (form.name.trim() === "") return { problem: "name" };
@@ -259,8 +244,8 @@ export function describeChannel(channel: Pick<Channel, "kind" | "config" | "publ
     return `${to.join(", ")} via ${relay}${config.starttls === false ? "" : " (STARTTLS)"}`;
   }
   // An incoming webhook shows the host of its address and nothing of the
-  // path: enough to tell a mistyped receiver from the right one, nothing
-  // of the token the path carries.
+  // path: enough to tell a mistyped receiver from the right one, nothing of
+  // the token the path carries.
   return String(config.url ?? channel.public_config?.display_host ?? "");
 }
 
@@ -272,10 +257,7 @@ export function addressWithheld(channel: Pick<Channel, "kind" | "config" | "secr
 }
 
 /**
- * What the form says in place of a secret. The value itself is never
- * shown back - it left the panel for the secret store the moment it was
- * typed - so the operator is told the one thing that can be checked
- * without it: whether a credential is configured, and how old it is.
+ * What the form says in place of a secret.
  */
 export function secretWords(
   t: (text: string, params?: Record<string, string | number>) => string,
@@ -315,10 +297,7 @@ export type LogWindow = "" | "1" | "24" | "168";
 
 /**
  * The query of the log for the screen's filter, the since moment computed
- * from the window. The filter's one word narrows by either vocabulary:
- * sent and failed are the previous release's and go out as status, every
- * state of the queue goes out as state. The server refuses a word neither
- * knows, so a typo is an answer rather than an empty table.
+ * from the window.
  */
 export function deliveryParams(filter: { channel: string; status: string; window: LogWindow }, now: Date): URLSearchParams {
   const params = new URLSearchParams();
@@ -366,10 +345,7 @@ export function stateTone(state: DeliveryState | string): string {
 }
 
 /**
- * True for a row an operator can send again. Only a dead letter: a row
- * still waiting for its next attempt is the worker's, and pressing the
- * button on it would only reset the attempts of a receiver that is
- * coming back on its own.
+ * True for a row an operator can send again.
  */
 export function canRetry(delivery: Pick<Delivery, "state">): boolean {
   return delivery.state === "dead_letter";
@@ -377,9 +353,8 @@ export function canRetry(delivery: Pick<Delivery, "state">): boolean {
 
 /**
  * When the next attempt of a row is due, or "" for a row that has none: a
- * row that arrived, one that was kept back, a dead letter nobody put back
- * in the queue. Showing the column for those would read as a promise the
- * queue does not make.
+ * row that arrived, one that was kept back, a dead letter nobody put back in
+ * the queue.
  */
 export function nextAttemptAt(delivery: Pick<Delivery, "state" | "next_attempt_at">): string {
   if (delivery.state !== "pending" && delivery.state !== "retry_wait") return "";
@@ -749,9 +724,9 @@ function ChannelRow({ channel, canManage, busy, outcome, onTest, onEdit, onToggl
 }
 
 /**
- * The fields of a channel: the kind chooses which address fields show,
- * the events are ticked from the catalogue the server sent, and the
- * filter narrows by severity, site and environment.
+ * The fields of a channel: the kind chooses which address fields show, the
+ * events are ticked from the catalogue the server sent, and the filter
+ * narrows by severity, site and environment.
  */
 function ChannelFields({ form, subjects, severities, onChange }: {
   form: ChannelForm; subjects: Subject[]; severities: string[]; onChange: (form: ChannelForm) => void;

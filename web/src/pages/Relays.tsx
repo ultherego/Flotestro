@@ -40,9 +40,7 @@ function Expiry({ value, revoked }: { value?: string; revoked: boolean }) {
 }
 
 /**
- * The fill of the buffer as the relay last reported it. A relay that has
- * not reported since the panel started has no number, and that is said
- * rather than shown as an empty buffer.
+ * The fill of the buffer as the relay last reported it.
  */
 function BufferCell({ relay }: { relay: Relay }) {
   const t = useT();
@@ -65,11 +63,6 @@ function BufferCell({ relay }: { relay: Relay }) {
 
 /**
  * The relays of the sites.
- *
- * A relay is the single link a site hangs on: while it works, nobody thinks
- * about it; when it falls silent, a whole site stops reporting and every
- * host behind it looks offline at once. This page is where that is seen
- * as one relay rather than as thirty hosts.
  */
 export function Relays() {
   const t = useT();
@@ -215,13 +208,6 @@ export function historyAddress(relayID: string, range: BufferRangeName): string 
 
 /**
  * What the window as a whole says, read off the points.
- *
- * The drops are summed from the deltas rather than taken as the
- * difference of the counters at the ends: the counter starts again at
- * every restart, so the difference across one would report a negative
- * number or hide everything the ended process lost. The peak fill is
- * missing rather than zero when no point knew its limit - a share of an
- * unknown limit is not a share of nothing.
  */
 export function bufferSummary(points: RelayBufferPoint[], stepSeconds: number) {
   let dropped = 0;
@@ -241,14 +227,8 @@ export function bufferSummary(points: RelayBufferPoint[], stepSeconds: number) {
 }
 
 /**
- * The buffer of a relay over a window.
- *
- * The last heartbeat answers "how full is it now" and nothing else. This
- * is the rest, and it is what an operator reads the morning after: the
- * fill against the limit, the items waiting, the results the site lost
- * between two points, the stretches when the relay had nothing upstream
- * to send to, and the moments it restarted - which is the only thing that
- * explains a drop counter falling back to zero.
+ * The buffer of a relay over a window. The last heartbeat answers "how full
+ * is it now" and nothing else.
  */
 function BufferHistory({ relay }: { relay: Relay }) {
   const t = useT();
@@ -275,9 +255,8 @@ function BufferHistory({ relay }: { relay: Relay }) {
     fillSeries.push({ name: t("Limit"), tone: "neutral", line: true, values: points.map((point) => point.bytes_limit) });
   }
   // The outage is drawn as a band the height of the chart over the points
-  // that had no upstream, and a restart as a single mark: both are
-  // stretches of the same time axis, so they belong on the same picture
-  // rather than in a sentence underneath it.
+  // that had no upstream, and a restart as a single mark: both are stretches
+  // of the same time axis, so they belong on the same picture rather than in
   fillSeries.push({
     name: t("No upstream"), tone: "error",
     values: points.map((point) => (point.disconnected ? band : undefined)),
@@ -494,13 +473,8 @@ function HostsTable({ hosts }: { hosts: RelayHost[] }) {
 }
 
 /**
- * Revoking the relay.
- *
- * From this moment the relay is refused: its heartbeat, its renewal and
- * every new session through it. The sessions it attested are ended, and
- * the agents come back on their own - directly, through another relay, or
- * not at all if the relay was their only path. That is a decision about a
- * whole site, so it asks for a reason and fresh authentication.
+ * Revoking the relay. From this moment the relay is refused: its heartbeat,
+ * its renewal and every new session through it.
  */
 function RevokeRelay({ relay, hosts }: { relay: Relay; hosts: number }) {
   const t = useT();

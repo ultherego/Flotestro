@@ -11,9 +11,7 @@ import { VerdictChip, ruleSummary, verdictLabel, verdictTone } from "../Policies
 import { useT } from "../../i18n";
 
 /**
- * The verdicts of every policy that selects this host, grouped by
- * policy. A rule the panel could not judge is an error with its reason,
- * and stands in red: the host is not compliant because nobody knows.
+ * The verdicts of every policy that selects this host, grouped by policy.
  */
 export function HostPolicies() {
   const t = useT();

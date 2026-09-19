@@ -82,9 +82,8 @@ type RemediationOrderDraft = {
 };
 
 /**
- * The selector the order sends: the hosts listed under the chosen checks,
- * or the site and environment filters. The server resolves it; the screen
- * never decides which host is in.
+ * The selector the order sends: the hosts listed under the chosen checks, or
+ * the site and environment filters.
  */
 type RemediationSelector = { site?: string; environment?: string; host_ids?: string[] };
 
@@ -102,18 +101,11 @@ function selectorOf(draft: RemediationOrderDraft, checks: Check[], selected: Set
 
 /**
  * The fleet's compliance with the hardening profile.
- *
- * One bad setting on a hundred hosts is one problem, not a hundred - and
- * that only shows once the findings stand next to each other. The fix
- * however goes host by host: each one creates an ordinary job of the module
- * that owns the given thing.
  */
 export function FleetSecurity() {
   const t = useT();
   const [expanded, setExpanded] = useState("");
-  // The checks ticked for a fleet remediation. Only a check with a
-  // remediating operation behind it can be ticked: there is nothing to
-  // plan for the rest.
+  // The checks ticked for a fleet remediation.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const permissions = usePermissions();
   const remediates = permissions.has("security.remediate");
@@ -150,9 +142,8 @@ export function FleetSecurity() {
     .filter((check) => !SEVERITIES.includes(check.severity))
     .reduce<Record<string, number>>((acc, check) => { acc[check.severity] = (acc[check.severity] ?? 0) + check.failed; return acc; }, {});
 
-  // The hosts with the most findings, counted over the host lists the
-  // checks carry. A check that carries no host list is counted in the
-  // bar but not here, and the widget says when that leaves it blank.
+  // The hosts with the most findings, counted over the host lists the checks
+  // carry.
   const byHost = new Map<string, { hostname: string; count: number }>();
   for (const check of data.checks) {
     for (const host of check.hosts ?? []) {
@@ -303,13 +294,6 @@ export function FleetSecurity() {
 
 /**
  * The hosts failing one check.
- *
- * The fleet answer carries a sample under each check, because a screen
- * that printed every host of every check would be an inventory listing.
- * The whole list is read here, a page at a time, with the cursor the
- * server hands back: on a fleet of thousands the hosts failing one check
- * are themselves a list, and a sample that quietly stops at fifty is the
- * same plausible half-truth this screen exists to avoid.
  */
 function CheckHosts({ check, columns }: { check: Check; columns: number }) {
   const t = useT();
@@ -322,8 +306,8 @@ function CheckHosts({ check, columns }: { check: Check; columns: number }) {
     getNextPageParam: (last) => last.next_cursor || undefined,
   });
   // Until the first page arrives the sample the fleet answer carried is
-  // shown: it is the same rows, and an empty expander would read as "no
-  // host fails this".
+  // shown: it is the same rows, and an empty expander would read as "no host
+  // fails this".
   const loaded = loadedItems<HostWithFinding>(list.data);
   const hosts = list.data ? loaded : (check.hosts ?? []);
   return (
@@ -351,13 +335,8 @@ function CheckHosts({ check, columns }: { check: Check; columns: number }) {
 }
 
 /**
- * The fleet remediation flow: the scope, the preview and the order.
- *
- * The operator picks checks and hosts; there is no fix-all. The preview
- * shows every host's plan grouped by its steps - a hundred hosts with the
- * same change are one change - and the hosts that get none, with the
- * reason. The order creates a campaign that waits for one approval over
- * the whole set of plans, and the campaign page takes it from there.
+ * The fleet remediation flow: the scope, the preview and the order. The
+ * operator picks checks and hosts; there is no fix-all.
  */
 function FleetRemediation({ checks, selected }: { checks: Check[]; selected: Set<string> }) {
   const t = useT();

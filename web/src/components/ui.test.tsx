@@ -69,10 +69,7 @@ describe("ErrorCode", () => {
 });
 
 /**
- * The states JobState classifies by name. They are listed here as the
- * component lists them; a state added to the component without a
- * meaning shows a badge with nothing on hover, and this list is what
- * catches it.
+ * The states JobState classifies by name.
  */
 const JOB_STATES = [
   // succeeded

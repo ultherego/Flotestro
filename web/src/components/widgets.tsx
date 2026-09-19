@@ -13,10 +13,8 @@ export type Segment = {
 };
 
 /**
- * A row of coloured segments, one per state, with the count in large
- * type: the condition of the fleet at one glance. Zero is shown, not
- * hidden - the absence of a state is information too - and an undefined
- * count is a dash, because unknown is never zero.
+ * A row of coloured segments, one per state, with the count in large type:
+ * the condition of the fleet at one glance.
  */
 export function StatusBar({ segments, compact = false }: { segments: Segment[]; compact?: boolean }) {
   const total = segments.reduce((sum, segment) => sum + (segment.value ?? 0), 0);
@@ -46,9 +44,8 @@ export type Bar = { label: string; value: number; tone?: WidgetTone | "accent" }
 export type BarSeries = { name: string; tone: WidgetTone | "accent"; values: number[] };
 
 /**
- * A bar chart over categories or hours, as plain SVG. Several series
- * stack on one bar. The height is given in the viewBox, so the chart
- * scales with its widget.
+ * A bar chart over categories or hours, as plain SVG. Several series stack
+ * on one bar.
  */
 export function BarChart({
   labels, series, height = 160, everyLabel = 1,
@@ -127,13 +124,8 @@ export type AreaSeries = {
 };
 
 /**
- * A time series as plain SVG: time on the x axis, one or more series
- * as a line with a soft fill under it, a faint grid and the values on the
- * y axis. A gap in a series is left open rather than bridged, so a host
- * that sent nothing for an hour shows the hour empty. An optional peak
- * line runs above a series: the rollups of a long window carry the
- * highest sample of each step beside the mean, and a spike averaged away
- * would be a lie of omission.
+ * A time series as plain SVG: time on the x axis, one or more series as a
+ * line with a soft fill under it, a faint grid and the values on the y axis.
  */
 export function AreaChart({
   times, series, height = 160, max, format = (value) => String(value), label = shortTime, peak,
@@ -163,7 +155,6 @@ export function AreaChart({
   );
   // A fixed top keeps a share on the same scale on every host; a top from
   // the data rounds up to a tick, so the largest value is not on the edge.
-  // A fixed top of nothing is no top at all.
   const ceiling = max !== undefined && max > 0 ? max : undefined;
   const step = ceiling !== undefined ? ceiling / 4 : niceStep(Math.max(1, highest));
   const top = ceiling ?? Math.max(step, Math.ceil(highest / step) * step);

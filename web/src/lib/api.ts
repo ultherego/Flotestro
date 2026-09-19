@@ -1,8 +1,5 @@
-// The panel API client.
-//
-// Authentication rests on the session cookie set by the control plane. The
-// cookie is HttpOnly, so the browser attaches it itself, but state-changing
-// requests must send back the CSRF token from the second cookie.
+// The panel API client. Authentication rests on the session cookie set by
+// the control plane.
 
 const CSRF_COOKIE = "flotestro_csrf";
 const CSRF_HEADER = "X-Flotestro-CSRF";
@@ -47,10 +44,7 @@ function csrfToken(): string {
 }
 
 /**
- * What a caller may add to one request. Headers are for the conditional
- * write: a record read with its entity tag goes back with `If-Match`, so a
- * capacity or a secret written over somebody else's change is refused
- * rather than winning quietly.
+ * What a caller may add to one request.
  */
 export type RequestOptions = { headers?: Record<string, string> };
 
@@ -130,9 +124,7 @@ export const api = {
 export type Collection<T> = { items: T[]; count: number };
 
 /**
- * One page of a list read by cursor. The server hands back the key of the
- * last row as `next_cursor`; the screen asks for the next page with it and
- * stops when it is empty. `total` comes only from the lists that count.
+ * One page of a list read by cursor.
  */
 export type Page<T> = Collection<T> & { next_cursor?: string; total?: number };
 

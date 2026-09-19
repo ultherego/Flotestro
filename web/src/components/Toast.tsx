@@ -7,17 +7,6 @@ import { useT } from "../i18n";
 
 /**
  * The notifications of the panel.
- *
- * A mutation's outcome used to be one line of text in the card that
- * ordered it, which is the right record but the wrong announcement: the
- * line is at the top of the page and the button that was pressed may be
- * at the bottom of a table. A toast repeats the outcome in one corner of
- * the screen whatever the scroll position, then goes away. The inline
- * line stays where it was: a toast is an announcement, not the record.
- *
- * A success or a note dismisses itself; an error stays until the operator
- * dismisses it, because the operator may have looked away and an error
- * that vanished is an error that was not read.
  */
 
 export type ToastKind = "success" | "error" | "info";

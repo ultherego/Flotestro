@@ -5,10 +5,6 @@ import {
 
 /**
  * The directory.
- *
- * Joining carries no password: the one-time credential is fetched from the
- * directory at the moment the task is sent and injected into the envelope,
- * so no secret lies in the database for the life of the order.
  */
 
 const GROUP = "Directory";

@@ -2,9 +2,7 @@
 
 /**
  * An adapter detected on the host. The name says what the host has
- * ("packages.apt"), not what the operation wants ("packages"). The reason
- * comes from the host: the interface is to repeat it, not guess the cause in
- * its own code.
+ * ("packages.
  */
 export type Capability = {
   name: string;
@@ -18,9 +16,7 @@ export type Capability = {
 export type Capabilities = Capability[];
 
 /**
- * The state of one inventory module. The revision and the observation
- * timestamp belong to the module, so a tab shows the freshness of what it
- * displays.
+ * The state of one inventory module.
  */
 export type InventoryFragment<T> = {
   host_id: string;
@@ -42,9 +38,7 @@ export type HostIdentity = {
 };
 
 /**
- * The panel's judgement on directory logins during an outage. The host only
- * reports the SSSD policy and the cache age; "unknown" is a missing fact,
- * never "no cached logins".
+ * The panel's judgement on directory logins during an outage.
  */
 export type OfflineVerdict = {
   verdict: "cached_logins_until" | "cached_logins_indefinitely" | "no_cached_logins" | "unknown";
@@ -84,23 +78,17 @@ export type Host = {
   last_seen_at?: string;
   boot_id?: string;
   // What the agent reported about itself at its last Hello beyond the
-  // version: the commit it was built from, the protocols it speaks, and
-  // the configuration it runs on. Every field is absent for a host whose
-  // agent predates the report - an unknown build is not an empty one.
+  // version: the commit it was built from, the protocols it speaks, and the
+  // configuration it runs on.
   agent_build_commit?: string;
   agent_protocol_min?: number;
   agent_protocol_max?: number;
-  // The digest of the effective agent.yaml, absent also for a host on the
-  // environment variables of the old flow; the schema the file declares,
-  // zero for no file; and the verdict: the host runs on the environment
-  // file or on a schema older than the current one. Absent when the agent
-  // reported nothing - not knowing is not "legacy".
+  // The digest of the effective agent.
   config_fingerprint?: string;
   config_schema_version?: number;
   config_legacy?: boolean;
   // The maintenance window: an empty field means a host outside a window,
-  // not a window of zero length. Campaigns skip a host in a window, and its
-  // alerts wake nobody.
+  // not a window of zero length.
   maintenance?: { until: string; reason?: string; set_by?: string; set_at?: string };
   // Empty values mean an undetermined state, not zero.
   reboot_required: boolean | null;
@@ -115,8 +103,6 @@ export type Host = {
   management_address_source?: "session" | "agent" | "manual";
   management_address_observed_at?: string;
   // Why the gateway last turned the host away since its last session.
-  // Absent for a host that connected the last time it tried: a session
-  // that opens clears it.
   last_connection_refusal?: ConnectionRefusal;
   enrolled_at: string;
   capabilities: Capabilities;
@@ -124,9 +110,7 @@ export type Host = {
 };
 
 /**
- * A refusal of the gateway. The certificate codes name the certificate the
- * host presented; a lifecycle refusal reads lifecycle_<state> and is an
- * operator's decision rather than a fault of the host.
+ * A refusal of the gateway.
  */
 export type ConnectionRefusal = {
   code: string;
@@ -160,8 +144,7 @@ export function refusalName(code: string): string {
 
 /**
  * One node of a campaign selector: exactly one field is set. A combinator
- * holds other nodes; a leaf names one fact about the host. The server
- * compiles it into the host query, so the panel never resolves it itself.
+ * holds other nodes; a leaf names one fact about the host.
  */
 export type SelectorExpression = {
   all?: SelectorExpression[];
@@ -226,8 +209,6 @@ export type FleetSummary = {
   sssd_offline: number;
   in_maintenance: number;
   // The attention counters the database computes over the visible fleet.
-  // A missing one is a counter the server could not answer honestly for
-  // this view, and the tile is left out rather than shown as zero.
   failed_jobs_24h?: number;
   pending_enrollment_requests?: number;
   agents_behind_latest?: number;
@@ -235,8 +216,8 @@ export type FleetSummary = {
   agent_certificates_expiring?: number;
   agent_certificates_expired?: number;
   degraded_relays?: number;
-  // The lifecycle document's panel-level alarms, as counters: a relay
-  // buffer at least 70 % full, the audit trail's duplicate identities and
+  // The lifecycle document's panel-level alarms, as counters: a relay buffer
+  // at least 70 % full, the audit trail's duplicate identities and
   // enrollment refusals, and agents on a protocol the panel does not speak.
   relays_buffer_high?: number;
   duplicate_identities_24h?: number;
@@ -245,10 +226,7 @@ export type FleetSummary = {
 };
 
 /**
- * What a decommission ended with. remote_cleanup_unconfirmed is the honest
- * part: the host is retired either way, but only a host that answered the
- * final task has wiped its identity - one without a session, or silent
- * past the deadline, may still hold its files.
+ * What a decommission ended with.
  */
 export type DecommissionOutcome = {
   host_id: string;
@@ -278,9 +256,9 @@ export type Job = {
   payload: unknown;
   payload_hash: string;
   requires_approval: boolean;
-  // A destructive operation requires two people's consent, so the flag
-  // alone is not enough: what counts is how many approvals there are and
-  // how many are needed.
+  // A destructive operation requires two people's consent, so the flag alone
+  // is not enough: what counts is how many approvals there are and how many
+  // are needed.
   required_approvals: number;
   collected_approvals: number;
   created_by: string;
@@ -323,9 +301,7 @@ export type Attempt = {
   /**
    * The host's reading of itself after the change: which verifier of the
    * contract looked, whether it saw the state that was ordered, what it
-   * expected, what it found and why the two differ. Absent for a read, for
-   * an operation the panel settles on the host's return, and for an agent
-   * from before the verifiers.
+   * expected, what it found and why the two differ.
    */
   verification?: {
     verifier?: string;
@@ -335,8 +311,7 @@ export type Attempt = {
     reason?: string;
   };
   // The delivery to the host, the agent's acknowledgement, the start it
-  // reported and the end: the window of the attempt on the host. An
-  // attempt never heard from has neither an acknowledgement nor a start.
+  // reported and the end: the window of the attempt on the host.
   dispatched_at?: string;
   accepted_at?: string;
   started_at?: string;
@@ -369,8 +344,7 @@ export type Campaign = {
   payload?: unknown;
   // planning, planned, awaiting_approval, canary, manual_gate, running,
   // paused, canceling, and the settled ones: completed,
-  // completed_with_issues, failed, plan_failed, expired, canceled. The
-  // list of the settled ones is SETTLED_CAMPAIGN_STATES in lib/targets.
+  // completed_with_issues, failed, plan_failed, expired, canceled.
   state: string;
   canary_size: number;
   wave_size: number;
@@ -403,11 +377,6 @@ export type Campaign = {
 
 /**
  * One entry of the durable campaign timeline.
- *
- * The content depends on the event kind, so it is a bag of fields rather
- * than a rigid shape: a target event carries the host and the wave, a
- * campaign event - the pause reason. Pretending one shape would force
- * filling in fields the given event does not have.
  */
 export type TimelineEntry = {
   id: number;
@@ -432,9 +401,7 @@ export type CampaignTarget = {
   cancel_requested_at?: string;
   cancel_outcome?: string;
   cancel_phase?: string;
-  // One of TARGET_STATES in lib/targets. A terminal state is one of
-  // succeeded, no_change, failed, unknown, skipped, ineligible, excluded,
-  // canceled; the report totals count each of them apart.
+  // One of TARGET_STATES in lib/targets.
   state: string;
   error_code?: string;
   message?: string;
@@ -681,9 +648,7 @@ export type AccessSimulation = {
 };
 
 /**
- * The effective access of one host. `known` false means the directory has
- * no entry for the host: the rules that reach it are then undetermined,
- * not absent.
+ * The effective access of one host.
  */
 export type HostAccess = {
   hostname: string;
@@ -744,8 +709,7 @@ export type LocalSudoRule = {
 
 /**
  * The platform picture of the system module, laid over the basic facts of
- * the fragment. A missing number is a fact the host could not read, and
- * `missing` says why for each of them.
+ * the fragment.
  */
 export type SystemSnapshot = {
   hostname?: string;
@@ -785,9 +749,7 @@ export type InventoryRevision = {
 };
 
 /**
- * An account seen on the host. A null value means an undetermined state and
- * must be shown as unknown, not as "no" - otherwise the panel would claim
- * the account has open access although it did not check.
+ * An account seen on the host.
  */
 export type LocalAccount = {
   name: string;
@@ -894,9 +856,7 @@ export type GroupMapping = {
 };
 
 /**
- * A fleet CA. The "pending" state means the CA is already recognised and
- * distributed, but does not sign yet - handing it the signing requires the
- * whole fleet to have learnt it.
+ * A fleet CA.
  */
 export type Authority = {
   subject: string;
@@ -918,8 +878,8 @@ export type EnrollmentStep = {
   key: "token" | "certificate" | "connected" | "inventory";
   state: EnrollmentStepState;
   // The reason the step does not go on, when the panel knows it: a refused
-  // attempt recorded against the order, or a readiness gate the host has
-  // not passed in time. Absent when the panel knows nothing yet.
+  // attempt recorded against the order, or a readiness gate the host has not
+  // passed in time.
   error_code?: string;
   detail?: string;
 };
@@ -1006,8 +966,6 @@ export type RelayDetail = { relay: Relay; hosts: RelayHost[] };
 /**
  * One capacity budget as the fleet page lists it: the key, the capacity
  * somebody set, the tokens held right now, and who holds or asks for them.
- * A key with an asterisk in its middle segment is the default policy for
- * every key of that family nobody described separately.
  */
 export type Budget = {
   key: string;
@@ -1041,9 +999,7 @@ export type InstallationFamily = {
 };
 
 /**
- * Everything a host needs before it holds a token. Nothing here is secret,
- * so the profile is read for a placement and as often as needed; the token
- * is ordered separately and shown once.
+ * Everything a host needs before it holds a token.
  */
 export type InstallationProfile = {
   kind: "agent" | "relay";
@@ -1105,9 +1061,7 @@ export type InterfaceSample = {
 };
 
 /**
- * One sample of a host, or one rollup step of them. A rollup carries the
- * peak of the step beside the mean, so a short spike within a quarter of
- * an hour is not averaged away.
+ * One sample of a host, or one rollup step of them.
  */
 export type MetricPoint = {
   at: string;
@@ -1310,9 +1264,7 @@ export type ResourceClaim = {
 
 /**
  * The second half of an operation's contract, as `/api/v1/actions` serves
- * it: what the panel may promise about an operation under way. The cancel
- * button, the stop confirmation and the rollback link are drawn from
- * these, never from the operation name.
+ * it: what the panel may promise about an operation under way.
  */
 export type OperationContract = {
   cancel_mode?: CancelMode;
@@ -1327,9 +1279,7 @@ export type HostTimelineKind = "job" | "audit" | "session" | "lifecycle" | "aler
 
 /**
  * One event in the history of a host: one record of one table, cut to a
- * common shape. `event` is the moment of the record the row stands for
- * (a task created or finished, a session opened or ended); `state` and
- * `error_code` are the record's own.
+ * common shape.
  */
 export type HostTimelineItem = {
   at: string;
@@ -1372,8 +1322,7 @@ export type ReadFanOutCounts = {
 
 /**
  * A diagnostic read ordered on many hosts at once. Not a campaign: nothing
- * changes and nothing is approved. One ordinary job per host carries the
- * result, and the fan-out is the row that groups them.
+ * changes and nothing is approved.
  */
 export type ReadFanOut = {
   id: string;
@@ -1468,8 +1417,7 @@ export type RemediationExcludedHost = {
 
 /**
  * What a fleet remediation would do: the per-host plans grouped by their
- * steps, and the hosts left out. The order recomputes the same shape and
- * records it as the campaign's plan set.
+ * steps, and the hosts left out.
  */
 export type RemediationPreview = {
   check_ids: string[];
@@ -1500,9 +1448,7 @@ export const POLICY_RULE_KINDS: PolicyRuleKind[] = [
 ];
 
 /**
- * One typed declaration. Exactly the fields of its kind are set; the
- * server holds them to the kind at the publication and refuses a kind it
- * does not judge with unsupported_rule.
+ * One typed declaration.
  */
 export type PolicyRule = {
   kind: PolicyRuleKind | string;

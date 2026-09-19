@@ -42,12 +42,8 @@ export type ProjectPlan = {
 };
 
 /**
- * Docker Compose projects.
- *
- * The manifest describes the desired state, not a command. The operator
- * plans, looks at the differences and only then deploys - the deployment is
- * bound to that plan and refuses when the base state changed since the
- * approval.
+ * Docker Compose projects. The manifest describes the desired state, not a
+ * command.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const COMPOSE_CHANGES = ["docker.compose.deploy"];
@@ -87,8 +83,7 @@ export function Compose() {
   });
 
   // The plan is computed on the host, so the screen waits for the
-  // operation's result. The stream wakes the job list; here it is enough to
-  // poll for this one result.
+  // operation's result.
   async function awaitPlan(jobID: string) {
     for (let attempt = 0; attempt < 30; attempt++) {
       await new Promise((done) => setTimeout(done, 2000));

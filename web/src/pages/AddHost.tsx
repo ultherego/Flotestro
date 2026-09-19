@@ -46,9 +46,7 @@ const commandTitles: Record<InstallationCommand["key"], string> = {
 };
 
 /**
- * What an error code means for the person at the screen. Only the codes
- * the panel really records are here; the rest show as they came, with the
- * sentence the server attached.
+ * What an error code means for the person at the screen.
  */
 const errorDescriptions: Record<string, string> = {
   token_expired: "The token expired before the host used it. Regenerate the order and try again.",
@@ -87,17 +85,6 @@ function timeLeft(expiresAt: string, now: number): string {
 
 /**
  * Adding a host to the fleet.
- *
- * The wizard leads through one decision at a time - what, where, by which
- * route, on which system - and only then places the order. The token
- * appears once, after the order, and does not come back after a page
- * refresh: it is a one-time secret, kept in the memory of this component
- * alone - not in the address, not in the browser storage. The panel does
- * not compose a shell command with the token inside; the token is pasted
- * into the hidden prompt of the tool on the host.
- *
- * The last step shows live what the host has already done, and names the
- * reason when it stops - as far as the panel can know it.
  */
 export function AddHost() {
   const t = useT();
@@ -110,9 +97,9 @@ export function AddHost() {
   const [site, setSite] = useState("default");
   const [environment, setEnvironment] = useState("unassigned");
   const [reason, setReason] = useState("");
-  // What the operator already knows about the machine: it goes onto the
-  // host the moment it enrolls, so a host that appears at night appears
-  // as somebody's and inside the campaigns its tags select.
+  // What the operator already knows about the machine: it goes onto the host
+  // the moment it enrolls, so a host that appears at night appears as
+  // somebody's and inside the campaigns its tags select.
   const [owner, setOwner] = useState("");
   const [tags, setTags] = useState("");
   const [maxUses, setMaxUses] = useState(1);
@@ -134,14 +121,13 @@ export function AddHost() {
   });
   const permissions = whoami.data?.permissions ?? [];
   const canEnrollRelay = permissions.includes("relay.enroll.create");
-  // A token for many machines is a separate right on top of inviting
-  // one; without it the field is not shown, so the order is not refused
-  // after the form is filled in.
+  // A token for many machines is a separate right on top of inviting one;
+  // without it the field is not shown, so the order is not refused after the
+  // form is filled in.
   const canEnrollBatch = permissions.includes("host.enroll.batch");
 
-  // The history of orders within the operator's scope - the server keeps
-  // out what lies elsewhere - narrowed by status on request. Pending is
-  // the default: what still waits for a host is the reason to look.
+  // The history of orders within the operator's scope - the server keeps out
+  // what lies elsewhere - narrowed by status on request.
   const [historyStatus, setHistoryStatus] = useState<EnrollmentOrder["status"] | "">("pending");
   const list = useQuery({
     queryKey: ["enrollment-requests", historyStatus],
@@ -164,10 +150,8 @@ export function AddHost() {
   });
   const usableRelays = (relays.data?.items ?? []).filter((relay) => !relay.revoked_at);
 
-  // The profile for the placement: it says whether the order needs a
-  // reason, and carries the configuration, the trust and the commands.
-  // Nothing in it is secret, so it is read as soon as the placement is
-  // known and again whenever it changes.
+  // The profile for the placement: it says whether the order needs a reason,
+  // and carries the configuration, the trust and the commands.
   const profileParams = new URLSearchParams({
     site: settledSite, environment: settledEnvironment, kind, architecture,
   });
@@ -179,10 +163,7 @@ export function AddHost() {
   });
 
   // The turns of the order come over the stream: the host redeeming the
-  // token, a refusal, a revocation. The poll stays as the fallback and
-  // slows down while the stream is open - the steps after the token (the
-  // session, the inventory) are gates the panel watches on its own, and
-  // they still come in with the poll.
+  // token, a refusal, a revocation.
   const live = useEnrollmentStream(created?.id ?? null, [["enrollment-request", created?.id]]);
 
   // The installation progress refreshes itself as long as something can
@@ -274,7 +255,6 @@ export function AddHost() {
   // Regenerate is the same replacement the history offers: the server
   // revokes the order in hand and places one like it in one call, so two
   // live tokens for one host never exist side by side, and the old token
-  // comes back on no read. A settled or closed order is only copied.
   const replace = useMutation({
     mutationFn: (previous: EnrollmentOrder) =>
       api.post<NewOrder>(`/api/v1/enrollment-requests/${previous.id}/replace`, { reason }),
@@ -867,9 +847,9 @@ export function AddHost() {
 }
 
 /**
- * A refusal of the order that the operator can do something about: a
- * missing reason is a field to fill in, a stale authentication is a sign-in
- * that comes back to the same place. Anything else is shown as it came.
+ * A refusal of the order that the operator can do something about: a missing
+ * reason is a field to fill in, a stale authentication is a sign-in that
+ * comes back to the same place.
  */
 function Refusal({ error, close }: { error: ApiError; close: () => void }) {
   const t = useT();

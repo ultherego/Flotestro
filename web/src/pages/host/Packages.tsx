@@ -91,10 +91,8 @@ type PackageList = {
 };
 
 /**
- * One change of an upgrade plan: what the host would move a package to,
- * from which repository, in which architecture and in which direction.
- * The direction and the origin enter the plan digest, so the row shows
- * them as the host named them.
+ * One change of an upgrade plan: what the host would move a package to, from
+ * which repository, in which architecture and in which direction.
  */
 export type PlanChange = {
   name: string;
@@ -107,10 +105,9 @@ export type PlanChange = {
 };
 
 /**
- * The plan an operator approved, as the panel carries it from the plan
- * job to the change: the digest the host recomputes under its lock, the
- * header it rebuilds the envelope from, and the elements that were
- * approved, so a refusal can name the one that moved.
+ * The plan an operator approved, as the panel carries it from the plan job
+ * to the change: the digest the host recomputes under its lock, the header
+ * it rebuilds the envelope from, and the elements that were approved, so a
  */
 export type ApprovedPlan = {
   plan_hash: string;
@@ -124,11 +121,6 @@ export type ApprovedPlan = {
 
 /**
  * The plan of a change out of the result of the plan job, or nothing.
- *
- * Nothing is the honest answer for a result that is not a package plan or
- * carries no digest: there is then no plan to bind a change to, and a
- * change with nothing to bind is exactly what this screen no longer
- * offers.
  */
 export function planBinding(detail: Record<string, unknown> | undefined): ApprovedPlan | null {
   if (!detail || detail.kind !== "package_plan") return null;
@@ -148,12 +140,8 @@ export function planBinding(detail: Record<string, unknown> | undefined): Approv
 
 /**
  * The payload of a change bound to its plan: the digest always, and the
- * envelope's header with the approved elements when the host's planner
- * built one. An agent from before the envelope sends no planner version,
- * and its change binds by the digest alone, as it always did.
- *
- * A change without a plan has no payload here at all: the screen plans
- * first and applies second, and there is nothing to send in between.
+ * envelope's header with the approved elements when the host's planner built
+ * one.
  */
 export function changePayload(action: string, packages: string[],
   plan: ApprovedPlan | null): Record<string, unknown> | null {
@@ -209,8 +197,8 @@ export type PackageRow = InstalledPackage & {
 export type PackageFilter = "all" | "upgradable" | "security" | "held";
 
 /**
- * The version of a package as the manager prints it: the epoch in front,
- * the release behind, so the row reads like the tool's own output and a
+ * The version of a package as the manager prints it: the epoch in front, the
+ * release behind, so the row reads like the tool's own output and a
  * candidate version from the plan compares by eye.
  */
 export function packageVersion(pkg: InstalledPackage): string {
@@ -222,10 +210,7 @@ export function packageVersion(pkg: InstalledPackage): string {
 
 /**
  * The rows of the table: every installed package joined with the holds the
- * host reported and the changes of the last upgrade plan. A held state is
- * unknown when the holds were not read, and a package the plan does not
- * name has no candidate - which says "nothing waits", not "not planned":
- * the caption of the table says how old the plan is.
+ * host reported and the changes of the last upgrade plan.
  */
 export function packageRows(
   items: InstalledPackage[], holds: string[] | undefined, changes: PlanChange[] | undefined,
@@ -264,9 +249,6 @@ export function planExpired(header: PlanHeader | undefined, now = Date.now()): b
 
 /**
  * The rows narrowed by the search box and the filter, in the chosen order.
- * The search is over the name and the source package, case-insensitively;
- * the filter "held" keeps the rows known to be held, so an unread hold
- * list filters to nothing rather than to everything.
  */
 export function filterRows(
   rows: PackageRow[], query: string, filter: PackageFilter, direction: "asc" | "desc" = "asc",
@@ -295,11 +277,8 @@ export function heldCount(packages: PackagesState | undefined): number | undefin
 }
 
 /**
- * The host's packages.
- *
- * Installing and removing are separated from upgrading: they are three
- * different decisions about the same host. A removal goes through a plan,
- * because one package can drag dozens of dependants along.
+ * The host's packages. Installing and removing are separated from upgrading:
+ * they are three different decisions about the same host.
  */
 /** The changes this page offers; when every one is refused, the page says so once. */
 const PACKAGE_CHANGES = [
@@ -315,9 +294,9 @@ export function Packages() {
   const packages = module.data?.payload;
 
   const [names, setNames] = useState("");
-  // The removal plan and the set it was computed for: a removal ordered
-  // from the table names one package, a removal from the form names what
-  // was typed, and the confirmation removes the set that was reviewed.
+  // The removal plan and the set it was computed for: a removal ordered from
+  // the table names one package, a removal from the form names what was
+  // typed, and the confirmation removes the set that was reviewed.
   const [plan, setPlan] = useState<{ requested: string[]; plan: RemovalPlan } | null>(null);
   const [toRemove, setToRemove] = useState<{ requested: string[]; removals: string[] } | null>(null);
   const [sourceIntent, setSourceIntent] = useState<SourceIntent | null>(null);
@@ -378,8 +357,7 @@ export function Packages() {
   });
 
   // The package list is read by the panel on its own cycle; the operator
-  // asks for it here when the copy is missing or older than the host. The
-  // rows appear when the job lands, not at the next timed refetch.
+  // asks for it here when the copy is missing or older than the host.
   const readList = useMutation({
     mutationFn: () => api.post<Job>(`/api/v1/hosts/${host.id}/operations`, { action: "packages.list", payload: {} }),
     onSuccess: (job) => {
@@ -743,21 +721,8 @@ export function Packages() {
 }
 
 /**
- * Plan, then apply - the two halves of every package change on this
- * screen.
- *
+ * Plan, then apply - the two halves of every package change on this screen.
  * A change is never ordered from what the panel believes about the host.
- * The host computes the plan under its own lock, the operator reads what
- * would really move, and the change carries the digest of that plan back;
- * the host computes it once more right before the transaction and refuses
- * one that no longer holds (stale_plan), so a repository that moved
- * between the reading and the click changes nothing. Until a plan is
- * there, the apply button is not there either - there is nothing to bind
- * a change to.
- *
- * A plan belongs to the set it was computed for: changing the packages
- * drops it, and the operator plans again rather than applying a plan made
- * for something else.
  */
 function PlanThenApply({ host, action, packages, planLabel, applyLabel, busy, onMessage }: {
   host: Host;
@@ -866,15 +831,6 @@ const PACKAGE_ROW = 34;
 
 /**
  * The installed packages, from the panel's copy of the host's list.
- *
- * The copy is read on request and kept next to the vulnerability
- * assessment; the inventory carries the digest of the host's own list, so
- * the table says when the copy stopped describing the host instead of
- * serving it as current. The holds come from the host with the counters,
- * and the version a package would move to comes from the last upgrade
- * plan - the table joins the three, and the caption says how old each is.
- * A few thousand rows are windowed: the search runs over the whole list,
- * the browser draws a screenful.
  */
 function InstalledPackages({
   host, packages, busy, reading, onRead, onHold, onRemove, onMessage,
@@ -916,14 +872,13 @@ function InstalledPackages({
   const stale = !!state?.digest && !!packages?.installed_digest && state.digest !== packages.installed_digest;
   const pacman = packages?.manager === "pacman";
   const key = (row: PackageRow) => `${row.name}/${row.architecture ?? ""}`;
-  // A column with nothing in any row says nothing: the architecture is
-  // left out where the manager does not report one, and the two plan
-  // columns until a plan exists - the caption says one is missing.
+  // A column with nothing in any row says nothing: the architecture is left
+  // out where the manager does not report one, and the two plan columns
+  // until a plan exists - the caption says one is missing.
   const showArchitecture = rows.some((row) => !!row.architecture);
   const showPlan = plan.changes !== undefined;
-  // The columns the operator may fold, remembered per table; the name of
-  // the package stays whatever the preference says. A column the host
-  // gives nothing for is not offered at all.
+  // The columns the operator may fold, remembered per table; the name of the
+  // package stays whatever the preference says.
   const columns = useColumns("host-packages", [
     { key: "name", label: t("Package"), fixed: true },
     { key: "version", label: t("Version") },
@@ -1153,9 +1108,7 @@ function originWords(t: (key: string) => string, originClass?: string): string {
 
 /**
  * The changes of the last upgrade plan of the host, with when it was made.
- * The plan is the newest succeeded packages.plan job that planned an
- * upgrade - a removal plan or an install plan says nothing about what
- * waits - and its changes are in the result of its last attempt.
+ * The plan is the newest succeeded packages.
  */
 function useLastUpgradePlan(hostId: string): { changes?: PlanChange[]; at?: string; header?: PlanHeader } {
   const jobs = useQuery({
@@ -1190,10 +1143,7 @@ const APPLYING = ["packages.install", "packages.remove", "packages.upgrade", "pa
 
 /**
  * The transaction history of the host: every package operation ordered
- * through the panel, newest first, with what it applied. It is the
- * operation list narrowed to the package family, not a second record - a
- * transaction the host ran by hand is not here, and the packages module
- * above says what is installed now.
+ * through the panel, newest first, with what it applied.
  */
 function TransactionHistory({ hostId }: { hostId: string }) {
   const t = useT();
@@ -1270,9 +1220,7 @@ function TransactionHistory({ hostId }: { hostId: string }) {
 
 /**
  * How many packages a transaction applied, from the result of its last
- * attempt. The count is not on the job row, so it is read per transaction
- * once the row is on screen; a page of twenty is twenty small reads, kept
- * by the query cache.
+ * attempt.
  */
 function AppliedCount({ jobId }: { jobId: string }) {
   const t = useT();
@@ -1291,12 +1239,6 @@ function AppliedCount({ jobId }: { jobId: string }) {
 
 /**
  * Package sources.
- *
- * Adding a source installs nothing today, but decides whose packages the
- * host accepts tomorrow - together with their scripts, which run as root.
- * That is why a source without signature checking requires explicit
- * consent, and the password to a private source is named by a secret, not
- * given as a value.
  */
 function Repositories({
   hostID, view, manager, onIntent,

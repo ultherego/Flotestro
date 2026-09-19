@@ -2,9 +2,8 @@ import { expect, test } from "@playwright/test";
 import { expectHealthy, navigation, openAccountMenu, watchErrors } from "./fleet";
 
 /**
- * The shell of the panel: the dashboard, every place the sidebar leads
- * to, and the settings of the person at the screen. None of it changes
- * the fleet.
+ * The shell of the panel: the dashboard, every place the sidebar leads to,
+ * and the settings of the person at the screen.
  */
 
 test.describe("dashboard", () => {
@@ -16,9 +15,8 @@ test.describe("dashboard", () => {
     const bars = page.getByTestId("status-bar");
     await expect(bars).toHaveCount(2);
 
-    // The availability bar counts hosts; every segment settles on a
-    // number once the summary and the activity have arrived. A dash
-    // would mean a count the server did not answer.
+    // The availability bar counts hosts; every segment settles on a number
+    // once the summary and the activity have arrived.
     const availability = bars.first();
     const values = availability.getByTestId("status-bar-value");
     await expect(values).toHaveCount(6);
@@ -50,9 +48,7 @@ test.describe("navigation", () => {
     await expect(links.first()).toBeVisible();
 
     // The targets are read first: the sidebar re-renders on every
-    // navigation, and a locator held across it would go stale. The name
-    // is the label alone: an item may carry a badge with the count of
-    // what waits behind it, and the count moves while the fleet works.
+    // navigation, and a locator held across it would go stale.
     const items: { name: string; href: string }[] = [];
     for (const link of await links.all()) {
       const href = await link.getAttribute("href");
@@ -133,9 +129,8 @@ test.describe("command palette", () => {
     const search = page.getByRole("textbox", { name: "Search the panel" });
     await expect(search).toBeVisible();
     await expect(search).toBeFocused();
-    // Empty, the palette lists the places of the panel and nothing else:
-    // the hosts stand in the selector beside it. Every row is a "Go to",
-    // and the host list is among them for whoever may see the sidebar.
+    // Empty, the palette lists the places of the panel and nothing else: the
+    // hosts stand in the selector beside it.
     const list = page.getByRole("listbox", { name: "Results" });
     await expect(list).toBeVisible();
     const rows = list.getByRole("option");

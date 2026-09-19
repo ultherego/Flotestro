@@ -40,9 +40,9 @@ export function emptyRule(kind: PolicyRuleKind): PolicyRule {
 }
 
 /**
- * A rule with only the fields of its kind: switching the kind in the
- * editor must not carry a package name into a sysctl rule, and the server
- * would store whatever it got.
+ * A rule with only the fields of its kind: switching the kind in the editor
+ * must not carry a package name into a sysctl rule, and the server would
+ * store whatever it got.
  */
 export function pruneRule(rule: PolicyRule): PolicyRule {
   const kept = emptyRule(rule.kind as PolicyRuleKind) ?? { kind: rule.kind };
@@ -84,9 +84,8 @@ export function rulesFromText(text: string): { rules?: PolicyRule[]; error?: str
 }
 
 /**
- * A selector expression taken apart into the rows of the builder: a leaf,
- * a negated leaf, or one level of all/any over those. Anything deeper is
- * edited as JSON - the builder would otherwise flatten it silently.
+ * A selector expression taken apart into the rows of the builder: a leaf, a
+ * negated leaf, or one level of all/any over those.
  */
 export function rulesFromExpression(expression: SelectorExpression | null | undefined): { rules: Rule[]; combine: "all" | "any" } | null {
   if (!expression) return { rules: [{ field: "tag", value: "", negated: false }], combine: "all" };
@@ -126,10 +125,6 @@ const RESULT_PAGE = 100;
 /**
  * One policy: what it declares, whom it concerns, how the fleet stands
  * against it, and what it ordered.
- *
- * The document is edited as a draft and judged as a version: the page
- * says which of the two it shows, and the publication - the approval the
- * document names - asks for a reason and fresh authentication.
  */
 export function PolicyPage() {
   const t = useT();
@@ -392,9 +387,8 @@ function Editor({ policy, etag, canWrite, onSaved }: { policy: Policy; etag: str
         rules: (rules.rules ?? []).map(pruneRule), remediation_mode: draft.mode, enabled: draft.enabled,
         check_interval_seconds: Math.max(1, draft.intervalMinutes) * 60,
       };
-      // The write goes on the tag the page read; a stale one is refused
-      // by the server with the current one, and the message says so. The
-      // record is read again for the tag of the version just written.
+      // The write goes on the tag the page read; a stale one is refused by
+      // the server with the current one, and the message says so.
       await api.put<Policy>(`/api/v1/policies/${policy.id}`, spec, { headers: etag ? { "If-Match": etag } : {} });
       return api.getWithMeta<Policy>(`/api/v1/policies/${policy.id}`);
     },

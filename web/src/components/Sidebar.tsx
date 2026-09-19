@@ -26,10 +26,7 @@ export type NavGroup = {
 };
 
 /**
- * The navigation has two faces, never both at once: the fleet, and one
- * host. Two columns of links side by side confused more than they helped,
- * so a host page replaces the fleet groups with the host's modules and a
- * way back; the brand above stays the same in both.
+ * The navigation has two faces, never both at once: the fleet, and one host.
  */
 export type NavFace = {
   groups: NavGroup[];
@@ -41,8 +38,7 @@ const GROUPS_KEY = "flotestro.sidebar.groups";
 
 /**
  * The counters of the fleet summary the badges read: what waits for a
- * decision behind each place. A counter the server left out is one this
- * reader may not see, and the item then carries no badge.
+ * decision behind each place.
  */
 type BadgeCounts = {
   jobs_awaiting_approval?: number;
@@ -56,10 +52,8 @@ type BadgeCounts = {
 const BADGE_INTERVAL = 30 * 1000;
 
 /**
- * The badge of an item, by its address: the jobs and the campaigns
- * waiting for an approval, the alerts firing, the hosts a policy found
- * drifted. Zero is no badge - the item is a place, and a badge is a reason
- * to go there.
+ * The badge of an item, by its address: the jobs and the campaigns waiting
+ * for an approval, the alerts firing, the hosts a policy found drifted.
  */
 function badgeFor(to: string, counts?: BadgeCounts): { count: number; tone: string; title: string } | undefined {
   if (!counts) return undefined;
@@ -101,9 +95,7 @@ function isFoldMap(value: unknown): value is Record<string, boolean> {
 /**
  * The application sidebar: the brand and the grouped navigation, nothing
  * else - the session, the search and the settings live in the top bar, so
- * this column is only a list of places. It folds to a rail of icons on
- * demand and becomes a drawer on a narrow screen; both are layout
- * decisions, so the pages know nothing about them.
+ * this column is only a list of places.
  */
 export function Sidebar({ face, collapsed, open, onClose }: {
   face: NavFace;
@@ -118,10 +110,9 @@ export function Sidebar({ face, collapsed, open, onClose }: {
   // The fold map holds only the groups somebody closed: a group absent
   // from it is open, so a group added in a later version starts open.
   const [folded, setFolded] = useStoredState<Record<string, boolean>>(GROUPS_KEY, {}, isFoldMap);
-  // The badges read the same summary the dashboard does, at a slower
-  // pace; a reader the summary is refused to has no badges, not an error
-  // in the navigation. The host face lists modules, not fleet places, so
-  // the counters are not asked for there.
+  // The badges read the same summary the dashboard does, at a slower pace; a
+  // reader the summary is refused to has no badges, not an error in the
+  // navigation.
   const counts = useQuery({
     queryKey: ["summary", "badges"],
     queryFn: () => api.get<BadgeCounts>("/api/v1/fleet/summary"),

@@ -14,9 +14,7 @@ import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard"
 import { useT } from "../../i18n";
 
 /**
- * The offline policy as the helper read it from sssd.conf. A missing field is
- * a value that could not be read; a key named in `defaulted` was absent from
- * the file and took the SSSD default, which is shown as such.
+ * The offline policy as the helper read it from sssd. conf.
  */
 type SssdOfflinePolicy = {
   cache_credentials?: boolean;
@@ -126,16 +124,8 @@ type EnrollDetail = {
 const DOMAIN_PATTERN = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/;
 
 /**
- * Joining the host to a domain.
- *
- * The order carries the domain, the realm, an optional server and the
- * host's FQDN; it carries no password. The one-time password is fetched
- * from the directory connector of the panel when the task is delivered
- * and travels in the envelope alone - it is never typed here, and it
- * reaches neither the database nor the trail. A panel without a connector
- * lets the order through and the host refuses it as missing_credential.
- * The preflight runs the same checks the join starts with and changes
- * nothing, so it is ordered first and read before the critical order.
+ * Joining the host to a domain. The order carries the domain, the realm, an
+ * optional server and the host's FQDN; it carries no password.
  */
 function JoinDomain({ host }: { host: Host }) {
   const t = useT();
@@ -266,9 +256,7 @@ function JoinDomain({ host }: { host: Host }) {
 }
 
 /**
- * The checks of a preflight, one row each. A check that could not be
- * established is neither passed nor failed and is shown as such; a
- * failed blocking check is what the join would stop at.
+ * The checks of a preflight, one row each.
  */
 function PreflightResult({ attempt, blocked }: {
   attempt: { status?: string; error_code?: string; message?: string; detail?: EnrollDetail };
@@ -315,11 +303,7 @@ function PreflightResult({ attempt, blocked }: {
 const SERVICE_PRINCIPAL_PATTERN = /^[a-zA-Z0-9_-]{1,64}\/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$/;
 
 /**
- * Renewing a service keytab. The host fetches a new key for the principal
- * with its own credentials and writes it into its keytab; until it lands
- * the service the principal names cannot prove who it is, which is why the
- * order is critical. The host's own principal is not renewed here: its
- * keytab is replaced by a re-join.
+ * Renewing a service keytab.
  */
 function RenewKeytab({ host }: { host: Host }) {
   const t = useT();
@@ -400,11 +384,7 @@ function RenewKeytab({ host }: { host: Host }) {
 }
 
 /**
- * Taking the host out of its domain. The button exists only for a host that
- * is in one and an operator allowed to order it: a button that leads to a
- * refusal is an interface defect. The order is confirmed by typing the
- * hostname, because every directory account loses this host at once and
- * the way back is a new join with a new credential from the directory.
+ * Taking the host out of its domain.
  */
 function LeaveDomain({ host }: { host: Host }) {
   const t = useT();
@@ -472,9 +452,7 @@ function LeaveDomain({ host }: { host: Host }) {
 
 /**
  * What happens to directory logins when the directory is unreachable. The
- * facts come from sssd.conf on the host; the verdict is the panel's and is
- * drawn as unknown whenever a fact is missing - a host that did not report
- * its policy is not a host without a cache.
+ * facts come from sssd.
  */
 function OfflinePolicy({ policy, verdict }: { policy?: SssdOfflinePolicy; verdict?: OfflineVerdict }) {
   const t = useT();
@@ -560,14 +538,9 @@ function VerdictChip({ verdict }: { verdict?: OfflineVerdict }) {
 }
 
 /**
- * The effective access: the host's groups and the access and sudo rules
- * that reach it, as the directory holds them, and next to them the rules
- * of the host's own sudoers files, as the helper parsed them. Nothing here
- * is decided by the panel - the host's SSSD and sudo apply the rules - so
- * the section shows the projection and says plainly when either half
- * could not be read. An unavailable directory, a host the directory does
- * not know or a policy the helper did not read is "unknown", never "no
- * access".
+ * The effective access: the host's groups and the access and sudo rules that
+ * reach it, as the directory holds them, and next to them the rules of the
+ * host's own sudoers files, as the helper parsed them.
  */
 function EffectiveAccess({ host }: { host: Host }) {
   const t = useT();
@@ -692,11 +665,7 @@ function EffectiveAccess({ host }: { host: Host }) {
 }
 
 /**
- * The rules of the host's own sudoers files. They apply next to the
- * directory's rules - or instead of them on a host outside the domain -
- * and they are the ones an administrator writes by hand, so each is shown
- * with the file and line it comes from. A policy the helper did not read
- * is unknown with its reason, never "no local rules".
+ * The rules of the host's own sudoers files.
  */
 function LocalSudoRules({ access }: { access: HostAccess }) {
   const t = useT();

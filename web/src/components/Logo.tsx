@@ -3,10 +3,7 @@ import type { CSSProperties } from "react";
 /**
  * The brand: an "F" for the control plane with a cable leaving its bars to
  * three hosts, each in its own colour - a fleet is many machines under one
- * plane, not one machine. The mark is drawn on a 128-unit grid, the same
- * one docs/logo.svg and the favicon use; a change here has to be carried
- * there by hand. Filled shapes and one round stroke, so it stays legible
- * at 16 px in a browser tab.
+ * plane, not one machine.
  */
 const PLANE =
   "M36 31h60a10 10 0 0 1 10 10v6a10 10 0 0 1-10 10H62v14h25a10 10 0 0 1 10 10v5a10 10 0 0 1-10 10H62v16H36z";
@@ -23,12 +20,7 @@ const HOSTS = [
 ];
 
 /**
- * The mark alone. The plane and the cable take the colour of the text
- * around them (the theme accent with `accent`); the three hosts keep the
- * brand colours, and the ports where the cable leaves the plane are cut
- * in the colour of the ground behind it, so the mark reads on any tile.
- * The mark is decorative wherever it appears - a title or a label always
- * stands next to it - so it is hidden from assistive technology.
+ * The mark alone.
  */
 export function LogoMark({ size = 24, className, accent = false, ground = "var(--bg-panel)" }: {
   size?: number;
@@ -59,10 +51,7 @@ export function LogoMark({ size = 24, className, accent = false, ground = "var(-
 }
 
 /**
- * The mark with the name beside it. The name is ordinary text in the
- * panel's font, not outlines, so it needs no font of its own and follows
- * the text colour; its size and spacing follow the mark, so one `size`
- * scales the whole lock-up.
+ * The mark with the name beside it.
  */
 export function Logo({ size = 32, className }: { size?: number; className?: string }) {
   const style: CSSProperties = {

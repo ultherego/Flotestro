@@ -4,14 +4,8 @@ import { Icon, type IconName } from "./icons";
 import { pageTitle, useDocumentTitle } from "../lib/title";
 
 /**
- * The layout primitives of a page: the header, the card, the stat tile,
- * the toolbar and the form field. Every fleet page is built from these,
- * so the pages share one rhythm - the same header, the same spacing, the
- * same card around every table - instead of each one inventing its own.
- *
- * They carry no data logic: a page decides what to show, these decide
- * where it stands. The tone of a tile or a card comes from the state
- * tokens (ok, warn, error, unknown); no colour is named here.
+ * The layout primitives of a page: the header, the card, the stat tile, the
+ * toolbar and the form field.
  */
 
 export type Tone = "ok" | "warn" | "error" | "unknown";
@@ -21,8 +15,7 @@ export type Crumb = { label: string; to: string };
 
 /**
  * The page header: the title, what the page is for, and the actions that
- * belong to the whole page. The description is a sentence, not a manual;
- * the detailed explanation goes with the section it explains.
+ * belong to the whole page.
  */
 export function PageHeader({
   title, description, actions, breadcrumb, icon,
@@ -36,9 +29,7 @@ export function PageHeader({
 }) {
   const location = useLocation();
   const mark = icon ?? iconForPath(location.pathname);
-  // The tab is named after the page. Only a plain title can name it: a
-  // title built from elements has no text a tab could show, and the tab
-  // then keeps what stood there.
+  // The tab is named after the page.
   useDocumentTitle(typeof title === "string" && title.trim() !== "" ? pageTitle(title) : undefined);
   return (
     <header className="page-header">
@@ -78,10 +69,6 @@ function iconForPath(pathname: string): IconName | undefined {
 
 /**
  * A card: a raised panel with an optional title row and footer.
- *
- * A `flush` card lets a table reach its edges; the text and toolbars put
- * in such a card keep their own padding, so a note above a table or an
- * empty state instead of one still stands where the reader expects it.
  */
 export function Card({
   title, description, actions, footer, children, flush = false, tone, className,
@@ -116,18 +103,16 @@ export function Card({
 }
 
 /**
- * The summary tiles. The `compact` form drops the borders and stands
- * inside a card, where one bordered box inside another would only add
- * lines.
+ * The summary tiles. The `compact` form drops the borders and stands inside
+ * a card, where one bordered box inside another would only add lines.
  */
 export function StatGrid({ children, compact = false }: { children: ReactNode; compact?: boolean }) {
   return <div className={compact ? "stats compact" : "stats"}>{children}</div>;
 }
 
 /**
- * One tile: a label, a big value and, when a number alone would mislead,
- * a hint saying what the number counts. A tile with a destination is a
- * link as a whole.
+ * One tile: a label, a big value and, when a number alone would mislead, a
+ * hint saying what the number counts.
  */
 export function Stat({
   label, value, hint, tone, to,
@@ -153,9 +138,7 @@ export function Stat({
 }
 
 /**
- * The row of filters, searches and actions above a list. It wraps rather
- * than scrolls; what is given as `end` keeps to the right edge while
- * there is room for it.
+ * The row of filters, searches and actions above a list.
  */
 export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNode }) {
   return (
@@ -167,9 +150,7 @@ export function Toolbar({ children, end }: { children?: ReactNode; end?: ReactNo
 }
 
 /**
- * The fields of a form, in columns that fold into one on a narrow
- * screen. A `wide` field takes the whole row: a description, a payload,
- * anything that is read as a line rather than a word.
+ * The fields of a form, in columns that fold into one on a narrow screen.
  */
 export function FieldGrid({ children }: { children: ReactNode }) {
   return <div className="field-grid">{children}</div>;
@@ -211,9 +192,7 @@ export function EmptyState({ children, action }: { children: ReactNode; action?:
 }
 
 /**
- * Blocks side by side. A page of short cards stacked in one column reads
- * as a strip down the left with nothing beside it; two or three across
- * use the width. On a narrow screen they stack again.
+ * Blocks side by side.
  */
 export function Columns({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return <div className={wide ? "columns wide" : "columns"}>{children}</div>;

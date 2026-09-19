@@ -11,14 +11,6 @@ import { useT } from "../i18n";
 
 /**
  * Scheduled campaigns and the maintenance calendar.
- *
- * A schedule keeps a campaign order for a moment or for a rule of
- * moments; the panel places the order when the moment comes, through the
- * same door the Bulk workspace uses, and the campaign then waits for its
- * approval like any other. The calendar draws, month by month, what the
- * fleet has ahead: hosts in maintenance, campaign windows and the moments
- * the schedules will fire at - one picture, so a window nobody remembers
- * setting is seen before the change that collides with it is ordered.
  */
 
 /** The schedule record as the API serves it. */
@@ -69,9 +61,7 @@ export function emptyRecurrence(): RecurrenceForm {
 }
 
 /**
- * The rule text the API reads, or an empty string for one moment. The
- * weekdays go in the calendar's order whatever order they were ticked
- * in, so the same rule always reads the same.
+ * The rule text the API reads, or an empty string for one moment.
  */
 export function recurrenceText(form: RecurrenceForm): string {
   if (!form.freq) return "";
@@ -82,9 +72,9 @@ export function recurrenceText(form: RecurrenceForm): string {
 }
 
 /**
- * The form of a stored rule, or null when the text is not one the form
- * can hold - the server accepts the same subset, so a stored rule always
- * parses, and null only ever means an empty or foreign text.
+ * The form of a stored rule, or null when the text is not one the form can
+ * hold - the server accepts the same subset, so a stored rule always parses,
+ * and null only ever means an empty or foreign text.
  */
 export function parseRecurrence(text: string | undefined): RecurrenceForm | null {
   if (!text) return null;
@@ -126,8 +116,7 @@ const pad = (value: number) => String(value).padStart(2, "0");
 
 /**
  * The rule in words: "monthly on day 15 at 02:30", "weekly on MO, TH at
- * 22:00", or "once" for a single moment. The weekday codes stay as the
- * rule writes them; a name per language would read the same list twice.
+ * 22:00", or "once" for a single moment.
  */
 export function describeRecurrence(t: (text: string, params?: Record<string, string | number>) => string, text: string | undefined): string {
   const form = parseRecurrence(text);
@@ -138,12 +127,9 @@ export function describeRecurrence(t: (text: string, params?: Record<string, str
 }
 
 /**
- * The next moment of a schedule in words, read against the clock: how
- * far ahead it is and when exactly, "disabled" for a schedule that will
- * not fire, and "nothing more to place" for a single moment that has
- * passed. A moment the loop is late for reads as due, not as a time in
- * the past - the loop places it within seconds, and a negative distance
- * would read as a failure.
+ * The next moment of a schedule in words, read against the clock: how far
+ * ahead it is and when exactly, "disabled" for a schedule that will not
+ * fire, and "nothing more to place" for a single moment that has passed.
  */
 export function nextRunWords(
   t: (text: string, params?: Record<string, string | number>) => string,
@@ -162,9 +148,8 @@ export function nextRunWords(
 }
 
 /**
- * The weeks of a month as rows of seven dates, Monday first, padded with
- * the neighbouring months' days so every row is full. The month is
- * zero-based as the Date API counts it.
+ * The weeks of a month as rows of seven dates, Monday first, padded with the
+ * neighbouring months' days so every row is full.
  */
 export function monthGrid(year: number, month: number): Date[][] {
   const first = new Date(year, month, 1);
@@ -191,9 +176,7 @@ export function dayKey(date: Date): string {
 
 /**
  * The entries of every day: a moment on its day, a window on every day it
- * covers, so a host in maintenance for a week is seen on each of the
- * seven. A window without a start is drawn from the range's first day;
- * one without an end, on its start day only.
+ * covers, so a host in maintenance for a week is seen on each of the seven.
  */
 export function entriesByDay(entries: CalendarEntry[], from: Date, to: Date): Map<string, CalendarEntry[]> {
   const byDay = new Map<string, CalendarEntry[]>();
@@ -626,9 +609,7 @@ function entryTone(entry: CalendarEntry): string {
 }
 
 /**
- * The month as a grid of seven columns, every day with its entries. No
- * library: the grid is a list of weeks, and a day cell is a list of
- * badges linking to what they name.
+ * The month as a grid of seven columns, every day with its entries.
  */
 function MonthView({ year, month, entries, loading }: { year: number; month: number; entries: CalendarEntry[]; loading: boolean }) {
   const t = useT();

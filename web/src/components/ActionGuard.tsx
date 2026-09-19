@@ -4,18 +4,6 @@ import { useT } from "../i18n";
 
 /**
  * A control that exists only where the order it places would be taken.
- *
- * The server previews every action of a host for the signed-in operator;
- * the guard draws its children when the action is allowed and nothing
- * otherwise, so a viewer sees no restart button and a host without a
- * package adapter shows no upgrade. A page with one primary action asks
- * for `explain` instead: the control stays on the screen, disabled, with
- * the reason on it, because a page whose only button is missing reads as
- * broken rather than as refused.
- *
- * The guard is a courtesy to the operator, not a gate: the order is judged
- * again by the server, and the refusal it may answer with is still shown
- * by the page.
  */
 export function ActionGuard({
   action, host, explain, children,
@@ -47,9 +35,9 @@ export function ActionGuard({
 }
 
 /**
- * The one line a module page shows when every change it offers is
- * refused: the operator can read the module and learns what changing it
- * would take, instead of a page with its buttons quietly gone.
+ * The one line a module page shows when every change it offers is refused:
+ * the operator can read the module and learns what changing it would take,
+ * instead of a page with its buttons quietly gone.
  */
 export function ReadOnlyModuleNotice({ host, actions }: { host: string; actions: string[] }) {
   const t = useT();

@@ -8,18 +8,11 @@ import { useT } from "../i18n";
 
 /**
  * The per-host plan: what the operator really consents to.
- *
- * The order is one, but the change on every host differs: a file with
- * different content, a rule of a different shape, a disk under the same
- * path with a different UUID. The plan computed on the host says what
- * happens there - or why not.
  */
 /**
  * One element of a package plan: the name, the versions it moves between,
- * and everything else the plan digest covers - the origin, the
- * architecture, the direction. A field the host did not fill is absent,
- * never a default: an older agent names no direction, and the table says
- * so rather than guessing one.
+ * and everything else the plan digest covers - the origin, the architecture,
+ * the direction.
  */
 export type PackageChange = {
   name: string;
@@ -61,10 +54,7 @@ export const ACTION_WORDS: Record<string, string> = {
 };
 
 /**
- * The direction of a change as the host named it. A host that named none
- * gets the two cases the versions settle - a package without a version
- * now arrives, one without a candidate goes - and a dash otherwise: the
- * table does not call a change an upgrade the host did not call one.
+ * The direction of a change as the host named it.
  */
 export function changeAction(change: PackageChange): string {
   if (change.action) return change.action;
@@ -84,10 +74,8 @@ export type SpaceFact = {
 };
 
 /**
- * The facts a package plan carries beyond its list of packages: the
- * fields of the package_plan detail the agent answers with. A group of a
- * campaign and a job attempt both carry them at the top level of the
- * detail, next to the changes.
+ * The facts a package plan carries beyond its list of packages: the fields
+ * of the package_plan detail the agent answers with.
  */
 export type PackagePlanFacts = {
   kind?: string;
@@ -130,9 +118,9 @@ export type HostPlan = {
 const CHANGES_SHOWN = 6;
 
 /**
- * One change of a plan as words: a sentence stays as it is, a package
- * reads as its name and the versions it moves between, so a plan of
- * forty packages is a list an operator can skim, not forty objects.
+ * One change of a plan as words: a sentence stays as it is, a package reads
+ * as its name and the versions it moves between, so a plan of forty packages
+ * is a list an operator can skim, not forty objects.
  */
 export function changeText(change: string | PackageChange): string {
   if (typeof change === "string") return change;
@@ -196,7 +184,7 @@ export function PlanSummary({ plan }: { plan: HostPlan }) {
 /**
  * The document or the commands of a plan, verbatim: the summary names the
  * change, but that text is exactly what lands on the host and the operator
- * consents to it, not to a paraphrase. Nothing for a plan without either.
+ * consents to it, not to a paraphrase.
  */
 export function PlanVerbatim({ plan }: { plan: HostPlan }) {
   const t = useT();
@@ -223,10 +211,9 @@ export function isPackageChange(change: string | PackageChange): change is Packa
 const ROWS_SHOWN = 8;
 
 /**
- * The changes of a plan as a table the operator can read: a package plan
- * is one row per package with the version it has now and the one it gets,
+ * The changes of a plan as a table the operator can read: a package plan is
+ * one row per package with the version it has now and the one it gets,
  * sorted by name, folded to the first few rows with the rest on request.
- * A plan that names its changes in words (a file, a rule) is a plain list.
  */
 export function PlanChanges({ changes, shown = ROWS_SHOWN }: { changes?: (string | PackageChange)[]; shown?: number }) {
   const t = useT();
@@ -321,9 +308,7 @@ const PACKAGE_MODES: Record<string, string> = {
 };
 
 /**
- * The operation of a plan in words. A host plan names its action; a
- * package plan names its mode, and the manager that carries it out, since
- * "apt" and "dnf" read the same order differently.
+ * The operation of a plan in words.
  */
 export function planWords(plan: HostPlan & PackagePlanFacts, t: (text: string, params?: Record<string, string | number>) => string): string {
   if (plan.action) return ACTION_NAMES[plan.action] ? t(ACTION_NAMES[plan.action]) : plan.action;
@@ -338,7 +323,6 @@ export function planWords(plan: HostPlan & PackagePlanFacts, t: (text: string, p
 /**
  * What a package plan says besides its packages: whether a reboot follows,
  * how much comes down the wire, and whether every file system has room.
- * The line stays empty for a plan that carries none of it.
  */
 export function PlanFacts({ plan }: { plan: PackagePlanFacts }) {
   const t = useT();
@@ -396,21 +380,15 @@ export type PlanGroup = {
 };
 
 /**
- * The codes a host answers with when it no longer computes the plan it
- * was handed. A target that ended with one of them is stale: the consent
- * does not carry over, and the screen offers to plan again.
+ * The codes a host answers with when it no longer computes the plan it was
+ * handed.
  */
 export const STALE_PLAN_CODES = new Set(["stale_plan", "replan_required", "plan_expired", "plan_stale", "plan_changed", "precondition_failed"]);
 
 export type PlanStatus = "known" | "unknown" | "expired";
 
 /**
- * Whether the panel can read a group's plan as a declaration of its
- * effects. A plan is unknown when it has no content the panel recognises
- * - no envelope, no action, no changes and no refusal - which is what an
- * agent from before the plans, or a broken result, gives. An approval
- * covering such a plan would consent to something nobody read, so the
- * approval is blocked while any host has one.
+ * Whether the panel can read a group's plan as a declaration of its effects.
  */
 export function planStatus(group: PlanGroup, now = Date.now()): PlanStatus {
   const plan = (group.plan?.plan ?? group.plan ?? {}) as HostPlan & PackagePlanFacts;
@@ -430,10 +408,9 @@ export function unknownPlanHosts(groups: PlanGroup[], now = Date.now()): string[
 const HOSTS_SHOWN = 12;
 
 /**
- * One group of plans of a campaign: a header with the hosts, the
- * fingerprint and the expiry, then the plan itself - the operation in
- * words, its facts and the table of changes. A hundred hosts with the
- * same diff are one group, so the operator reads the diff once.
+ * One group of plans of a campaign: a header with the hosts, the fingerprint
+ * and the expiry, then the plan itself - the operation in words, its facts
+ * and the table of changes.
  */
 export function PlanGroupView({ group, action, stale = [] }: { group: PlanGroup; action?: string; stale?: string[] }) {
   const t = useT();

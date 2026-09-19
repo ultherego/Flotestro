@@ -40,8 +40,7 @@ export function hostMeta(host: Pick<Host, "site" | "environment">): string {
 
 /**
  * Whether a host answers the query by its name or its management address:
- * the two things an operator types when they mean a host. An empty query
- * matches every host.
+ * the two things an operator types when they mean a host.
  */
 export function matchesHost(host: Pick<Host, "hostname" | "management_address">, query: string): boolean {
   const needle = query.trim().toLowerCase();
@@ -52,10 +51,7 @@ export function matchesHost(host: Pick<Host, "hostname" | "management_address">,
 /**
  * The rows of the selector: the starred hosts first, then the ones opened
  * last, then the fleet as the server listed it, each host once under the
- * first heading it belongs to. The remembered hosts are narrowed by the
- * query in the browser - they are already at hand - while the fleet rows
- * are the server's answer to the same query and are taken as they come.
- * A remembered host whose record has not arrived, or is gone, has no row.
+ * first heading it belongs to.
  */
 export function selectRows(
   favourites: string[],
@@ -95,8 +91,7 @@ export function toggled(list: string[], id: string): string[] {
 
 /**
  * Where the highlight goes for a key of the list: one row up or down,
- * clamped to the ends, or the first or the last row. Any other key leaves
- * it where it is (undefined), so the input keeps the keystroke.
+ * clamped to the ends, or the first or the last row.
  */
 export function step(key: string, index: number, length: number): number | undefined {
   if (length === 0) return undefined;
@@ -116,19 +111,7 @@ export function moduleSegment(rest: string | undefined): string {
 
 /**
  * The host selector: the second box of the top bar, beside the command
- * palette. Where the palette finds anything in the panel, this lists
- * hosts and nothing else, and jumps to the one chosen: the operator on a
- * host workspace switches to another host in the same module, the
- * operator anywhere else lands on the overview of the host they picked.
- *
- * On a host workspace the trigger names the open host; elsewhere it
- * invites a choice. Ctrl+Shift+K opens it from anywhere, one key beside
- * the palette's Ctrl+K.
- *
- * Empty, it shows the starred hosts, the ones opened last, and the first
- * of the fleet by name. With a query it asks the server for the hosts
- * whose name, address, machine identifier or owner holds the text, and
- * narrows the remembered ones in the browser.
+ * palette.
  */
 export function HostSelect() {
   const t = useT();
@@ -159,9 +142,8 @@ export function HostSelect() {
   const input = useRef<HTMLInputElement>(null);
   const listID = useId();
 
-  // The remembered hosts are the palette's: the same keys, so a star here
-  // is a star there. The palette keeps a copy of its own, so the storage
-  // is read again whenever this list opens, and the last write wins.
+  // The remembered hosts are the palette's: the same keys, so a star here is
+  // a star there.
   const [favourites, setFavourites] = useStoredState<string[]>(FAVOURITES_KEY, [], isStringList);
   const [recent, setRecent] = useStoredState<string[]>(RECENT_KEY, [], isStringList);
 
@@ -208,8 +190,6 @@ export function HostSelect() {
   );
 
   // Ctrl+Shift+K (Cmd+Shift+K on a Mac) opens the selector from anywhere.
-  // The palette listens for Ctrl+K without looking at Shift, so this one
-  // listens ahead of it, in the capture phase, and stops the key there.
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "k") {

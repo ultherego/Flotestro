@@ -7,12 +7,7 @@ import { pl } from "./pl";
 /**
  * The translation catalogue is keyed by the English source strings, so a
  * string added to a screen without a Polish line falls back to English
- * quietly. This test walks the sources, collects every literal key passed
- * to t() and checks it against the catalogue, so the fallback never goes
- * unnoticed.
- *
- * Only literal keys are checked: a call like t(stateName(state)) takes its
- * key from a table, and those files are reported rather than parsed.
+ * quietly.
  */
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -26,9 +21,7 @@ type Extraction = {
 };
 
 /**
- * Every .ts and .tsx source under a directory. The tests are left out,
- * and so is the i18n directory itself: the catalogue is what is checked,
- * and the definition of t() is not a use of it.
+ * Every . ts and . tsx source under a directory.
  */
 function sourceFiles(dir: string): string[] {
   if (dir === join(SRC, "i18n")) return [];
@@ -58,9 +51,7 @@ function unquote(literal: string): string {
 }
 
 /**
- * Extracts the t() keys of one source text. The pattern is anchored on a
- * word boundary, so split( and at( do not match, and it accepts either
- * quote style with escapes inside.
+ * Extracts the t() keys of one source text.
  */
 export function extractKeys(text: string, file: string): Extraction {
   const keys: Usage[] = [];
@@ -158,8 +149,7 @@ describe("the Polish catalogue", () => {
 
   // The two reports below are advisory: a catalogue line may serve a key
   // that reaches t() through a table, and a table-driven call is a design
-  // choice, not a defect. They are printed so somebody reads them, and
-  // they never fail the run.
+  // choice, not a defect.
   it("reports catalogue lines no literal key uses (advisory)", () => {
     const unused = Object.keys(pl).filter((key) => !used.has(key)).sort();
     if (unused.length > 0) {
