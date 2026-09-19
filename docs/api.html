@@ -1,79 +1,99 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The HTTP API &middot; Flotestro documentation</title>
+<title>API &middot; Flotestro documentation</title>
 <meta name="description" content="Every route of the Flotestro control plane, its permission, and the conventions of the interface: paging, revisions, idempotency and refusals.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
 <link rel="stylesheet" href="../style.css">
 </head>
 <body>
-<a class="skip-link" href="#content">Skip to the content</a>
+
 <header class="site-header">
-<a class="site-title" href="../">Flotestro</a>
-<nav class="site-nav" aria-label="Sections">
-<a href="index.html">Documentation</a>
-<a href="https://github.com/ultherego/Flotestro">Repository</a>
-</nav>
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
 </header>
+
 <div class="layout">
-<nav class="sidebar" aria-label="Documentation">
-<p class="sidebar-title">Getting started</p>
-<ul>
-<li><a href="index.html">Documentation</a></li>
-<li><a href="introduction.html">Introduction</a></li>
-<li><a href="installation.html">Installation</a></li>
-<li><a href="architecture.html">Architecture</a></li>
-<li><a href="concepts.html">Concepts</a></li>
-</ul>
-<p class="sidebar-title">Reference</p>
-<ul>
-<li><a href="configuration.html">Configuration</a></li>
-<li><a href="operations.html">Operations</a></li>
-<li><a href="errors.html">Error codes</a></li>
-<li><a href="api.html" class="current" aria-current="page">HTTP API</a></li>
-</ul>
-<p class="sidebar-title">Running it</p>
-<ul>
-<li><a href="runbooks.html">Runbooks</a></li>
-</ul>
-</nav>
-<main class="content" id="content">
-<nav class="toc" aria-label="On this page">
-<p class="toc-title">On this page</p>
-<ul>
-<li><a href="#basics">The shape of the interface</a></li>
-<li><a href="#authentication">Authentication</a></li>
-<li><a href="#stepup">Step-up: the operations of the greatest impact</a></li>
-<li><a href="#problem">The shape of a refusal</a></li>
-<li><a href="#paging">Paging and cursors</a></li>
-<li><a href="#sorting">Sorting</a></li>
-<li><a href="#revisions">Revisions, ETag and If-Match</a></li>
-<li><a href="#idempotency">Idempotency keys</a></li>
-<li><a href="#exports">Exports and streams</a></li>
-<li><a href="#request-id">Request identifiers</a></li>
-<li><a href="#routes">The routes</a></li>
-<li class="toc-sub"><a href="#routes-service">Service endpoints</a></li>
-<li class="toc-sub"><a href="#routes-caller">Signing in, and the caller's own records</a></li>
-<li class="toc-sub"><a href="#routes-fleet">The fleet at a glance</a></li>
-<li class="toc-sub"><a href="#routes-hosts">Hosts</a></li>
-<li class="toc-sub"><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></li>
-<li class="toc-sub"><a href="#routes-work">Operations, reads and campaigns</a></li>
-<li class="toc-sub"><a href="#routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</a></li>
-<li class="toc-sub"><a href="#routes-monitoring">Monitoring and notifications</a></li>
-<li class="toc-sub"><a href="#routes-directory">The directory</a></li>
-<li class="toc-sub"><a href="#routes-access">Identities, teams, roles and secrets</a></li>
-<li class="toc-sub"><a href="#routes-audit">The audit trail</a></li>
-<li class="toc-sub"><a href="#routes-support">Support bundles</a></li>
-<li><a href="#filters">The filters of the big lists</a></li>
-</ul></nav>
-<h1>The HTTP API</h1>
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html" aria-current="page">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+<h1>8. API</h1>
 <p class="lede">Everything the panel does, a program can do. The API is the same surface the web panel runs on: 230 routes under <code>/api/v1</code>, answered in JSON, authorised by the same permissions and written to the same audit trail. This page is the route table as <code>internal/adminapi/adminapi.go</code> registers it and the conventions as <code>internal/adminapi/openapi.go</code> describes them; the panel serves its own OpenAPI document at <code>GET /api/v1/openapi.json</code>.</p>
+    <ul class="linkrow">
+      <li><a href="#basics">The shape of the interface</a></li>
+      <li><a href="#authentication">Authentication</a></li>
+      <li><a href="#stepup">Step-up: the operations of the greatest impact</a></li>
+      <li><a href="#problem">The shape of a refusal</a></li>
+      <li><a href="#paging">Paging and cursors</a></li>
+      <li><a href="#sorting">Sorting</a></li>
+      <li><a href="#revisions">Revisions, ETag and If-Match</a></li>
+      <li><a href="#idempotency">Idempotency keys</a></li>
+      <li><a href="#exports">Exports and streams</a></li>
+      <li><a href="#request-id">Request identifiers</a></li>
+      <li><a href="#routes">The routes</a></li>
+      <li><a href="#routes-service">Service endpoints</a></li>
+      <li><a href="#routes-caller">Signing in, and the caller's own records</a></li>
+      <li><a href="#routes-fleet">The fleet at a glance</a></li>
+      <li><a href="#routes-hosts">Hosts</a></li>
+      <li><a href="#routes-enrollment">Enrollment, relays and the fleet CA</a></li>
+      <li><a href="#routes-work">Operations, reads and campaigns</a></li>
+      <li><a href="#routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</a></li>
+      <li><a href="#routes-monitoring">Monitoring and notifications</a></li>
+      <li><a href="#routes-directory">The directory</a></li>
+      <li><a href="#routes-access">Identities, teams, roles and secrets</a></li>
+      <li><a href="#routes-audit">The audit trail</a></li>
+      <li><a href="#routes-support">Support bundles</a></li>
+      <li><a href="#filters">The filters of the big lists</a></li>
+    </ul>
 <h2 id="basics">The shape of the interface</h2>
 <ul><li>Reads use <code>GET</code>. Plans, operations and campaigns are created with <code>POST</code> and have explicit <code>approve</code>, <code>cancel</code>, <code>pause</code> and <code>resume</code> endpoints of their own.</li><li>Every list is paged on the server.</li><li>Errors are problem objects with a stable code.</li><li>The document describes itself: <code>GET /api/v1/openapi.json</code> is generated from the registered routes, so it can never drift from them.</li><li>The panel listens on <code>FLOTESTRO_ADMIN_ADDR</code>, <code>127.0.0.1:8080</code> by default, in plain HTTP; it is meant to sit behind a reverse proxy that terminates TLS.</li></ul>
 <h2 id="authentication">Authentication</h2>
 <p>Two credentials reach the same permissions.</p>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Credential</th><th>How it travels</th><th>Who uses it</th></tr></thead><tbody><tr><td>API token</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>Automation. A token belongs to a principal and carries that principal's permissions.</td></tr><tr><td>Browser session</td><td>the cookie <code>flotestro_session</code>, set after an OIDC login</td><td>A person in the panel.</td></tr></tbody></table></div>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Credential</th><th>How it travels</th><th>Who uses it</th></tr></thead>
+<tbody>
+<tr><td>API token</td><td><code>Authorization: Bearer &lt;token&gt;</code></td><td>Automation. A token belongs to a principal and carries that principal&rsquo;s permissions.</td></tr>
+<tr><td>Browser session</td><td>the cookie <code>flotestro_session</code>, set after an OIDC login</td><td>A person in the panel.</td></tr>
+</tbody></table></div>
 <p>The browser session takes precedence: when a request carries both, the cookie decides. The session cookie is <code>HttpOnly</code>, so a script in the browser cannot read it, and a state-changing request that authenticates with it has to confirm the caller's intent: the value of the readable cookie <code>flotestro_csrf</code> is sent back in the header <code>X-Flotestro-CSRF</code>. The cookie by itself authorises nothing. A request with no credential is anonymous, and an endpoint that needs one answers <code>401</code> with <code>WWW-Authenticate: Bearer realm="flotestro"</code> and the code <code>unauthenticated</code>.</p>
 <p>Browser login is configured, not built in: without <code>FLOTESTRO_OIDC_ISSUER</code> the panel works on API tokens alone. A session is bounded by <code>FLOTESTRO_SESSION_IDLE</code> (8h by default) and by an absolute limit of 24 hours, and its groups are confirmed with the provider every <code>FLOTESTRO_SESSION_GROUP_REFRESH</code> (5m by default).</p>
 <h2 id="stepup">Step-up: the operations of the greatest impact</h2>
@@ -83,7 +103,7 @@
 <p>In a production environment - one named by <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>, <code>prod,production</code> by default - an approval may not be given by the person who ordered the change.</p>
 <h2 id="problem">The shape of a refusal</h2>
 <p>Every refusal is the same object, served as <code>application/problem+json</code>:</p>
-<pre class="code"><code>{
+<pre><code>{
   "type":   "about:blank",
   "title":  "Unprocessable Entity",
   "status": 422,
@@ -96,7 +116,13 @@
 <p>A list that can be counted answers with <code>items</code>, <code>count</code>, <code>next_cursor</code> and <code>total</code> (how many match the filter across every page). The task list and the audit trail carry no <code>total</code>: they are browsed, not counted.</p>
 <h2 id="sorting">Sorting</h2>
 <p>A list that can be ordered takes <code>sort</code> as <code>column</code> or <code>column:desc</code>. An unknown column is refused with <code>invalid_sort</code>, and a cursor issued under one order is refused under another.</p>
-<div class="table-wrap"><table class="ref"><thead><tr><th>List</th><th>Columns</th><th>Default</th></tr></thead><tbody><tr><td><code>GET /api/v1/hosts</code></td><td><code>agent_version</code>, <code>connection_state</code>, <code>environment</code>, <code>failed_units</code>, <code>hostname</code>, <code>last_seen_at</code>, <code>lifecycle_state</code>, <code>owner</code>, <code>pending_security_updates</code>, <code>pending_updates</code>, <code>site</code></td><td>hostname ascending</td></tr><tr><td><code>GET /api/v1/jobs</code></td><td><code>action_type</code>, <code>created_at</code>, <code>finished_at</code>, <code>hostname</code>, <code>state</code></td><td>newest first</td></tr></tbody></table></div>
+<div class="table-scroll">
+<table>
+<thead><tr><th>List</th><th>Columns</th><th>Default</th></tr></thead>
+<tbody>
+<tr><td><code>GET /api/v1/hosts</code></td><td><code>agent_version</code>, <code>connection_state</code>, <code>environment</code>, <code>failed_units</code>, <code>hostname</code>, <code>last_seen_at</code>, <code>lifecycle_state</code>, <code>owner</code>, <code>pending_security_updates</code>, <code>pending_updates</code>, <code>site</code></td><td>hostname ascending</td></tr>
+<tr><td><code>GET /api/v1/jobs</code></td><td><code>action_type</code>, <code>created_at</code>, <code>finished_at</code>, <code>hostname</code>, <code>state</code></td><td>newest first</td></tr>
+</tbody></table></div>
 <p>A value the host has not reported does not pretend to be zero: a count that is unknown sorts below zero, and a host never seen sorts before every host that has been.</p>
 <h2 id="revisions">Revisions, ETag and If-Match</h2>
 <p>Two operators editing the same record is an ordinary event, so the records they share carry a version. A read of such a record answers with a weak entity tag in <code>ETag</code>; a write may carry it back in <code>If-Match</code>. Without the header the write proceeds; with it, a record that changed in between is refused with <code>412</code> <code>precondition_failed</code> and the current tag on the response: <em>the record changed since it was read; read it again and repeat the write with its current ETag</em>. <code>If-Match: *</code> matches any version.</p>
@@ -113,7 +139,10 @@
 <p>A caller may set <code>X-Request-Id</code>. The panel records it on every audit entry the request writes, so one identifier ties a change in an external system to the entry in the trail.</p>
 <h2 id="routes">The routes</h2>
 <p>Every registered route, with the permission its handler checks. A row with more than one names every permission the handler references: some are alternatives - a fleet-wide reader's second right - and some are asked for on top of the first. The order itself is authorised again on the server, whatever a client was told.</p>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Section</th><th>Routes</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Section</th><th>Routes</th></tr></thead>
+<tbody>
 <tr><td><a href="#routes-service">Service endpoints</a></td><td>13</td></tr>
 <tr><td><a href="#routes-caller">Signing in, and the caller's own records</a></td><td>8</td></tr>
 <tr><td><a href="#routes-fleet">The fleet at a glance</a></td><td>7</td></tr>
@@ -128,275 +157,314 @@
 <tr><td><a href="#routes-support">Support bundles</a></td><td>5</td></tr>
 </tbody></table></div>
 <h3 id="routes-service">Service endpoints</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/actions</code><br><span class="caption">Typed operations: plan, approval, execution, result.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/capabilities</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/errors</code></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/openapi.json</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/settings</code><br><span class="caption">The effective configuration, secrets masked: what this panel was started with, for whoever administers it.</span></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">The monitoring retentions are the installation's own setting rather than the process's: read here, and written without a restart.</span></td><td><code>settings.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">The first run: what the installation still lacks, and the two connection tests the checklist offers in place.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/status</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/healthz</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/metrics</code></td><td><code>metrics.read</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/actions</code><br><span class="caption">Typed operations: plan, approval, execution, result.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/capabilities</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/errors</code></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/openapi.json</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings</code><br><span class="caption">The effective configuration, secrets masked: what this panel was started with, for whoever administers it.</span></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/settings/monitoring</code><br><span class="caption">The monitoring retentions are the installation's own setting rather than the process's: read here, and written without a restart.</span></td><td><code>settings.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/settings/monitoring</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/setup</code><br><span class="caption">The first run: what the installation still lacks, and the two connection tests the checklist offers in place.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-directory</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/setup/test-oidc</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/status</code></td><td><code>settings.read</code>, <code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/healthz</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/metrics</code></td><td><code>metrics.read</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-caller">Signing in, and the caller's own records</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/me/preferences</code><br><span class="caption">What the signed-in identity keeps for itself.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/me/preferences</code></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/me/sessions</code></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/me/tokens</code></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/whoami</code></td><td><span class="caption">any authenticated identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/auth/callback</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/auth/login</code><br><span class="caption">Operator login through the identity provider.</span></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/auth/logout</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/preferences</code><br><span class="caption">What the signed-in identity keeps for itself.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/me/preferences</code></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/sessions</code></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/me/tokens</code></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/whoami</code></td><td><span class="caption">any authenticated identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/auth/callback</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/auth/login</code><br><span class="caption">Operator login through the identity provider.</span></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/auth/logout</code></td><td><span class="caption">none &mdash; the endpoint answers without an identity</span></td></tr>
 </tbody></table></div>
 <h3 id="routes-fleet">The fleet at a glance</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/access/review</code><br><span class="caption">The access review: every identity with what it can do, when it was last used and what the reviewer should look at.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">The event stream of the whole visible fleet. One connection per tab is enough for all the operations in progress.</span></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/reports/{name}</code></td><td><code>host.read</code>, <code>campaign.read</code>, <code>policy.read</code>, <code>security.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/search</code><br><span class="caption">One question across every kind the caller may read.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/access/review</code><br><span class="caption">The access review: every identity with what it can do, when it was last used and what the reviewer should look at.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/events</code><br><span class="caption">The event stream of the whole visible fleet. One connection per tab is enough for all the operations in progress.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/activity</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/fleet/summary</code></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/maintenance/calendar</code></td><td><code>campaign.read</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reports/{name}</code></td><td><code>host.read</code>, <code>campaign.read</code>, <code>policy.read</code>, <code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/search</code><br><span class="caption">One question across every kind the caller may read.</span></td><td><span class="caption">any authenticated identity</span></td></tr>
 </tbody></table></div>
 <h3 id="routes-hosts">Hosts</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/files/versions/{sha256}</code></td><td><code>file.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/host-groups</code><br><span class="caption">Host groups: a saved answer to "which hosts", either a fixed member list or a selector resolved when read.</span></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/host-groups</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/host-groups/preview</code><br><span class="caption">The selector preview: what a selector under construction resolves to now, for the group form; the same evaluation as the group page.</span></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}/hosts</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}/members</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/bulk-metadata</code><br><span class="caption">One order for the facts of many hosts, answered host by host.</span></td><td><code>host.tag.write</code>, <code>host.maintenance.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/access</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/actions</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/audit</code></td><td><code>audit.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups/runs</code></td><td><code>backup.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates</code></td><td><code>certificate.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates/deployments</code></td><td><code>certificate.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/channel</code><br><span class="caption">The release channel is a policy like a tag: which agent releases the host sees first.</span></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/compose/{project}/versions</code><br><span class="caption">The manifest history of a project. Reverting a change is deploying an earlier version, so there is no separate operation.</span></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/decommission</code></td><td><code>host.decommission</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/failure-domain</code></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files</code></td><td><code>file.plan</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files/history</code></td><td><code>file.plan</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/identity-recovery</code></td><td><code>host.identity.replace</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory</code></td><td><code>inventory.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory/{module}</code></td><td><code>inventory.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/local-accounts</code></td><td><code>localuser.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/maintenance</code><br><span class="caption">A maintenance window changes what the panel thinks about the host, not the host state, so it has its own entry point instead of a place in the task queue.</span></td><td><code>host.maintenance.write</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/management-address</code></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/metrics</code><br><span class="caption">The host view: its charts, its alerts and its silences.</span></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/monitoring</code></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences</code></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/notes</code></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/operations</code></td><td><code>job.create</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/owner</code><br><span class="caption">The owner and the manual management address are facts the operator records about the host, like a tag; they share its permission and carry an entity tag, because two people correct the same host.</span></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/packages</code><br><span class="caption">The installed packages of a host as the store keeps them, with the holds.</span></td><td><code>packages.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/placement</code></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/policies</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine</code><br><span class="caption">The host lifecycle: cut-off, release and decommissioning from the fleet.</span></td><td><code>host.quarantine</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine/release</code></td><td><code>host.quarantine.release</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security</code><br><span class="caption">Compliance with the hardening profile is computed by the panel from the facts the host reports anyway; the remediation is a plan and separate module tasks.</span></td><td><code>security.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.remediate</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation/{plan}/stop</code></td><td><code>security.remediate</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/system/history</code><br><span class="caption">The kernels and releases the panel has seen the host on; the current platform is the system module of the inventory.</span></td><td><code>inventory.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/tags</code><br><span class="caption">Tags describe a host in the panel; the host itself is not asked. The list is replaced whole, so the trail shows every change as one write.</span></td><td><code>host.tag.write</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/team</code><br><span class="caption">Putting a host into a team changes who may act on it, so it is a decision of its own rather than a field of its metadata.</span></td><td><code>host.scope.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/timeline</code><br><span class="caption">The history of one host from every record the panel keeps: tasks, the trail, sessions, campaigns and alerts, lined up by time.</span></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/installation-profiles</code><br><span class="caption">Everything a host needs before it holds a token: the addresses, the trust, the repository and the commands for its family.</span></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/tags</code><br><span class="caption">The tag catalogue of the visible fleet, and a rename across it.</span></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/tags/rename</code></td><td><code>host.tag.write</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/files/versions/{sha256}</code></td><td><code>file.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups</code><br><span class="caption">Host groups: a saved answer to "which hosts", either a fixed member list or a selector resolved when read.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/host-groups</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/preview</code><br><span class="caption">The selector preview: what a selector under construction resolves to now, for the group form; the same evaluation as the group page.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/host-groups/{id}</code></td><td><code>host.group.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/host-groups/{id}/hosts</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/host-groups/{id}/members</code></td><td><code>host.group.write</code>, <code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/bulk-metadata</code><br><span class="caption">One order for the facts of many hosts, answered host by host.</span></td><td><code>host.tag.write</code>, <code>host.maintenance.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/access</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/actions</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/audit</code></td><td><code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/backups</code></td><td><code>backup.run</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/backups/runs</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/certificates/deployments</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/certificates/targets</code></td><td><code>certificate.watch</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/channel</code><br><span class="caption">The release channel is a policy like a tag: which agent releases the host sees first.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/compose/{project}/versions</code><br><span class="caption">The manifest history of a project. Reverting a change is deploying an earlier version, so there is no separate operation.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/decommission</code></td><td><code>host.decommission</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/failure-domain</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files</code></td><td><code>file.plan</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/files/history</code></td><td><code>file.plan</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/identity-recovery</code></td><td><code>host.identity.replace</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory</code></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/inventory/{module}</code></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/local-accounts</code></td><td><code>localuser.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/maintenance</code><br><span class="caption">A maintenance window changes what the panel thinks about the host, not the host state, so it has its own entry point instead of a place in the task queue.</span></td><td><code>host.maintenance.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/management-address</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/metrics</code><br><span class="caption">The host view: its charts, its alerts and its silences.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/monitoring</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/hosts/{id}/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/notes</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/operations</code></td><td><code>job.create</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/owner</code><br><span class="caption">The owner and the manual management address are facts the operator records about the host, like a tag; they share its permission and carry an entity tag, because two people correct the same host.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/packages</code><br><span class="caption">The installed packages of a host as the store keeps them, with the holds.</span></td><td><code>packages.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/placement</code></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/policies</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine</code><br><span class="caption">The host lifecycle: cut-off, release and decommissioning from the fleet.</span></td><td><code>host.quarantine</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/quarantine/release</code></td><td><code>host.quarantine.release</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security</code><br><span class="caption">Compliance with the hardening profile is computed by the panel from the facts the host reports anyway; the remediation is a plan and separate module tasks.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation</code></td><td><code>security.remediate</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/hosts/{id}/security/remediation/{plan}/stop</code></td><td><code>security.remediate</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/system/history</code><br><span class="caption">The kernels and releases the panel has seen the host on; the current platform is the system module of the inventory.</span></td><td><code>inventory.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/tags</code><br><span class="caption">Tags describe a host in the panel; the host itself is not asked. The list is replaced whole, so the trail shows every change as one write.</span></td><td><code>host.tag.write</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/hosts/{id}/team</code><br><span class="caption">Putting a host into a team changes who may act on it, so it is a decision of its own rather than a field of its metadata.</span></td><td><code>host.scope.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/timeline</code><br><span class="caption">The history of one host from every record the panel keeps: tasks, the trail, sessions, campaigns and alerts, lined up by time.</span></td><td><code>host.read</code>, <code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/hosts/{id}/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/installation-profiles</code><br><span class="caption">Everything a host needs before it holds a token: the addresses, the trust, the repository and the commands for its family.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/tags</code><br><span class="caption">The tag catalogue of the visible fleet, and a rename across it.</span></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/tags/rename</code></td><td><code>host.tag.write</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-enrollment">Enrollment, relays and the fleet CA</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/enrollment-requests</code><br><span class="caption">An enrollment request is a durable record of a pending installation; the token is only the secret that authorises one attempt.</span></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/enrollment-requests</code></td><td><code>host.enroll.create</code>, <code>relay.enroll.create</code>, <code>host.enroll.batch</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}</code></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}/config</code><br><span class="caption">The ready configuration of an order: the same file the installation profile composes, without the token, fetchable as often as needed.</span></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/replace</code></td><td><code>host.enroll.revoke</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/revoke</code></td><td><code>host.enroll.revoke</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/pki</code></td><td><code>pki.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/pki/activate</code></td><td><code>pki.rotate</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/pki/prepare</code></td><td><code>pki.rotate</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/pki/{fingerprint}</code></td><td><code>pki.rotate</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/relays</code><br><span class="caption">The relays of the sites: the route of an installation for the wizard, the state of a site for the relay page.</span></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/relays/{id}</code></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/relays/{id}/buffer-history</code></td><td><code>host.enroll.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/relays/{id}/revoke</code></td><td><code>relay.manage</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests</code><br><span class="caption">An enrollment request is a durable record of a pending installation; the token is only the secret that authorises one attempt.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests</code></td><td><code>host.enroll.create</code>, <code>relay.enroll.create</code>, <code>host.enroll.batch</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/enrollment-requests/{id}/config</code><br><span class="caption">The ready configuration of an order: the same file the installation profile composes, without the token, fetchable as often as needed.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/replace</code></td><td><code>host.enroll.revoke</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/enrollment-requests/{id}/revoke</code></td><td><code>host.enroll.revoke</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/pki</code></td><td><code>pki.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/pki/activate</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/pki/prepare</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/pki/{fingerprint}</code></td><td><code>pki.rotate</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays</code><br><span class="caption">The relays of the sites: the route of an installation for the wizard, the state of a site for the relay page.</span></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays/{id}</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/relays/{id}/buffer-history</code></td><td><code>host.enroll.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/relays/{id}/revoke</code></td><td><code>relay.manage</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-work">Operations, reads and campaigns</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/budgets</code></td><td><code>budget.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaign-schedules</code><br><span class="caption">Scheduled campaigns: an order kept for a moment or a rule of moments, placed through the door above under its author's rights; each campaign it places waits for its approval.</span></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaign-schedules</code></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaign-schedules/{id}/run-now</code></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns</code><br><span class="caption">Campaigns: plan, approval, conduct and report.</span></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns</code></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/preview</code><br><span class="caption">The selector preview: the target count comes from the database, not from the length of the first page of the host list.</span></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/advance</code></td><td><code>campaign.control</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/approvals</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/approve</code></td><td><code>campaign.approve</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/cancel</code></td><td><code>campaign.control</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/events</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/pause</code></td><td><code>campaign.control</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/plans</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/report</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/resume</code></td><td><code>campaign.control</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/retry</code><br><span class="caption">A retry is a new order for the hosts the campaign lost, under a new approval; the settled campaign itself never changes.</span></td><td><code>campaign.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/steps</code><br><span class="caption">The steps of the targets: which task carried which step of which host, on which attempt, and why a step did not run.</span></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/targets</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/targets/{host}/skip</code></td><td><code>campaign.approve</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/timeline</code></td><td><code>campaign.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/jobs</code></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/jobs/{id}</code></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/approve</code></td><td><code>job.approve</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/attempts</code></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/cancel</code></td><td><code>job.cancel</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/events</code><br><span class="caption">The progress stream of one operation. The result stays durable in the database; the stream only says when it is worth reading again.</span></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/reads</code><br><span class="caption">Diagnostic read fan-outs: the same read on a handful of hosts at once, one ordinary job per host, merged into one answer.</span></td><td><code>job.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/reads</code></td><td><code>job.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/reads/{id}</code></td><td><code>job.read</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets</code></td><td><code>budget.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/budgets/{key...}</code></td><td><code>budget.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaign-schedules</code><br><span class="caption">Scheduled campaigns: an order kept for a moment or a rule of moments, placed through the door above under its author's rights; each campaign it places waits for its approval.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaign-schedules</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/campaign-schedules/{id}</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaign-schedules/{id}/run-now</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns</code><br><span class="caption">Campaigns: plan, approval, conduct and report.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns</code></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/preview</code><br><span class="caption">The selector preview: the target count comes from the database, not from the length of the first page of the host list.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/advance</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/approvals</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/approve</code></td><td><code>campaign.approve</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/cancel</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/events</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/pause</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/plans</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/report</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/resume</code></td><td><code>campaign.control</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/retry</code><br><span class="caption">A retry is a new order for the hosts the campaign lost, under a new approval; the settled campaign itself never changes.</span></td><td><code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/steps</code><br><span class="caption">The steps of the targets: which task carried which step of which host, on which attempt, and why a step did not run.</span></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/targets</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/campaigns/{id}/targets/{host}/skip</code></td><td><code>campaign.approve</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/campaigns/{id}/timeline</code></td><td><code>campaign.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/approve</code></td><td><code>job.approve</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/attempts</code></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/jobs/{id}/cancel</code></td><td><code>job.cancel</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/jobs/{id}/events</code><br><span class="caption">The progress stream of one operation. The result stays durable in the database; the stream only says when it is worth reading again.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reads</code><br><span class="caption">Diagnostic read fan-outs: the same read on a handful of hosts at once, one ordinary job per host, merged into one answer.</span></td><td><code>job.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/reads</code></td><td><code>job.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/reads/{id}</code></td><td><code>job.read</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-compliance">Policies, compliance, vulnerabilities, certificates and backups</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/backups</code></td><td><code>backup.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/certificates</code></td><td><code>certificate.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/certificates/trust</code></td><td><code>certificate.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/policies</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/policies</code></td><td><code>policy.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/policies/{id}/campaigns</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/policies/{id}/evaluate</code></td><td><code>policy.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/policies/{id}/publish</code></td><td><code>policy.publish</code>, <code>policy.remediate.auto</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/policies/{id}/results</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/policies/{id}/versions</code></td><td><code>policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/security</code><br><span class="caption">The fleet view: one bad setting on a hundred hosts is one problem, not a hundred - and that is visible only when the findings stand side by side.</span></td><td><code>security.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/security/remediation</code></td><td><code>security.remediate</code>, <code>campaign.create</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/security/remediation/preview</code><br><span class="caption">A fleet remediation: chosen checks on chosen hosts, every host with its own plan of steps, one approval over the whole set, carried out as a campaign.</span></td><td><code>security.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves</code></td><td><code>vulnerability.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves/{cve}</code></td><td><code>vulnerability.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/vulnerabilities/snapshots/{id}/accept</code></td><td><code>monitoring.rules.write</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/backups</code></td><td><code>backup.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/certificates</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/certificates/trust</code></td><td><code>certificate.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/policies/{id}</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/campaigns</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies/{id}/evaluate</code></td><td><code>policy.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/policies/{id}/publish</code></td><td><code>policy.publish</code>, <code>policy.remediate.auto</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/results</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/policies/{id}/versions</code></td><td><code>policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/security</code><br><span class="caption">The fleet view: one bad setting on a hundred hosts is one problem, not a hundred - and that is visible only when the findings stand side by side.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/security/remediation</code></td><td><code>security.remediate</code>, <code>campaign.create</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/security/remediation/preview</code><br><span class="caption">A fleet remediation: chosen checks on chosen hosts, every host with its own plan of steps, one approval over the whole set, carried out as a campaign.</span></td><td><code>security.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/vulnerabilities/cves/{cve}</code></td><td><code>vulnerability.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/vulnerabilities/snapshots/{id}/accept</code></td><td><code>monitoring.rules.write</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-monitoring">Monitoring and notifications</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/monitoring</code><br><span class="caption">The fleet view: what is firing now, who reports and who went quiet.</span></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/monitoring/alerts</code></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/acknowledge</code><br><span class="caption">Taking an alert and writing on it: the sensor stays on, the counts of what waits for a person leave it out.</span></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/annotate</code></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/monitoring/rules</code><br><span class="caption">The rules are fleet-wide policy: reading them goes with reading the alerts, writing them has a permission of its own.</span></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/monitoring/rules</code></td><td><code>monitoring.rules.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/monitoring/silences</code></td><td><code>monitoring.read</code>, <code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/monitoring/silences</code><br><span class="caption">A silence that names no host covers every host, so it is written and ended with the permission over the whole installation.</span></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/notifications/channels/{id}/test</code></td><td><code>notification.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/notifications/deliveries</code></td><td><code>notification.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/notifications/deliveries/{id}/retry</code></td><td><code>notification.manage</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring</code><br><span class="caption">The fleet view: what is firing now, who reports and who went quiet.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/alerts</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/acknowledge</code><br><span class="caption">Taking an alert and writing on it: the sensor stays on, the counts of what waits for a person leave it out.</span></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/alerts/{id}/annotate</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/rules</code><br><span class="caption">The rules are fleet-wide policy: reading them goes with reading the alerts, writing them has a permission of its own.</span></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/rules</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/rules/{id}</code></td><td><code>monitoring.rules.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/monitoring/silences</code></td><td><code>monitoring.read</code>, <code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/monitoring/silences</code><br><span class="caption">A silence that names no host covers every host, so it is written and ended with the permission over the whole installation.</span></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/monitoring/silences/{silence}</code></td><td><code>monitoring.silence.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/channels</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/notifications/channels/{id}</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/channels/{id}/test</code></td><td><code>notification.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/notifications/deliveries</code></td><td><code>notification.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/notifications/deliveries/{id}/retry</code></td><td><code>notification.manage</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-directory">The directory</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">The effective access: the directory's own simulation for a user and a host, and the projection of the rules onto one host.</span></td><td><code>identity.policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Directory changes: plan, approval and execution phase by phase.</span></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>the permission of the change type: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> or, for a simulation, <code>identity.policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/changes/{id}</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/approve</code></td><td><code>identity.policy.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/cancel</code></td><td><code>identity.user.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/reveal</code><br><span class="caption">The one-time value of a change - the password of a reset - read once by the requester and by nobody else.</span></td><td><code>identity.user.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/identity/directory/provision-preserve</code></td><td><code>identity.policy.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/dns/records</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/dns/zones</code><br><span class="caption">The directory DNS: zones and records.</span></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/groups</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/hbac-rules</code><br><span class="caption">The access and sudo rules require a separate permission: they describe who may enter a host and elevate privileges.</span></td><td><code>identity.policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/host-groups</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/hosts</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/services</code></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/status</code><br><span class="caption">The identity directory in read-only mode.</span></td><td><code>identity.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/sudo-rules</code></td><td><code>identity.policy.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/identity/users</code></td><td><code>identity.read</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/access/simulate</code><br><span class="caption">The effective access: the directory's own simulation for a user and a host, and the projection of the rules onto one host.</span></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes</code><br><span class="caption">Directory changes: plan, approval and execution phase by phase.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes</code></td><td>the permission of the change type: <code>identity.user.write</code>, <code>identity.group.write</code>, <code>identity.policy.write</code>, <code>dns.directory.write</code>, <code>identity.keytab.rotate</code> or, for a simulation, <code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/changes/{id}</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/approve</code></td><td><code>identity.policy.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/cancel</code></td><td><code>identity.user.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/changes/{id}/reveal</code><br><span class="caption">The one-time value of a change - the password of a reset - read once by the requester and by nobody else.</span></td><td><code>identity.user.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/identity/directory/provision-preserve</code></td><td><code>identity.policy.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/dns/records</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/dns/zones</code><br><span class="caption">The directory DNS: zones and records.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/groups</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hbac-rules</code><br><span class="caption">The access and sudo rules require a separate permission: they describe who may enter a host and elevate privileges.</span></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/host-groups</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/hosts</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/services</code></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/status</code><br><span class="caption">The identity directory in read-only mode.</span></td><td><code>identity.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/sudo-rules</code></td><td><code>identity.policy.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/identity/users</code></td><td><code>identity.read</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-access">Identities, teams, roles and secrets</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/group-mappings/{id}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/principals</code><br><span class="caption">Principals and API tokens.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/principals</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}</code><br><span class="caption">An identity is disabled rather than deleted: the trail keeps naming it. The tokens and the bindings are managed one by one.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/principals/{id}/enable</code><br><span class="caption">Enabling gives a disabled identity its roles back; the sessions and the tokens that ended with the disabling stay ended.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/principals/{id}/roles</code><br><span class="caption">A binding is granted with a validity or without one; granting it again changes the validity alone.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/roles/{role}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/principals/{id}/sessions</code><br><span class="caption">The live browser sessions of an identity, ended one at a time.</span></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/sessions/{sid}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/principals/{id}/team-roles</code><br><span class="caption">A role over a team, beside the site-scoped bindings.</span></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/team-roles/{role}</code></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/principals/{id}/tokens</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/tokens/{token}</code></td><td><code>principal.manage</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/roles</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/secrets/{name}</code></td><td><code>secret.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/retire</code></td><td><code>secret.destroy</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/rotate</code></td><td><code>secret.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/secrets/{name}/versions/{version}</code></td><td><code>secret.destroy</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/teams</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/teams</code></td><td><code>team.binding.write</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>host.read</code></td></tr>
-<tr><td><span class="method method-put">PUT</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
-<tr><td><span class="method method-delete">DELETE</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/group-mappings</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/group-mappings/{id}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/principals</code><br><span class="caption">Principals and API tokens.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}</code><br><span class="caption">An identity is disabled rather than deleted: the trail keeps naming it. The tokens and the bindings are managed one by one.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/enable</code><br><span class="caption">Enabling gives a disabled identity its roles back; the sessions and the tokens that ended with the disabling stay ended.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/roles</code><br><span class="caption">A binding is granted with a validity or without one; granting it again changes the validity alone.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/roles/{role}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/principals/{id}/sessions</code><br><span class="caption">The live browser sessions of an identity, ended one at a time.</span></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/sessions/{sid}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/team-roles</code><br><span class="caption">A role over a team, beside the site-scoped bindings.</span></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/team-roles/{role}</code></td><td><code>principal.manage</code>, <code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/principals/{id}/tokens</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/principals/{id}/tokens/{token}</code></td><td><code>principal.manage</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/roles</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets</code></td><td><code>secret.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/secrets/{name}</code></td><td><code>secret.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/retire</code></td><td><code>secret.destroy</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/secrets/{name}/rotate</code></td><td><code>secret.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/secrets/{name}/versions/{version}</code></td><td><code>secret.destroy</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/teams</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/teams</code></td><td><code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>host.read</code></td></tr>
+<tr><td><span class="badge method method-put">PUT</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
+<tr><td><span class="badge method method-delete">DELETE</span></td><td><code>/api/v1/teams/{id}</code></td><td><code>team.binding.write</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-audit">The audit trail</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/audit</code></td><td><code>audit.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/audit/export</code><br><span class="caption">The export is the trail as a file with a hash chain, for a copy kept outside the panel; cmd/auditverify checks such a file offline.</span></td><td><code>audit.read</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/audit</code></td><td><code>audit.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/audit/export</code><br><span class="caption">The export is the trail as a file with a hash chain, for a copy kept outside the panel; cmd/auditverify checks such a file offline.</span></td><td><code>audit.read</code></td></tr>
 </tbody></table></div>
 <h3 id="routes-support">Support bundles</h3>
-<div class="table-wrap"><table class="ref routes"><thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead><tbody>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/support/bundles</code><br><span class="caption">The support bundle of the panel: asked for with step-up, fetched through a link that expires (security remediation, chapter 14.6).</span></td><td><code>support.bundle.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/support/bundles</code></td><td><code>support.bundle.create</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}</code></td><td><code>support.bundle.read</code></td></tr>
-<tr><td><span class="method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}/archive</code></td><td><code>support.bundle.read</code></td></tr>
-<tr><td><span class="method method-post">POST</span></td><td><code>/api/v1/support/bundles/{id}/download</code></td><td><code>support.bundle.read</code></td></tr>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Method</th><th>Path</th><th>Permission</th></tr></thead>
+<tbody>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles</code><br><span class="caption">The support bundle of the panel: asked for with step-up, fetched through a link that expires (security remediation, chapter 14.6).</span></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/support/bundles</code></td><td><code>support.bundle.create</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}</code></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-get">GET</span></td><td><code>/api/v1/support/bundles/{id}/archive</code></td><td><code>support.bundle.read</code></td></tr>
+<tr><td><span class="badge method method-post">POST</span></td><td><code>/api/v1/support/bundles/{id}/download</code></td><td><code>support.bundle.read</code></td></tr>
 </tbody></table></div>
 <h2 id="filters">The filters of the big lists</h2>
 <p>Every filter a list takes, as the panel&rsquo;s own contract describes it. A filter left out does not narrow anything.</p>
 <h3 id="filters-get-api-v1-audit"><code>GET /api/v1/audit</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>target_id</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>target_type</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>actor</code></td><td><code>string</code></td><td>The identity that acted.</td></tr>
@@ -412,12 +480,18 @@
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-backups"><code>GET /api/v1/backups</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page. The moment the ages were judged at travels in it, so every page of one reading judges by the same clock.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-campaigns-preview"><code>GET /api/v1/campaigns/preview</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>action</code></td><td><code>string</code></td><td>The operation type; without it the preview counts hosts and qualifies none. For an operation the panel splits host by host (system.hostname.set) the answer also lists every ready host under hosts [{id, hostname}], for the mapping to name.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
@@ -429,18 +503,27 @@
 <tr><td><code>host_id</code></td><td><code>string</code></td><td>A host identifier to preview as an explicit list; may repeat. The list is strict: an unknown host, one outside the caller's scope for the operation, or one also excluded answers 422 targets_invalid with the reason per host.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-campaigns-id-steps"><code>GET /api/v1/campaigns/{id}/steps</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>host_id</code></td><td><code>string</code></td><td>Only the steps of this host.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>How many hosts one page covers: 200 by default, 1000 at most; a page is cut between hosts, never inside one.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-certificates"><code>GET /api/v1/certificates</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-enrollment-requests"><code>GET /api/v1/enrollment-requests</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>status</code></td><td><code>string</code></td><td>pending, enrolled, expired, revoked or failed.</td></tr>
 <tr><td><code>kind</code></td><td><code>string</code></td><td>agent or relay.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
@@ -449,11 +532,17 @@
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-host-groups-preview"><code>GET /api/v1/host-groups/preview</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>expression</code></td><td><code>string</code></td><td>The typed selector as JSON; the answer is the count within the caller's scope, a sample of up to 20 hostnames and the selector in one line.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-hosts"><code>GET /api/v1/hosts</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>A fragment of the hostname, the management address, the machine identifier or the owner; case-insensitive.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td></td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td></td></tr>
@@ -481,7 +570,10 @@
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-hosts-id-audit"><code>GET /api/v1/hosts/{id}/audit</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>actor</code></td><td><code>string</code></td><td>The identity that acted.</td></tr>
 <tr><td><code>actor_kind</code></td><td><code>string</code></td><td>user, service, anonymous, agent, relay, machine or system.</td></tr>
 <tr><td><code>actor_principal_id</code></td><td><code>string</code></td><td>The immutable identifier of the identity that acted.</td></tr>
@@ -495,20 +587,32 @@
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-hosts-id-metrics"><code>GET /api/v1/hosts/{id}/metrics</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>range</code></td><td><code>string</code></td><td>The chart window: 3h (default), 24h, 7d or 30d; the first two answer with raw samples, the others with quarter-hour rollups.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-identity-changes"><code>GET /api/v1/identity/changes</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>state</code></td><td><code>string</code></td><td>planned, awaiting_approval, running, succeeded, partially_applied, failed or canceled.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The most changes to return: 50 by default, 200 at most.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-identity-users"><code>GET /api/v1/identity/users</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>preserved</code></td><td><code>string</code></td><td>"true" lists the accounts removed with their entry kept, apart from the live ones; a preserved account reaches no host and belongs to no group.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-installation-profiles"><code>GET /api/v1/installation-profiles</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>site</code></td><td><code>string</code></td><td>The site the host will live in; "default" when empty.</td></tr>
 <tr><td><code>environment</code></td><td><code>string</code></td><td>The environment of the host; "unassigned" when empty.</td></tr>
 <tr><td><code>kind</code></td><td><code>string</code></td><td>agent (default) or relay.</td></tr>
@@ -517,7 +621,10 @@
 <tr><td><code>channel</code></td><td><code>string</code></td><td>The repository channel; stable by default.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-jobs"><code>GET /api/v1/jobs</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>host_id</code></td><td><code>string</code></td><td>The host the tasks belong to.</td></tr>
 <tr><td><code>hostname</code></td><td><code>string</code></td><td>The beginning of a host name; a full name keeps that host alone.</td></tr>
 <tr><td><code>state</code></td><td><code>string</code></td><td></td></tr>
@@ -534,12 +641,18 @@
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-maintenance-calendar"><code>GET /api/v1/maintenance/calendar</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>from</code></td><td><code>string</code></td><td>RFC 3339; the start of the range.</td></tr>
 <tr><td><code>to</code></td><td><code>string</code></td><td>RFC 3339; the end of the range, a year after from at most.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-monitoring-alerts"><code>GET /api/v1/monitoring/alerts</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>state</code></td><td><code>string</code></td><td>pending, firing or resolved.</td></tr>
 <tr><td><code>acknowledged</code></td><td><code>string</code></td><td>true keeps the alerts somebody took, false the ones still waiting.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, warning or info.</td></tr>
@@ -547,7 +660,10 @@
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The most alerts to return: 100 by default, 500 at most.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-notifications-deliveries"><code>GET /api/v1/notifications/deliveries</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>channel_id</code></td><td><code>string</code></td><td>One channel's deliveries.</td></tr>
 <tr><td><code>status</code></td><td><code>string</code></td><td>sent or failed, the words of the previous release.</td></tr>
 <tr><td><code>state</code></td><td><code>string</code></td><td>pending, leased, delivered, retry_wait, dead_letter or suppressed.</td></tr>
@@ -555,27 +671,42 @@
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>100 by default, 500 at most.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-policies-id-results"><code>GET /api/v1/policies/{id}/results</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>host_id</code></td><td><code>string</code></td><td>Only the verdicts of this host.</td></tr>
 <tr><td><code>verdict</code></td><td><code>string</code></td><td>compliant, drift, error or not_applicable.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-reads"><code>GET /api/v1/reads</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 100 by default, 500 at most.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-relays"><code>GET /api/v1/relays</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>site</code></td><td><code>string</code></td><td>Only the relays of this site.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-relays-id-buffer-history"><code>GET /api/v1/relays/{id}/buffer-history</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>range</code></td><td><code>string</code></td><td>The chart window: 3h, 24h (the default), 7d, 30d or 90d; the first two answer with the raw reports, the others with the quarter-hour rollups.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-reports-name-"><code>GET /api/v1/reports/{name}</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>from</code></td><td><code>string</code></td><td>RFC 3339; the start of the period. Both bounds or neither: without them the last thirty days.</td></tr>
 <tr><td><code>to</code></td><td><code>string</code></td><td>RFC 3339; the end of the period, a year after from at most.</td></tr>
 <tr><td><code>site</code></td><td><code>string</code></td><td>Narrows the report to one site.</td></tr>
@@ -584,18 +715,27 @@
 <tr><td><code>section</code></td><td><code>string</code></td><td>compliance with format=csv: policies (default), hosts or security.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-search"><code>GET /api/v1/search</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>The beginning of a name: a hostname, machine identifier or management address, a campaign, policy, group, relay or secret name, an identity's subject or display name, at least eight characters of a job identifier, or a CVE identifier in full. Fewer than two characters answer with nothing; a kind the caller may not read is left out.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The hits per kind: 8 by default, 25 at most.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-security"><code>GET /api/v1/security</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>check</code></td><td><code>string</code></td><td>The identifier of one check; the answer is then one page of the hosts failing it rather than the whole profile.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size of the host list of a check: 100 by default, 500 at most.</td></tr>
 <tr><td><code>cursor</code></td><td><code>string</code></td><td>The next_cursor of the previous page; empty for the first page.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-vulnerabilities"><code>GET /api/v1/vulnerabilities</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>A fragment of the hostname; the summary numbers stay fleet-wide.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible or unrated: hosts with an affected finding of that rung.</td></tr>
 <tr><td><code>sort</code></td><td><code>string</code></td><td>affected (default), fixable or hostname.</td></tr>
@@ -604,18 +744,32 @@
 <tr><td><code>offset</code></td><td><code>integer</code></td><td>Rows to skip; the cursor wins when both are given.</td></tr>
 </tbody></table></div>
 <h3 id="filters-get-api-v1-vulnerabilities-cves"><code>GET /api/v1/vulnerabilities/cves</code></h3>
-<div class="table-wrap"><table class="ref"><thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead><tbody>
+<div class="table-scroll">
+<table>
+<thead><tr><th>Parameter</th><th>Type</th><th>Meaning</th></tr></thead>
+<tbody>
 <tr><td><code>q</code></td><td><code>string</code></td><td>A prefix of a CVE number or of an affected package name.</td></tr>
 <tr><td><code>severity</code></td><td><code>string</code></td><td>critical, high, medium, low, negligible or unrated.</td></tr>
 <tr><td><code>fixable</code></td><td><code>boolean</code></td><td>true keeps the CVEs with a vendor fix on at least one host.</td></tr>
 <tr><td><code>limit</code></td><td><code>integer</code></td><td>The page size: 50 by default, 500 at most.</td></tr>
 <tr><td><code>offset</code></td><td><code>integer</code></td><td>Rows to skip.</td></tr>
 </tbody></table></div>
-</main>
+    <ul class="linkrow">
+      <li><a href="errors.html">← 7. Errors and refusals</a></li>
+      <li><a href="operations.html">6. Operations</a></li>
+      <li><a href="runbooks.html">9. Runbooks</a></li>
+      <li><a href="./">Contents</a></li>
+    </ul>
+  </main>
+
 </div>
+
 <footer class="site-footer">
-<p>Flotestro &middot; <a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
-<p class="footer-note">This reference is transcribed from the sources on the main branch: <code>docs/configuration.md</code>, <code>packaging/agent.yaml</code>, <code>packaging/relay.yaml</code>, <code>internal/opspec/</code> and <code>internal/adminapi/</code>.</p>
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
 </footer>
+
 </body>
 </html>
