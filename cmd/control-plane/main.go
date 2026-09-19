@@ -329,19 +329,19 @@ func run() error {
 		config.EnvDuration("FLOTESTRO_VULN_MAX_SNAPSHOT_AGE", 6*time.Hour),
 		"the age above which the data of a feed are described as stale")
 	flag.StringVar(&vulnerabilities.DebianURL, "vulnerability-debian-url",
-		config.Env("FLOTESTRO_VULN_DEBIAN_URL", debiansource.DefaultURL),
+		config.EnvMeaningfullyEmpty("FLOTESTRO_VULN_DEBIAN_URL", debiansource.DefaultURL),
 		"the dump of the Debian security tracker (https:// or file://); empty disables this source")
 	flag.StringVar(&vulnerabilities.UbuntuURL, "vulnerability-ubuntu-url",
-		config.Env("FLOTESTRO_VULN_UBUNTU_URL", ubuntusource.DefaultURL),
+		config.EnvMeaningfullyEmpty("FLOTESTRO_VULN_UBUNTU_URL", ubuntusource.DefaultURL),
 		"the directory with the OVAL data of Canonical (https:// or file://); empty disables this source")
 	flag.StringVar(&vulnerabilities.RedHatURL, "vulnerability-redhat-url",
-		config.Env("FLOTESTRO_VULN_REDHAT_URL", redhatsource.DefaultURL),
+		config.EnvMeaningfullyEmpty("FLOTESTRO_VULN_REDHAT_URL", redhatsource.DefaultURL),
 		"the directory with the CSAF/VEX data of Red Hat (https:// or file://); empty disables this source")
 	flag.StringVar(&vulnerabilities.RedHatCache, "vulnerability-redhat-cache",
 		config.Env("FLOTESTRO_VULN_REDHAT_CACHE", redhatsource.DefaultDirectory),
 		"the directory for the Red Hat findings that were read")
 	flag.StringVar(&vulnerabilities.NVDURL, "vulnerability-nvd-url",
-		config.Env("FLOTESTRO_VULN_NVD_URL", nvdsource.DefaultURL),
+		config.EnvMeaningfullyEmpty("FLOTESTRO_VULN_NVD_URL", nvdsource.DefaultURL),
 		"the API of the NVD database for enriching the descriptions (https:// or file://); empty disables it")
 	flag.StringVar(&vulnerabilities.NVDKey, "vulnerability-nvd-key", nvdKey,
 		"the API key for NVD; without it the first read takes around twenty minutes")

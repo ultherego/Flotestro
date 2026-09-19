@@ -51,9 +51,20 @@ type Vulnerabilities struct {
 	NVDInterval time.Duration
 }
 
-// Env reads an environment variable with a default value.
+// Env reads an environment variable with a default value. An empty variable
+// reads as unset: packaging ships the keys it does not fill as empty lines.
 func Env(key, fallback string) string {
 	if value, ok := os.LookupEnv(key); ok && value != "" {
+		return value
+	}
+	return fallback
+}
+
+// EnvMeaningfullyEmpty is Env for a key whose empty value means something of
+// its own - a feed address that empty switches off, rather than one the
+// packaging left blank. Only a key that is not set at all takes the fallback.
+func EnvMeaningfullyEmpty(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
 		return value
 	}
 	return fallback

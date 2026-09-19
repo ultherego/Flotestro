@@ -1,10 +1,14 @@
-# The Flotestro control plane.
+# The Flotestro control plane and what it is deployed with, in profiles.
 #
-#   docker compose --profile quickstart up -d    with a database of its own
-#   docker compose up -d                         with a database somebody else runs
+#   docker compose up -d                                with a database somebody else runs
+#   docker compose --profile quickstart up -d           with a database of its own
+#   docker compose --profile airgap up -d               plus the package repository of the release
+#   docker compose --profile tools run --rm admin-tools backup
+#   docker compose --profile restore run --rm admin-restore restore <backup-id>
 #
-# Without the profile no database is started here, so an installation pointed
-# at an external one cannot quietly run a second beside it.
+# Nothing but the control plane starts unless its profile is named, so an
+# installation pointed at an external database cannot quietly run a second
+# beside it. Profiles combine: --profile quickstart --profile airgap.
 # Settings come from ./.env, secrets from files under ./secrets/ - see README.md.
 name: flotestro
 
@@ -38,8 +42,12 @@ services:
       # The address the operator sees. The OIDC redirect and the Secure flag
       # of the session cookies follow from it.
       FLOTESTRO_PUBLIC_URL: ${FLOTESTRO_PUBLIC_URL:?required, for example https://panel.example.org}
-      # Optional, and non-secret; uncomment what the installation uses.
-      # FLOTESTRO_PACKAGE_REPOSITORY_URL: https://packages.example.org/flotestro
+      # Optional and non-secret, empty unless ./.env says otherwise: the address
+      # the hosts reach the repository at, and the NVD an isolated site clears.
+      FLOTESTRO_PACKAGE_REPOSITORY_URL: ${FLOTESTRO_PACKAGE_REPOSITORY_URL-}
+      # No value: passed through only when the host environment sets it, so an
+      # unset variable is unset in the container and not an empty one.
+      FLOTESTRO_VULN_NVD_URL:
 
     secrets:
       - database_url
@@ -50,6 +58,9 @@ services:
       - control_plane_state:/var/lib/flotestro
       # The keytab of the directory connector, when FreeIPA is configured:
       # - ./secrets/ipa.keytab:/run/secrets/ipa.keytab:ro
+      # Vulnerability feeds copied onto an isolated site, read-only and outside
+      # the state, which is one half of the backup pair - see README.md:
+      # - ./feeds:/var/lib/flotestro-feeds:ro
 
     ports:
       # The panel and the API are published on the host loopback alone; a
@@ -140,6 +151,148 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # The package repository of the release, for a site with no route out. It
+  # holds no secret and answers GET and HEAD for one already-signed directory.
+  package-repository:
+    profiles: ["airgap"]
+    # The reference keeps the registry it was built under although the site
+    # cannot reach it: "docker load" restores the image under exactly that name.
+    image: ghcr.io/ultherego/flotestro-package-repository:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    restart: unless-stopped
+    user: "65532:65532"
+
+    ports:
+      # The fleet fetches over plain HTTP, and that is not a weakness here:
+      # what a package manager trusts is the signature in the tree.
+      - "8090:8080"
+
+    networks:
+      - application
+
+    # Nothing is written, not even a temporary file, so there is no tmpfs
+    # either: the tree is in the image layer and the process only reads it.
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 16384
+    # A download in flight is finished rather than cut.
+    stop_grace_period: 30s
+
+    healthcheck:
+      # The same static client as the other images; the server answers
+      # /healthz and refuses to start at all without flotestro-repo.asc.
+      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8080"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Taking the backup pair. The state is read-only here: this service never
+  # writes into the identity of the installation.
+  admin-tools:
+    profiles: ["tools"]
+    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    restart: "no"
+    user: "65532:65532"
+
+    environment:
+      # The same DSN the control plane uses, from the same file. The tool takes
+      # the password out of it before it runs anything.
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      FLOTESTRO_STATE_DIR: /state
+      FLOTESTRO_BACKUP_DIR: /backups
+      # The digest this deployment pins, so that the manifest of a backup can
+      # name the image the backup was taken with.
+      FLOTESTRO_IMAGE_DIGEST: ${FLOTESTRO_TOOLS_DIGEST:-}
+
+    secrets:
+      - database_url
+
+    volumes:
+      # The state of the control plane, read-only: the CA, the keys of the
+      # secret store, the bootstrap token. Half of the backup pair.
+      - control_plane_state:/state:ro
+      # The other half lands here, in a directory named after the backup.
+      - ./backups:/backups
+
+    networks:
+      # Both are named because the database of the quick start is on the
+      # internal one and an external database is reached through the other.
+      database_egress:
+        priority: 100
+      database:
+        priority: 10
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # Putting the pair back. The same image and the same tool; what differs is
+  # that the state is writable and the backups are not.
+  admin-restore:
+    profiles: ["restore"]
+    image: ghcr.io/ultherego/flotestro-admin-tools:${FLOTESTRO_VERSION:?set FLOTESTRO_VERSION in .env}
+    restart: "no"
+    user: "65532:65532"
+
+    environment:
+      FLOTESTRO_DATABASE_URL_FILE: /run/secrets/database_url
+      FLOTESTRO_STATE_DIR: /state
+      FLOTESTRO_BACKUP_DIR: /backups
+      FLOTESTRO_IMAGE_DIGEST: ${FLOTESTRO_TOOLS_DIGEST:-}
+
+    secrets:
+      - database_url
+
+    volumes:
+      # Read-write, and the tool refuses to write into a state that is not
+      # empty: a restore puts an installation back where there is none.
+      - control_plane_state:/state
+      # The backup is the source here and is mounted read-only, so a restore
+      # cannot damage the thing it is restoring from.
+      - ./backups:/backups:ro
+
+    networks:
+      database_egress:
+        priority: 100
+      database:
+        priority: 10
+
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
 
     logging:
       driver: json-file

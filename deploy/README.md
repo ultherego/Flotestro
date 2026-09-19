@@ -8,15 +8,13 @@ the signed repository.
 | File | Role |
 |---|---|
 | `Containerfile` | All four images: the control plane (target `control-plane`), the relay (target `relay`), the administration tools (target `admin-tools`) and the package repository of an isolated site (target `package-repository`). |
-| `compose.yaml` | The control plane, and under `--profile quickstart` a PostgreSQL of its own. |
-| `compose.relay.yaml` | The relay of one site, run on the site host as its own project. |
-| `compose.airgap.yaml` | The overlay that puts the signed package repository of the release beside the control plane, for a site with no route out. |
-| `compose.tools.yaml` | The overlay with the backup and the restore, behind the profiles `tools` and `restore`. It adds nothing to `up`. |
-| `compose.podman.yaml` | The override rootless Podman needs: `keep-id`, so the secrets stay owned by the deploying account. |
+| `compose.yaml` | The whole deployment, in profiles: the control plane on its own, `quickstart` for a PostgreSQL of its own, `airgap` for the signed package repository of the release, `tools` and `restore` for the backup pair. |
+| `compose.relay.yaml` | The relay of one site, run on the site host as its own project. It is not a profile of the file above: that file requires settings a relay host has none of, and Compose interpolates a whole document whatever profile is active. |
+| `compose.podman.yaml` | The override rootless Podman needs: `keep-id`, so the secrets stay owned by the deploying account. It changes a property of a service that already exists, which no profile can do. |
 | `../.dockerignore` | The allowlist of the build context; it lies at the repository root because that is the context the build runs with. |
 | `../.github/workflows/images.yml` | What builds, publishes, describes and signs the three service images, and what a pull request runs to prove the files above still work. |
 
-## The four profiles
+## The four deployments
 
 **Quick start** - the control plane and a PostgreSQL of its own, one host,
 local backup. For a laboratory, a demonstration and a small installation.
@@ -47,17 +45,20 @@ on media and installs its agents from the fourth one; nothing reaches the
 Internet.
 
 ```
-docker compose -f compose.yaml -f compose.airgap.yaml up -d
+docker compose --profile airgap up -d
+docker compose --profile quickstart --profile airgap up -d   # with a database of its own
 ```
 
-The backup and the restore are not a profile of a deployment: they are two
-one-shot services behind the profiles `tools` and `restore` in
-`compose.tools.yaml`, which adds nothing to `up`. See "Taking the pair".
+The backup and the restore are not a deployment of their own: they are two
+one-shot services behind the profiles `tools` and `restore`, which add nothing
+to `up`. See "Taking the pair".
 
-`compose.yaml` never names a database service, a host called `postgres` or a
-database volume. An installation that points at an external database
-therefore cannot start a second, empty one beside it and write half of its
-truth there.
+The control plane is the only service with no profile; nothing else starts
+unless its profile is named, and `.github/workflows/images.yml` checks that
+in both directions. An installation
+that points at an external database therefore cannot start a second, empty one
+beside it and write half of its truth there, and a connected site does not
+quietly publish a package repository on port 8090.
 
 ## Podman
 
@@ -99,7 +100,7 @@ registry - `postgres:17-bookworm` - is a short name, and Podman refuses to
 resolve one without a terminal to ask at; the files name
 `docker.io/library/postgres` in full, which both runtimes take. And
 `podman-compose` honours `--profile` but not the `COMPOSE_PROFILES`
-environment variable, so the quick start is started with the flag.
+environment variable, so every profile here is named with the flag.
 
 `podman-compose` reads the rest of the files as written: `secrets:`,
 `read_only`, `tmpfs`, `cap_drop`, `security_opt`, `pids_limit`, `ulimits` and
@@ -137,14 +138,18 @@ docker buildx build -f deploy/Containerfile --target admin-tools \
 The fourth image is built from something the source tree does not contain: a
 repository that is already built and already signed. `packaging/build-release.sh`
 makes the packages, `packaging/sign-repo.sh` signs them into a tree, and that
-tree enters the build as a named context. The signing key stays on the machine
+tree enters the build as a named context. The same script composes the public
+repository the release workflow publishes, so an isolated site serves the
+layout its hosts would have met anywhere else. Run against a directory that
+already holds earlier releases it adds to them rather than replacing them: a
+host that has not upgraded yet still finds the version it runs. The signing key stays on the machine
 that used it and never reaches a layer - what the image carries is the public
 half, `flotestro-repo.asc`, which is what a host imports before it installs
 anything.
 
 ```
 packaging/build-release.sh all 0.59.0 /srv/release
-packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo
+packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo 0.59.0
 
 docker build -f deploy/Containerfile --target package-repository \
   --build-context repository=/srv/repo \
@@ -410,8 +415,7 @@ docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-t
 # 5. Back up the database and the state volume together, now - the CA was
 #    just created. See "Taking the pair" below.
 mkdir -p backups && chown 65532:65532 backups && chmod 700 backups
-docker compose -f compose.yaml -f compose.tools.yaml \
-  --profile tools run --rm admin-tools backup
+docker compose --profile tools run --rm admin-tools backup
 ```
 
 Delete `./bootstrap-token` and the token in the panel once the real accounts
@@ -534,17 +538,30 @@ this machine and the published port - never a Compose service name.
 ```
 cat >> .env <<'SETTINGS'
 FLOTESTRO_PACKAGE_REPOSITORY_URL=http://panel.site.example.org:8090
+# NVD is read from a live API and has no offline form; an isolated site
+# clears it rather than letting a timer fail every six hours.
+FLOTESTRO_VULN_NVD_URL=
 SETTINGS
 
-docker compose -f compose.yaml -f compose.airgap.yaml up -d
+docker compose --profile airgap up -d
 ```
 
 What the panel then writes into the commands, and what the repository image
 serves, is the layout `packaging/sign-repo.sh` writes: `flotestro-repo.asc`
-at the root, `deb/dists/<channel>/main` for apt, `rpm/<channel>` for dnf and
-`arch/<channel>` for pacman. Left empty, `FLOTESTRO_PACKAGE_REPOSITORY_URL`
-leaves a placeholder in those commands and the "Add host" screen says so in a
-warning; it is not a setting the panel guesses.
+at the root, `deb/dists/<channel>/main` over `deb/pool/<channel>` for apt,
+`rpm/<channel>` for dnf and `arch/<channel>` for pacman, with
+`releases/<version>` beside them for each release's `SHA256SUMS` and
+`provenance.json`. Left empty, `FLOTESTRO_PACKAGE_REPOSITORY_URL` leaves a
+placeholder in those commands and the "Add host" screen says so in a warning;
+it is not a setting the panel guesses.
+
+Every directory named there carries the channel, so a `testing` build and a
+`stable` one never meet: a pre-release copied into the same tree is invisible
+to a host that asked for `stable`. The pacman channel is the exception worth
+knowing - one database serves one architecture, so `arch/<channel>` is the
+x86_64 repository, the one Arch Linux itself has and the one the panel's
+command points at, and any other architecture stands in
+`arch/<channel>/<architecture>` for a host configured by hand.
 
 Plain HTTP is not a weakness here. What a package manager trusts is the
 signature over the index and the key it imported once, and the fleet's
@@ -590,7 +607,7 @@ block is the place that says so.
 **What an operator does instead.** Every distribution source accepts a
 `file://` address, and a copy on the panel's disk is read exactly as the
 remote feed is - including the conditional fetch, so an unchanged copy is not
-re-parsed. The commented block in `compose.airgap.yaml` is the shape of it;
+re-parsed. The commented mount in `compose.yaml` is the shape of it;
 what has to be on the media is:
 
 | Source | What to copy |
@@ -613,8 +630,9 @@ that changes the age of the feeds is the operator's calendar, not a panel
 screen.
 
 *NVD has no offline form at all.* It is read page by page from a live API
-against one address, so no static file can stand in for it; this profile
-therefore switches it off rather than letting a timer fail every six hours.
+against one address, so no static file can stand in for it; an isolated site
+therefore clears `FLOTESTRO_VULN_NVD_URL` in `./.env` rather than letting a
+timer fail every six hours.
 What is lost is enrichment only - the descriptions and the CVSS scores. The
 findings, their packages and the vendor's own severity stay; a CVE the vendor
 did not rate shows as unrated rather than as harmless.
@@ -653,7 +671,7 @@ by. Neither is a backup of the other and neither is usable without the other:
 
 ### Taking the pair
 
-`compose.tools.yaml` is the overlay that takes it, and `flotestro-admin-tools`
+The profile `tools` is what takes it, and `flotestro-admin-tools`
 is the image that does the work - so that the host which runs the panel never
 needs a PostgreSQL client, a `pg_dump` of the wrong major version or a cron
 job written by hand.
@@ -668,8 +686,7 @@ Then, with the control plane stopped - or at the very least with the rotation
 of the CA and of the key encryption keys held for the duration:
 
 ```
-docker compose -f compose.yaml -f compose.tools.yaml \
-  --profile tools run --rm admin-tools backup
+docker compose --profile tools run --rm admin-tools backup
 ```
 
 It writes `./backups/<backup-id>/` and nothing outside it:
@@ -686,10 +703,8 @@ do: the backup belongs on encrypted storage, away from the host it was taken
 from, and it is worth restoring it into an isolated environment now and again
 to find out whether it actually works.
 
-Writing `COMPOSE_FILE=compose.yaml:compose.tools.yaml` into `./.env` shortens
-all of this to `docker compose --profile tools run --rm admin-tools backup`.
-With the quick start profile the local database is on an internal network, so
-add `--profile quickstart` as well.
+The database of the quick start is on an internal network, so a deployment
+that runs one adds `--profile quickstart` to the commands above.
 
 ### Putting it back
 
@@ -697,8 +712,7 @@ The restore is a second profile, because it is the one operation that mounts
 the state writable:
 
 ```
-docker compose -f compose.yaml -f compose.tools.yaml \
-  --profile restore run --rm admin-restore restore 20260919T101500Z
+docker compose --profile restore run --rm admin-restore restore 20260919T101500Z
 ```
 
 It refuses to start unless the checksums match, the state volume is empty and
@@ -707,8 +721,7 @@ installation back where there is none, it never writes over the identity of
 one that is still there. A pair can be checked without restoring anything:
 
 ```
-docker compose -f compose.yaml -f compose.tools.yaml \
-  --profile tools run --rm admin-tools verify 20260919T101500Z
+docker compose --profile tools run --rm admin-tools verify 20260919T101500Z
 ```
 
 The whole procedure, in order: stop every control plane; pick the database
@@ -722,8 +735,7 @@ The image carries the same `auditverify` the packages ship, so an export can
 be checked where it lies:
 
 ```
-docker compose -f compose.yaml -f compose.tools.yaml \
-  --profile tools run --rm admin-tools auditverify /backups/audit-20260901.jsonl
+docker compose --profile tools run --rm admin-tools auditverify /backups/audit-20260901.jsonl
 ```
 
 Anything else it is asked to run, it runs: `psql`, `pg_dump` and `pg_restore`
@@ -796,7 +808,7 @@ state directory holds the key that opens them and the CA the fleet trusts.
 
 ```
 docker compose down
-docker compose --profile quickstart down    # quick start
+docker compose --profile quickstart --profile airgap down    # name what it was started with
 ```
 
 The volumes survive on purpose: `docker compose down` stops the containers

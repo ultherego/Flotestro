@@ -187,35 +187,52 @@ jobs:
           # Quick start: the same file, with a PostgreSQL of its own.
           parse -f compose.yaml --profile quickstart
           # The administration tools, over each of the two above.
-          parse -f compose.yaml -f compose.tools.yaml --profile tools --profile restore
-          parse -f compose.yaml -f compose.tools.yaml \
-            --profile quickstart --profile tools --profile restore
+          parse -f compose.yaml --profile tools --profile restore
+          parse -f compose.yaml --profile quickstart --profile tools --profile restore
           # Air-gapped: the same, plus the package repository of the release.
           export FLOTESTRO_PACKAGE_REPOSITORY_URL=http://packages.invalid:8090
-          parse -f compose.yaml -f compose.airgap.yaml
-          parse -f compose.yaml --profile quickstart -f compose.airgap.yaml
+          parse -f compose.yaml --profile airgap
+          parse -f compose.yaml --profile quickstart --profile airgap
           # The relay: its own project, on the site host.
           parse -f compose.relay.yaml
           parse -f compose.relay.yaml --profile enroll
 
-      - name: No database starts unless it is asked for by name
+      - name: Nothing starts unless it is asked for by name
         # An installation on an external database must not be able to start a
-        # second one beside it, so the profile is checked in both directions.
+        # second one beside it, and an isolated site's repository has no
+        # business on a connected one, so each profile is checked in both
+        # directions. The tools add nothing to "up" at all.
         run: |
           set -euo pipefail
-          if docker compose -f compose.yaml config --services | grep -qx postgres; then
-            echo "compose.yaml starts a postgres service without --profile quickstart" >&2
-            exit 1
-          fi
-          if ! docker compose -f compose.yaml --profile quickstart config --services | grep -qx postgres; then
+          started() { docker compose -f compose.yaml "$@" config --services; }
+          for service in postgres package-repository admin-tools admin-restore; do
+            if started | grep -qx "$service"; then
+              echo "compose.yaml starts $service with no profile named" >&2
+              exit 1
+            fi
+          done
+          if ! started --profile quickstart | grep -qx postgres; then
             echo "--profile quickstart starts no postgres service" >&2
             exit 1
           fi
+          if ! started --profile airgap | grep -qx package-repository; then
+            echo "--profile airgap starts no package-repository service" >&2
+            exit 1
+          fi
+          # The two together are an air-gapped quick start, and both services
+          # have to be there.
+          both="$(started --profile quickstart --profile airgap)"
+          for service in postgres package-repository; do
+            if ! printf '%s\n' "$both" | grep -qx "$service"; then
+              echo "--profile quickstart --profile airgap starts no $service service" >&2
+              exit 1
+            fi
+          done
           if docker compose -f compose.yaml config | grep -qE '^ *depends_on:'; then
             echo "compose.yaml makes the control plane depend on a service the profile may not start" >&2
             exit 1
           fi
-          echo "no database without the profile, one with it, and no dependency either way"
+          echo "nothing without its profile, everything with it, and no dependency either way"
 
       - name: Our own services run as nobody and write nowhere
         # The execution contract of the document, read back out of the files
@@ -224,8 +241,8 @@ jobs:
         # contract.
         run: |
           set -euo pipefail
-          docker compose -f compose.yaml -f compose.tools.yaml \
-            --profile quickstart --profile tools --profile restore config --format json > /tmp/deployment.json
+          docker compose -f compose.yaml --profile quickstart --profile tools \
+            --profile restore --profile airgap config --format json > /tmp/deployment.json
           docker compose -f compose.relay.yaml --profile enroll config --format json > /tmp/relay.json
           jq -e -r '
             .services | to_entries
@@ -287,12 +304,17 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="${GITHUB_REF_NAME#v}"
             push=true
-            # The full SemVer tag, which is never rewritten, and the commit
-            # tag, for diagnostics and for a laboratory that wants exactly
-            # this build. No moving alias is published: "stable" and "0.56"
-            # are a convenience of a test bench, and a convenience that can
-            # be repointed has no place on a production registry.
+            # The full SemVer tag and the commit tag are never rewritten:
+            # that is what production pins, beside the digest.
             tags="$repository:$version,$repository:sha-${commit:0:12}"
+            # A stable release also moves latest and the minor alias, so that
+            # somebody who has just found the project can start without first
+            # having to learn which version is current. A pre-release moves
+            # neither: a host that follows latest must never be handed one.
+            case "$version" in
+            *-*) ;;
+            *)   tags="$tags,$repository:latest,$repository:${version%.*}" ;;
+            esac
           else
             version="0.0.0-sha-${commit:0:12}"
             push=false

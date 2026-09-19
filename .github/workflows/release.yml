@@ -11,6 +11,18 @@
 # does not hold it. The checksums are signed here only if the repository
 # already carries a signing key as a secret; without it the step is skipped
 # and says so.
+#
+# The same job then adds the release to the package repository the fleet
+# installs from - the `gh-pages` branch, served by GitHub Pages. Loose assets
+# on a release page are not a repository: no `apt update`, no upgrade path,
+# and a URL that carries a version number stops being true the day the next
+# version exists. The tree is added to, never replaced, so a host still on an
+# older version keeps finding what it runs today.
+#
+# The repository is published before the assets are attached. Everything the
+# publication needs - the tools, the key, the tree as it stands - is then
+# answered for while the tag is still re-runnable; once an asset is on the
+# release page the tag cannot be built again.
 name: Release
 
 on:
@@ -20,6 +32,12 @@ on:
 
 permissions:
   contents: read
+
+env:
+  # The branch GitHub Pages serves the package repository from. Every
+  # publication is a commit on it, so what the fleet installs from has a
+  # history, and a bad release is backed out the way anything else is.
+  PAGES_BRANCH: gh-pages
 
 jobs:
   packages:
@@ -250,7 +268,8 @@ jobs:
     timeout-minutes: 20
     # The protected environment is the point of this job. The build runner
     # that compiled the code never sees the signing key; this one sees the
-    # key and not a line of the product's source, and the environment's
+    # key and, of the product, one packaging script it takes from the tag
+    # itself rather than from the build job's hands - and the environment's
     # reviewers stand between a tag and a signature. An environment that
     # does not exist yet simply runs without the wait - configuring the
     # reviewers is the owner's step, and the split holds either way.
@@ -297,6 +316,174 @@ jobs:
             --local-user "$key" --armor --detach-sign --output dist/SHA256SUMS.asc dist/SHA256SUMS
           gpg --batch --quiet --delete-secret-and-public-key --yes "$key" || true
           rm -rf "$GNUPGHOME"
+
+      - name: The channel this release belongs in
+        id: channel
+        # A pre-release goes to a channel of its own. "stable" is what the
+        # panel writes into a host's command unless somebody typed otherwise,
+        # so a v1.2.3-rc1 that landed there would be installed by every host
+        # that only ever asked for the product.
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          case "$version" in
+            *-*) channel=testing ;;
+            *)   channel=stable ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "name=$channel" >> "$GITHUB_OUTPUT"
+          echo "$GITHUB_REF_NAME publishes to the $channel channel"
+
+      - name: Nothing unsigned is published
+        # A repository whose index carries no signature is worse than none:
+        # apt takes it with a warning and the host never learns. Without the
+        # key there is simply no repository publication, and the release says
+        # so rather than serving a tree nobody can verify.
+        if: env.RELEASE_SIGNING_KEY == ''
+        run: |
+          {
+            echo "### The package repository was not published"
+            echo
+            echo 'There is no `RELEASE_SIGNING_KEY` in the `release-signing` environment, so there was nothing to sign the repository indexes with. The release assets are published; the repository still carries the previous release.'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=No repository publication::the signing key is missing, so the repository keeps the previous release"
+
+      - name: The tools the repositories are composed with
+        if: env.RELEASE_SIGNING_KEY != ''
+        # dpkg-dev writes the apt index, createrepo-c the dnf metadata, rpm
+        # signs the .rpm files themselves, and repo-add - pacman's own tool,
+        # packaged for Debian and Ubuntu as pacman-package-manager - writes
+        # the pacman database.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            dpkg-dev rpm createrepo-c pacman-package-manager
+
+      - name: The script that composes them
+        if: env.RELEASE_SIGNING_KEY != ''
+        # One file of the product, taken from the tag being released rather
+        # than from the job that built it: a script handed over by the build
+        # job would be a way to reach the key this job holds.
+        uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ github.ref }}
+          path: source
+          sparse-checkout: packaging/sign-repo.sh
+          sparse-checkout-cone-mode: false
+
+      - name: The repository as it stands today
+        if: env.RELEASE_SIGNING_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # The published tree is fetched before anything is added to it. A
+        # publication that started from an empty directory would drop every
+        # version the fleet has not upgraded from yet, and the next `apt
+        # update` on such a host would find nothing it runs.
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git"
+          rm -rf pages
+          if git clone --quiet --depth 1 --branch "$PAGES_BRANCH" "$url" pages; then
+            echo "the repository carries $(find pages -name '*.deb' -o -name '*.rpm' -o -name '*.pkg.tar.*' | wc -l) packages"
+          else
+            mkdir pages
+            git -C pages init --quiet --initial-branch "$PAGES_BRANCH"
+            git -C pages remote add origin "$url"
+            echo "no $PAGES_BRANCH branch yet; this release starts it"
+          fi
+
+      - name: Compose and sign the repositories
+        if: env.RELEASE_SIGNING_KEY != ''
+        env:
+          FLOTESTRO_CHANNEL: ${{ steps.channel.outputs.name }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$RELEASE_SIGNING_KEY" | gpg --batch --quiet --import
+          key="$(gpg --list-secret-keys --with-colons | awk -F: '/^sec:/ {print $5; exit}')"
+          # rpmsign and repo-add call gpg themselves, so the passphrase cannot
+          # travel on a command line. It goes into this run's own gpg
+          # configuration, in the directory that is removed with the key.
+          if [ -n "${RELEASE_SIGNING_KEY_PASSPHRASE:-}" ]; then
+            ( umask 077; printf '%s' "$RELEASE_SIGNING_KEY_PASSPHRASE" > "$GNUPGHOME/passphrase" )
+            printf '%s\n' "batch" "pinentry-mode loopback" \
+              "passphrase-file $GNUPGHOME/passphrase" >> "$GNUPGHOME/gpg.conf"
+            echo "allow-loopback-pinentry" >> "$GNUPGHOME/gpg-agent.conf"
+            gpg-connect-agent reloadagent /bye >/dev/null
+          fi
+          bash source/packaging/sign-repo.sh dist "$key" pages "${{ steps.channel.outputs.version }}"
+          gpg --batch --quiet --delete-secret-and-public-key --yes "$key" || true
+          rm -rf "$GNUPGHOME"
+
+      - name: Every index carries a signature
+        if: env.RELEASE_SIGNING_KEY != ''
+        # What is about to be pushed is verified with nothing but the public
+        # key that lies beside it - exactly what a host has. An index whose
+        # signature does not check out stops the publication here, where it
+        # is still a failed release rather than a fleet installing from a
+        # tree nobody signed.
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          [ -s pages/flotestro-repo.asc ] || { echo "the repository carries no public key" >&2; exit 1; }
+          gpg --batch --quiet --import pages/flotestro-repo.asc
+          checked=0
+          while read -r index; do
+            gpg --batch --verify "$index" >/dev/null 2>&1 || \
+              { echo "$index is not signed by the release key" >&2; exit 1; }
+            checked=$((checked + 1))
+          done < <(find pages/deb/dists -name InRelease)
+          while read -r signature; do
+            gpg --batch --verify "$signature" "${signature%.asc}" >/dev/null 2>&1 || \
+              { echo "${signature%.asc} is not signed by the release key" >&2; exit 1; }
+            checked=$((checked + 1))
+          done < <(find pages/rpm -name repomd.xml.asc)
+          while read -r signature; do
+            gpg --batch --verify "$signature" "${signature%.sig}" >/dev/null 2>&1 || \
+              { echo "${signature%.sig} is not signed by the release key" >&2; exit 1; }
+            checked=$((checked + 1))
+          done < <(find pages/arch -name 'flotestro.db.tar.gz.sig')
+          [ "$checked" -gt 0 ] || { echo "the release produced no repository index at all" >&2; exit 1; }
+          echo "$checked indexes verify against flotestro-repo.asc"
+          rm -rf "$GNUPGHOME"
+
+      - name: Publish the repository
+        if: env.RELEASE_SIGNING_KEY != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Jekyll would try to build the tree it is given; .nojekyll says to
+        # serve it as it is. The commit is the publication: an unchanged tree
+        # is a re-run of the same tag and there is nothing to say.
+        run: |
+          set -euo pipefail
+          cd pages
+          : > .nojekyll
+          cat > index.html <<'PAGE'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>Flotestro packages</title>
+          <h1>Flotestro packages</h1>
+          <p>The signed apt, dnf and pacman repository the Flotestro fleet installs from.
+          The panel writes the commands for a host under <em>Add host</em>; the key that
+          signs every index is <a href="flotestro-repo.asc">flotestro-repo.asc</a>.</p>
+          <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+          PAGE
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "the repository already carries $GITHUB_REF_NAME; nothing to publish"
+            exit 0
+          fi
+          git commit --quiet -m "Publish $GITHUB_REF_NAME to the ${{ steps.channel.outputs.name }} channel"
+          git push --quiet origin "$PAGES_BRANCH"
+          {
+            echo "### The package repository"
+            echo
+            echo "\`$GITHUB_REF_NAME\` is in the \`${{ steps.channel.outputs.name }}\` channel of <https://ultherego.github.io/Flotestro/>."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: The release is not published twice
         # The check stands before the upload so that a re-run of a tag
