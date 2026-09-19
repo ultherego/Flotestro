@@ -400,3 +400,88 @@ CLI, no route to a managed host - and the DSN never reaches an argument: the
 tool lifts the password out of it and passes it to libpq through the
 environment, so a dump that runs for an hour does not stand in the process
 list of the host with a password in it for that hour.
+
+## Upgrading
+
+An upgrade is three decisions in one order: the backup, the schema, the
+replicas. The control plane refuses to serve a schema it does not match, in
+either direction, so the order is not a matter of taste.
+
+1. **Take the pair.** The backup above, with the new images already pulled
+   but nothing started from them. A backup taken after the migration is a
+   backup of the version you are trying to leave.
+2. **Ask what the new version would do.** With the new image, against the
+   running database:
+
+   ```
+   docker compose run --rm control-plane schema-check
+   ```
+
+   Exit 0 means the new version needs no migration and the upgrade is a
+   restart. Exit 1 with `schema_behind` means it carries migrations; the
+   message names how many. Any other answer stops the upgrade.
+3. **Migrate once, as its own job**, with the credentials of the migrator:
+
+   ```
+   FLOTESTRO_MIGRATION_DATABASE_URL_FILE=/run/secrets/migration-database-url \
+   docker compose run --rm control-plane migrate
+   ```
+
+   Two migrators at once do not race: the second waits on the advisory lock
+   and says so. Run `schema-check` again afterwards; it must now exit 0.
+4. **Roll the replicas** onto the new image, one at a time, watching the
+   fleet reconnect between them. An agent of the previous release keeps
+   working: every change of the protocol carries either compatibility with
+   the release before it or a refusal that names what to upgrade.
+
+The agents are upgraded afterwards and separately - the panel does that
+itself, through the agent upgrade operation, against a package it has
+verified. A fleet running the previous agent against the new panel is an
+ordinary state, not a broken one.
+
+## Going back
+
+A version can be gone back to; a schema cannot. That asymmetry is the whole
+of the rollback procedure.
+
+* **The new version applied no migration** (`schema-check` said so before the
+  upgrade): put the previous image back and start it. Nothing else is needed.
+* **The new version migrated the database**: the old control plane will
+  refuse to start with `schema_ahead`, and it is right to - it would read
+  tables whose shape it does not know. Going back then means restoring the
+  pair taken in step 1, which loses everything recorded since: stop every
+  control plane, restore the database *and* the state directory together,
+  start the previous image. Never delete rows from `schema_migrations` to
+  make the two agree; the tables are still the new ones and the panel would
+  write into a shape it misreads.
+
+This is why step 1 is not optional and why the two halves of the pair are
+never restored apart: the database holds the encrypted secrets, and the
+state directory holds the key that opens them and the CA the fleet trusts.
+
+## Removing an installation
+
+```
+docker compose down
+docker compose -f compose.yaml -f compose.local-db.yaml down    # quick start
+```
+
+The volumes survive on purpose: `docker compose down` stops the containers
+and leaves the state and the database where they are, because an operator
+stopping a panel for an hour must not lose the fleet's certificate authority
+by typing the usual command.
+
+Removing the installation for good is deliberate and in this order:
+
+1. Decommission the hosts from the panel while it still runs, so each one
+   stops trusting the centre and revokes its own certificate. A host nobody
+   decommissioned keeps an agent asking for a panel that no longer exists.
+2. Take a last backup pair if the audit trail has to outlive the panel.
+3. `docker compose down --volumes`, which takes the state volume with it.
+4. Remove the database, if it is one this installation owns - the external
+   database of a production deployment is not this command's to drop.
+
+What remains on a managed host after a decommission is the agent package
+itself; `apt purge`, `dnf remove` or `pacman -Rns` on the host removes it
+together with its identity files, which is what the packaging's purge step
+is for.
