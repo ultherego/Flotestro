@@ -20,19 +20,14 @@ on:
   push:
     tags:
       - "v*"
+    # A push to the default branch builds and checks the files and pushes
+    # nothing; without it the compose contract is first proven by the tag.
+    branches:
+      - main
   # A pull request builds and pushes nothing. It exists so that a broken
   # Containerfile, a Compose file that does not parse and a build context
   # that carries a secret are found while there is still something to fix,
   # rather than at the moment somebody tags a release.
-  # A push to the default branch builds and checks the files, and pushes
-  # nothing: the compose contract is otherwise proven for the first time by
-  # the tag that publishes.
-  push:
-    branches:
-      - main
-    paths:
-      - "deploy/**"
-      - ".github/workflows/images.yml"
   pull_request:
     paths:
       - "deploy/**"
