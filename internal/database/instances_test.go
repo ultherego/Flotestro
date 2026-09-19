@@ -112,13 +112,11 @@ func TestAClaimNamesTheReplica(t *testing.T) {
 // that is what an operator needs in order to decide whether to give the new
 // replica an identifier of its own or to stop the old one.
 func TestTheRefusalNamesTheHolder(t *testing.T) {
-	err := &InstanceInUseError{
-		GatewayID: "panel-1",
-		Holder: Instance{
-			GatewayID: "panel-1", InstanceID: "22222222-2222-2222-2222-222222222222",
-			Hostname: "cp-b", SinceHeartbeat: 3 * time.Second,
-		},
+	holder := Instance{
+		GatewayID: "panel-1", InstanceID: "22222222-2222-2222-2222-222222222222",
+		Hostname: "cp-b", SinceHeartbeat: 3 * time.Second,
 	}
+	err := &InstanceInUseError{GatewayID: "panel-1", Holder: holder}
 	if err.Code() != CodeGatewayIDInUse {
 		t.Fatalf("code = %s, want %s", err.Code(), CodeGatewayIDInUse)
 	}

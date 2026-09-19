@@ -55,12 +55,14 @@ export function formatSeconds(value: number): string {
 
 /** The order the blocks stand in: what breaks the panel first comes first. */
 const BLOCK_ORDER = [
-  "database", "migrations", "outbox", "scheduler", "sessions", "relays",
+  "database", "replicas", "migrations", "crypto", "outbox", "scheduler", "sessions", "relays",
   "directory", "vulnerability_feeds", "certificates", "monitoring", "housekeeping",
 ];
 
 const BLOCK_TITLES: Record<string, string> = {
   database: "Database",
+  replicas: "Replicas",
+  crypto: "Cryptographic state",
   migrations: "Schema",
   outbox: "Durable trail",
   scheduler: "Scheduler",
@@ -102,6 +104,18 @@ const FACT_LABELS: Record<string, [string, FactKind]> = {
   connections_max: ["Server connection limit", "number"],
   pool_used: ["Pool connections", "number"],
   pool_max: ["Pool limit", "number"],
+  replicas_seen: ["Replicas alive", "number"],
+  connections_per_replica: ["Connections per replica", "number"],
+  connections_claimed: ["Connections claimed", "number"],
+  server_max_connections: ["Server max_connections", "number"],
+  server_reserved_connections: ["Reserved for superusers", "number"],
+  connections_available: ["Connections available", "number"],
+  connections_in_use: ["Connections in use", "number"],
+  connections_headroom: ["Headroom", "number"],
+  next_replica_fits: ["Another replica fits", "flag"],
+  next_replica_shortfall: ["Shortfall for the next replica", "number"],
+  instance_stale_after: ["Instance dead after", "text"],
+  replicas_without_a_pool: ["Replicas without a declared pool", "number"],
   pool_min: ["Pool minimum", "number"],
   pool_idle: ["Idle connections", "number"],
   pool_max_conn_lifetime: ["Connection lifetime", "text"],

@@ -15,49 +15,25 @@ import (
 )
 
 // The replicas of the control plane and the budget they share.
-//
-// Chapter 21 of the containerisation document names three ways a scaled
-// deployment goes wrong, and two of them live here. The first is the gateway
-// identifier: every replica must have its own, because the scheduler's
-// leases, the session fencing and the audit trail all read that identifier
-// as "the instance". Two replicas sharing one are invisible to every
-// mechanism that would otherwise notice, since each of them reads the
-// other's rows as its own. The second is the connection budget: N replicas
-// times the maximum of the pool against what the server answers, a sum no
-// single replica can see and every one of them takes from.
-//
-// Both are answered by one row per identifier: who holds it, when they last
-// said they were alive, and how large a pool they were allowed. The
-// identifier is then claimed rather than declared, and the budget is a
-// question the panel can answer before somebody scales instead of after.
 
 // CodeGatewayIDInUse is the refusal of a start that finds its gateway
-// identifier held by another, living process. It is a code of the error
-// guide: the log names it and the runbook is indexed by it.
+// identifier held by another, living process.
 const CodeGatewayIDInUse = "gateway_id_in_use"
 
-// The pace of the heartbeat and the age at which a record stops counting as
-// a live replica.
-//
-// Four heartbeats fit in the stale window, so a replica that misses one on a
-// slow query does not look dead to anybody, and a replica that is actually
-// gone frees its identifier inside a minute. An orderly stop gives the row
-// back at once, so only a crash ever has to be waited out.
+// The pace of the heartbeat and the age at which a record stops counting as a
+// live replica.
 const (
 	InstanceHeartbeatEvery = 15 * time.Second
 	InstanceStaleAfter     = 60 * time.Second
 )
 
 // instanceClaimPoll is how often a start that is waiting for a record to age
-// out looks again. It is a variable so the waiting can be exercised without
-// a test that takes as long as the wait.
+// out looks again.
 var instanceClaimPoll = 2 * time.Second
 
 // ErrInstanceSuperseded is what a heartbeat returns when the row of the
 // gateway identifier no longer names this process: another process has taken
-// the identifier over. It is not a transient error - two processes are now
-// answering under one identifier, and the one that lost the row is the one
-// that has to stop.
+// the identifier over.
 var ErrInstanceSuperseded = errors.New("the gateway identifier of this process was taken over by another instance")
 
 // Instance is one row of control_plane_instances as it is read back.
@@ -66,16 +42,15 @@ type Instance struct {
 	InstanceID string
 	Hostname   string
 	Version    string
-	// PoolMaxConns is what this replica may open against the database;
-	// zero means a replica that did not say, which the budget counts as
-	// unknown rather than as nothing.
+	// PoolMaxConns is what this replica may open against the database; zero means
+	// a replica that did not say, which the budget counts as unknown rather than
+	// as nothing.
 	PoolMaxConns    int32
 	StartedAt       time.Time
 	LastHeartbeatAt time.Time
-	// SinceHeartbeat is measured by the clock of the database rather than
-	// by the clock of the process that reads it: the replicas are separate
-	// machines and their clocks differ, and a judgement about who is alive
-	// must not depend on whose clock was asked.
+	// SinceHeartbeat is measured by the clock of the database rather than by the
+	// clock of the process that reads it: the replicas are separate machines and
+	// their clocks differ, and a judgement about who is alive must not depend on
 	SinceHeartbeat time.Duration
 }
 
@@ -99,10 +74,7 @@ type Claim struct {
 	Log *slog.Logger
 }
 
-// Validate refuses a claim that cannot identify a replica. An empty gateway
-// identifier is not a replica nobody can tell apart - it is every replica at
-// once, because every one of them would write the same empty string into the
-// sessions and the leases.
+// Validate refuses a claim that cannot identify a replica.
 func (c Claim) Validate() error {
 	if strings.TrimSpace(c.GatewayID) == "" {
 		return errors.New("FLOTESTRO_GATEWAY_ID is empty; every replica answers under an identifier of " +
@@ -156,10 +128,9 @@ type Registration struct {
 	// First says the identifier had no row at all: this is the first
 	// replica ever to answer under it.
 	First bool
-	// TookOverFrom names the instance whose record this start took over -
-	// the ordinary restart, where the previous process of this very
-	// replica left a row nobody renews any more. Empty on a first claim
-	// and on a re-claim by the same process.
+	// TookOverFrom names the instance whose record this start took over - the
+	// ordinary restart, where the previous process of this very replica left a
+	// row nobody renews any more.
 	TookOverFrom string
 	// Waited is how long the start watched a record that was not being
 	// renewed before taking it over.
@@ -176,17 +147,13 @@ const (
 	// refuseInstance: the heartbeat of the record has moved since this
 	// start first looked, so another process is alive under the identifier.
 	refuseInstance
-	// waitInstance: the record still looks fresh, but nothing has been seen
-	// to move yet. A process killed a second ago leaves exactly this, and
-	// so does a replica that is running; the two are told apart by looking
-	// again.
+	// waitInstance: the record still looks fresh, but nothing has been seen to
+	// move yet.
 	waitInstance
 )
 
-// judgeInstanceClaim decides what a start does with the row under its
-// gateway identifier. firstSeen is the heartbeat of the first look, zero on
-// the first look itself; a heartbeat that has moved since is a process that
-// is alive, whatever its age says.
+// judgeInstanceClaim decides what a start does with the row under its gateway
+// identifier.
 func judgeInstanceClaim(instanceID string, holder *Instance, firstSeen time.Time) instanceDecision {
 	switch {
 	case holder == nil:
@@ -204,17 +171,8 @@ func judgeInstanceClaim(instanceID string, holder *Instance, firstSeen time.Time
 	}
 }
 
-// ClaimInstance takes the gateway identifier for this process.
-//
-// The three outcomes are the three deployments. A free identifier, or one
-// whose record nobody renews any more, is taken: the first start of a
-// replica and every ordinary restart. An identifier whose record is still
-// being renewed is refused: a second replica was started under the
-// identifier of the first, which is the mistake nothing downstream can see.
-// In between there is a record that looks fresh and is not being renewed -
-// what a killed process leaves behind - and that one is waited out rather
-// than refused, because refusing it would turn every crash into an outage
-// that lasts until somebody notices.
+// ClaimInstance takes the gateway identifier for this process. The three
+// outcomes are the three deployments.
 func ClaimInstance(ctx context.Context, pool *pgxpool.Pool, claim Claim) (Registration, error) {
 	if err := claim.Validate(); err != nil {
 		return Registration{}, err
@@ -224,9 +182,9 @@ func ClaimInstance(ctx context.Context, pool *pgxpool.Pool, claim Claim) (Regist
 		log = slog.Default()
 	}
 	started := time.Now()
-	// The bound is the stale window with one heartbeat of slack: past it a
-	// record that is not being renewed has aged out by definition, so a
-	// start that is still waiting is waiting on something else.
+	// The bound is the stale window with one heartbeat of slack: past it a record
+	// that is not being renewed has aged out by definition, so a start that is
+	// still waiting is waiting on something else.
 	deadline := started.Add(InstanceStaleAfter + InstanceHeartbeatEvery)
 	var firstSeen time.Time
 	var announced bool
@@ -300,11 +258,8 @@ func tryClaimInstance(ctx context.Context, pool *pgxpool.Pool, claim Claim,
 	}
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
-	// The row is locked while it is judged, so two replicas starting at the
-	// same moment are serialised by the row rather than by luck. A row that
-	// does not exist yet locks nothing, and the insert below settles that
-	// race instead: the second one gets the unique violation and looks
-	// again, by which time there is a row to judge.
+	// The row is locked while it is judged, so two replicas starting at the same
+	// moment are serialised by the row rather than by luck.
 	holder, err := readInstanceForUpdate(ctx, tx, claim.GatewayID)
 	if err != nil {
 		return Registration{}, nil, err
@@ -324,9 +279,8 @@ func tryClaimInstance(ctx context.Context, pool *pgxpool.Pool, claim Claim,
 		if err != nil {
 			var pgErr *pgconn.PgError
 			if errors.As(err, &pgErr) && pgErr.Code == uniqueViolation {
-				// Another replica inserted the row between the lock that
-				// found nothing and this insert. Nothing was written; the
-				// next attempt reads the row it lost to.
+				// Another replica inserted the row between the lock that found nothing and
+				// this insert.
 				return Registration{}, &Instance{GatewayID: claim.GatewayID}, nil
 			}
 			return Registration{}, nil, fmt.Errorf("claiming the gateway identifier: %w", err)
@@ -375,10 +329,7 @@ func readInstanceForUpdate(ctx context.Context, tx pgx.Tx, gatewayID string) (*I
 	return &instance, nil
 }
 
-// HeartbeatInstance says this process is still the one holding the
-// identifier. A heartbeat that changes nothing means the row names somebody
-// else, which is ErrInstanceSuperseded and is not survivable: the leases and
-// the sessions this process writes are being read as another instance's.
+// HeartbeatInstance says this process is still the one holding the identifier.
 func HeartbeatInstance(ctx context.Context, pool *pgxpool.Pool, registration Registration) error {
 	tag, err := pool.Exec(ctx, `
 		update control_plane_instances set last_heartbeat_at = now()
@@ -393,9 +344,9 @@ func HeartbeatInstance(ctx context.Context, pool *pgxpool.Pool, registration Reg
 	return nil
 }
 
-// ReleaseInstance gives the identifier back on an orderly stop, so the
-// replica that takes its place starts at once instead of waiting for the
-// record to age out. A row that names another process is left alone.
+// ReleaseInstance gives the identifier back on an orderly stop, so the replica
+// that takes its place starts at once instead of waiting for the record to age
+// out.
 func ReleaseInstance(ctx context.Context, pool *pgxpool.Pool, registration Registration) error {
 	_, err := pool.Exec(ctx, `
 		delete from control_plane_instances where gateway_id = $1 and instance_id = $2::uuid`,
@@ -407,9 +358,7 @@ func ReleaseInstance(ctx context.Context, pool *pgxpool.Pool, registration Regis
 }
 
 // KeepInstanceAlive renews the heartbeat until the context ends, and returns
-// when the identifier is taken from under this process. A failure that is
-// not a takeover - the database is away for a moment - is logged and tried
-// again: the stale window holds four heartbeats for exactly that.
+// when the identifier is taken from under this process.
 func KeepInstanceAlive(ctx context.Context, pool *pgxpool.Pool, registration Registration, log *slog.Logger) error {
 	if log == nil {
 		log = slog.Default()
@@ -441,9 +390,7 @@ func KeepInstanceAlive(ctx context.Context, pool *pgxpool.Pool, registration Reg
 }
 
 // LiveInstances lists the replicas whose heartbeat still counts, newest
-// heartbeat first. A record that has aged out is left out: it is not a
-// replica, and counting it would inflate the budget with a process that is
-// gone.
+// heartbeat first.
 func LiveInstances(ctx context.Context, pool *pgxpool.Pool) ([]Instance, error) {
 	rows, err := pool.Query(ctx, `
 		select gateway_id, instance_id::text, hostname, version, pool_max_conns,
@@ -474,23 +421,20 @@ func LiveInstances(ctx context.Context, pool *pgxpool.Pool) ([]Instance, error) 
 }
 
 // Budget is the connection arithmetic of chapter 21, done before somebody
-// scales rather than after: the replicas that are alive, what each of them
-// may open, and what the server answers in total.
+// scales rather than after: the replicas that are alive, what each of them may
+// open, and what the server answers in total.
 type Budget struct {
 	// Replicas are the live rows, and Instances are those rows.
 	Replicas  int
 	Instances []Instance
-	// PoolMaxConns is this replica's own pool - the size a further replica
-	// would most likely be given, and what the answer about the next one
-	// is computed with.
+	// PoolMaxConns is this replica's own pool - the size a further replica would
+	// most likely be given, and what the answer about the next one is computed
+	// with.
 	PoolMaxConns int32
-	// Claimed is the sum of the pools of the live replicas: the
-	// connections the installation may open at any moment, whether or not
-	// it is opening them now.
+	// Claimed is the sum of the pools of the live replicas: the connections the
+	// installation may open at any moment, whether or not it is opening them now.
 	Claimed int
-	// Unreported counts live replicas whose row names no pool. Their share
-	// is not zero, it is unknown, and an unknown share is said out loud
-	// rather than left out of the sum.
+	// Unreported counts live replicas whose row names no pool.
 	Unreported int
 	// ServerMaxConns is max_connections and Reserved is what the server
 	// keeps for superusers; the difference is what ordinary clients share.
@@ -500,9 +444,8 @@ type Budget struct {
 	// InUse is what is connected to this database right now, replicas and
 	// everything else - a psql session, a backup, the monitoring.
 	InUse int
-	// Headroom is what is left of Available once every live replica has
-	// opened its whole pool. It goes negative when the replicas are
-	// allowed more than the server answers.
+	// Headroom is what is left of Available once every live replica has opened
+	// its whole pool.
 	Headroom int
 	// NextReplicaFits says whether one more replica of this size would
 	// still fit; Shortfall is how many connections it would be over.
@@ -511,8 +454,7 @@ type Budget struct {
 }
 
 // Overcommitted says the replicas may already open more than the server
-// answers. Nothing is wrong until they all try at once, and then it is the
-// whole fleet rather than the replica that was misconfigured.
+// answers.
 func (b Budget) Overcommitted() bool { return b.Headroom < 0 }
 
 // Summary is the one sentence the status screen and the log carry.
@@ -535,9 +477,7 @@ func (b Budget) Summary() string {
 }
 
 // ReadBudget gathers what the installation may open and what the server
-// allows. The pool of this replica is read from the pool itself rather than
-// from the row, because it is the one number here that is a fact of this
-// process and not a report of another's.
+// allows.
 func ReadBudget(ctx context.Context, pool *pgxpool.Pool) (Budget, error) {
 	instances, err := LiveInstances(ctx, pool)
 	if err != nil {

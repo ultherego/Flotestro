@@ -309,7 +309,7 @@ func run() error {
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
 	// The rollout stage of the root helper's signed capability on the panel's
 	// side: observe and prefer dispatch to every host, prefer reports a host
-	// whose agent forwards no capability, enforce holds a mutating task back
+	// whose agent forwards no capability, enforce holds a mutating task back.
 	helperCapabilityModeValue := flag.String("helper-capability-mode",
 		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "prefer"),
 		"the stage of the helper capability rollout: observe, prefer (the default) or enforce")
@@ -551,6 +551,41 @@ func run() error {
 		return schemaRefusal(log, report, "the control plane refuses to start")
 	}
 	log.Info("the database schema is current", "level", report.Level, "applied", report.Applied)
+
+	// Two replicas must not answer under one gateway identifier; a record
+	// nobody renews is taken over, which is an ordinary restart.
+	hostname, _ := os.Hostname()
+	registration, err := database.ClaimInstance(ctx, pool, database.Claim{
+		GatewayID:    cfg.GatewayID,
+		InstanceID:   jobs.InstanceID(),
+		Hostname:     hostname,
+		Version:      buildinfo.Version,
+		PoolMaxConns: dbPool.MaxConns,
+		Log:          log,
+	})
+	if err != nil {
+		var inUse *database.InstanceInUseError
+		if errors.As(err, &inUse) {
+			log.Error("the control plane refuses to start: another instance answers under this gateway identifier",
+				"code", inUse.Code(), "gateway_id", inUse.GatewayID,
+				"holder_instance_id", inUse.Holder.InstanceID, "holder_hostname", inUse.Holder.Hostname,
+				"holder_started_at", inUse.Holder.StartedAt.Format(time.RFC3339),
+				"hint", "every replica has a FLOTESTRO_GATEWAY_ID of its own and they share one database; "+
+					"never scale with a copied identifier")
+			return fmt.Errorf("%s: %s", inUse.Code(), inUse.Error())
+		}
+		return err
+	}
+	defer func() {
+		// An orderly stop gives the identifier back, so the next replica
+		// starts at once instead of waiting for the record to age out.
+		releaseCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := database.ReleaseInstance(releaseCtx, pool, registration); err != nil {
+			log.Warn("the gateway identifier was not released; the next start waits for the record to age out",
+				"err", err, "gateway_id", registration.GatewayID)
+		}
+	}()
 
 	// The cryptographic identity of the installation is checked before anything
 	// touches the secret store or the CA.
@@ -1087,7 +1122,14 @@ func run() error {
 		MaxHeaderBytes:    64 << 10,
 	}
 
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
+	// A heartbeat that finds the row taken means two processes answer under
+	// one identifier; this one stops rather than carrying on.
+	go func() {
+		if err := database.KeepInstanceAlive(ctx, pool, registration, log); err != nil {
+			errCh <- err
+		}
+	}()
 	go serveTLS(gatewayServer, "the agent gateway", log, errCh)
 	go serveTLS(enrollmentServer, "enrollment", log, errCh)
 	go func() {
