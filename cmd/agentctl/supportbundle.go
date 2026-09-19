@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/ultherego/flotestro/internal/agent"
 	"github.com/ultherego/flotestro/internal/agentconfig"
 )
@@ -41,15 +43,18 @@ const redactedValue = "[redacted]"
 // in a journal line alike.
 var secretPattern = regexp.MustCompile(`(?i)("?[\w.-]*(?:token|password|secret)[\w.-]*"?[ \t]*[:=][ \t]*)("?)([^"\s,]*)("?)`)
 
-// redact hides the values of the keys that name a secret and counts what it
-// hid.
+// redact is the last layer over what the structural redaction has already
+// been over: it hides the values of the keys that name a secret and counts
+// what it hid.
 func redact(content []byte) ([]byte, int) {
 	count := 0
 	redacted := secretPattern.ReplaceAllFunc(content, func(match []byte) []byte {
 		groups := secretPattern.FindSubmatch(match)
-		if groups == nil || len(groups[3]) == 0 {
-			// An empty value hides nothing; leaving it alone keeps the
-			// count honest.
+		if groups == nil || len(groups[3]) == 0 ||
+			string(bytes.Trim(groups[3], `"'`)) == redactedValue {
+			// An empty value hides nothing, and a value the structural pass
+			// already dropped is not hidden twice - however the writer of the
+			// file quoted it; both keep the count honest.
 			return match
 		}
 		count++
@@ -138,6 +143,33 @@ const (
 	fieldSecret sensitivity = "secret"
 )
 
+// bundleFormat is the shape of what a collector produces, so that the
+// redaction parses the file instead of guessing at its text.
+type bundleFormat string
+
+const (
+	formatJSON        bundleFormat = "json"
+	formatYAML        bundleFormat = "yaml"
+	formatEnvironment bundleFormat = "environment"
+	// formatText is free text - a journal, a status, a report written for a
+	// person - which has no structure to walk.
+	formatText bundleFormat = "text"
+)
+
+// dropKind says how a field declared secret is kept out of the bundle.
+type dropKind string
+
+const (
+	// dropNotCollected: the source is never read, so nothing can slip out of it.
+	dropNotCollected dropKind = "not_collected"
+	// dropStructural: the file is parsed and the value at the declared key is
+	// replaced, whatever that key happens to be called.
+	dropStructural dropKind = "structural"
+	// dropPattern: free text names no key to walk to, so the pattern is all
+	// there is for it.
+	dropPattern dropKind = "pattern"
+)
+
 // field is one thing a collector produces.
 type field struct {
 	Name        string      `json:"name"`
@@ -145,6 +177,11 @@ type field struct {
 	// Why says why a secret field is left out. It is empty for a field that
 	// travels: a thing that is in the bundle needs no excuse.
 	Why string `json:"why,omitempty"`
+	// Drop says how a secret field is kept out; Key locates it for a structural
+	// drop - the name of a variable in an environment listing, or a dotted path
+	// in YAML and JSON where a segment ending in "[]" is a list.
+	Drop dropKind `json:"drop,omitempty"`
+	Key  string   `json:"key,omitempty"`
 }
 
 // collector produces one file of the bundle and declares beforehand what is
@@ -154,19 +191,44 @@ type collector struct {
 	// in the words the operator would use to fetch it by hand.
 	Name   string
 	Source string
+	// Format is the shape of the content; the structural redaction parses it
+	// before the file is written.
+	Format bundleFormat
 	Fields []field
 	// Collect returns the content.
 	Collect func(ctx context.Context, sources bundleSources) ([]byte, error)
 }
 
+// The typed reasons the manifest gives for what a bundle does not carry.
+const (
+	codeFieldNotCollected = "bundle_field_not_collected"
+	codeFieldRedacted     = "bundle_field_redacted"
+	codeFieldPatternOnly  = "bundle_field_pattern_only"
+	codeFileUnparsable    = "bundle_file_unparsable"
+)
+
 // omitted lists the secret fields of a collector - what was left out of this
-// file, and why.
-func (c collector) omitted() []omission {
+// file, and why. dropped names the declared keys the structural pass found, so
+// that a key the file never held is not reported as taken out of it.
+func (c collector) omitted(dropped map[string]int) []omission {
 	var left []omission
 	for _, f := range c.Fields {
-		if f.Sensitivity == fieldSecret {
-			left = append(left, omission{File: c.Name, Field: f.Name, Why: f.Why})
+		if f.Sensitivity != fieldSecret {
+			continue
 		}
+		code := ""
+		switch f.Drop {
+		case dropNotCollected:
+			code = codeFieldNotCollected
+		case dropPattern:
+			code = codeFieldPatternOnly
+		case dropStructural:
+			if dropped[f.Key] == 0 {
+				continue
+			}
+			code = codeFieldRedacted
+		}
+		left = append(left, omission{File: c.Name, Field: f.Name, Why: f.Why, Code: code})
 	}
 	return left
 }
@@ -176,6 +238,238 @@ type omission struct {
 	File  string `json:"file"`
 	Field string `json:"field"`
 	Why   string `json:"why"`
+	// Code is the stable name of the reason, for everything that reads the
+	// manifest rather than reads it aloud.
+	Code string `json:"code,omitempty"`
+}
+
+// secretKeys lists the keys the collector declared secret and asked the
+// structural redaction to drop.
+func (c collector) secretKeys() []string {
+	var keys []string
+	for _, f := range c.Fields {
+		if f.Sensitivity == fieldSecret && f.Drop == dropStructural && f.Key != "" {
+			keys = append(keys, f.Key)
+		}
+	}
+	return keys
+}
+
+// redactStructurally parses a collected file and replaces the values the
+// collector declared secret - because they were declared, not because a
+// pattern recognised them. A file whose shape does not parse comes back as an
+// error: what cannot be walked cannot be shown to hold no secret, so the
+// caller declares it instead of shipping it.
+func redactStructurally(c collector, content []byte) ([]byte, map[string]int, error) {
+	dropped := map[string]int{}
+	keys := c.secretKeys()
+	switch c.Format {
+	case formatText:
+		if len(keys) > 0 {
+			return nil, dropped, errors.New("a key was declared for a file that has no structure to walk")
+		}
+		return content, dropped, nil
+	case formatEnvironment:
+		out, err := redactEnvironment(content, keys, dropped)
+		return out, dropped, err
+	case formatJSON:
+		out, err := redactDocument(content, keys, dropped, parseJSON, writeJSON)
+		if err != nil {
+			return nil, dropped, fmt.Errorf("the content did not parse as %s", c.Format)
+		}
+		return out, dropped, nil
+	case formatYAML:
+		out, err := redactDocument(content, keys, dropped, parseYAML, writeYAML)
+		if err != nil {
+			return nil, dropped, fmt.Errorf("the content did not parse as %s", c.Format)
+		}
+		return out, dropped, nil
+	}
+	return nil, dropped, errors.New("the collector declares no format for its content")
+}
+
+// environmentAssignment matches a line of an environment listing: an optional
+// export, the name of a variable, and the "=" the value follows.
+var environmentAssignment = regexp.MustCompile(`^(export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)=`)
+
+// redactEnvironment replaces the values of the declared variables. A line that
+// is neither blank, a comment nor an assignment leaves the shape of the file
+// unknown, and an unknown shape is not shipped.
+func redactEnvironment(content []byte, keys []string, dropped map[string]int) ([]byte, error) {
+	secret := map[string]bool{}
+	for _, key := range keys {
+		secret[key] = true
+	}
+	lines := strings.Split(string(content), "\n")
+	for number, line := range lines {
+		trimmed := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
+			continue
+		}
+		match := environmentAssignment.FindStringSubmatch(trimmed)
+		if match == nil {
+			// The line is counted, never quoted: the reason travels in the
+			// manifest, where the value of the line must not.
+			return nil, fmt.Errorf("line %d is neither an assignment, a comment nor blank", number+1)
+		}
+		if secret[match[2]] {
+			lines[number] = match[1] + match[2] + "=" + redactedValue
+			dropped[match[2]]++
+		}
+	}
+	return []byte(strings.Join(lines, "\n")), nil
+}
+
+// redactDocument parses a structured file, drops the declared keys and writes
+// it back. A file nothing was dropped from keeps the bytes it was collected
+// with, so that the bundle shows what the host holds and not what a marshaller
+// would rather write.
+func redactDocument(content []byte, keys []string, dropped map[string]int,
+	parse func([]byte) (any, error), write func(any) ([]byte, error)) ([]byte, error) {
+	if len(bytes.TrimSpace(content)) == 0 {
+		return content, nil
+	}
+	document, err := parse(content)
+	if err != nil {
+		return nil, err
+	}
+	changed := false
+	for _, key := range keys {
+		if count := dropPath(document, strings.Split(key, ".")); count > 0 {
+			dropped[key] += count
+			changed = true
+		}
+	}
+	if !changed {
+		return content, nil
+	}
+	return write(document)
+}
+
+// dropPath replaces the value at a declared path and returns how many values
+// it replaced. A segment ending in "[]" is a list, every element of which
+// carries the rest of the path.
+func dropPath(node any, path []string) int {
+	if len(path) == 0 {
+		return 0
+	}
+	name, list := strings.CutSuffix(path[0], "[]")
+	entry, present := mappingValue(node, name)
+	if !present {
+		return 0
+	}
+	if list {
+		items, ok := entry.([]any)
+		if !ok {
+			return 0
+		}
+		if len(path) == 1 {
+			for index := range items {
+				items[index] = redactedValue
+			}
+			return len(items)
+		}
+		count := 0
+		for _, item := range items {
+			count += dropPath(item, path[1:])
+		}
+		return count
+	}
+	if len(path) == 1 {
+		return setMappingValue(node, name, redactedValue)
+	}
+	return dropPath(entry, path[1:])
+}
+
+// mappingValue reads a key of a mapping whichever shape the parser gave it:
+// JSON and YAML with string keys give map[string]any, YAML otherwise
+// map[any]any.
+func mappingValue(node any, name string) (any, bool) {
+	switch mapping := node.(type) {
+	case map[string]any:
+		value, present := mapping[name]
+		return value, present
+	case map[any]any:
+		value, present := mapping[name]
+		return value, present
+	}
+	return nil, false
+}
+
+// setMappingValue replaces a key that is there and says how many it replaced.
+func setMappingValue(node any, name string, value any) int {
+	switch mapping := node.(type) {
+	case map[string]any:
+		if _, present := mapping[name]; !present {
+			return 0
+		}
+		mapping[name] = value
+		return 1
+	case map[any]any:
+		if _, present := mapping[name]; !present {
+			return 0
+		}
+		mapping[name] = value
+		return 1
+	}
+	return 0
+}
+
+// parseJSON reads exactly one JSON document; a number keeps the text it was
+// written with, so a file written back is the file that was read.
+func parseJSON(content []byte) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.UseNumber()
+	var document any
+	if err := decoder.Decode(&document); err != nil {
+		return nil, err
+	}
+	if decoder.More() {
+		return nil, errors.New("more than one document")
+	}
+	return document, nil
+}
+
+// writeJSON writes a document back the way the bundle writes JSON.
+func writeJSON(document any) ([]byte, error) {
+	content, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(content, '\n'), nil
+}
+
+// parseYAML reads one YAML document. A file of nothing but comments parses to
+// nothing, which drops nothing and is not an error.
+func parseYAML(content []byte) (any, error) {
+	decoder := yaml.NewDecoder(bytes.NewReader(content))
+	var document any
+	if err := decoder.Decode(&document); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var next any
+	err := decoder.Decode(&next)
+	if err == nil {
+		return nil, errors.New("more than one document")
+	}
+	if !errors.Is(err, io.EOF) {
+		return nil, err
+	}
+	return document, nil
+}
+
+// writeYAML writes a document back the way the bundle writes YAML.
+func writeYAML(document any) ([]byte, error) {
+	return yaml.Marshal(document)
+}
+
+// withheldNote stands in the bundle in place of a file the structural
+// redaction could not parse.
+func withheldNote(reason error) []byte {
+	return []byte("(withheld: " + codeFileUnparsable + "; " + reason.Error() + ")\n")
 }
 
 // bundleEntry describes one file of the bundle in the manifest.
@@ -186,8 +480,13 @@ type bundleEntry struct {
 	// SHA256 is the digest of this file as it was written, so a file taken
 	// out of the archive can be held against the manifest.
 	SHA256 string `json:"sha256"`
+	// Format is the shape the structural redaction parsed this file as.
+	Format bundleFormat `json:"format,omitempty"`
 	// Fields is what the collector declared this file carries.
 	Fields []field `json:"fields,omitempty"`
+	// Withheld names the typed reason the content was not shipped; the file is
+	// in the bundle as a note, so that its absence is not silent.
+	Withheld string `json:"withheld,omitempty"`
 	// Redactions counts the values hidden in this file.
 	Redactions int `json:"redactions,omitempty"`
 	// Error says why the file is empty or partial; the bundle is still written,
@@ -197,7 +496,7 @@ type bundleEntry struct {
 }
 
 // redactionPolicy is the version of what the bundle takes out and leaves out.
-const redactionPolicy = "2"
+const redactionPolicy = "3"
 
 // bundleManifest is the first file to read: what is inside, what was taken
 // out, and what was never collected.
@@ -216,6 +515,18 @@ type bundleManifest struct {
 	// Scanned says the assembled bundle was held against the scanner before it
 	// was written.
 	Scanned bool `json:"scanned"`
+}
+
+// fieldsLeftOut counts the declared fields the bundle does not carry, apart
+// from the files it withheld whole.
+func (m bundleManifest) fieldsLeftOut() int {
+	count := 0
+	for _, left := range m.Omitted {
+		if left.Code != codeFileUnparsable {
+			count++
+		}
+	}
+	return count
 }
 
 // identityMetadata is what the bundle says about the certificate of the
@@ -306,18 +617,24 @@ func supportBundleCommand(args []string, out, errOut io.Writer) int {
 		fmt.Fprintf(out, "Checksum:     %s\n", checksum)
 	}
 	fmt.Fprintf(out, "Files:        %d\n", len(manifest.Entries))
-	redactions, partial := 0, 0
+	redactions, partial, withheld := 0, 0, 0
 	for _, entry := range manifest.Entries {
 		redactions += entry.Redactions
 		if entry.Error != "" {
 			partial++
 		}
+		if entry.Withheld != "" {
+			withheld++
+		}
 	}
 	fmt.Fprintf(out, "Redactions:   %d\n", redactions)
-	fmt.Fprintf(out, "Left out:     %d field(s) declared secret; see manifest.json\n", len(manifest.Omitted))
+	fmt.Fprintf(out, "Left out:     %d field(s) declared secret; see manifest.json\n", manifest.fieldsLeftOut())
 	fmt.Fprintf(out, "Scanner:      no finding under redaction policy %s\n", manifest.RedactionPolicy)
 	if partial > 0 {
 		fmt.Fprintf(out, "Partial:      %d file(s) could not be read fully; see manifest.json\n", partial)
+	}
+	if withheld > 0 {
+		fmt.Fprintf(out, "Withheld:     %d file(s) did not parse and were not shipped; see manifest.json\n", withheld)
 	}
 	return 0
 }
@@ -354,7 +671,10 @@ func verifyBundle(path string, out, errOut io.Writer) int {
 			policy = "not stated"
 		}
 		fmt.Fprintf(out, "Policy:       %s\n", policy)
-		fmt.Fprintf(out, "Left out:     %d field(s) declared secret\n", len(manifest.Omitted))
+		fmt.Fprintf(out, "Left out:     %d field(s) declared secret\n", manifest.fieldsLeftOut())
+		if withheld := len(manifest.Omitted) - manifest.fieldsLeftOut(); withheld > 0 {
+			fmt.Fprintf(out, "Withheld:     %d file(s) did not parse and were not shipped\n", withheld)
+		}
 	} else {
 		fmt.Fprint(out, "Policy:       no manifest in the bundle\n")
 	}
@@ -408,12 +728,33 @@ func bundleName(sources bundleSources) string {
 	return "flotestro-support-" + host + "-" + sources.Now().UTC().Format("20060102T150405Z")
 }
 
+// environmentFields declares what the environment listing of the service
+// carries. The variables marked secret in environmentSettings are declared
+// secret here and dropped by the key they are declared under, so that marking
+// one there is enough to keep its value out of a bundle.
+func environmentFields() []field {
+	fields := make([]field, 0, len(environmentSettings))
+	for _, setting := range environmentSettings {
+		declared := field{Name: setting.Variable, Sensitivity: fieldSensitive}
+		if setting.Secret {
+			declared.Sensitivity = fieldSecret
+			declared.Drop = dropStructural
+			declared.Key = setting.Variable
+			declared.Why = "the service marks " + setting.Variable + " secret, so the listing is parsed and " +
+				"its value replaced before the bundle is written; whoever read it could act as this host"
+		}
+		fields = append(fields, declared)
+	}
+	return fields
+}
+
 // bundleCollectors lists what a bundle is made of, in the order it is read.
 // Every collector declares its fields.
 func bundleCollectors(sources bundleSources) []collector {
 	collectors := []collector{
 		{
 			Name: "diagnose.json", Source: "flotestro-agentctl diagnose --json",
+			Format: formatJSON,
 			Fields: []field{
 				{Name: "checks[].name", Sensitivity: fieldPublic},
 				{Name: "checks[].error_code", Sensitivity: fieldPublic},
@@ -425,6 +766,7 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		{
 			Name: "status.txt", Source: "flotestro-agentctl status",
+			Format: formatText,
 			Fields: []field{
 				{Name: "agent version", Sensitivity: fieldPublic},
 				{Name: "identity and connection", Sensitivity: fieldSensitive},
@@ -435,6 +777,7 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		{
 			Name: "config-effective.txt", Source: "flotestro-agentctl config show",
+			Format: formatText,
 			Fields: []field{
 				{Name: "settings with the defaults filled in", Sensitivity: fieldSensitive},
 			},
@@ -444,6 +787,7 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		{
 			Name: "agent.yaml", Source: sources.ConfigPath,
+			Format: formatYAML,
 			Fields: []field{
 				{Name: "connection and agent settings", Sensitivity: fieldSensitive},
 			},
@@ -453,17 +797,15 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		{
 			Name: "agent.env", Source: sources.EnvironmentPath,
-			Fields: []field{
-				{Name: "FLOTESTRO_GATEWAY_URL", Sensitivity: fieldSensitive},
-				{Name: "FLOTESTRO_ENROLLMENT_TOKEN", Sensitivity: fieldSecret,
-					Why: "a token left in the file would let whoever reads the bundle enroll a machine as this host"},
-			},
+			Format: formatEnvironment,
+			Fields: environmentFields(),
 			Collect: func(_ context.Context, sources bundleSources) ([]byte, error) {
 				content, err := sources.ReadFile(sources.EnvironmentPath)
 				if os.IsNotExist(err) {
 					// The Arch package carries no environment file; its absence
-					// is a fact of the host, not a failure of the bundle.
-					return []byte("(no environment file)\n"), nil
+					// is a fact of the host, not a failure of the bundle. The
+					// note is a comment, so the listing still parses.
+					return []byte("# no environment file\n"), nil
 				}
 				return content, err
 			},
@@ -480,10 +822,12 @@ func bundleCollectors(sources bundleSources) []collector {
 		collectors = append(collectors, collector{
 			Name:   "journal-" + short + ".txt",
 			Source: "journalctl -u " + unit + " --no-pager -n " + journalLines,
+			Format: formatText,
 			Fields: []field{
 				{Name: "the last " + journalLines + " lines of the unit", Sensitivity: fieldSensitive},
-				{Name: "values of keys naming a token, a password or a secret", Sensitivity: fieldSecret,
-					Why: "a journal line may quote a variable, and the quoted value is replaced with " + redactedValue},
+				{Name: "values of keys naming a token, a password or a secret", Sensitivity: fieldSecret, Drop: dropPattern,
+					Why: "a journal line is written by whoever logged it, so it names no key to walk to; " +
+						"a line quoting a variable has the quoted value replaced with " + redactedValue},
 			},
 			Collect: func(ctx context.Context, sources bundleSources) ([]byte, error) {
 				return sources.Command(ctx, "journalctl", "-u", unit, "--no-pager", "-n", journalLines)
@@ -495,6 +839,7 @@ func bundleCollectors(sources bundleSources) []collector {
 	collectors = append(collectors,
 		collector{
 			Name: "systemctl-status.txt", Source: "systemctl " + strings.Join(statusArgs, " "),
+			Format: formatText,
 			Fields: []field{
 				{Name: "unit state", Sensitivity: fieldPublic},
 				{Name: "command lines and recent log lines", Sensitivity: fieldSensitive},
@@ -511,6 +856,7 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		collector{
 			Name: "os-release", Source: sources.OSReleasePath,
+			Format: formatEnvironment,
 			Fields: []field{{Name: "distribution and version", Sensitivity: fieldPublic}},
 			Collect: func(_ context.Context, sources bundleSources) ([]byte, error) {
 				return sources.ReadFile(sources.OSReleasePath)
@@ -518,10 +864,11 @@ func bundleCollectors(sources bundleSources) []collector {
 		},
 		collector{
 			Name: "identity.json", Source: "the certificate of the identity",
+			Format: formatJSON,
 			Fields: []field{
 				{Name: "host_id", Sensitivity: fieldSensitive},
 				{Name: "serial, subject, issuer, validity, fingerprint", Sensitivity: fieldSensitive},
-				{Name: "private key", Sensitivity: fieldSecret,
+				{Name: "private key", Sensitivity: fieldSecret, Drop: dropNotCollected,
 					Why: "a bundle goes to people who must not be able to act as this host, so the key is never read"},
 			},
 			Collect: func(_ context.Context, sources bundleSources) ([]byte, error) {
@@ -545,8 +892,10 @@ func writeSupportBundle(ctx context.Context, sources bundleSources, name string,
 		Hostname:        host,
 		CreatedAt:       sources.Now().UTC(),
 		RedactionPolicy: redactionPolicy,
-		Redaction: "values of keys matching token, password or secret are replaced with " + redactedValue +
-			"; the fields declared secret are never collected; the private key is never read",
+		Redaction: "every collected file is parsed and the values of the fields declared secret are replaced with " +
+			redactedValue + "; the pattern for keys naming a token, a password or a secret runs after that, " +
+			"as the last layer and not the only one; a file whose shape does not parse is declared, not shipped; " +
+			"the private key is never read",
 		Scanned: true,
 	}
 
@@ -571,15 +920,32 @@ func writeSupportBundle(ctx context.Context, sources bundleSources, name string,
 
 	for _, source := range bundleCollectors(sources) {
 		content, collectErr := source.Collect(ctx, sources)
-		// The redaction runs before the file is written, not after, so that a
-		// bundle interrupted half-way holds nothing more than a finished one.
-		redacted, count := redact(content)
 		entry := bundleEntry{Name: source.Name, Source: source.Source,
-			Fields: source.Fields, Redactions: count}
+			Format: source.Format, Fields: source.Fields}
 		if collectErr != nil {
 			entry.Error = collectErr.Error()
 		}
-		manifest.Omitted = append(manifest.Omitted, source.omitted()...)
+		// The structural pass drops what the collector declared; the pattern
+		// runs after it over what is left, as the backstop for a secret nobody
+		// declared. Both run before the file is written, not after, so that a
+		// bundle interrupted half-way holds nothing more than a finished one.
+		structured, dropped, parseErr := redactStructurally(source, content)
+		if parseErr != nil {
+			structured = withheldNote(parseErr)
+			entry.Withheld = codeFileUnparsable
+			manifest.Omitted = append(manifest.Omitted, omission{
+				File:  source.Name,
+				Field: "the whole file",
+				Code:  codeFileUnparsable,
+				Why:   parseErr.Error() + "; a shape the redaction cannot walk cannot be shown to hold no secret",
+			})
+		}
+		redacted, count := redact(structured)
+		for _, times := range dropped {
+			count += times
+		}
+		entry.Redactions = count
+		manifest.Omitted = append(manifest.Omitted, source.omitted(dropped)...)
 		if err := add(entry, redacted); err != nil {
 			return manifest, err
 		}

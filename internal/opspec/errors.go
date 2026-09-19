@@ -733,7 +733,6 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The package file hashes to the digest the order names and was signed by a different key than the order names. A correct digest from the wrong signer is what this check exists for. Nothing was installed.",
 		Action:  "Do not order the upgrade again. Find out which key signed the artefact on the host and compare it with the release key; a mirror serving a rebuild and a compromised build machine both look like this.", CountsAsFailure: true},
 
-	// The phases of a directory change (security remediation, chapter 14. 3).
 	{Code: "directory_moddn_unsupported", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The preflight asked the directory what it can do and it proved it cannot preserve an account: the connector's service account may not move an entry, or the container of preserved accounts is not there. Nothing was ordered and the local account was not touched.",
 		Action:  "Run the directory provisioning step for preserving accounts: it gives the connector's service account the four rights the move needs - System: Preserve User for the move itself, System: Modify User RDN for the name it carries, System: Read Preserved Users so the directory can report what it moved, and System: Modify Preserved Users because the directory clears the password of the entry it preserves - through the privilege Flotestro Preserve Users and the role Flotestro Directory Connector, and nothing else. It is safe to repeat - a second run changes nothing. If the directory refuses the connector that step too, the refusal names the ipa commands a directory administrator runs instead. A directory that merely does not report its rights does not raise this."},
@@ -762,8 +761,11 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The control-plane instance evaluating the alert rules lost the lease in the middle of a pass and stopped where it was. Another instance holds the lease and carries on from the open episodes; nothing was written after the loss, because two instances judging one fleet at once is how a panel contradicts itself about an alert.",
 		Action:  "Nothing, unless it repeats. A stream of these from one instance means it cannot renew in time: look at the database latency and at the clock of that instance."},
 	{Code: "metrics_retention_too_short", Stage: "startup", Retry: RetryAfterChange,
-		Meaning: "The panel refused to start because the raw retention is shorter than the window it offers at full resolution plus the longest a sample may take to arrive. Such a configuration deletes a reading a relay is still carrying, by definition and without anybody ordering it.",
-		Action:  "Raise the raw retention to at least the sum, or lower the raw query window or the maximum lateness. The three are named in the configuration reference under the monitoring settings."},
+		Meaning: "The raw retention is shorter than the window the panel offers at full resolution plus the longest a sample may take to arrive. Such a configuration deletes a reading a relay is still carrying, by definition and without anybody ordering it, so the panel refuses to start on it and refuses to store it from the settings screen.",
+		Action:  "Raise the raw retention to at least the sum, or lower the raw query window or the maximum lateness. The three are named in the configuration reference under the monitoring settings; nothing was stored, so the values in force are unchanged."},
+	{Code: "metrics_retention_shrink_unacknowledged", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The monitoring settings offered would drop readings the panel still keeps - whole daily partitions of raw samples, or rollups, recorded gaps and clock corrections - and the request did not say that this is intended. Nothing was stored and nothing was deleted.",
+		Action:  "Read what the preview says goes: it is counted before anything is written and it cannot be undone afterwards. Send the same values again with acknowledge_data_loss set, or raise the retention back."},
 
 	// The proof of the management channel after a change of the network or the
 	// firewall (security remediation, chapter 14.
@@ -850,6 +852,18 @@ var reportedGuides = []ErrorGuide{
 	// The support bundle of the panel (security remediation, chapter 14.6).
 	// None of these is a failure of a change on a host: they are what the
 	// panel answers when a bundle is asked for or fetched.
+	{Code: "bundle_field_not_collected", Stage: "reconcile", Retry: RetryNever,
+		Meaning: "A field the bundle declares secret is never read at all, so no file of the bundle carries it. The manifest names the field and why.",
+		Action:  "Nothing to do; if a diagnosis really needs the value, take it from the host itself."},
+	{Code: "bundle_field_redacted", Stage: "reconcile", Retry: RetryNever,
+		Meaning: "A field the bundle declares secret was found in a collected file and its value replaced before the file was written, because it was declared and not because a pattern recognised it.",
+		Action:  "Nothing to do; the file in the bundle shows the key without its value."},
+	{Code: "bundle_field_pattern_only", Stage: "reconcile", Retry: RetryNever,
+		Meaning: "A secret in free text names no key the redaction can walk to, so only the pattern for keys naming a token, a password or a secret hid it.",
+		Action:  "Read the file knowing the pattern is the only layer there, and keep credentials out of what the unit logs."},
+	{Code: "bundle_file_unparsable", Stage: "reconcile", Retry: RetryAfterChange,
+		Meaning: "A collected file did not parse as the shape its collector declared, so its content was not shipped: what cannot be walked cannot be shown to be free of the fields declared secret.",
+		Action:  "Repair the file on the host - a configuration or an environment listing that does not parse is a fault of its own - and make the bundle again."},
 	{Code: "support_bundle_in_flight", Stage: "admission", Retry: RetryAutomatic,
 		Meaning: "A bundle is already being assembled. One bundle is a reading of the whole panel, and several at once would be a load test rather than a support request.",
 		Action:  "Wait for the bundle on the screen to become ready, then ask again."},

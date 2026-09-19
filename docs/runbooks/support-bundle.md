@@ -85,7 +85,13 @@ What to do:
 - `flotestro-agentctl support-bundle --verify <file>` prints `Findings:     none`.
 - `tar tzf <file>` lists `manifest.json` first by name; `manifest.json` carries
   `redaction_policy`, the fields of every file with their sensitivity, and `omitted`.
-- The file is `0600` and owned by whoever ran the command.
+- The file is `0600` and owned by whoever ran the command, and `<file>.sha256` beside it
+  holds the archive's own digest in `sha256sum -c` form. `--verify` checks the two against
+  each other.
+- A file listed under `Withheld:` did not parse as the shape it was collected as, so its
+  content was left out rather than sent unparsed - what cannot be walked cannot be shown to
+  be free of the fields declared secret. `manifest.json` gives the code and the reason. Repair
+  the file on the host and make the bundle again.
 
 ## Rollback
 
@@ -95,6 +101,8 @@ support request is closed - it holds the journal of a service and the addresses 
 ## Codes
 
 `bundle_private_key_found`, `bundle_bearer_token_found`, `bundle_password_in_url_found`,
-`bundle_enrollment_token_found`. They are refusals of the tool on the host and never sit on a
-job or a campaign target, so they are not in the panel's error guide
-(`GET /api/v1/errors`); they are listed above in full.
+`bundle_enrollment_token_found` refuse the bundle outright. `bundle_file_unparsable` withholds
+one file. `bundle_field_not_collected`, `bundle_field_redacted` and `bundle_field_pattern_only`
+say in the manifest which layer kept a field out: never read at all, dropped because it was
+declared, or hidden only by the pattern. All of them are in the panel's error guide
+(`GET /api/v1/errors`) as well, because the panel now makes bundles of its own.

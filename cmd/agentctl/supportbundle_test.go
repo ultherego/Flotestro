@@ -39,6 +39,8 @@ func TestRedactHidesTheValuesOfSecretKeysOnly(t *testing.T) {
 		{"a sentence is not a value", "the enrollment token is still in /etc/flotestro/agent.env", "the enrollment token is still in /etc/flotestro/agent.env", 0},
 		{"an empty value stays empty", "token:\n", "token:\n", 0},
 		{"the next line is not the value", "token:\nenrollment_url: https://e\n", "token:\nenrollment_url: https://e\n", 0},
+		{"a value already taken out is not hidden twice", "token=[redacted]\napi_token: '[redacted]'\n",
+			"token=[redacted]\napi_token: '[redacted]'\n", 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -602,5 +604,262 @@ func TestVerifyPassesACleanBundle(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "Findings:     none") || errOut.Len() != 0 {
 		t.Fatalf("out = %q, err = %q", out.String(), errOut.String())
+	}
+}
+
+// declaredSecret is a field a collector declares secret and asks the
+// structural redaction to drop by its key.
+func declaredSecret(key string) field {
+	return field{Name: key, Sensitivity: fieldSecret, Drop: dropStructural, Key: key,
+		Why: "the collector declared it secret"}
+}
+
+// A value goes because it was declared, not because a pattern recognised its
+// key: every key below is one the pattern knows nothing about.
+func TestTheStructuralPassDropsWhatWasDeclared(t *testing.T) {
+	cases := []struct {
+		name    string
+		source  collector
+		in      string
+		keeps   string
+		dropped map[string]int
+	}{
+		{
+			name:    "a path in JSON",
+			source:  collector{Name: "a.json", Format: formatJSON, Fields: []field{declaredSecret("enrollment.passphrase")}},
+			in:      `{"enrollment":{"passphrase":"opensesame","url":"https://e"}}`,
+			keeps:   "https://e",
+			dropped: map[string]int{"enrollment.passphrase": 1},
+		},
+		{
+			name:    "every element of a list in JSON",
+			source:  collector{Name: "b.json", Format: formatJSON, Fields: []field{declaredSecret("checks[].passphrase")}},
+			in:      `{"checks":[{"name":"one","passphrase":"opensesame"},{"name":"two","passphrase":"opensesame"}]}`,
+			keeps:   "two",
+			dropped: map[string]int{"checks[].passphrase": 2},
+		},
+		{
+			name:    "a path in YAML",
+			source:  collector{Name: "c.yaml", Format: formatYAML, Fields: []field{declaredSecret("connection.passphrase")}},
+			in:      "connection:\n  passphrase: opensesame\n  url: https://e\n",
+			keeps:   "https://e",
+			dropped: map[string]int{"connection.passphrase": 1},
+		},
+		{
+			name:    "a variable of an environment listing",
+			source:  collector{Name: "d.env", Format: formatEnvironment, Fields: []field{declaredSecret("PROXY_CREDENTIAL")}},
+			in:      "# the proxy of the site\nexport PROXY_CREDENTIAL=opensesame\nPROXY_URL=https://e\n",
+			keeps:   "PROXY_URL=https://e",
+			dropped: map[string]int{"PROXY_CREDENTIAL": 1},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// The case proves nothing unless the pattern is blind to the key.
+			if _, count := redact([]byte(c.in)); count != 0 {
+				t.Fatalf("the pattern already hides %d value(s) of this file; the case proves nothing", count)
+			}
+			out, dropped, err := redactStructurally(c.source, []byte(c.in))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(out), "opensesame") {
+				t.Fatalf("the declared value is still there:\n%s", out)
+			}
+			if !strings.Contains(string(out), redactedValue) || !strings.Contains(string(out), c.keeps) {
+				t.Fatalf("the file no longer reads as itself:\n%s", out)
+			}
+			if len(dropped) != len(c.dropped) {
+				t.Fatalf("dropped = %v, we want %v", dropped, c.dropped)
+			}
+			for key, times := range c.dropped {
+				if dropped[key] != times {
+					t.Fatalf("dropped = %v, we want %v", dropped, c.dropped)
+				}
+			}
+		})
+	}
+}
+
+// A key the file does not hold takes nothing out of it, and a file nothing
+// was dropped from keeps the bytes it was collected with.
+func TestAKeyTheFileDoesNotHoldChangesNothing(t *testing.T) {
+	source := collector{Name: "a.yaml", Format: formatYAML, Fields: []field{declaredSecret("connection.passphrase")}}
+	content := []byte(goodConfiguration)
+	out, dropped, err := redactStructurally(source, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped) != 0 {
+		t.Fatalf("dropped = %v from a file that holds none of it", dropped)
+	}
+	if !bytes.Equal(out, content) {
+		t.Fatalf("the file was rewritten although nothing was dropped:\n%s", out)
+	}
+	if left := source.omitted(dropped); len(left) != 0 {
+		t.Fatalf("the manifest leaves out %+v, which the file never held", left)
+	}
+}
+
+// The pattern is the backstop, not the only layer: a secret nobody declared
+// is still hidden after the structural pass has left the file alone.
+func TestThePatternStillCatchesWhatNobodyDeclared(t *testing.T) {
+	source := collector{Name: "agent.yaml", Format: formatYAML,
+		Fields: []field{{Name: "connection and agent settings", Sensitivity: fieldSensitive}}}
+	content := []byte("connection:\n  api_token: abc1234567\n")
+	structured, dropped, err := redactStructurally(source, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dropped) != 0 || !bytes.Equal(structured, content) {
+		t.Fatalf("the structural pass touched a file nothing was declared for: %v %q", dropped, structured)
+	}
+	redacted, count := redact(structured)
+	if count != 1 || bytes.Contains(redacted, []byte("abc1234567")) {
+		t.Fatalf("the backstop let %q through (count %d)", redacted, count)
+	}
+}
+
+// The enrollment token leaves the listing because the service marks it
+// secret, not because the pattern knows the word "token": after the
+// declaration has been honoured the pattern has nothing left to do.
+func TestTheEnrollmentTokenIsDroppedByDeclaration(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	sources := fakeBundleSources(t, certPEM)
+	var listing collector
+	for _, source := range bundleCollectors(sources) {
+		if source.Name == "agent.env" {
+			listing = source
+		}
+	}
+	if listing.Collect == nil {
+		t.Fatal("the bundle collects no environment listing")
+	}
+	content, err := listing.Collect(context.Background(), sources)
+	if err != nil {
+		t.Fatal(err)
+	}
+	structured, dropped, err := redactStructurally(listing, content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped["FLOTESTRO_ENROLLMENT_TOKEN"] != 1 {
+		t.Fatalf("the declared token was not dropped: %v", dropped)
+	}
+	if _, count := redact(structured); count != 0 {
+		t.Fatalf("the pattern still had %d value(s) to hide after the declaration was honoured", count)
+	}
+	left := listing.omitted(dropped)
+	if len(left) != 1 || left[0].Field != "FLOTESTRO_ENROLLMENT_TOKEN" || left[0].Code != codeFieldRedacted {
+		t.Fatalf("the manifest says %+v", left)
+	}
+}
+
+// A file the structural pass cannot parse is declared in the manifest with a
+// typed reason. It is not shipped: what cannot be walked cannot be shown to
+// hold no secret, and the pattern alone is not the promise the bundle makes.
+func TestAFileThatDoesNotParseIsDeclaredNotShipped(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	sources := fakeBundleSources(t, certPEM)
+	read := sources.ReadFile
+	sources.ReadFile = func(path string) ([]byte, error) {
+		if path == sources.ConfigPath {
+			// An unterminated flow sequence, with a value under a key the
+			// pattern knows nothing about.
+			return []byte("connection: [gw.example.com\n  passphrase: opensesame\n"), nil
+		}
+		return read(path)
+	}
+
+	name := bundleName(sources)
+	var archive bytes.Buffer
+	manifest, err := writeSupportBundle(context.Background(), sources, name, &archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := readBundle(t, archive.Bytes(), name)
+	for _, leak := range []string{"opensesame", "gw.example.com"} {
+		if bytes.Contains(files["agent.yaml"], []byte(leak)) {
+			t.Fatalf("the file that did not parse was shipped anyway:\n%s", files["agent.yaml"])
+		}
+	}
+	if !bytes.Contains(files["agent.yaml"], []byte(codeFileUnparsable)) {
+		t.Fatalf("agent.yaml says nothing about why it is empty: %q", files["agent.yaml"])
+	}
+
+	byName := map[string]bundleEntry{}
+	for _, entry := range manifest.Entries {
+		byName[entry.Name] = entry
+	}
+	if byName["agent.yaml"].Withheld != codeFileUnparsable {
+		t.Fatalf("the manifest does not say the file was withheld: %+v", byName["agent.yaml"])
+	}
+	if byName["agent.env"].Withheld != "" {
+		t.Fatalf("a listing that parses was withheld: %+v", byName["agent.env"])
+	}
+	found := false
+	for _, left := range manifest.Omitted {
+		if strings.Contains(left.Why, "opensesame") || strings.Contains(left.Why, "gw.example.com") {
+			t.Fatalf("the reason quotes the file it refused to ship: %+v", left)
+		}
+		if left.File == "agent.yaml" && left.Code == codeFileUnparsable && left.Why != "" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the manifest does not say why agent.yaml was withheld: %+v", manifest.Omitted)
+	}
+}
+
+// Every collector says what shape its content has and how each secret field
+// is kept out, so that the redaction walks the file instead of guessing.
+func TestEveryCollectorSaysHowItIsRedacted(t *testing.T) {
+	certPEM, _ := testCertificate(t)
+	for _, source := range bundleCollectors(fakeBundleSources(t, certPEM)) {
+		switch source.Format {
+		case formatJSON, formatYAML, formatEnvironment, formatText:
+		default:
+			t.Fatalf("%s says its content is shaped %q", source.Name, source.Format)
+		}
+		for _, declared := range source.Fields {
+			if declared.Sensitivity != fieldSecret {
+				if declared.Drop != "" || declared.Key != "" {
+					t.Fatalf("%s: %s travels and still says how it is dropped", source.Name, declared.Name)
+				}
+				continue
+			}
+			switch declared.Drop {
+			case dropNotCollected, dropPattern:
+				if declared.Key != "" {
+					t.Fatalf("%s: %s names a key it is not dropped by", source.Name, declared.Name)
+				}
+			case dropStructural:
+				if declared.Key == "" {
+					t.Fatalf("%s: %s is dropped structurally without a key", source.Name, declared.Name)
+				}
+				if source.Format == formatText {
+					t.Fatalf("%s: %s is dropped by a key in free text, which has none", source.Name, declared.Name)
+				}
+			default:
+				t.Fatalf("%s: %s is secret and does not say how it is kept out", source.Name, declared.Name)
+			}
+		}
+	}
+	// Marking a variable secret in the environment of the service is enough:
+	// the listing is parsed and the value dropped under that name.
+	for _, setting := range environmentSettings {
+		if !setting.Secret {
+			continue
+		}
+		found := false
+		for _, declared := range environmentFields() {
+			if declared.Name == setting.Variable && declared.Sensitivity == fieldSecret &&
+				declared.Drop == dropStructural && declared.Key == setting.Variable {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s is secret in the environment of the service and not dropped from the listing", setting.Variable)
+		}
 	}
 }
