@@ -1,10 +1,447 @@
-<!doctype html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Flotestro</title>
-<h1>Flotestro</h1>
-<p>Fleet management for Linux servers: one panel that plans, approves, carries
-and records changes across Debian, Ubuntu, Fedora, RHEL and Arch hosts.</p>
-<ul>
-  <li><a href="https://github.com/ultherego/Flotestro">The project, and how to install it</a></li>
-  <li><a href="packages/">The signed package repository</a></li>
-</ul>
+<meta name="description" content="Fleet management for Linux servers: one panel that plans, approves, carries and records changes across Debian, Ubuntu, Fedora, RHEL and Arch hosts.">
+<link rel="icon" href="img/logo.webp" type="image/webp">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="/Flotestro/">
+      <img class="brand__mark" src="img/logo.webp" alt="" width="459" height="160">
+      Flotestro
+    </a>
+    <nav class="site-nav" aria-label="Sections">
+      <a href="#panel">The panel</a>
+      <a href="#change">A change</a>
+      <a href="#operations">Operations</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#install">Install</a>
+      <a href="docs/">Documentation</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout layout--plain">
+  <main class="content">
+
+    <h1>Fleet management for Linux servers</h1>
+    <p class="lede prose">One panel that plans, approves, carries and records changes across
+      Debian, Ubuntu, Fedora, RHEL and Arch hosts.</p>
+
+    <p class="prose">Flotestro is a control plane and an agent. The agent reports what its host
+      actually is; the panel decides what that means and orders the change. There is no
+      &ldquo;run a command&rdquo; operation and the panel never opens a shell on a host: every action is
+      a versioned contract with its own permission, risk level, lock class and campaign mode.
+      Across a fleet the same change runs as a campaign, with a canary, waves, gates and a
+      failure threshold.</p>
+
+    <ul class="linkrow">
+      <li><a href="#install">Install</a></li>
+      <li><a href="docs/">Documentation</a></li>
+      <li><a href="https://github.com/ultherego/Flotestro">Source on GitHub</a></li>
+      <li><a href="packages/">Package repository</a></li>
+    </ul>
+
+    <h2 id="principles">What it holds to</h2>
+
+    <dl class="kv">
+      <dt>Typed operations only</dt>
+      <dd>Every action is a versioned contract with its own permission, risk level, lock class
+        and campaign mode. There is no type that runs an arbitrary command.</dd>
+
+      <dt>Plans approved by digest</dt>
+      <dd>The host computes the plan, an approver reads it, and the host applies it only if the
+        content still matches the approved digest.</dd>
+
+      <dt>Unknown is shown as unknown</dt>
+      <dd>A fact the agent could not determine is empty, not zero; a missing declaration means a
+        refusal, not consent.</dd>
+
+      <dt>Evidence, not logs</dt>
+      <dd>Every order, approval and result is an event in a hash-chained audit trail that
+        <code>auditverify</code> checks offline, without the database.</dd>
+
+      <dt>No external monitoring stack</dt>
+      <dd>Agents sample their host; the panel keeps the samples and the rollups, evaluates the
+        rules, and holds the alerts and the silences.</dd>
+    </dl>
+
+    <h2 id="panel">The panel</h2>
+
+    <p class="prose">Every picture below is a running installation: a four-host laboratory with one
+      Debian, one Ubuntu, one Fedora and one Arch machine, which is why the numbers in it are
+      small. What the pages do is the point, not the size of the fleet.</p>
+
+    <h3>The fleet</h3>
+
+    <figure class="figure">
+      <img src="img/dashboard.png" alt="The fleet dashboard: host availability, problems by kind, operations of the last 24 hours, what needs attention, and the composition of the fleet." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Dashboard.</b> Only what needs a decision. Host availability on the left —
+        four online, nothing stale, offline, unknown, quarantined or in maintenance — and the
+        problems by kind on the right: 13 security findings, 8 failed jobs in 24 hours, 6 checks
+        that came back unknown. Below them, finished operations per hour by outcome; a
+        <i>needs attention</i> block counted in the database, with two hosts carrying failed
+        units, one pending enrollment and four agent certificates expiring within 30 days; and
+        the composition of the fleet by system, agent build, site and environment.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="img/hosts.png" alt="The host list with server-side filters and a row per host: state, system, site, environment, domain, updates, failed units, reboot and last seen." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Hosts.</b> The filters are applied server-side: hostname or address, site,
+        environment, owner, tags, then operating system, state, lifecycle, maintenance,
+        capability and release channel. A row carries the state, the system as the host reported
+        it — <code>arch</code>, <code>debian 13</code>, <code>fedora 42</code>,
+        <code>ubuntu 24.04</code> — its site and environment, whether it is in a domain, how many
+        updates wait for it, how many units have failed, whether it wants a reboot, and when it
+        was last seen.</figcaption>
+    </figure>
+
+    <h3>One host</h3>
+
+    <figure class="figure">
+      <img src="img/host-overview.png" alt="A host page: the module menu, the adapters available on this host, the system facts and the hardware the agent reported." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Host overview.</b> The left-hand menu is that host&rsquo;s modules: packages,
+        services, processes, schedules, kernel, time, power, network, DNS, firewall, SSH,
+        storage, files, backups, containers, Compose, security, vulnerabilities, certificates.
+        Every page says where its facts came from and when — here
+        <code>agent/os-release+procfs, revision 1dc313f1f045, observed 8m ago</code>. Of the
+        adapters on this host 16 can read and change, 2 are read-only and 5 are unavailable,
+        which is a different answer from zero. Beside the identity and the hardware sits what
+        needs attention on this host alone: no failed units, 36 updates waiting, no security
+        updates.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="img/host-packages.png" alt="The packages page of one host: updates by state, the package sources, the operations an operator may request, and the agent's own version." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Packages of a host.</b> 351 packages up to date, 36 upgradable, none of them
+        security. On the right the sources as the host reports them: 387 installed through
+        <code>apt</code>, a healthy package database, seven repositories of which one has its
+        signatures checked and none is managed by the panel. The operator can plan the updates —
+        counting them changes nothing on the host — or install, hold, unhold and plan a removal.
+        Ordinary upgrades leave the agent alone: replacing it is an operation of its own, and it
+        counts as done only when the host comes back reporting the version that was asked
+        for.</figcaption>
+    </figure>
+
+    <h3>A change across the fleet</h3>
+
+    <figure class="figure">
+      <img src="img/campaign.png" alt="A completed campaign: target counts, canary and wave settings, the approval record, the waves and the plans with their fingerprints." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Campaign.</b> A completed <code>file.ensure</code> campaign over four hosts:
+        one canary and two waves, at most two hosts at a time, a failure threshold of 25% or one
+        host, reboot policy <code>never</code>, offline policy
+        <code>replan_on_reconnect</code>, and the contract of the operation stated on the page —
+        cancel between steps, retry after a new plan, rollback by exact restore, verification by
+        re-checking the plan. The approval record says who approved, on what authentication (an
+        API token, not re-authenticated) and why: <i>change CHG-1042 approved in the weekly
+        review</i>. It is written once and never changed. Below the waves, one row per shape of
+        the change with its plan fingerprint and how long it stays valid — a host whose plan has
+        changed since refuses the change.</figcaption>
+    </figure>
+
+    <h3>What the panel watches</h3>
+
+    <figure class="figure">
+      <img src="img/security.png" alt="The security page: findings by state, a table of checks with the expected value, and findings by severity and by host." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Security.</b> Versioned checks judged in the panel over facts the hosts
+        already report: 13 checks across four hosts, 13 findings that need action, 23 passed, 6
+        unknown, 10 not applicable, 6 that the panel can fix. Each row names the check and its
+        identifier — <code>ssh.password-auth</code>, <code>exposure.listening</code>,
+        <code>kernel.rp-filter</code> — and the value it was judged against. One bad setting on
+        a hundred hosts is one problem, and the fix is one campaign with one
+        approval.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="img/monitoring.png" alt="The monitoring page: alerts by severity, coverage of the hosts, and the alert rules with their conditions." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Monitoring.</b> Every agent samples its host; the rules on this page turn
+        the samples into alerts, and nothing fires without a rule an operator can read here.
+        Coverage first — four hosts reporting, none silent, five rules enabled — then the
+        rules themselves: <code>filesystem_used_percent &gt; 90%</code> held for ten minutes is
+        a warning over the whole fleet, the same metric past 97% is critical with no waiting
+        at all.</figcaption>
+    </figure>
+
+    <figure class="figure">
+      <img src="img/audit.png" alt="The audit page: events per hour by outcome, the outcome and actor summary, filters, and the event table." width="1600" height="1000" loading="lazy">
+      <figcaption><b>Audit.</b> Every success and failure creates an event; so does every denial.
+        Among the hundred listed here: 89 succeeded, 9 failed, 2 were denied, counted by actor —
+        a named operator, the panel itself, and campaigns under their own identifiers. A row
+        carries the time, the actor, the kind, the operation, the target and the result, and
+        under a user&rsquo;s name the authentication the request rested on: the session and the
+        authentication context it was granted with.</figcaption>
+    </figure>
+
+    <h2 id="change">How a change happens</h2>
+
+    <ol class="steps">
+      <li>The host computes a plan of the change and reports its digest.</li>
+      <li>An approver reads the plan; in production a second person approves.</li>
+      <li>The host applies the change only if its content still matches the approved digest.</li>
+      <li>The result, the verification and every step are written to a hash-chained audit trail.</li>
+    </ol>
+
+    <figure class="figure figure--bare">
+      <img src="img/flow.svg" alt="One controlled change path: operator, control plane, host agent, the Linux fleet, and the audit trail that records every step." width="1200" height="700" loading="lazy">
+      <figcaption>Plan, approval, execution only for a matching digest, verification, audit.</figcaption>
+    </figure>
+
+    <p class="prose">Across a fleet the same change runs as a campaign: canary, waves, manual or
+      automatic gates, failure thresholds, maintenance windows, per-site budgets and an offline
+      policy per host.</p>
+
+    <h2 id="operations">What it can operate on</h2>
+
+    <dl class="kv">
+      <dt>Packages</dt>
+      <dd>Plan, upgrade, install, remove, hold, repair; per-host plans approved by digest; agent
+        upgrades.</dd>
+
+      <dt>Services and processes</dt>
+      <dd>Start, stop, restart, reload, enable, mask, reset-failed; unit detail; process tree;
+        signals.</dd>
+
+      <dt>Files and schedules</dt>
+      <dd>Managed files with versions and rollback; cron entries and systemd timers.</dd>
+
+      <dt>Network and firewall</dt>
+      <dd>NetworkManager, nmstate and netplan with a connectivity watchdog; firewalld, nftables
+        and UFW; the resolver.</dd>
+
+      <dt>Storage</dt>
+      <dd>Mounts, filesystem check and resize, LVM, SMART, device wipe.</dd>
+
+      <dt>Containers</dt>
+      <dd>Docker containers, images, prune, events and logs; Compose projects deployed against a
+        plan.</dd>
+
+      <dt>Kernel and security</dt>
+      <dd>sysctl, modules, SELinux mode, audit rules; security checks with fleet-wide
+        remediation.</dd>
+
+      <dt>Time</dt>
+      <dd>chrony and timesyncd, the time zone, and a source test before a source is replaced.</dd>
+
+      <dt>Identity</dt>
+      <dd>FreeIPA users, groups, HBAC and sudo rules, access simulation, domain joins; local
+        accounts and keys.</dd>
+
+      <dt>Certificates and backups</dt>
+      <dd>Scanning, trust-anchor rotation, certmonger renewal; restic and borg runs, verification
+        and restore.</dd>
+
+      <dt>Monitoring</dt>
+      <dd>CPU, memory, swap, filesystems, inodes and uptime sampled by the agent; alert rules and
+        silences in the panel.</dd>
+
+      <dt>Vulnerabilities</dt>
+      <dd>Package lists correlated against the Debian, Ubuntu, Red Hat and NVD feeds; the panel
+        reads the feeds, never the hosts.</dd>
+
+      <dt>Campaigns</dt>
+      <dd>Canary, waves, manual or automatic gates, failure thresholds, maintenance windows,
+        per-site budgets, offline policy per host.</dd>
+
+      <dt>Notifications</dt>
+      <dd>A durable trail posted to a webhook in batches, signed with HMAC-SHA256, delivered at
+        least once and in order.</dd>
+    </dl>
+
+    <h2 id="architecture">Architecture</h2>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Component</th><th scope="col">Runs as</th><th scope="col">Role</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>flotestro-control-plane</code></td>
+            <td>service on the panel server</td>
+            <td>API, web panel, agent gateway, enrollment, scheduler, campaign engine, PKI,
+              PostgreSQL</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-agent</code></td>
+            <td>unprivileged user on every host</td>
+            <td>one mTLS session to the gateway; inventory, metrics, plans; hands privileged steps
+              to the helper</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-agent-helper</code></td>
+            <td>root, socket-activated</td>
+            <td>executes the fixed set of privileged operations over a local socket; no
+              network</td>
+          </tr>
+          <tr>
+            <td><code>flotestro-relay</code></td>
+            <td>unprivileged, one per isolated site</td>
+            <td>terminates the agent sessions of a site and forwards them; buffers results during
+              an outage</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose">Hosts hold a certificate from the fleet CA, issued at enrollment from a key
+      that never leaves the host, renewed by the agent itself and revoked when superseded.
+      Enrollment tokens are one-time and stored as digests. Users sign in through OpenID Connect;
+      roles come from group mappings scoped by site and environment, and a sensitive action needs
+      step-up authentication. Secrets are fetched by the host under a short lease and never travel
+      in a task. PostgreSQL is the only source of truth: the panel keeps the fleet state nowhere
+      else.</p>
+
+    <table>
+      <thead>
+        <tr><th scope="col">Port</th><th scope="col">Service</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>8080</td><td>panel and API; loopback by default, put behind a TLS proxy</td></tr>
+        <tr><td>8443</td><td>agent gateway (mTLS)</td></tr>
+        <tr><td>8444</td><td>enrollment (TLS)</td></tr>
+        <tr><td>8453</td><td>relay</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="install">Install</h2>
+
+    <p class="prose">Nothing to build and nothing to clone. The panel runs from a published image;
+      the hosts take a package from the project&rsquo;s signed repository.</p>
+
+    <h3>The panel, with a database of its own</h3>
+
+    <pre><code>curl -fsSLO https://raw.githubusercontent.com/ultherego/Flotestro/main/deploy/compose.yaml
+printf '%s\n' FLOTESTRO_VERSION=0.60.0 FLOTESTRO_GATEWAY_ID=cp-01 \
+  FLOTESTRO_ADVERTISE=panel.example.org FLOTESTRO_PUBLIC_URL=http://panel.example.org:8080 &gt; .env
+mkdir -p secrets &amp;&amp; chmod 700 secrets
+printf '%s' 'a-long-random-password' &gt; secrets/postgres-password
+printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable' &gt; secrets/database-url
+sudo chown 65532:65532 secrets/* &amp;&amp; chmod 400 secrets/*
+docker compose --profile quickstart up -d
+docker compose cp control-plane:/var/lib/flotestro/bootstrap-token .</code></pre>
+
+    <p class="prose"><code>FLOTESTRO_ADVERTISE</code> is the name the fleet really reaches this
+      panel at: it enters the agent gateway&rsquo;s certificate. The bootstrap token is the first
+      sign-in; map the identity provider&rsquo;s groups to roles, then delete it.</p>
+
+    <p class="prose">Against a database you already run, leave the profile out and point
+      <code>secrets/database-url</code> at it. Under rootless Podman add
+      <code>-f compose.podman.yaml</code>. On a host with SELinux,
+      <code>chcon -Rt container_file_t secrets</code>. The backup pair, an isolated site, pinning
+      a digest and upgrading are in
+      <a href="https://github.com/ultherego/Flotestro/blob/main/deploy/README.md">deploy/README.md</a>.</p>
+
+    <div class="note">
+      <p class="note__title">Which image</p>
+      <p>The control plane is <code>ghcr.io/ultherego/flotestro-control-plane</code>. A release
+        publishes the full version, <code>0.60.0</code>, and
+        <code>sha-&lt;twelve characters of the commit&gt;</code>; a stable release also moves
+        <code>latest</code> and the minor alias <code>0.60</code>, a pre-release moves neither.
+        The tag is what a human reads — production pins the digest the release run printed.</p>
+    </div>
+
+    <h3>A host, from the package repository</h3>
+
+    <p class="filename">Debian and Ubuntu</p>
+    <pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc &gt;/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list &gt;/dev/null
+sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
+
+    <p class="filename">RHEL and Fedora</p>
+    <pre><code>sudo rpm --import https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc
+printf '%s\n' '[flotestro]' 'name=Flotestro' 'baseurl=https://ultherego.github.io/Flotestro/packages/rpm/stable' \
+  'enabled=1' 'gpgcheck=1' 'repo_gpgcheck=1' 'gpgkey=https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc' \
+  | sudo tee /etc/yum.repos.d/flotestro.repo &gt;/dev/null
+sudo dnf install -y flotestro-agent</code></pre>
+
+    <p class="filename">Arch Linux</p>
+    <pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key "$(curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc \
+  | gpg --show-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+printf '%s\n' '[flotestro]' 'SigLevel = Required DatabaseRequired' \
+  'Server = https://ultherego.github.io/Flotestro/packages/arch/stable' | sudo tee -a /etc/pacman.conf &gt;/dev/null
+sudo pacman -Sy &amp;&amp; sudo pacman -S --noconfirm flotestro-agent</code></pre>
+
+    <p class="prose">Every index in the repository is signed by the release key, and there is no
+      version in any of those lines: <code>apt update</code> is how a host learns a newer version
+      exists and <code>apt upgrade</code> is what moves it. A pre-release goes to a
+      <code>testing</code> channel that a host asking for <code>stable</code> never reads. Without
+      a route out, the package is fetched on a connected machine, verified against
+      <code>SHA256SUMS</code> and carried in; each asset also carries a build attestation that
+      <code>gh attestation verify</code> checks.</p>
+
+    <h3>Then enroll the host</h3>
+
+    <p class="prose">The panel writes the exact commands for its own addresses under
+      <b>Add host</b> — the repository, the package, the fleet CA with the fingerprint to compare,
+      the one-time token and the start. The shape of the last two steps:</p>
+
+    <pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA, fingerprint shown in the panel
+sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
+            -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
+echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll   # one-time, from the panel
+sudo systemctl enable --now flotestro-agent
+flotestro-agentctl diagnose                                        # explains a host that does not show up</code></pre>
+
+    <div class="note note--warning">
+      <p class="note__title">The token is one-time and short-lived</p>
+      <p>Pass it by file or on standard input, never in the environment:
+        <code>sudo -u flotestro-agent flotestro-agentctl enroll --token-file /run/token</code>, and
+        delete the file afterwards. A host that still holds an identity from a previous
+        installation is refused with <code class="refusal">machine_already_enrolled</code>: a new
+        fleet CA does not recognise certificates the previous one issued.</p>
+    </div>
+
+    <p class="prose">For a whole inventory at once there is an Ansible role in
+      <a href="https://github.com/ultherego/Flotestro/tree/main/deploy/ansible">deploy/ansible</a>;
+      for a site behind a relay, <code>deploy/compose.relay.yaml</code>. Installing from nothing,
+      end to end, is the
+      <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">installation runbook</a>.</p>
+
+    <h2 id="documentation">Documentation</h2>
+
+    <ul class="cards">
+      <li class="card">
+        <p class="card__title"><a href="docs/">The documentation</a></p>
+        <p>Installing, configuring and operating an installation, and the runbooks for what goes
+          wrong.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="packages/">Package repository</a></p>
+        <p>The signed apt, dnf and pacman repositories the hosts install the agent from.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="https://github.com/ultherego/Flotestro">Source</a></p>
+        <p>The Go services, the panel, the migrations and the packaging, with the checks that run
+          on every push.</p>
+      </li>
+      <li class="card">
+        <p class="card__title"><a href="https://github.com/ultherego/Flotestro/releases">Releases</a></p>
+        <p>Packages for amd64 and arm64 with their checksums, signatures and bills of
+          materials.</p>
+      </li>
+    </ul>
+
+  </main>
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro &middot; <a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+    <p>This site describes version 0.60.0.</p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a change happens &middot; Flotestro documentation</title>
+<meta name="description" content="An operation, its plan, the approval bound to a digest, dispatch, the lease, the result and the verifier - and what a campaign adds on top. Inventory, revisions, cadences and the audit chain.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html" aria-current="page">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>4. How a change happens</h1>
+
+    <p class="lede">Every change in Flotestro takes the same path, whether it is
+    one unit restarted on one host or a package upgrade across ten thousand: an
+    operation, a plan, an approval bound to a digest, a dispatch under a lease, a
+    result, and a verifier that reads the host afterwards to say whether the
+    change is really there. A campaign is that path repeated under a snapshot,
+    a canary, waves and a budget.</p>
+
+    <ul class="linkrow">
+      <li><a href="#operation">The operation</a></li>
+      <li><a href="#plan">The plan and its digest</a></li>
+      <li><a href="#approval">The approval</a></li>
+      <li><a href="#dispatch">Dispatch and the lease</a></li>
+      <li><a href="#result">The result and the verifier</a></li>
+      <li><a href="#campaign">Campaigns</a></li>
+      <li><a href="#inventory">Inventory</a></li>
+      <li><a href="#audit">The audit chain</a></li>
+    </ul>
+
+    <h2 id="operation">The operation</h2>
+
+    <p>An order names an operation, a host and a payload. The operation is a
+    typed contract from the registry - <code>packages.upgrade</code>,
+    <code>unit.restart</code>, <code>file.ensure</code>, <code>disk.wipe</code> -
+    and the contract decides most of what follows.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Field</th><th>What it decides</th></tr></thead>
+      <tbody>
+        <tr><td><code>permission</code></td><td>The permission the caller needs in the host's scope.</td></tr>
+        <tr><td><code>mutating</code></td><td>Whether it changes the host, which decides whether the helper demands a capability and which budget is claimed.</td></tr>
+        <tr><td><code>risk</code></td><td><code>low</code>, <code>medium</code>, <code>high</code>, <code>critical</code>, <code>destructive</code>. <code>critical</code> and <code>destructive</code> require fresh authentication; <code>destructive</code> also requires typing the target's name and two approvals.</td></tr>
+        <tr><td><code>lock_class</code></td><td>The resource the host locks while it runs: <code>packages</code>, <code>units</code>, <code>containers</code>, <code>identity</code>, <code>accounts</code>, <code>network</code>, <code>storage</code>, <code>backup</code>, <code>certificates</code>, <code>host</code>, or none. Two changes of one class never interleave on one host.</td></tr>
+        <tr><td><code>default_timeout_seconds</code></td><td>How long the host may take before the attempt is a timeout.</td></tr>
+        <tr><td><code>max_output_bytes</code></td><td>The output the result may carry; 64 KiB unless the operation says otherwise. Beyond it, <code class="refusal">output_too_large</code>.</td></tr>
+        <tr><td><code>requires_plan</code></td><td>Whether the change may only run against an approved plan.</td></tr>
+        <tr><td><code>campaign_mode</code></td><td><code>none</code> (not allowed in bulk), <code>same_payload</code>, <code>per_host_plan</code>, or <code>specialized</code> for the ones with a state machine of their own - reboot, enrollment, fleet remediation.</td></tr>
+        <tr><td><code>offline_policy</code></td><td><code>require_online</code>, <code>skip_if_offline</code>, <code>wait_until_deadline</code>, <code>replan_on_reconnect</code>.</td></tr>
+        <tr><td><code>cancel_mode</code></td><td><code>safe</code>, <code>checkpoint_only</code>, <code>impossible_after_start</code>, <code>local_watchdog_owned</code>.</td></tr>
+        <tr><td><code>rollback</code></td><td><code>automatic_local</code>, <code>exact_restore</code>, <code>compensating</code>, <code>best_effort</code>, <code>none</code>.</td></tr>
+        <tr><td><code>verifier</code> and <code>on_unverified</code></td><td>Which verifier reads the host after the change, and whether a change it cannot confirm is <code>report</code>ed or <code>rollback</code>ed.</td></tr>
+        <tr><td><code>resource_claims</code></td><td>What the operation takes on the host, <code>shared</code> or <code>exclusive</code>, and with what weight.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>An operation the registry does not know is treated as
+    <code>critical</code>, and the budgets treat it as mutating: unknown is not
+    harmless, so it asks for the scarcer capacity.</p>
+
+    <h2 id="plan">The plan and its digest</h2>
+
+    <p>Nine operations may not run without a plan -
+    <code>packages.upgrade</code>, <code>packages.install</code>,
+    <code>packages.remove</code>, <code>docker.container.ensure</code>,
+    <code>docker.network.ensure</code>, <code>docker.network.remove</code>,
+    <code>docker.volume.ensure</code>, <code>docker.volume.remove</code> and
+    <code>docker.compose.deploy</code> - and many more have a planner beside
+    them: <code>file.ensure</code> plans with <code>file.plan</code>,
+    <code>firewall.rule.ensure</code> with <code>firewall.plan</code>,
+    <code>network.profile.apply</code> with <code>network.plan</code>,
+    <code>certificate.deploy</code> with <code>certificate.plan</code>,
+    <code>backup.run</code> with <code>backup.plan</code>.</p>
+
+    <p>A plan is computed <em>on the host</em>, because only the host knows what
+    its package manager, its unit files and its filesystems will actually do. It
+    is an envelope with the schema version, the planner version, the action, the
+    host, the inventory revision it was read against, the resource revision, the
+    preconditions, the steps, the effects it promises, the artifacts (for
+    packages: the exact versions; for Compose: the resolved image digests), the
+    rollback and an expiry.</p>
+
+    <figure class="figure">
+      <img src="host-packages.png" alt="The packages page of one host: the computed plan, its digest and the actions available">
+      <figcaption><b>A plan on one host.</b> What would change, the digest it
+      hashes to, and the actions the operator may take from here.</figcaption>
+    </figure>
+
+    <h3>How the digest is computed</h3>
+
+    <p>Before hashing, the envelope is stripped of everything that is not the
+    content of the change - the description, the host identifier, the inventory
+    revision and the expiry - and then normalized: every collection sorted, every
+    <code>null</code> list turned into an empty one, every timestamp truncated to
+    the second in UTC. The result is encoded as canonical JSON to RFC 8785
+    (members sorted by UTF-16 code unit, no whitespace, minimal escaping) and
+    hashed with SHA-256. The hex form of that hash is the digest an approver
+    approves.</p>
+
+    <p>The consequence is the point of the whole design: the same change against
+    the same state always hashes the same, on any machine, in any order of
+    fields - and any difference at all, down to one package version, is a
+    different digest.</p>
+
+    <h3>What is checked before the change runs</h3>
+
+    <p>When the task reaches the host, the host computes the plan again and
+    compares it with the approved reference:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Check</th><th>Refusal</th></tr></thead>
+      <tbody>
+        <tr><td>The plan computed now hashes to something else</td><td><code class="refusal">stale_plan</code> - the state of the host moved after the plan was computed. Nothing is changed.</td></tr>
+        <tr><td>The schema or planner version differs</td><td><code class="refusal">replan_required</code></td></tr>
+        <tr><td>The plan is past its expiry (24 hours by default)</td><td><code class="refusal">plan_expired</code></td></tr>
+        <tr><td>The execution carries no digest at all</td><td><code class="refusal">stale_plan</code>; the panel's own name for a host that gave no digest to approve is <code class="refusal">plan_hash_missing</code></td></tr>
+        <tr><td>The steps ran but the post-state does not show every promised effect</td><td><code class="refusal">effects_partial</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note">
+      <p class="note__title">Two digests, and they are not the same thing</p>
+      <p>The <strong>plan digest</strong> binds the computed change - steps,
+      effects, artifacts - to its approval. The <strong>payload hash</strong>
+      binds the <em>order</em> to the job row when it is created: SHA-256 over a
+      domain-separated prefix, the action, the contract version and the canonical
+      JSON of the payload. A task whose payload does not match the one the job
+      was created with is refused with
+      <code class="refusal">payload_hash_mismatch</code>, and the helper checks
+      the same binding again, per request, against the capability it was
+      handed.</p>
+    </div>
+
+    <h2 id="approval">The approval</h2>
+
+    <p>A job that needs approval is created in <code>awaiting_approval</code> and
+    goes nowhere until it has enough. One approval is the default; a
+    <code>destructive</code> operation needs two, and the two have to be two
+    different people - the approvals table is keyed by the approver. In an
+    environment named by <code>FLOTESTRO_PRODUCTION_ENVIRONMENTS</code>
+    (<code>prod,production</code> by default) a change needs a second person's
+    approval as well.</p>
+
+    <p>What an approval binds to is the plan, not the intention. The approval
+    request may carry the <code>payload_hash</code> the approver had in front of
+    them, and the panel compares it with the job's: a mismatch is
+    <code>409</code> <code class="refusal">payload_hash_mismatch</code> - "the
+    plan changed since you reviewed it" - and the denial goes on the audit trail
+    with what was expected. In a production environment the person who ordered
+    the change cannot approve it: that is <code>403</code>
+    <code class="refusal">self_approval</code>, recorded with the environment and
+    the name of whoever created the job.</p>
+
+    <p>Beside the approval the panel records the actor and the authentication the
+    decision rested on - the session, its <code>acr</code> and <code>amr</code>,
+    the moment of the authentication - and the reason the approver gave. Fresh
+    authentication is required for every <code>critical</code> and
+    <code>destructive</code> operation: the session has to be younger than
+    <code>FLOTESTRO_STEPUP_MAX_AGE</code> (5m) and, if the installation set one,
+    at <code>FLOTESTRO_STEPUP_ACR</code>. With
+    <code>FLOTESTRO_STEPUP_TOKENS=refuse</code>, an API token cannot carry such
+    an operation at all and gets
+    <code class="refusal">reauthentication_required</code>. On the step-up routes
+    - the CA rotation, the lifecycle of a host, the monitoring settings, the
+    notification channels - the reason is not optional: fewer than eight
+    characters is refused with
+    <code class="refusal">reason_required</code>.</p>
+
+    <p>An approval that no longer describes what is about to run is refused
+    rather than stretched: <code class="refusal">approval_stale</code> when the
+    campaign changed since consent was given, and
+    <code class="refusal">fingerprint_mismatch</code> when the approval carried
+    the fingerprint of something else.</p>
+
+    <h3>The preview a bulk order is placed from</h3>
+
+    <p>A campaign is ordered from a preview: the panel resolves the selector,
+    shows who would be touched, and hands back a preview identifier with a
+    digest over the qualified hosts. The order carries both, and the panel
+    refuses it if anything has moved in between -
+    <code class="refusal">preview_unknown</code>,
+    <code class="refusal">preview_expired</code> (a preview lives 15 minutes),
+    <code class="refusal">preview_consumed</code>,
+    <code class="refusal">preview_principal_mismatch</code>,
+    <code class="refusal">preview_permission_mismatch</code>,
+    <code class="refusal">preview_action_mismatch</code>,
+    <code class="refusal">preview_selector_changed</code>,
+    <code class="refusal">preview_scope_changed</code>,
+    <code class="refusal">preview_targets_changed</code> or
+    <code class="refusal">preview_digest_mismatch</code>. Nobody approves a list
+    and then runs a different one.</p>
+
+    <h2 id="dispatch">Dispatch and the lease</h2>
+
+    <p>An approved job is queued. From there the panel owns it, and the states it
+    passes through are exactly these:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>State</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>planned</code></td><td>Created, with its payload hash and its plan reference.</td></tr>
+        <tr><td><code>awaiting_approval</code></td><td>Waiting for the approvals its operation requires.</td></tr>
+        <tr><td><code>queued</code></td><td>Eligible to start. <code>wait_reason</code> says what it is waiting for: <code>awaiting_budget:&lt;key&gt;</code> or <code>awaiting_lock:&lt;blocker&gt;</code>.</td></tr>
+        <tr><td><code>leased</code></td><td>A gateway instance has taken it to deliver.</td></tr>
+        <tr><td><code>dispatched</code></td><td>The envelope went down the host's stream.</td></tr>
+        <tr><td><code>running</code></td><td>The host accepted it and started.</td></tr>
+        <tr><td><code>cancel_requested</code></td><td>A cancel is on its way to the host.</td></tr>
+        <tr><td><code>succeeded</code>, <code>failed</code>, <code>timed_out</code>, <code>canceled</code>, <code>expired</code></td><td>Terminal. Nothing leaves these.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>A job that never gets to start expires: the time to live before dispatch
+    is 15 minutes unless the order set one, and
+    <code>planned</code>, <code>awaiting_approval</code> and <code>queued</code>
+    jobs past it are marked <code>expired</code>. Every job also carries an
+    idempotency key - the order's own, or one generated - so the same order
+    repeated against a host returns the existing job instead of making a second
+    one.</p>
+
+    <h3>The leases</h3>
+
+    <p>Two different leases are in play, and a queue that is not moving is
+    usually one of them.</p>
+
+    <dl class="kv">
+      <dt>The session ownership lease</dt>
+      <dd>45 seconds, renewed every 15, on the instance that holds a host's
+      stream. Every claim raises a fencing token, and a write from an instance
+      whose claim was superseded is refused by the database as
+      <code class="refusal">session_fence_stale</code>; the task goes back to the
+      queue and the new owner carries on. A connected host whose owner lease ran
+      out is <code>session_unowned</code>: its tasks stay queued, never marked
+      delivered, until a session claims it again. Neither is a failure - a stream
+      of either from one instance is an instance keeping sessions it no longer
+      owns.</dd>
+
+      <dt>The attempt lease</dt>
+      <dd>Taken when the job is leased for delivery. Until the agent
+      acknowledges, it is clamped to 60 seconds; once the agent accepts, it is
+      raised to the execution lease of that operation and renewed on every sign
+      of life from the host. An attempt whose lease expires with no result goes
+      back to <code>queued</code>, and the attempt settles as
+      <code class="refusal">lease_expired</code>. If the real result arrives
+      later, it settles as <code>superseded_by_result</code> rather than being
+      thrown away.</dd>
+    </dl>
+
+    <p>Delivery itself is paced by <code>FLOTESTRO_DISPATCH_RATE</code> - 100
+    envelopes a second with a one-second burst, so that a queue of thousands
+    after an outage drains at that pace rather than starting every host at the
+    same moment. What the pace held back is counted in
+    <code>flotestro_dispatch_throttled_total</code>; <code>0</code> turns the
+    pacing off.</p>
+
+    <p>A reboot is the one operation whose lease loss is not treated as an
+    answer: a <code>system.reboot</code> job gets a grace period of 10 minutes
+    for a session with a new boot id to appear, and only then fails with
+    <code class="refusal">reboot_not_observed</code>.</p>
+
+    <h3>Cancelling</h3>
+
+    <p>A cancel is a request to the host, not a state change in the panel. The
+    host answers with one of four outcomes:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Answer</th><th>What the panel does</th></tr></thead>
+      <tbody>
+        <tr><td><code>not_started</code></td><td>Settles the job as <code>canceled</code>.</td></tr>
+        <tr><td><code>interrupted</code></td><td>Settles the job as <code>canceled</code>.</td></tr>
+        <tr><td><code>not_interruptible</code></td><td>Puts the job back to <code>running</code>; its result will settle it.</td></tr>
+        <tr><td><code>already_done</code></td><td>Nothing moves; the result in flight settles it.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>No answer within the operation's own timeout fails the job with
+    <code class="refusal">cancel_ack_timeout</code> and the result status
+    <code>unknown_needs_reconciliation</code> - the panel does not claim the
+    change did not happen. An operation whose contract is
+    <code>impossible_after_start</code> answers a cancel with
+    <code class="refusal">operation_non_cancelable</code>.</p>
+
+    <h2 id="result">The result and the verifier</h2>
+
+    <p>The result carries the status, the output within the operation's limit,
+    the effects the steps actually produced and, where there is one, the
+    verifier's reading of the host afterwards. The verifiers are typed like
+    everything else - <code>unit_state</code>, <code>package_versions</code>,
+    <code>file_content</code>, <code>network_state</code>,
+    <code>firewall_ruleset</code>, <code>container_spec</code>,
+    <code>reboot</code>, <code>agent_version</code> and some twenty more - and
+    each operation declares which one applies.</p>
+
+    <p>A change that ran but that the verifier could not confirm is not a
+    success. It settles as
+    <code class="refusal">applied_unverified</code>, which names the verifier,
+    what was expected, what was observed, and whether a rollback happened -
+    because the operation's <code>on_unverified</code> is either
+    <code>report</code> or <code>rollback</code>. A network change that cut the
+    host off is undone by the host itself and comes back as
+    <code class="refusal">rolled_back</code>; a unit that is not active after the
+    change is <code class="refusal">unit_unhealthy</code>; a post-change check of
+    the host that failed is <code class="refusal">health_check_failed</code>.</p>
+
+    <p>An agent that restarted in the middle of an operation answers
+    <code class="refusal">outcome_unknown</code>: the outcome has to be read from
+    the host before the operation is tried again. This is the doctrine in its
+    least convenient form, and it is deliberate - a panel that assumed "probably
+    nothing happened" would be wrong exactly when it matters.</p>
+
+    <h2 id="campaign">Campaigns</h2>
+
+    <p>A campaign is the same path across many hosts, with the things a fleet
+    needs that a single host does not: a fixed list of targets, a canary, waves,
+    a gate, a threshold, a window and a budget.</p>
+
+    <figure class="figure">
+      <img src="campaign.png" alt="A campaign across the fleet: canary, waves, gates, thresholds and per-target state">
+      <figcaption><b>A campaign.</b> The canary, the waves behind it, and every
+      target with the state and the reason code it ended on.</figcaption>
+    </figure>
+
+    <h3>The snapshot</h3>
+
+    <p>The selector records what was <em>asked for</em>; the snapshot records
+    what it <em>resolved to</em>. At creation, in the same transaction as the
+    campaign row, every host the selector matched is written into the campaign's
+    targets with its wave and its position. Nothing about the membership changes
+    afterwards: a host that matches the selector an hour later is not silently
+    added, and a host that stops matching is not silently dropped. What was
+    approved is what runs.</p>
+
+    <h3>The canary and the waves</h3>
+
+    <p>Wave zero is the canary. The first <code>canary_size</code> targets in the
+    snapshot's order are wave zero - one host unless the order says otherwise -
+    and the rest are cut into waves of <code>wave_size</code>. A wave starts only
+    once the wave before it has fully settled, and inside a wave at most
+    <code>max_concurrent</code> hosts run at a time.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Setting</th><th>Default</th><th>Bound</th></tr></thead>
+      <tbody>
+        <tr><td><code>canary_size</code></td><td>1</td><td>0 is legal and means no canary phase; a manual gate requires a canary.</td></tr>
+        <tr><td><code>wave_size</code></td><td>10 for most operations; 50 for <code>packages.repository.set</code>; 10 for <code>system.hostname.set</code></td><td>at most 500</td></tr>
+        <tr><td><code>max_concurrent</code></td><td>5 for most operations; 2 for <code>system.hostname.set</code></td><td>at most 200</td></tr>
+        <tr><td><code>failure_threshold_percent</code></td><td>20</td><td>0-100; 0 disables it</td></tr>
+        <tr><td><code>failure_threshold_absolute</code></td><td>0 (disabled)</td><td></td></tr>
+        <tr><td><code>deadline</code></td><td>24 hours</td><td>how long a host waiting to come back may hold a target open</td></tr>
+        <tr><td>reboot timeout</td><td>15 minutes</td><td>between 1 minute and 2 hours</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>The gate</h3>
+
+    <p>There is no such thing as an "automatic gate": automatic progression is
+    simply the absence of a manual one. With <code>manual_gate</code> set, the
+    campaign stops after the canary in the state <code>manual_gate</code> and
+    waits for a person to advance it; the panel records who advanced it and when,
+    and the audit trail carries <code>campaign.manual_gate</code>. The same
+    endpoint family carries <code>pause</code>, <code>resume</code>,
+    <code>advance</code> and <code>cancel</code>.</p>
+
+    <h3>The thresholds</h3>
+
+    <p>After every settled host the campaign asks whether it has failed enough to
+    stop. The absolute threshold trips when the number of failures reaches it;
+    the percentage threshold trips when the failed share of the <em>finished</em>
+    hosts reaches it. Either one pauses the campaign - it never cancels it - with
+    the reason, the counts and the thresholds on the audit trail, so that an
+    operator decides whether the remaining waves still make sense.</p>
+
+    <p>A host that ended <code>unknown</code> counts as a failure for that tally.
+    The threshold is a bound on hosts that did not reach the desired state, and a
+    host nobody can speak for did not, as far as anyone knows.</p>
+
+    <p>There is a second, separate bound for the case where the change itself
+    takes hosts away: <code>connectivity_lost_absolute</code>, which pauses the
+    campaign once that many hosts have lost their session while their task ran
+    (their targets carry <code class="refusal">lease_expired</code>). It is
+    disabled unless the order sets it.</p>
+
+    <h3>The maintenance window</h3>
+
+    <p>A window is two absolute moments, a start and an end - not a cron
+    expression. It holds back the <em>start</em> of new hosts and never
+    interrupts a host already running. A host still rebooting when the window
+    closes carries <code class="refusal">reboot_window_closed</code>, and the
+    campaign pauses with the reason
+    <code>maintenance_window_closed_mid_reboot</code>.</p>
+
+    <p>Recurrence is a different feature: a campaign <em>order</em> can be
+    scheduled to repeat weekly or monthly, by weekday or by day of the month, at
+    an hour and minute in a named IANA time zone (<code>UTC</code> when none is
+    given; anything that is not a zone name is refused with
+    <code class="refusal">invalid_timezone</code>).</p>
+
+    <h3>The budgets</h3>
+
+    <p>A budget answers one question: does the system have the capacity to start
+    one more operation. Every mutating operation claims the global mutation
+    budget plus the budgets of its site, its failure domain and its gateway for
+    the family of its lock class; a backup also claims the budget of its
+    repository, because two backups against one repository contend whatever hosts
+    they run from.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Key</th><th>Scope</th></tr></thead>
+      <tbody>
+        <tr><td><code>global:mutations</code>, <code>global:reads</code></td><td>The installation as a whole.</td></tr>
+        <tr><td><code>site:&lt;site&gt;:&lt;family&gt;</code></td><td>One site, one family of work.</td></tr>
+        <tr><td><code>domain:&lt;domain&gt;:&lt;family&gt;</code></td><td>One failure domain.</td></tr>
+        <tr><td><code>gateway:&lt;gateway&gt;:&lt;family&gt;</code></td><td>One gateway or relay.</td></tr>
+        <tr><td><code>backend:&lt;repository&gt;:backup</code></td><td>One backup repository.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Work is claimed in one of four classes, in priority order:
+    <code>incident</code> (never waits), <code>interactive</code>,
+    <code>maintenance</code> - which is what every campaign claims - and
+    <code>background</code>, the panel's own sweeps. Capacity that is free is
+    still not given out without limit: a claimant's fair share is the capacity
+    divided by the number of claimants, and a campaign is one claimant however
+    many hosts it holds. A claimant refused for its share is let through anyway
+    once it has waited past its class's promotion age - 15 seconds for
+    interactive, 2 minutes for maintenance, 5 minutes for background.</p>
+
+    <p>A refusal is <code>capacity</code> or <code>fair_share</code>, and reaches
+    the operator as <code class="refusal">budget_capacity</code> or
+    <code class="refusal">budget_fair_share</code> on a campaign target, and as
+    <code>wait_reason: awaiting_budget:&lt;key&gt;</code> on a single-host job.
+    Leases on a budget are two minutes and are renewed while the work runs; they
+    carry a fencing token, so a runner that lost its target to another one
+    releases nothing.</p>
+
+    <p>Raising a budget's capacity is a write that takes part in optimistic
+    concurrency: read it, and repeat the write with the ETag you read. A stale
+    one is refused with <code>412</code>
+    <code class="refusal">precondition_failed</code>. A budget still holding
+    running work cannot be deleted (<code class="refusal">budget_in_use</code>),
+    and a capacity below 1 is refused - to stop work, pause the campaign.</p>
+
+    <h3>Offline hosts</h3>
+
+    <p>Each operation declares what it does when the host is not there, and a
+    campaign may only <em>tighten</em> it, never loosen it:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Policy</th><th>What happens</th><th>Typical operations</th></tr></thead>
+      <tbody>
+        <tr><td><code>wait_until_deadline</code></td><td>The target stays queued until the host reconnects, up to the campaign's deadline.</td><td>unit start/stop/restart, package hold and repair, agent upgrade, sysctl, kernel module load, docker start/stop</td></tr>
+        <tr><td><code>replan_on_reconnect</code></td><td>Waits, then recomputes the host's plan on reconnect and runs only if the new plan hashes to the approved one.</td><td>plan-bound package and container changes</td></tr>
+        <tr><td><code>skip_if_offline</code></td><td>The host is left out. Not a failure.</td><td><code>inventory.refresh</code>, <code>security.scan</code>, <code>certificate.scan</code>, <code>monitoring.probe.run</code>, <code>dns.resolve.test</code>, <code>time.sync.test</code></td></tr>
+        <tr><td><code>require_online</code></td><td>Participation ends the moment the host is found offline.</td><td><code>system.reboot</code>, <code>system.shutdown</code>, <code>system.hostname.set</code>, <code>localuser.delete</code>, <code>disk.wipe</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>The states a campaign and its targets pass through</h3>
+
+    <p>The campaign itself: <code>planning</code>, <code>planned</code>,
+    <code>awaiting_approval</code>, <code>canary</code>,
+    <code>manual_gate</code>, <code>running</code>, <code>pausing</code>,
+    <code>paused</code>, <code>canceling</code>, and then one of the terminal
+    states <code>completed</code>, <code>completed_with_issues</code>,
+    <code>failed</code>, <code>plan_failed</code>, <code>expired</code> or
+    <code>canceled</code>. The verdict is simple: failures with no successes is
+    <code>failed</code>, failures beside successes is
+    <code>completed_with_issues</code>, and neither is
+    <code>completed</code>.</p>
+
+    <p>Each target: <code>pending</code>, <code>planning</code>,
+    <code>awaiting_budget</code>, <code>ineligible</code>, <code>excluded</code>,
+    <code>queued_offline</code>, <code>dispatched</code>,
+    <code>awaiting_lock</code>, <code>running</code>, <code>rebooting</code>,
+    <code>verifying</code>, and then <code>succeeded</code>,
+    <code>no_change</code>, <code>failed</code>, <code>unknown</code>,
+    <code>skipped</code> or <code>canceled</code>. A host that was never eligible
+    carries the reason as its code -
+    <code class="refusal">quarantined</code>,
+    <code class="refusal">out_of_scope</code>,
+    <code class="refusal">capability_missing</code>,
+    <code class="refusal">inventory_stale</code>,
+    <code class="refusal">conflict</code> (another campaign is already working on
+    it) or <code class="refusal">excluded</code> (an operator named it).</p>
+
+    <h3>Retrying and undoing</h3>
+
+    <p>A finished campaign can be retried over the hosts that failed, and that is
+    a new campaign with its own approval: a retry of one that is still running or
+    paused is refused with
+    <code class="refusal">campaign_not_finished</code>, and one where nothing
+    failed with <code class="refusal">nothing_to_retry</code>. A compensation -
+    the declared reverse operation over the hosts the original actually changed -
+    is refused with
+    <code class="refusal">compensated_campaign_not_settled</code>,
+    <code class="refusal">not_reverse_operation</code>,
+    <code class="refusal">nothing_to_compensate</code> or
+    <code class="refusal">compensation_target_unchanged</code> if it is not that.
+    Undoing is an ordered change like any other; it is never a quiet rewind.</p>
+
+    <h2 id="inventory">Inventory</h2>
+
+    <p>Inventory is what the whole panel reasons from: the units, the packages,
+    the mounts, the interfaces, the certificates, the accounts, the sudo policy.
+    The agent reports it; the panel judges it.</p>
+
+    <h3>Revisions</h3>
+
+    <p>A report carries a revision - a tag the agent computes - and may be
+    <em>full</em> (every module) or partial. The panel stores it against
+    <code>(host, revision)</code>: a revision it has seen before does not create
+    a new row, it only moves the freshness mark, so a host that went back to an
+    earlier picture has that picture as its latest rather than a spurious new
+    one. Per module it keeps a fragment with its own revision, source,
+    payload and, where the module could not be read, an
+    <code>unavailable_reason</code>; a fragment's timestamp moves only when the
+    module's revision actually changed, so "fresh" and "unchanged" stay
+    distinguishable.</p>
+
+    <p>A host keeps at most 20 revisions, pruned in the same transaction as the
+    new write rather than by a later sweep, and a report may not exceed 6 MiB. An
+    oversized report is refused whole - the gateway writes nothing - rather than
+    stored truncated: half an inventory would be a host reporting facts that are
+    not true.</p>
+
+    <h3>Cadences</h3>
+
+    <p>Not everything is worth reading every quarter of an hour. The base cycle
+    is <code>FLOTESTRO_INVENTORY_MINUTES</code> (15 minutes) with &plusmn;10&nbsp;%
+    jitter, and each module belongs to a class:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Class</th><th>How often</th><th>Modules</th></tr></thead>
+      <tbody>
+        <tr><td><code>fast</code></td><td>Every cycle</td><td>services, containers, power and inhibitors - a unit fails or a container stops, and the operator wants it at the next cycle; the read is cheap.</td></tr>
+        <tr><td><code>normal</code></td><td>Every fourth cycle</td><td>packages, network, dns, firewall, storage, security, files, certs, time - they change on their own, but slowly, and the read starts tools.</td></tr>
+        <tr><td><code>slow</code></td><td>Every 6 hours, and at the start of a session</td><td>system facts and sudoers. A session start is where a reboot lands.</td></tr>
+        <tr><td><code>static</code></td><td>Once a day, at the full report, or on demand</td><td>identity, accounts, kernel, schedules, ssh, backups - they change when somebody changes them, and that change usually comes from the panel and orders its own refresh.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>A module the table does not know is read as <code>static</code>: an unknown
+    module is not a cheap one. The hour of the daily full report is derived from
+    the host's own identifier, so a fleet's full reports are spread across the
+    day instead of arriving together. The panel may override the interval, the
+    normal multiplier and the full-report hour per session, and
+    <code>inventory.refresh</code> asks for a module now.</p>
+
+    <p>A verdict is only as good as the reading under it. A module read more than
+    twice its cadence ago is stale, and a policy or campaign that would judge a
+    host from it answers <code class="refusal">inventory_stale</code> instead -
+    the verdict is unknown, which is not a failure.</p>
+
+    <h3>Samples are not inventory</h3>
+
+    <figure class="figure">
+      <img src="monitoring.png" alt="The monitoring screen: raw samples, rollups, rules, alerts and silences">
+      <figcaption><b>Monitoring.</b> Raw samples for the short charts,
+      quarter-hour rollups for the long ones, with the rules and the alerts they
+      raised beside them.</figcaption>
+    </figure>
+
+    <p>Resource samples follow a different path from inventory. The agent reads
+    the kernel counters once a minute, gives the reading an identity - the boot it
+    runs on and a sequence within that boot - writes it to its spool, and only
+    then sends it. The panel stores it, marks its quarter-hour as owing a
+    recomputation, and answers only after the transaction committed; the agent
+    deletes its copy on that answer and on no other event. A sample is identified
+    by its boot and sequence, never by its clock, so a clock correction changes
+    where a point is drawn and never which sample it is. A reading that arrives
+    later than <code>FLOTESTRO_METRICS_MAX_LATENESS</code> (24 hours) is answered
+    <code class="refusal">metric_sample_too_old</code>, is not stored, and leaves
+    a gap with a reason rather than a line drawn through it.</p>
+
+    <h2 id="audit">The audit chain</h2>
+
+    <p>Every order, approval, refusal and result is an event on a hash-chained
+    trail. An event carries the moment, the actor and what kind of actor it was,
+    the action, the target and its type, the outcome, the request identifier, the
+    session with its <code>acr</code>, <code>amr</code> and authentication time,
+    the approval chain, and the before and after of what changed. The target's
+    hostname and address are snapshotted into the event at write time, so a host
+    later renamed or retired keeps in the record the name it had when the thing
+    happened.</p>
+
+    <figure class="figure">
+      <img src="audit.png" alt="The audit screen: actor, action, target, outcome and the authentication the request rested on">
+      <figcaption><b>The trail.</b> Who, what, against which host, with what
+      outcome - and the authentication the request rested on.</figcaption>
+    </figure>
+
+    <h3>What the chain is</h3>
+
+    <p>An export is newline-delimited JSON, oldest first, from
+    <code>GET /api/v1/audit/export</code>. Each line is an event plus one field,
+    <code>prev_sha256</code>: the SHA-256 of the <em>exact bytes</em> of the line
+    before it. The first line's predecessor is the SHA-256 of the empty string.
+    The last line is not an event at all but a trailer,
+    <code>{"count": N, "sha256_chain": &lt;hex&gt;}</code>, carrying the number of
+    events and the digest of the last event line.</p>
+
+    <p>Because each link covers the whole previous line, the
+    <code>prev_sha256</code> field included, a single changed byte anywhere breaks
+    at least one link or the trailer. A file with no trailer is truncated by
+    definition, whatever it holds.</p>
+
+    <h3>What <code>auditverify</code> proves</h3>
+
+<pre><code>flotestro-auditverify audit-20260901.jsonl
+# audit-20260901.jsonl: OK, 18422 events (1 to 18422), sha256_chain 9f2c...</code></pre>
+
+    <p>It reads the file and nothing else - no database, no network, no key - and
+    recomputes the chain line by line. Exit status 0 means intact, 1 means broken,
+    2 means it was invoked wrongly or could not read the file. Without a file
+    name it reads standard input, so an export can be checked as it is
+    downloaded. The tool ships with the control-plane package, so an export can be
+    checked where the trail was written, and it is in the admin-tools image too:</p>
+
+<pre><code>docker compose --profile tools run --rm admin-tools auditverify /backups/audit-20260901.jsonl</code></pre>
+
+    <p>A broken file is reported with the line that does not follow the one before
+    it, and with how far the file verified: <code>the first 9120 events verified,
+    up to event 9120</code>. The failures it names are the ones that can happen -
+    a line that follows the closing line, a line that is neither an event nor a
+    trailer, a count that disagrees with the lines present, a closing digest that
+    does not match the last event, and a file cut short.</p>
+
+    <div class="note">
+      <p class="note__title">What it does and does not prove</p>
+      <p>The chain proves that the sequence in the file is exactly the sequence
+      that was exported, byte for byte and in order, with nothing inserted,
+      removed, reordered or edited. It is a hash chain, not a signature: it says
+      the file was not tampered with after the export, not who produced it. That
+      part of the trust comes from how the file was obtained. The audit retention
+      is <code>0</code> - keep forever - by default, and deleting the trail is a
+      decision an installation makes deliberately.</p>
+    </div>
+
+    <ul class="linkrow">
+      <li><a href="installation.html">&larr; 3. Installation</a></li>
+      <li><a href="operations.html">Next: the operations reference &rarr;</a></li>
+      <li><a href="runbooks.html">Runbooks</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

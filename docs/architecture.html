@@ -1,0 +1,513 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Architecture &middot; Flotestro documentation</title>
+<meta name="description" content="The control plane, the agent, the root helper, the relay, the database and the state directory: what talks to what, over which port, with which identity.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html" aria-current="page">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>2. Architecture</h1>
+
+    <p class="lede">An installation has five parts: the control plane, an
+    unprivileged agent on every host, a root helper beside it, a relay for a
+    site that cannot reach the panel directly, and PostgreSQL. Each one proves an
+    identity to the next, and each one has a state that is not the other's
+    backup.</p>
+
+    <ul class="linkrow">
+      <li><a href="#parts">The parts</a></li>
+      <li><a href="#wires">Who talks to whom</a></li>
+      <li><a href="#cp">The control plane</a></li>
+      <li><a href="#agent">The agent</a></li>
+      <li><a href="#helper">The root helper</a></li>
+      <li><a href="#relay">The relay</a></li>
+      <li><a href="#data">The database and the state</a></li>
+      <li><a href="#why-native">Why the agent is a package</a></li>
+    </ul>
+
+    <h2 id="parts">The parts</h2>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Component</th><th>Runs as</th><th>Role</th><th>Its own state</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>flotestro-control-plane</code></td>
+          <td>uid 65532 in a container, or a service account from the package</td>
+          <td>REST API, web panel, agent gateway, enrollment, scheduler, campaign engine, fleet CA, monitoring ingest and alert evaluation, notification outbox</td>
+          <td><code>FLOTESTRO_STATE_DIR</code>, default <code>/var/lib/flotestro</code></td>
+        </tr>
+        <tr>
+          <td><code>flotestro-agent</code></td>
+          <td>the unprivileged user <code>flotestro-agent</code></td>
+          <td>One mTLS session to the gateway; inventory, metrics, plans and task execution; hands every privileged step to the helper</td>
+          <td><code>/var/lib/flotestro-agent</code></td>
+        </tr>
+        <tr>
+          <td><code>flotestro-agent-helper</code></td>
+          <td><code>root</code>, socket-activated</td>
+          <td>Carries out the fixed set of privileged steps over a local socket. It has no network at all</td>
+          <td><code>/var/lib/flotestro-helper</code></td>
+        </tr>
+        <tr>
+          <td><code>flotestro-relay</code></td>
+          <td>unprivileged, one per isolated site</td>
+          <td>Terminates the agent sessions of a site and forwards them to the centre; spools what the centre has not acknowledged</td>
+          <td><code>/var/lib/flotestro-relay</code></td>
+        </tr>
+        <tr>
+          <td>PostgreSQL 16 or newer</td>
+          <td>the installation's own database service</td>
+          <td>The only source of truth: hosts, inventory, jobs, campaigns, budgets, encrypted secrets, the outbox, the audit trail, samples and rollups</td>
+          <td>its own</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Two more images exist and run only when they are asked to:
+    <code>flotestro-admin-tools</code>, which takes and restores the backup pair
+    and carries the same <code>auditverify</code> the packages ship, and
+    <code>flotestro-package-repository</code>, which serves the signed packages
+    of a release inside an isolated site.</p>
+
+    <h2 id="wires">Who talks to whom, over which port, with which identity</h2>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>From</th><th>To</th><th>Port</th><th>Identity proved</th></tr></thead>
+      <tbody>
+        <tr><td>Browser, API client</td><td>control plane</td><td><code>127.0.0.1:8080</code> (<code>FLOTESTRO_ADMIN_ADDR</code>)</td><td>An OIDC browser session or an API token. Plain HTTP: it belongs behind a TLS proxy.</td></tr>
+        <tr><td>Agent</td><td>agent gateway</td><td><code>:8443</code> (<code>FLOTESTRO_GATEWAY_ADDR</code>)</td><td>mTLS with the host's own certificate from the fleet CA. gRPC, one long-lived bidirectional stream per host.</td></tr>
+        <tr><td>Agent, first time only</td><td>enrollment</td><td><code>:8444</code> (<code>FLOTESTRO_ENROLLMENT_ADDR</code>)</td><td>TLS without a client certificate, plus a one-time enrollment token. It answers strangers, so a request is bounded to 256 KiB.</td></tr>
+        <tr><td>Agent of a relayed site</td><td>relay</td><td><code>:8453</code> (<code>relay.listen</code>)</td><td>The same mTLS, terminated by the relay; the host additionally signs its own identity envelope, which the centre verifies end to end.</td></tr>
+        <tr><td>Relay</td><td>agent gateway</td><td><code>:8443</code></td><td>The relay's own certificate from the same fleet CA, with the site its enrollment token granted.</td></tr>
+        <tr><td>Container runtime</td><td>relay health</td><td><code>127.0.0.1:8454</code> (<code>relay.health_listen</code>)</td><td>None. Plain HTTP, <code>/healthz</code> and <code>/readyz</code> only, so a runtime can ask without a shell in the image.</td></tr>
+        <tr><td>Agent</td><td>root helper</td><td><code>/run/flotestro/helper.sock</code></td><td>The kernel's <code>SO_PEERCRED</code>: only the uid of <code>FLOTESTRO_AGENT_USER</code>. Plus, per request, a capability the panel signed.</td></tr>
+        <tr><td>Control plane</td><td>PostgreSQL</td><td>5432</td><td>The DSN from <code>FLOTESTRO_DATABASE_URL_FILE</code>; <code>sslmode=verify-full</code> for a database on another machine.</td></tr>
+        <tr><td>Control plane</td><td>identity provider, FreeIPA, vulnerability feeds, the webhook</td><td>outbound</td><td>OIDC client credentials; a keytab for FreeIPA; an HMAC-SHA256 signature on every webhook batch.</td></tr>
+        <tr><td>Managed host</td><td>package repository</td><td>the repository's own address, <code>:8090</code> for the air-gapped image</td><td>None at the transport. What is trusted is the GPG signature over the index and the key the host imported once.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <div class="note note--warning">
+      <p class="note__title">The gateway and the enrollment ports are end to end</p>
+      <p>8443 and 8444 are reached by the fleet directly and their TLS must not
+      be terminated by an HTTP proxy: the gateway authenticates the host by its
+      client certificate, and a proxy that terminates the session takes that
+      away. Only 8080 goes behind a reverse proxy. The names in
+      <code>FLOTESTRO_ADVERTISE</code> enter the gateway's certificate, so they
+      have to be the names the fleet really reaches - never a Compose service
+      name.</p>
+    </div>
+
+    <h2 id="cp">The control plane</h2>
+
+    <p>One binary. Inside it, the pieces that matter to an operator are:</p>
+
+    <dl class="kv">
+      <dt>API and panel</dt>
+      <dd>The REST API under <code>/api/v1</code> and the built panel served from
+      <code>FLOTESTRO_WEB_ROOT</code>; an empty web root serves the API alone.
+      Every response carries a strict content security policy, and the panel is
+      never framed.</dd>
+
+      <dt>Agent gateway</dt>
+      <dd>Holds one stream per connected host, delivers task envelopes, takes
+      results, inventory reports and samples, issues the capabilities the helper
+      verifies, and hands out secrets under a lease. Dispatch is rate-limited by
+      <code>FLOTESTRO_DISPATCH_RATE</code>, 100 envelopes a second by default.</dd>
+
+      <dt>Enrollment</dt>
+      <dd>Spends one-time tokens, which are stored as digests, and issues a host
+      or relay certificate from a key that never leaves the machine.</dd>
+
+      <dt>PKI</dt>
+      <dd>The fleet CA lives in the state directory as <code>ca.pem</code> and
+      <code>ca.key</code>, with <code>ca-pending.*</code> and
+      <code>ca-retired/&lt;serial&gt;.pem</code> during a rotation. Agent
+      certificates last <code>FLOTESTRO_AGENT_CERT_TTL</code>, 720 hours by
+      default, and the agent renews after two thirds of that.</dd>
+
+      <dt>Scheduler and campaign engine</dt>
+      <dd>Turns approved work into leased tasks, holds the waves of a campaign,
+      claims capacity from the budgets and settles what came back.</dd>
+
+      <dt>Monitoring</dt>
+      <dd>Stores the raw samples in one table partition per day, recomputes the
+      quarter-hour rollups that are marked dirty, and evaluates the alert rules -
+      on exactly one instance at a time, under a lease of
+      <code>FLOTESTRO_METRICS_EVALUATOR_LEASE</code>, 45 seconds by default.</dd>
+
+      <dt>Notifications</dt>
+      <dd>A durable outbox: events are posted to the webhook in batches, signed
+      with HMAC-SHA256, delivered at least once and in order, with a cursor per
+      consumer.</dd>
+
+      <dt>Housekeeping</dt>
+      <dd>One sweep an hour, five thousand rows of a kind at a time, against the
+      retentions. Ended agent sessions are swept after thirty days whatever the
+      settings say.</dd>
+    </dl>
+
+    <h3>More than one instance</h3>
+
+    <p>Several control planes may run against one database. Each one has its own
+    <code>FLOTESTRO_GATEWAY_ID</code> - sessions and leases are tagged with it,
+    and a second instance claiming an identity that is already held refuses to
+    start with <code class="refusal">gateway_id_in_use</code>.</p>
+
+    <p>A host is connected to exactly one instance, and an operator's request
+    lands on whichever instance answered the browser. Most decisions are rows and
+    travel by themselves. The work that needs the host's open stream - the final
+    task of a decommission, ending a session at a quarantine or an identity
+    recovery - is written as an order in <code>gateway_commands</code>, addressed
+    to the session that owned the host at the moment of the decision and to the
+    fencing token of that claim. Ownership is a lease of 45 seconds renewed every
+    15; a write from an instance whose claim was superseded is refused by the
+    database itself as <code class="refusal">session_fence_stale</code>, and the
+    task simply goes back to the queue.</p>
+
+    <p>The order loop is woken by the trail, so an order normally reaches its
+    owner within a round trip; <code>FLOTESTRO_COMMAND_POLL</code> (5s) is the
+    floor under that and <code>FLOTESTRO_COMMAND_EXPIRY</code> (5m) is how long
+    an unclaimed order stands before it is settled as <code>expired</code> with
+    nothing done. The request that gave the order waits up to 60 seconds; a
+    decommission not finished by then answers with the phase
+    <code>handover_pending</code> and the host stands in <code>retiring</code>
+    while its owner finishes the handshake. An installation with one instance
+    never writes an order at all.</p>
+
+    <h2 id="agent">The agent</h2>
+
+    <p>The agent runs as an unprivileged user and holds one stream to the
+    gateway. It reads the host, it never decides anything about it, and it
+    cannot change anything by itself: every change goes through the helper.</p>
+
+    <p>Its state directory, <code>/var/lib/flotestro-agent</code>
+    (<code>FLOTESTRO_AGENT_STATE_DIR</code>), holds:</p>
+
+    <ul>
+      <li><code>identity/current</code>, a symlink to
+      <code>identity/generations/&lt;serial&gt;/</code> with
+      <code>agent.key</code>, <code>agent.pem</code> and
+      <code>trust-bundle.pem</code>. A renewal writes a new generation and moves
+      the link; the daemon starts only when
+      <code>identity/current/agent.pem</code> exists, which is the
+      <code>ConditionPathExists</code> in <code>flotestro-agent.service</code>.</li>
+      <li><code>metrics-spool</code>, at most 240 small files: four hours of
+      samples at one a minute. A sample is written before it is sent and deleted
+      only when the panel answers that very sample; on reconnect the agent sends
+      what was never answered, oldest first. Past the bound the oldest goes - a
+      panel away for a week costs the host four hours of readings, not a
+      week.</li>
+      <li>The idempotency journal of performed tasks, so a task delivered twice
+      is done once.</li>
+    </ul>
+
+    <p>The host itself is described by <code>/etc/flotestro/agent.yaml</code>:
+    the enrollment URL, the gateway URLs, the CA file and the mode. The
+    environment variables of <code>/etc/flotestro/agent.env</code> override the
+    file and exist for an image or a test. Two settings are worth knowing before
+    a fleet is rolled out: <code>FLOTESTRO_MAX_CONCURRENT_TASKS</code> (2) bounds
+    what one host runs at once, and <code>FLOTESTRO_AGENT_MODE</code> chooses
+    between <code>full</code> and <code>read_only</code> - a read-only agent
+    reports and changes nothing.</p>
+
+    <p>Inventory is collected on a cadence rather than all at once: a base cycle
+    of <code>FLOTESTRO_INVENTORY_MINUTES</code>, 15 minutes by default, with
+    &plusmn;10&nbsp;% jitter so that a fleet started by one reboot does not report
+    in step for the rest of its life. See
+    <a href="concepts.html#inventory">the inventory section</a> for which module
+    is read how often.</p>
+
+    <p>The daemon never enrolls. Enrollment is
+    <code>flotestro-agentctl enroll</code>, run once by an operator;
+    <code>FLOTESTRO_ENROLLMENT_TOKEN</code> in the daemon's environment is
+    ignored and reported at every start until it is removed.</p>
+
+    <h2 id="helper">The root helper</h2>
+
+    <p>The helper is the only part that runs as root, and it is deliberately
+    small: a socket, a fixed repertoire of actions, and no network. It is
+    socket-activated and exits after
+    <code>FLOTESTRO_HELPER_IDLE_SECONDS</code> (300) of quiet; systemd starts it
+    again on the next command. Its wire protocol is length-prefixed protobuf,
+    version 1, with a frame limit of 4 MiB - the helper runs as root and must not
+    let its peer allocate memory at will. An action it does not know is
+    <code class="refusal">unknown_action</code>; a unit it protects is
+    <code class="refusal">protected_unit</code>; a resource class already busy is
+    <code class="refusal">locked</code>.</p>
+
+    <p>Two checks stand in front of every request. The first is the kernel's:
+    <code>SO_PEERCRED</code> has to name the uid of
+    <code>FLOTESTRO_AGENT_USER</code>, and the check is made against the socket,
+    not against anything in the message. The second is the panel's capability.</p>
+
+    <h3>The capability</h3>
+
+    <p>Every mutating request is meant to carry a capability the control plane
+    signed with Ed25519 for exactly this host, task, action and payload. The
+    helper verifies it against the root-owned keyring in
+    <code>FLOTESTRO_HELPER_TRUST_DIR</code>
+    (<code>/etc/flotestro/helper-trust.d</code>, one
+    <code>&lt;key_id&gt;.pub</code> per key), against the host identifier in
+    <code>FLOTESTRO_HELPER_HOST_ID_FILE</code>, and against the nonces it has
+    already consumed under <code>FLOTESTRO_HELPER_REPLAY_DIR</code>. Because the
+    keyring and the identity belong to root, a compromised agent cannot lower
+    what they say.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th><code>FLOTESTRO_HELPER_CAPABILITY_MODE</code></th><th>A request with no capability</th><th>A request with a bad one</th></tr></thead>
+      <tbody>
+        <tr><td><code>observe</code></td><td>runs, and is logged</td><td>runs, and the failure is logged</td></tr>
+        <tr><td><code>prefer</code> (default)</td><td>runs, counted as a legacy agent</td><td>refused</td></tr>
+        <tr><td><code>enforce</code></td><td><code class="refusal">capability_required</code></td><td>refused</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Reads never need a capability. Set <code>enforce</code> on a host once the
+    panel's <code>flotestro_helper_capability_total{outcome="legacy_agent"}</code>
+    stays at zero. The validity window is short and depends on the class of the
+    action: 5 minutes by default, 10 for a package transaction, 2 for a
+    destructive storage operation. The helper allows 30 seconds of clock skew,
+    and refuses a longer window than its class permits with
+    <code class="refusal">capability_ttl_too_long</code> - a window the panel
+    would not have signed. The other refusals are
+    <code class="refusal">capability_wrong_host</code>,
+    <code class="refusal">capability_wrong_action</code>,
+    <code class="refusal">capability_expired</code>,
+    <code class="refusal">payload_hash_mismatch</code>,
+    <code class="refusal">payload_binding_mismatch</code>,
+    <code class="refusal">capability_unknown_key</code>,
+    <code class="refusal">capability_bad_signature</code>,
+    <code class="refusal">capability_invalid_nonce</code> and
+    <code class="refusal">capability_replay</code>.</p>
+
+    <h3>File versions</h3>
+
+    <p>The helper also keeps what a managed file held before each write, under
+    <code>FLOTESTRO_HELPER_FILE_VERSION_DIR</code>
+    (<code>/var/lib/flotestro-helper/files</code>): one directory per file, named
+    by the digest of its path, root's own, mode 0700, every copy 0600. It keeps
+    <code>FLOTESTRO_HELPER_FILE_VERSIONS</code> copies of one file (10) inside
+    <code>FLOTESTRO_HELPER_FILE_VERSION_BYTES</code> in total (32 MiB). A write
+    that cannot make the copy refuses with
+    <code class="refusal">file_version_not_kept</code> rather than making a change
+    nothing can undo, and <code>file.rollback</code> names one version by its
+    checksum - a checksum this host never kept is
+    <code class="refusal">file_version_unknown</code>, not the newest copy.</p>
+
+    <h2 id="relay">The relay</h2>
+
+    <p>A relay serves one site whose hosts cannot reach the panel directly. It
+    terminates their sessions on <code>:8453</code>, forwards them upstream to
+    one of <code>upstream.gateway_urls</code>, and spools what the centre has not
+    acknowledged. It is configured by <code>/etc/flotestro/relay.yaml</code>
+    alone - one variable, <code>FLOTESTRO_ENROLLMENT_TOKEN</code>, is read by the
+    <code>enroll</code> command and by nothing else. <code>flotestro-relay config
+    show</code> prints what the file resolves to.</p>
+
+    <p>Its site is an expectation, not a grant: the scope of a relay is what its
+    enrollment token granted, and the token settles it. No relay may advertise a
+    name that is in <code>FLOTESTRO_ADVERTISE</code> - those names are
+    reserved.</p>
+
+    <h3>The buffer and the spool are two different things</h3>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Setting</th><th>Default</th><th>What it bounds</th></tr></thead>
+      <tbody>
+        <tr><td><code>relay.buffer_max_bytes</code></td><td>256 MiB (max 4 GiB)</td><td>The in-memory buffer of results in front of the spool.</td></tr>
+        <tr><td><code>spool.max_bytes</code></td><td>1 GiB (max 64 GiB)</td><td>The durable spool: append-only segments under <code>spool/</code> in the state directory, which survive a restart.</td></tr>
+        <tr><td><code>spool.critical_reserve_bytes</code></td><td>128 MiB</td><td>The part of the spool only control messages and job results may enter; inventory, metrics and logs stop before it.</td></tr>
+        <tr><td><code>spool.min_free_bytes</code></td><td>256 MiB</td><td>Free space on the spool's filesystem below which nothing is appended, whatever its class.</td></tr>
+        <tr><td><code>spool.ack_timeout</code></td><td>30s</td><td>How long a sent record waits for the centre's acknowledgement before it is sent again.</td></tr>
+        <tr><td><code>spool.max_inflight_per_host</code></td><td>64</td><td>Records of one host sent and not yet acknowledged.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>On a restart the index is rebuilt from the segments, and a record damaged
+    at the end of the last segment is cut off without touching the records before
+    it. <code>/healthz</code> is liveness and stays <code>200</code> through an
+    outage of the centre - a relay whose link is down is the one process that
+    must not be restarted - while <code>/readyz</code> answers <code>503</code>
+    with the reason: <code class="refusal">relay_upstream_unreachable</code>,
+    <code class="refusal">relay_spool_critical</code>,
+    <code class="refusal">relay_spool_unwritable</code>,
+    <code class="refusal">relay_certificate_expired</code> or
+    <code class="refusal">relay_certificate_unknown</code>. Its body also carries
+    <code>safe_to_restart</code>, true only when nothing waits in the spool.</p>
+
+    <h3>Whose word the centre takes for a host</h3>
+
+    <p>A session that arrives through a relay raises a question the direct one
+    does not: is the host really the host, or is it the relay saying so? The
+    answer is the host's own signed identity envelope
+    (<code>relay.identity</code> v2), verified at the centre under every mode -
+    relay, host, certificate by serial, site and environment, payload digest,
+    signature and sequence - and a session that carries one is marked
+    <code>relay_identity: end_to_end</code>. A bad envelope is refused under
+    every mode with <code class="refusal">relay_envelope_invalid</code>,
+    <code class="refusal">relay_body_hash_mismatch</code>,
+    <code class="refusal">relay_sequence_replayed</code> or
+    <code class="refusal">relay_host_signature_invalid</code>.</p>
+
+    <p><code>FLOTESTRO_RELAY_IDENTITY</code> decides what happens without an
+    envelope: <code>observe</code> and <code>prefer</code> (the default) let the
+    session in on the relay's attestation or its word alone, recorded as
+    <code>attested</code> or <code>weak</code>; <code>enforce</code> refuses a
+    relay that names a host without an envelope with
+    <code class="refusal">relay_identity_missing</code>, and an agent too old to
+    sign with <code class="refusal">blocked_upgrade_required</code>. A renewal or
+    a secret fetch through a relay requires the envelope under every mode.
+    Upgrade the panel, then the relays, then the agents, and set
+    <code>enforce</code> once <code>weak</code> and <code>relay_only</code>
+    sessions are at zero.</p>
+
+    <h2 id="data">The database and the state directory</h2>
+
+    <p>PostgreSQL is the only source of truth. Hosts, certificates, jobs and
+    their attempts, campaigns and their targets, budgets, encrypted secrets, the
+    outbox and its cursor, the audit trail, the monitoring samples and rollups
+    all live in the database named by <code>FLOTESTRO_DATABASE_URL</code>. The
+    panel keeps the fleet's state nowhere else.</p>
+
+    <p>What is <em>not</em> in the database is the state directory, and that is
+    the whole reason the two are one backup pair:</p>
+
+    <ul>
+      <li><code>ca.pem</code>, <code>ca.key</code>, and during a rotation
+      <code>ca-pending.pem</code>, <code>ca-pending.key</code>,
+      <code>ca-pending.at</code> and <code>ca-retired/&lt;serial&gt;.pem</code> -
+      without <code>ca.key</code> no host can renew or enroll.</li>
+      <li><code>keys/&lt;key-id&gt;.key</code>, the key encryption keys of the
+      secret store - without the active one every row of the store is
+      unreadable. A key held as a systemd credential
+      (<code>FLOTESTRO_SECRETS_KEY_CREDENTIAL</code>) lives wherever the unit's
+      <code>LoadCredential=</code> points, and that place is in the backup set
+      instead.</li>
+      <li>The helper signing key, whose public half the hosts hold as the
+      capability keyring.</li>
+      <li><code>bootstrap-token</code>, on a first start only.</li>
+    </ul>
+
+    <div class="note note--refusal">
+      <p class="note__title">Never restore one half without the other</p>
+      <p>A database restored beside a different state directory is an
+      installation that cannot talk to its own fleet. The control plane checks
+      the state against the installation record at every start and stops,
+      fail-closed, with the state named -
+      <code class="refusal">installation_state_mismatch</code>,
+      <code class="refusal">secrets_key_unavailable</code>,
+      <code class="refusal">issuer_key_unavailable</code>,
+      <code class="refusal">pki_state_mismatch</code> or
+      <code class="refusal">crypto_state_ambiguous</code>. It never creates a
+      fresh CA in place of a missing one. Two instances must not run with
+      separate state directories against one database.</p>
+    </div>
+
+    <h2 id="why-native">Why the agent is a package and the control plane is an image</h2>
+
+    <p>The agent manages the host itself: its PID 1, its devices, its package
+    database, its real <code>/proc</code>. A container that could do all of that
+    would be a <code>--privileged</code> container sharing every namespace -
+    something with the word container in it and nothing isolated about it. So the
+    agent and its helper are native packages, installed from the project's signed
+    repository, upgraded by the host's own package manager or by the panel's
+    <code>agent.upgrade</code> operation against a package it has verified.</p>
+
+    <p>The control plane has the opposite shape. It talks to a database and to
+    the network, it owns no host, and it benefits from a runtime that gives it a
+    read-only root filesystem, no capabilities and one writable volume. Its image
+    is distroless: the binaries, the system certificate store and the built
+    panel, with no shell, no package manager, no <code>curl</code>, no PostgreSQL
+    and no container socket. The health check is a static client of its own,
+    precisely because there is nothing in the image to call an endpoint with, and
+    debugging is done with a support bundle or the tools image rather than by
+    installing something into a running container.</p>
+
+    <h3>Versions between the parts</h3>
+
+    <p>The agent protocol is versioned separately from the release, and this
+    binary speaks version 1 with a minimum of 1. An agent of the previous release
+    keeps working against a newer panel: every change of the protocol carries
+    either compatibility with the release before it or a refusal that names what
+    to upgrade (<code class="refusal">blocked_upgrade_required</code>,
+    <code class="refusal">protocol_incompatible</code>). The order for an upgrade
+    is therefore: the panel, then the relays, then the agents - and the agents
+    are upgraded by the panel itself, separately, afterwards. A fleet running the
+    previous agent against the new panel is an ordinary state, not a broken
+    one.</p>
+
+    <ul class="linkrow">
+      <li><a href="introduction.html">&larr; 1. Introduction</a></li>
+      <li><a href="installation.html">Next: 3. Installation &rarr;</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

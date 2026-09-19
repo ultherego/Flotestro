@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Runbooks &middot; Flotestro documentation</title>
+<meta name="description" content="The procedures the panel does not carry out by itself: when an operator reaches for each one, what it names, and the codes it produces.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html" aria-current="page">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>9. Runbooks</h1>
+
+    <p class="lede">Procedures for the operations the panel does not do by
+    itself. Each one names the signals that call for it, the preconditions, the
+    exact requests and commands, how to verify the result and how to go back -
+    and ends with the codes it produces or reads. Where the product offers no
+    route or command for a step, the runbook says so rather than describing
+    one.</p>
+
+    <p>They live in
+    <a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a>
+    of the repository and are written to be followed at three in the morning by
+    somebody who did not write them.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md">Installing from nothing</a></h2>
+
+    <p>Reach for it when there is no installation yet: the control plane from its
+    image, the first administrator, the backup pair before the fleet exists, and
+    the first hosts from signed packages. It is the short form of
+    <a href="installation.html">chapter 3</a>, and the one to hand somebody who
+    is doing this for the first time - it names the three things that are easy to
+    get wrong and cost an hour each (the ownership of the secret files, the
+    SELinux label on them, and pinning a digest in production).</p>
+
+    <p>Codes: <code class="refusal">installation_state_mismatch</code>,
+    <code class="refusal">gateway_id_in_use</code>,
+    <code class="refusal">machine_already_enrolled</code>.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/ca-rotation.md">CA rotation</a></h2>
+
+    <p>Reach for it when
+    <code>flotestro_ca_certificate_expires_in_seconds</code> is getting short,
+    when the setup checklist starts warning thirty days before the fleet CA's
+    end, or when a CA key has to be considered compromised. The rotation is
+    staged so that there is never a moment in which a host distrusts the panel or
+    the panel distrusts a host: a new CA is <em>prepared</em> (trusted,
+    distributed, not signing), then <em>activated</em> (it signs, the old one
+    becomes retired), and the old one leaves the trust set only once no host uses
+    it. There is no push - the bundle travels in enrollment and renewal
+    responses, so the fleet learns the new CA at its own renewal pace, and
+    <code>GET /api/v1/pki</code> reports <code>hosts_missing</code> and
+    <code>ready_to_activate</code> until it has. Every stage is a step-up
+    operation under <code>pki.rotate</code>, held by
+    <code>platform_admin</code> alone.</p>
+
+    <p>Codes: <code class="refusal">incomplete_coverage</code> from the error
+    guide; the PKI routes answer with their own -
+    <code class="refusal">pki_unavailable</code>,
+    <code class="refusal">prepare_failed</code>,
+    <code class="refusal">no_pending_ca</code>,
+    <code class="refusal">hosts_missing_ca</code>,
+    <code class="refusal">activate_failed</code>,
+    <code class="refusal">ca_in_use</code>,
+    <code class="refusal">reason_required</code>,
+    <code class="refusal">reauthentication_required</code>.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/db-restore.md">Database restore</a></h2>
+
+    <p>Reach for it to bring the control plane back on a snapshot - in a drill or
+    in earnest - and to settle the work that was in flight when the snapshot was
+    taken. It is also the reference for what the database holds and what does
+    not: the state directory, the environment file, and the signed package
+    repositories are each outside it and each part of the backup set. It carries
+    the cryptographic states a start can stop in
+    (<code class="refusal">secrets_key_unavailable</code>,
+    <code class="refusal">issuer_key_unavailable</code>,
+    <code class="refusal">pki_state_mismatch</code>,
+    <code class="refusal">crypto_state_ambiguous</code>), the adoption of a
+    pre-existing secret key at the first start after an upgrade, the rotation of
+    the store's key, what can and cannot be recovered when a key is lost, and the
+    check of the audit chain with <code>flotestro-auditverify</code> after the
+    restore.</p>
+
+    <p>Read the section on in-flight jobs before the first drill: after a restore
+    to an older point, attempts close as
+    <code class="refusal">lease_expired</code>, late results settle as
+    <code class="refusal">superseded_by_result</code>, and an agent that restarted
+    mid-operation answers <code class="refusal">outcome_unknown</code>.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/queue-backlog.md">Queue backlog</a></h2>
+
+    <p>Reach for it when work is queued and not starting. It exists to tell apart
+    the four reasons, because the remedies are different and three of them are
+    not a fault at all: a saturated budget, the dispatch rate, a resource lock on
+    the host, or a host that is simply offline. It names the metric for each
+    (<code>flotestro_budget_tokens</code>,
+    <code>flotestro_dispatch_throttled_total</code>,
+    <code>flotestro_resource_lock_wait_seconds</code>,
+    <code>flotestro_job_queue_age_seconds</code>), where the same thing appears
+    in the API (<code>wait_reason</code> on a job,
+    <code>reason_code</code> on a campaign target), how to raise a budget under
+    <code>If-Match</code>, and how to pause or cancel a campaign. A campaign stop
+    never interrupts a host: the remedies here change what starts next.</p>
+
+    <p>Codes: <code class="refusal">budget_capacity</code>,
+    <code class="refusal">budget_fair_share</code>,
+    <code class="refusal">resource_busy</code>,
+    <code class="refusal">offline</code>,
+    <code class="refusal">offline_deadline</code>,
+    <code class="refusal">session_stale</code>,
+    <code class="refusal">session_unowned</code>,
+    <code class="refusal">session_fence_stale</code>,
+    <code class="refusal">precondition_failed</code> (412, on an
+    <code>If-Match</code> write).</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/relay-disk-full.md">Relay buffer full, relay disk full</a></h2>
+
+    <p>Reach for it when a site's relay reports its buffer above 70&nbsp;%, when
+    <code>/readyz</code> answers <code class="refusal">relay_spool_critical</code>
+    or <code class="refusal">relay_spool_unwritable</code>, or when a site has
+    been cut off long enough that what it is holding matters. It separates the
+    two resources that can run out - the in-memory buffer and the durable spool
+    on disk - says exactly what is dropped first and what is protected by the
+    critical reserve, and gives the relay's own tool,
+    <code>flotestro-relayctl</code>, for the parts the panel cannot see. It also
+    covers re-enrolling a relay whose identity was lost or compromised.</p>
+
+    <p>Read the note on <code>/healthz</code> before touching a relay in an
+    outage: liveness stays <code>200</code> through an outage of the centre on
+    purpose, because a relay whose link is down is the one process that must not
+    be restarted. <code>/readyz</code> carries <code>safe_to_restart</code>, and
+    it is true only when nothing is waiting in the spool.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/metrics-gap.md">Samples stop arriving, or a chart has a hole</a></h2>
+
+    <p>Reach for it whenever a host's chart stops or shows a gap - and take it
+    seriously, because the panel is the only alerting channel of this product: a
+    host whose samples stop is a host whose alert rules cannot fire. The runbook
+    tells apart the five causes and treats each one: the host is away, the agent
+    cannot spool, the panel refuses the samples as too late, the rollup has
+    stopped, or the alert evaluator is running nowhere. The signals are all in
+    one place - the <code>monitoring</code> block of
+    <code>GET /api/v1/status</code>, with <code>raw_partitions</code>,
+    <code>dirty_buckets</code>, <code>evaluator_holder</code> and the retentions
+    the rest has to be read against.</p>
+
+    <p>Codes: <code class="refusal">metric_sample_too_old</code>,
+    <code class="refusal">metric_sample_not_kept</code>,
+    <code class="refusal">alert_evaluator_lease_lost</code>,
+    <code class="refusal">metrics_retention_too_short</code>.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/quarantine.md">Quarantine, identity recovery and decommission</a></h2>
+
+    <p>Reach for it to cut a host off from the fleet, to bring it back, to
+    replace its identity, or to retire it. The lifecycle states are
+    <code>active</code>, <code>quarantined</code>, <code>recovery</code>,
+    <code>retiring</code> and <code>retired</code>, and a transition the state
+    machine does not allow is refused with <code>409</code>
+    <code class="refusal">lifecycle_conflict</code>. All four routes are step-up
+    operations with a reason of at least eight characters and the typed hostname.
+    The runbook also explains what the clone policy does when one certificate is
+    alive on two boots at once, and how a decommission is handed over when the
+    instance that owns the host's session is not the one that took the
+    decision.</p>
+
+    <p>Codes: <code class="refusal">host_quarantined</code>,
+    <code class="refusal">lifecycle_conflict</code>,
+    <code class="refusal">lifecycle_quarantined</code>,
+    <code class="refusal">identity_mismatch</code>,
+    <code class="refusal">revoked_certificate</code>,
+    <code class="refusal">remote_cleanup_unconfirmed</code>,
+    <code class="refusal">lifecycle_handover_pending</code>.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/support-bundle.md">Support bundle</a></h2>
+
+    <p>Reach for it when <code>flotestro-agentctl diagnose</code> alone does not
+    settle the question - a host that will not connect, a helper that does not
+    answer, a renewal that keeps failing - or when somebody asks for "the logs".
+    Send the bundle instead of loose files, because the bundle is the form that
+    was scanned. It is made on the host, by an explicit command, into a file the
+    operator names and can read before sending it anywhere; there is no route
+    that pulls one off a host, deliberately. Every collector declares each field
+    as public, sensitive or secret: the public and the sensitive travel, the
+    secret is never collected, and the manifest says what was left out and
+    why.</p>
+
+    <p>Codes: <code class="refusal">bundle_private_key_found</code>,
+    <code class="refusal">bundle_bearer_token_found</code>,
+    <code class="refusal">bundle_password_in_url_found</code> and
+    <code class="refusal">bundle_enrollment_token_found</code> refuse a bundle
+    outright; <code class="refusal">bundle_file_unparsable</code> withholds one
+    file; <code>bundle_field_not_collected</code>,
+    <code>bundle_field_redacted</code> and
+    <code>bundle_field_pattern_only</code> say in the manifest which layer kept a
+    field out.</p>
+
+    <h2><a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/golden-image.md">Golden image and cloud-init</a></h2>
+
+    <p>Reach for it before building a machine image that carries the agent, and
+    before turning a snapshot of a running host into a template. The rule it
+    exists to enforce is that an image must carry no identity: the host row is
+    keyed by <code>/etc/machine-id</code>, the identity lives under
+    <code>identity/current</code>, and a session is recognised by a certificate
+    fingerprint - so an image that carries any of the three produces a fleet in
+    which many machines are one host. It lists what may and must not be in an
+    image, the sanitisation before sealing (including the firewall registry,
+    which would otherwise put one clone's rules on every machine made from it),
+    and the first-boot enrollment through
+    <code>flotestro-enroll.service</code>, which runs only while
+    <code>identity/current/agent.pem</code> does not exist.</p>
+
+    <p>Codes: <code class="refusal">duplicate_machine_id</code>,
+    <code class="refusal">machine_id_mismatch</code>,
+    <code class="refusal">machine_id_retired</code>,
+    <code class="refusal">enrollment_token_invalid</code>,
+    <code class="refusal">machine_already_enrolled</code>,
+    <code class="refusal">lifecycle_quarantined</code>; the audit action
+    <code>security.duplicate_identity</code>.</p>
+
+    <h2>And the checks a change passes before it is released</h2>
+
+    <p>What every push and every tag has to survive - the tests, the linters, the
+    vulnerability scan, the fuzz targets, the Compose parse checks and the image
+    build for both platforms - and what to do when one of them fails, is in
+    <a href="https://github.com/ultherego/Flotestro/blob/main/docs/ci.md"><code>docs/ci.md</code></a>.
+    It is not a runbook for an operator; it is the one for whoever is releasing.</p>
+
+    <ul class="linkrow">
+      <li><a href="concepts.html">&larr; 4. How a change happens</a></li>
+      <li><a href="./">Contents</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>
