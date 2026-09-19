@@ -58,6 +58,7 @@ directory against it. What it finds decides what happens:
 | `ca.key` without `ca.pem`, a key that does not match the certificate, a CA other than the recorded one, an unreadable file | Stops: `pki_state_mismatch`. |
 | No row, database with secrets, no `secrets.key` | Stops: `secrets_key_unavailable`. |
 | No row, database with hosts, no CA at all; or several keys under `keys/` and nothing says which is active | Stops: `crypto_state_ambiguous`. |
+| The state directory names one installation and the database another, or one names none while the other has a history | Stops: `installation_state_mismatch`. The log names which of the two is the stranger. |
 | A second panel of the same installation starting at the same time | Waits on the lock, then reads the row the first one wrote. Two panels never make two installations. |
 
 Every stop is logged with `code`, `reason`, `detail` and `hint`; the process exits 1 and
@@ -125,6 +126,11 @@ recovered; the metadata and the fleet can. With the service stopped:
    makes a new key, writes a new row and starts; the fleet keeps its CA and its certificates.
 5. Rotate every secret through the API (`POST /api/v1/secrets/{name}/rotate`) with the values
    entered again. The audit trail keeps the history of the destroyed versions.
+
+The state directory names its own installation in `installation.id`, beside `ca.pem`. Back it
+up with the rest of the directory and never copy it between installations: it is what lets a
+start tell "my database" from "somebody else's", and it is what refuses the deployment that
+scales a second control plane with a state volume of its own against one database.
 
 ## Preconditions
 
