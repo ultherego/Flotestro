@@ -3,10 +3,12 @@
 package packages
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -234,12 +236,9 @@ type Apply struct {
 // tailLines returns the last useful lines of the output of the tool. The
 // cause is usually near the end, so it is the beginning that can be given up.
 func tailLines(stderr, stdout string, count int) []string {
-	lines := usefulLines(stderr)
+	lines := lastUsefulLines(stderr, count)
 	if len(lines) == 0 {
-		lines = usefulLines(stdout)
-	}
-	if len(lines) > count {
-		lines = lines[len(lines)-count:]
+		lines = lastUsefulLines(stdout, count)
 	}
 	return lines
 }
@@ -326,6 +325,9 @@ type commandResult struct {
 	ExitCode int
 	Ran      bool
 	Err      error
+	// Truncated says the tool wrote more than the bound and the text above is
+	// not all of it. A caller that reads a listing out of it has to refuse.
+	Truncated bool
 }
 
 // Reason describes the cause of a failure in a form readable in the result
@@ -334,11 +336,77 @@ func (r commandResult) Reason() string {
 	if r.Err != nil && !r.Ran {
 		return r.Err.Error()
 	}
+	reason := fmt.Sprintf("code %d", r.ExitCode)
 	if description := errorDescription(r.Stderr, r.Stdout); description != "" {
-		return fmt.Sprintf("code %d: %s", r.ExitCode, description)
+		reason += ": " + description
 	}
-	return fmt.Sprintf("code %d", r.ExitCode)
+	if r.Truncated {
+		reason += " (" + truncatedNote + ")"
+	}
+	return reason
 }
+
+// Complete says the tool ran, succeeded and wrote all of what it had to say.
+// Anything parsed out of a cut listing would be a shorter answer, and a
+// shorter answer is not a smaller truth.
+func (r commandResult) Complete() bool {
+	return r.Ran && r.ExitCode == 0 && !r.Truncated
+}
+
+// ErrorOutputTooLarge is the stable code a listing carries when the tool wrote
+// more than the agent reads in one go.
+const ErrorOutputTooLarge = "tool_output_too_large"
+
+// unreadable is the reason a listing that could not be read whole records. The
+// cut case gets its own code, because it is not the tool failing.
+func (r commandResult) unreadable(tool string) string {
+	if r.Truncated {
+		return ErrorOutputTooLarge + ": " + tool + ": " + r.Reason()
+	}
+	return tool + ": " + r.Reason()
+}
+
+// truncatedNote is the one sentence a cut output carries into a reason.
+const truncatedNote = "the tool wrote more than the agent reads and the rest was not read"
+
+// The bounds on what one run of a package tool may cost this process. A
+// listing of every package of a distribution is well under a megabyte; past
+// these a tool is running away and the agent must not grow with it.
+const (
+	maxCommandOutput = 8 << 20
+	maxCommandError  = 256 << 10
+	// maxLineBytes bounds one line of a streamed output.
+	maxLineBytes = 1 << 20
+)
+
+// ErrOutputTooLong means a single line of a tool's output passed the bound, so
+// the stream could not be read to its end.
+var ErrOutputTooLong = errors.New("the tool wrote a line longer than the agent reads")
+
+// boundedWriter gathers a tool's output up to a limit and remembers that it
+// stopped. It builds a string, so handing the text on costs no second copy.
+type boundedWriter struct {
+	text  strings.Builder
+	limit int
+	over  bool
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	switch room := w.limit - w.text.Len(); {
+	case room <= 0:
+		w.over = w.over || len(p) > 0
+	case len(p) > room:
+		w.text.Write(p[:room])
+		w.over = true
+	default:
+		w.text.Write(p)
+	}
+	// The tool is always told its bytes were taken: closing the pipe under a
+	// transaction already under way would break it over a counter.
+	return len(p), nil
+}
+
+func (w *boundedWriter) String() string { return w.text.String() }
 
 // runtimeDir is a directory writable by the user of the process.
 var runtimeDir = os.TempDir()
@@ -389,17 +457,19 @@ func runCommand(ctx context.Context, timeout time.Duration, input string,
 	// scope the context asks for, when the helper put one there.
 	argv := runscope.Apply(ctx, append([]string{path}, args...))
 
-	var stdout, stderr bytes.Buffer
+	stdout := &boundedWriter{limit: maxCommandOutput}
+	stderr := &boundedWriter{limit: maxCommandError}
 	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
 	cmd.Env = environment()
 
 	runErr := cmd.Run()
-	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1, Err: runErr}
+	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1,
+		Err: runErr, Truncated: stdout.over || stderr.over}
 
 	var exitErr *exec.ExitError
 	switch {
@@ -410,6 +480,69 @@ func runCommand(ctx context.Context, timeout time.Duration, input string,
 	}
 	if cmdCtx.Err() != nil {
 		result.Ran = false
+	}
+	return result
+}
+
+// runLines starts a tool and hands the caller its output line by line. The
+// whole output never exists at once, which is what a listing of every package
+// of a distribution costs when it does.
+func runLines(ctx context.Context, timeout time.Duration, onLine func(string),
+	path string, args ...string) commandResult {
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() || info.Mode()&0o111 == 0 {
+		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: the tool is missing", path)}
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	argv := runscope.Apply(ctx, append([]string{path}, args...))
+	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
+	cmd.Env = environment()
+	stderr := &boundedWriter{limit: maxCommandError}
+	cmd.Stderr = stderr
+
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return commandResult{ExitCode: -1, Err: err}
+	}
+	if err := cmd.Start(); err != nil {
+		return commandResult{ExitCode: -1, Err: err}
+	}
+
+	scanner := bufio.NewScanner(pipe)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
+	for scanner.Scan() {
+		onLine(scanner.Text())
+	}
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		// The rest is drained so the tool is never left blocked on a full pipe,
+		// but nothing more of it is read.
+		_, _ = io.Copy(io.Discard, pipe)
+	}
+	runErr := cmd.Wait()
+
+	result := commandResult{Stderr: stderr.String(), ExitCode: -1, Err: runErr,
+		Truncated: stderr.over}
+	var exitErr *exec.ExitError
+	switch {
+	case runErr == nil:
+		result.Ran, result.ExitCode = true, 0
+	case errors.As(runErr, &exitErr):
+		result.Ran, result.ExitCode = true, exitErr.ExitCode()
+	}
+	if cmdCtx.Err() != nil {
+		result.Ran = false
+	}
+	if scanErr != nil {
+		// A line nobody could read means the listing has a hole in it; that is
+		// not a shorter listing, it is one nothing may be concluded from.
+		result.Ran, result.Truncated = false, true
+		if errors.Is(scanErr, bufio.ErrTooLong) {
+			scanErr = ErrOutputTooLong
+		}
+		result.Err = fmt.Errorf("%s: %w", filepath.Base(path), scanErr)
 	}
 	return result
 }

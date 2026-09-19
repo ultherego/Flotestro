@@ -752,11 +752,48 @@ func firewallResponse(snapshot firewall.Snapshot, message string, plan *firewall
 	return &helperv1.HelperResponse{Accepted: true, FirewallResult: result}
 }
 
+// The bounds on what one firewall tool may cost the helper. A ruleset of a
+// busy host is megabytes; past these a tool is running away.
+const (
+	maxToolOutput = 16 << 20
+	maxToolError  = 256 << 10
+)
+
+// errToolOutputTooLarge refuses an answer the helper could not take whole. A
+// ruleset read in part is not a smaller ruleset.
+var errToolOutputTooLarge = errors.New("the tool wrote more than the helper reads")
+
+// boundedOutput gathers a tool's output up to a limit and remembers that it
+// stopped. It builds a string, so handing the text on costs no second copy.
+type boundedOutput struct {
+	text  strings.Builder
+	limit int
+	over  bool
+}
+
+func (w *boundedOutput) Write(p []byte) (int, error) {
+	switch room := w.limit - w.text.Len(); {
+	case room <= 0:
+		w.over = w.over || len(p) > 0
+	case len(p) > room:
+		w.text.Write(p[:room])
+		w.over = true
+	default:
+		w.text.Write(p)
+	}
+	return len(p), nil
+}
+
 func runTool(ctx context.Context, arguments []string) (string, error) {
 	cmd := exec.CommandContext(ctx, arguments[0], arguments[1:]...)
 	cmd.Env = toolEnvironment()
-	output, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(output)), err
+	output := &boundedOutput{limit: maxToolOutput}
+	cmd.Stdout, cmd.Stderr = output, output
+	err := cmd.Run()
+	if output.over {
+		return "", fmt.Errorf("%s: %w", filepath.Base(arguments[0]), errToolOutputTooLarge)
+	}
+	return strings.TrimSpace(output.text.String()), err
 }
 
 // toolOutput runs a tool and attaches its error message.
@@ -769,17 +806,23 @@ func toolOutput(ctx context.Context, path string, arguments ...string) (string, 
 func outputWithWarnings(ctx context.Context, path string, arguments ...string) (string, string, error) {
 	cmd := exec.CommandContext(ctx, path, arguments...)
 	cmd.Env = toolEnvironment()
-	var errorStream strings.Builder
-	cmd.Stderr = &errorStream
-	output, err := cmd.Output()
-	message := errorStream.String()
+	output := &boundedOutput{limit: maxToolOutput}
+	errorStream := &boundedOutput{limit: maxToolError}
+	cmd.Stdout, cmd.Stderr = output, errorStream
+	err := cmd.Run()
+	message := errorStream.text.String()
+	if output.over || errorStream.over {
+		// A ruleset read only in part would compare as a host with fewer rules
+		// than it filters with; the read is refused instead.
+		return "", message, fmt.Errorf("%s: %w", filepath.Base(path), errToolOutputTooLarge)
+	}
 	if err != nil {
 		if content := strings.TrimSpace(message); content != "" {
 			return "", message, fmt.Errorf("%w: %s", err, content)
 		}
 		return "", message, err
 	}
-	return string(output), message, nil
+	return output.text.String(), message, nil
 }
 
 func exists(path string) bool {

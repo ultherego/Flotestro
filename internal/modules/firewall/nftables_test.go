@@ -1,6 +1,8 @@
 package firewall
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
@@ -120,5 +122,23 @@ func TestFingerprintDoesNotDependOnCounters(t *testing.T) {
 	other := ParseRuleset(strings.ReplaceAll(nftOutput, "tcp dport 8443", "tcp dport 8444")).Hash
 	if first == other {
 		t.Error("the fingerprint did not change after a rule change")
+	}
+}
+
+// The fingerprint is hashed line by line so that a ruleset of a busy host is
+// not copied twice to arrive at it. The value has to stay the value a plan
+// made against an earlier release carries.
+func TestFingerprintMatchesTheDigestOfTheWholeText(t *testing.T) {
+	for name, ruleset := range map[string]string{
+		"empty":            "",
+		"one line":         "table inet filter {",
+		"no final newline": nftOutput,
+		"final newline":    nftOutput + "\n",
+		"blank lines":      "table inet filter {\n\n}\n",
+	} {
+		whole := sha256.Sum256([]byte(ruleCounters.ReplaceAllString(ruleset, "counter")))
+		if got, want := Fingerprint(ruleset), hex.EncodeToString(whole[:12]); got != want {
+			t.Errorf("%s: fingerprint %q, expected %q", name, got, want)
+		}
 	}
 }

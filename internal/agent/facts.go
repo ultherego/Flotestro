@@ -4,13 +4,13 @@ package agent
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -323,18 +323,105 @@ type commandResult struct {
 	ExitCode int
 	Ran      bool
 	Err      error
+	// Truncated says the tool wrote more than the bound: what is above is not
+	// all of it, and nothing may be counted out of it.
+	Truncated bool
 }
 
 // Reason describes the reason why the value could not be determined.
 func (r commandResult) Reason() string {
-	switch {
-	case r.Err != nil && !r.Ran:
+	if r.Err != nil && !r.Ran {
 		return r.Err.Error()
-	case strings.TrimSpace(r.Stderr) != "":
-		return fmt.Sprintf("code %d: %s", r.ExitCode, firstLine(r.Stderr))
-	default:
-		return fmt.Sprintf("code %d", r.ExitCode)
 	}
+	reason := fmt.Sprintf("code %d", r.ExitCode)
+	if strings.TrimSpace(r.Stderr) != "" {
+		reason += ": " + firstLine(r.Stderr)
+	}
+	if r.Truncated {
+		reason += " (the tool wrote more than the agent reads and the rest was not read)"
+	}
+	return reason
+}
+
+// Complete says the tool ran, succeeded and wrote all of what it had to say.
+// Counting rows out of a cut output would answer with a smaller number than
+// the host holds, and a smaller number is not a smaller truth.
+func (r commandResult) Complete() bool {
+	return r.Ran && r.ExitCode == 0 && !r.Truncated
+}
+
+// The bounds on what one tool of the fact collection may cost the agent. A
+// listing of a host is far below these; past them a tool is running away.
+const (
+	maxCommandOutput = 8 << 20
+	maxCommandError  = 256 << 10
+	// maxLineBytes bounds one line of a streamed output.
+	maxLineBytes = 1 << 20
+)
+
+// ErrOutputTooLong means a single line of a tool's output passed the bound, so
+// the stream could not be read to its end.
+var ErrOutputTooLong = errors.New("the tool wrote a line longer than the agent reads")
+
+// boundedWriter gathers a tool's output up to a limit and remembers that it
+// stopped. It builds a string, so handing the text on costs no second copy.
+type boundedWriter struct {
+	text  strings.Builder
+	limit int
+	over  bool
+}
+
+func (w *boundedWriter) Write(p []byte) (int, error) {
+	switch room := w.limit - w.text.Len(); {
+	case room <= 0:
+		w.over = w.over || len(p) > 0
+	case len(p) > room:
+		w.text.Write(p[:room])
+		w.over = true
+	default:
+		w.text.Write(p)
+	}
+	// The tool is always told its bytes were taken: closing the pipe under it
+	// would end a read as a broken pipe rather than as an answer.
+	return len(p), nil
+}
+
+func (w *boundedWriter) String() string { return w.text.String() }
+
+// tailBuffer keeps the last bytes of a stream and nothing before them. A
+// journal read answers with the end of what it read, so the beginning need
+// never be held: the limit of the task is applied while reading, not after.
+type tailBuffer struct {
+	data  []byte
+	limit int
+	cut   bool
+}
+
+func newTailBuffer(limit int) *tailBuffer {
+	switch {
+	case limit <= 0:
+		return &tailBuffer{}
+	case limit > maxCommandOutput:
+		limit = maxCommandOutput
+	}
+	return &tailBuffer{data: make([]byte, 0, limit), limit: limit}
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	written := len(p)
+	switch {
+	case b.limit <= 0:
+		b.cut = b.cut || written > 0
+		return written, nil
+	case len(p) > b.limit:
+		b.cut, p = true, p[len(p)-b.limit:]
+	}
+	if excess := len(b.data) + len(p) - b.limit; excess > 0 {
+		b.cut = true
+		b.data = append(b.data[:0], b.data[excess:]...)
+	}
+	b.data = append(b.data, p...)
+	return written, nil
 }
 
 // runCommand starts a process with a fixed path and an array of arguments. sh
@@ -346,23 +433,16 @@ func runCommand(ctx context.Context, timeout time.Duration, path string, args ..
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	var stdout, stderr bytes.Buffer
+	stdout := &boundedWriter{limit: maxCommandOutput}
+	stderr := &boundedWriter{limit: maxCommandError}
 	cmd := exec.CommandContext(cmdCtx, path, args...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	cmd.Env = []string{
-		"LC_ALL=C",
-		"LANG=C",
-		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
-		"DEBIAN_FRONTEND=noninteractive",
-		"HOME=" + runtimeDir,
-		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
-		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
-		"XDG_CONFIG_HOME=" + filepath.Join(runtimeDir, "config"),
-	}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Env = commandEnvironment()
 
 	err := cmd.Run()
-	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1, Err: err}
+	result := commandResult{Stdout: stdout.String(), Stderr: stderr.String(), ExitCode: -1,
+		Err: err, Truncated: stdout.over || stderr.over}
 
 	var exitErr *exec.ExitError
 	switch {
@@ -376,6 +456,115 @@ func runCommand(ctx context.Context, timeout time.Duration, path string, args ..
 	if cmdCtx.Err() != nil {
 		// An exceeded timeout is not a substantive result.
 		result.Ran = false
+	}
+	return result
+}
+
+// commandEnvironment is the same for every tool the fact collection starts:
+// one language, one set of paths, and no prompt to hang on.
+func commandEnvironment() []string {
+	return []string{
+		"LC_ALL=C",
+		"LANG=C",
+		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
+		"DEBIAN_FRONTEND=noninteractive",
+		"HOME=" + runtimeDir,
+		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
+		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
+		"XDG_CONFIG_HOME=" + filepath.Join(runtimeDir, "config"),
+	}
+}
+
+// runCommandTo starts a tool and writes its output straight into the caller's
+// writer. Where the answer is bounded anyway, the bound belongs here rather
+// than after the whole output has been held.
+func runCommandTo(ctx context.Context, timeout time.Duration, stdout io.Writer,
+	path string, args ...string) commandResult {
+	if !isExecutable(path) {
+		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: %w", path, os.ErrNotExist)}
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	stderr := &boundedWriter{limit: maxCommandError}
+	cmd := exec.CommandContext(cmdCtx, path, args...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.Env = commandEnvironment()
+
+	runErr := cmd.Run()
+	result := commandResult{Stderr: stderr.String(), ExitCode: -1, Err: runErr,
+		Truncated: stderr.over}
+	var exitErr *exec.ExitError
+	switch {
+	case runErr == nil:
+		result.Ran, result.ExitCode = true, 0
+	case errors.As(runErr, &exitErr):
+		result.Ran, result.ExitCode = true, exitErr.ExitCode()
+	}
+	if cmdCtx.Err() != nil {
+		result.Ran = false
+	}
+	return result
+}
+
+// runCommandLines starts a tool and hands the caller its output line by line.
+// The whole output never exists at once, which is what a listing of every
+// package of a host costs when it does.
+func runCommandLines(ctx context.Context, timeout time.Duration, onLine func(string),
+	path string, args ...string) commandResult {
+	if !isExecutable(path) {
+		return commandResult{ExitCode: -1, Err: fmt.Errorf("%s: %w", path, os.ErrNotExist)}
+	}
+	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	stderr := &boundedWriter{limit: maxCommandError}
+	cmd := exec.CommandContext(cmdCtx, path, args...)
+	cmd.Stderr = stderr
+	cmd.Env = commandEnvironment()
+
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return commandResult{ExitCode: -1, Err: err}
+	}
+	if err := cmd.Start(); err != nil {
+		return commandResult{ExitCode: -1, Err: err}
+	}
+
+	scanner := bufio.NewScanner(pipe)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
+	for scanner.Scan() {
+		onLine(scanner.Text())
+	}
+	scanErr := scanner.Err()
+	if scanErr != nil {
+		// The rest is drained so the tool is never left blocked on a full pipe,
+		// but nothing more of it is read.
+		_, _ = io.Copy(io.Discard, pipe)
+	}
+	runErr := cmd.Wait()
+
+	result := commandResult{Stderr: stderr.String(), ExitCode: -1, Err: runErr,
+		Truncated: stderr.over}
+	var exitErr *exec.ExitError
+	switch {
+	case runErr == nil:
+		result.Ran, result.ExitCode = true, 0
+	case errors.As(runErr, &exitErr):
+		result.Ran, result.ExitCode = true, exitErr.ExitCode()
+	}
+	if cmdCtx.Err() != nil {
+		result.Ran = false
+	}
+	if scanErr != nil {
+		// A line nobody could read means the listing has a hole in it; that is
+		// not a shorter listing, it is one nothing may be concluded from.
+		result.Ran, result.Truncated = false, true
+		if errors.Is(scanErr, bufio.ErrTooLong) {
+			scanErr = ErrOutputTooLong
+		}
+		result.Err = fmt.Errorf("%s: %w", filepath.Base(path), scanErr)
 	}
 	return result
 }

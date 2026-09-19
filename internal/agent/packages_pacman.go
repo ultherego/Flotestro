@@ -12,11 +12,14 @@ import (
 func pacmanSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: packages.PacmanName}
 
-	if result := runCommand(ctx, 30*time.Second, "/usr/bin/pacman", "-Q"); result.Ran && result.ExitCode == 0 {
-		installed := uint32(len(strings.Split(strings.TrimSpace(result.Stdout), "\n")))
-		if strings.TrimSpace(result.Stdout) == "" {
-			installed = 0
+	// The listing is counted as it arrives: only the counter is kept, never the
+	// list of every package of the host.
+	var installed uint32
+	if result := runCommandLines(ctx, 30*time.Second, func(line string) {
+		if strings.TrimSpace(line) != "" {
+			installed++
 		}
+	}, "/usr/bin/pacman", "-Q"); result.Complete() {
 		summary.Installed = &installed
 	}
 

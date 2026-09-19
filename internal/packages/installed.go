@@ -138,39 +138,14 @@ func installedAPT(ctx context.Context) ([]InstalledPackage, string) {
 	// ourselves.
 	format := `${db:Status-Status}\t${Package}\t${Version}\t${Architecture}\t` +
 		`${source:Package}\t${source:Version}\n`
-	result := run(ctx, 2*time.Minute, "/usr/bin/dpkg-query", "-W", "-f", format)
-	if !result.Ran || result.ExitCode != 0 {
-		return nil, "dpkg-query: " + result.Reason()
-	}
-
 	var pkgs []InstalledPackage
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) < 6 {
-			continue
+	result := runLines(ctx, 2*time.Minute, func(line string) {
+		if pkg, ok := DpkgQueryLine(line); ok {
+			pkgs = append(pkgs, pkg)
 		}
-		// A package removed with its configuration left behind is not installed: its
-		// code no longer lies on the host, so it is not vulnerable either.
-		if strings.TrimSpace(fields[0]) != "installed" {
-			continue
-		}
-		pkg := InstalledPackage{
-			Name:          strings.TrimSpace(fields[1]),
-			Version:       strings.TrimSpace(fields[2]),
-			Architecture:  strings.TrimSpace(fields[3]),
-			SourceName:    strings.TrimSpace(fields[4]),
-			SourceVersion: strings.TrimSpace(fields[5]),
-		}
-		if pkg.Name == "" || pkg.Version == "" {
-			continue
-		}
-		if pkg.SourceName == "" {
-			pkg.SourceName = pkg.Name
-		}
-		if pkg.SourceVersion == "" {
-			pkg.SourceVersion = pkg.Version
-		}
-		pkgs = append(pkgs, pkg)
+	}, "/usr/bin/dpkg-query", "-W", "-f", format)
+	if !result.Complete() {
+		return nil, result.unreadable("dpkg-query")
 	}
 	if len(pkgs) == 0 {
 		return nil, "dpkg-query returned an empty list"
@@ -179,6 +154,37 @@ func installedAPT(ctx context.Context) ([]InstalledPackage, string) {
 	// about each of four hundred would be four hundred processes.
 	FillAPTOrigin(ctx, pkgs)
 	return pkgs, ""
+}
+
+// DpkgQueryLine reads one tab-separated row of the dpkg database as
+// installedAPT asks for it.
+func DpkgQueryLine(line string) (InstalledPackage, bool) {
+	fields := strings.Split(line, "\t")
+	if len(fields) < 6 {
+		return InstalledPackage{}, false
+	}
+	// A package removed with its configuration left behind is not installed: its
+	// code no longer lies on the host, so it is not vulnerable either.
+	if strings.TrimSpace(fields[0]) != "installed" {
+		return InstalledPackage{}, false
+	}
+	pkg := InstalledPackage{
+		Name:          strings.TrimSpace(fields[1]),
+		Version:       strings.TrimSpace(fields[2]),
+		Architecture:  strings.TrimSpace(fields[3]),
+		SourceName:    strings.TrimSpace(fields[4]),
+		SourceVersion: strings.TrimSpace(fields[5]),
+	}
+	if pkg.Name == "" || pkg.Version == "" {
+		return InstalledPackage{}, false
+	}
+	if pkg.SourceName == "" {
+		pkg.SourceName = pkg.Name
+	}
+	if pkg.SourceVersion == "" {
+		pkg.SourceVersion = pkg.Version
+	}
+	return pkg, true
 }
 
 // FillAPTOrigin writes to the packages the repository the installed version
@@ -191,14 +197,18 @@ func FillAPTOrigin(ctx context.Context, pkgs []InstalledPackage) {
 	for _, pkg := range pkgs {
 		names = append(names, pkg.Name)
 	}
-	result := run(ctx, 3*time.Minute, "/usr/bin/apt-cache", append([]string{"policy"}, names...)...)
-	if !result.Ran || result.ExitCode != 0 {
+	// The blocks are read as they arrive: the answer for a whole host is the
+	// longest output the inventory ever takes, and only its distillate is kept.
+	reader := newAPTPolicyReader()
+	result := runLines(ctx, 3*time.Minute, reader.line,
+		"/usr/bin/apt-cache", append([]string{"policy"}, names...)...)
+	if !result.Complete() {
 		// Missing knowledge about the origin stays missing knowledge: the correlator
 		// treats such packages as undetermined rather than as packages of the
 		// distribution.
 		return
 	}
-	origin := ParseAPTPolicy(result.Stdout)
+	origin := reader.done()
 	for i := range pkgs {
 		if entry, known := origin[pkgs[i].Name]; known {
 			pkgs[i].Origin = entry.Origin
@@ -216,79 +226,100 @@ type OriginEntry struct {
 }
 
 // ParseAPTPolicy reads the output of "apt-cache policy" for many packages.
-func ParseAPTPolicy(wyjscie string) map[string]OriginEntry {
-	result := map[string]OriginEntry{}
-	name := ""
-	installed := ""
-	inInstalled := false
-	var fromVersion, fromPackage OriginEntry
-
-	close_ := func() {
-		if name == "" || installed == "" || installed == "(none)" {
-			return
-		}
-		switch {
-		case fromVersion.Class != "" && fromVersion.Class != OriginLocal:
-			result[name] = fromVersion
-		case fromPackage.Class != "":
-			// A withdrawn version: the package still belongs to the repository it came
-			// from, even though that version of it is no longer there.
-			result[name] = fromPackage
-		case fromVersion.Class != "":
-			result[name] = fromVersion
-		default:
-			result[name] = OriginEntry{Class: OriginUnknown}
-		}
+func ParseAPTPolicy(output string) map[string]OriginEntry {
+	reader := newAPTPolicyReader()
+	for _, line := range strings.Split(output, "\n") {
+		reader.line(line)
 	}
+	return reader.done()
+}
 
-	for _, line := range strings.Split(wyjscie, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		// The header of a block: "name:" at the left edge.
-		if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") {
-			close_()
-			name = strings.TrimSuffix(trimmed, ":")
-			if colon := strings.Index(name, ":"); colon > 0 {
-				// A multi-architecture package carries an architecture suffix.
-				name = name[:colon]
-			}
-			installed, inInstalled = "", false
-			fromVersion, fromPackage = OriginEntry{}, OriginEntry{}
-			continue
-		}
-		if name == "" {
-			continue
-		}
-		if strings.HasPrefix(trimmed, "Installed:") {
-			installed = strings.TrimSpace(strings.TrimPrefix(trimmed, "Installed:"))
-			continue
-		}
-		fields := strings.Fields(trimmed)
-		if strings.HasPrefix(trimmed, "***") {
-			inInstalled = len(fields) >= 2 && fields[1] == installed
-			continue
-		}
-		switch {
-		case len(fields) >= 2 && onlyDigits(fields[0]):
-			// A source line: the priority, the address, the suite, the component.
-			entry := APTSourceClass(trimmed)
-			if inInstalled && fromVersion.Class == "" {
-				fromVersion = entry
-			}
-			if entry.Class == OriginDistribution ||
-				(entry.Class == OriginThirdParty && fromPackage.Class == "") {
-				fromPackage = entry
-			}
-		case len(fields) >= 2 && onlyDigits(fields[len(fields)-1]):
-			// The line of a further version: from this point on the sources
-			// concern it rather than the installed version.
-			inInstalled = false
-		}
+// aptPolicyReader turns the blocks of "apt-cache policy" into origins as the
+// lines arrive, so the answer for a whole host never exists at once.
+type aptPolicyReader struct {
+	result      map[string]OriginEntry
+	name        string
+	installed   string
+	inInstalled bool
+	fromVersion OriginEntry
+	fromPackage OriginEntry
+}
+
+func newAPTPolicyReader() *aptPolicyReader {
+	return &aptPolicyReader{result: map[string]OriginEntry{}}
+}
+
+// closeBlock records what the block that has just ended says about its package.
+func (r *aptPolicyReader) closeBlock() {
+	if r.name == "" || r.installed == "" || r.installed == "(none)" {
+		return
 	}
-	close_()
-	return result
+	switch {
+	case r.fromVersion.Class != "" && r.fromVersion.Class != OriginLocal:
+		r.result[r.name] = r.fromVersion
+	case r.fromPackage.Class != "":
+		// A withdrawn version: the package still belongs to the repository it came
+		// from, even though that version of it is no longer there.
+		r.result[r.name] = r.fromPackage
+	case r.fromVersion.Class != "":
+		r.result[r.name] = r.fromVersion
+	default:
+		r.result[r.name] = OriginEntry{Class: OriginUnknown}
+	}
+}
+
+func (r *aptPolicyReader) line(line string) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return
+	}
+	// The header of a block: "name:" at the left edge.
+	if !strings.HasPrefix(line, " ") && strings.HasSuffix(trimmed, ":") {
+		r.closeBlock()
+		r.name = strings.TrimSuffix(trimmed, ":")
+		if colon := strings.Index(r.name, ":"); colon > 0 {
+			// A multi-architecture package carries an architecture suffix.
+			r.name = r.name[:colon]
+		}
+		r.installed, r.inInstalled = "", false
+		r.fromVersion, r.fromPackage = OriginEntry{}, OriginEntry{}
+		return
+	}
+	if r.name == "" {
+		return
+	}
+	if strings.HasPrefix(trimmed, "Installed:") {
+		r.installed = strings.TrimSpace(strings.TrimPrefix(trimmed, "Installed:"))
+		return
+	}
+	fields := strings.Fields(trimmed)
+	if strings.HasPrefix(trimmed, "***") {
+		r.inInstalled = len(fields) >= 2 && fields[1] == r.installed
+		return
+	}
+	switch {
+	case len(fields) >= 2 && onlyDigits(fields[0]):
+		// A source line: the priority, the address, the suite, the component.
+		entry := APTSourceClass(trimmed)
+		if r.inInstalled && r.fromVersion.Class == "" {
+			r.fromVersion = entry
+		}
+		if entry.Class == OriginDistribution ||
+			(entry.Class == OriginThirdParty && r.fromPackage.Class == "") {
+			r.fromPackage = entry
+		}
+	case len(fields) >= 2 && onlyDigits(fields[len(fields)-1]):
+		// The line of a further version: from this point on the sources
+		// concern it rather than the installed version.
+		r.inInstalled = false
+	}
+}
+
+// done closes the last block and hands over what was read.
+func (r *aptPolicyReader) done() map[string]OriginEntry {
+	r.closeBlock()
+	r.name = ""
+	return r.result
 }
 
 // onlyDigits says whether a string consists of digits alone.
@@ -332,44 +363,50 @@ func APTSourceClass(row string) OriginEntry {
 // installedRPM reads the RPM database in the full NEVRA form.
 func installedRPM(ctx context.Context) ([]InstalledPackage, string) {
 	format := `%{NAME}\t%{EPOCHNUM}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\t%{SOURCERPM}\t%{VENDOR}\n`
-	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", format)
-	if !result.Ran || result.ExitCode != 0 {
-		return nil, "rpm -qa: " + result.Reason()
-	}
-
 	var pkgs []InstalledPackage
-	for _, line := range strings.Split(result.Stdout, "\n") {
-		fields := strings.Split(line, "\t")
-		if len(fields) < 7 {
-			continue
+	result := runLines(ctx, 2*time.Minute, func(line string) {
+		if pkg, ok := RPMQueryLine(line); ok {
+			pkgs = append(pkgs, pkg)
 		}
-		pkg := InstalledPackage{
-			Name:         strings.TrimSpace(fields[0]),
-			Epoch:        strings.TrimSpace(fields[1]),
-			Version:      strings.TrimSpace(fields[2]),
-			Release:      strings.TrimSpace(fields[3]),
-			Architecture: strings.TrimSpace(fields[4]),
-			SourceRPM:    strings.TrimSpace(fields[5]),
-			Vendor:       strings.TrimSpace(fields[6]),
-		}
-		if pkg.Name == "" || pkg.Version == "" {
-			continue
-		}
-		// EPOCHNUM gives "0" also when the package has no epoch; we record that as a
-		// missing epoch, because that is how the advisories speak about it.
-		if pkg.Epoch == "0" || pkg.Epoch == "(none)" {
-			pkg.Epoch = ""
-		}
-		if pkg.Vendor == "(none)" {
-			pkg.Vendor = ""
-		}
-		pkg.SourceName, pkg.SourceVersion = SourceFromSourceRPM(pkg.SourceRPM)
-		pkgs = append(pkgs, pkg)
+	}, rpmPath, "-qa", "--qf", format)
+	if !result.Complete() {
+		return nil, result.unreadable("rpm -qa")
 	}
 	if len(pkgs) == 0 {
 		return nil, "rpm -qa returned an empty list"
 	}
 	return pkgs, ""
+}
+
+// RPMQueryLine reads one tab-separated row of the RPM database as
+// installedRPM asks for it.
+func RPMQueryLine(line string) (InstalledPackage, bool) {
+	fields := strings.Split(line, "\t")
+	if len(fields) < 7 {
+		return InstalledPackage{}, false
+	}
+	pkg := InstalledPackage{
+		Name:         strings.TrimSpace(fields[0]),
+		Epoch:        strings.TrimSpace(fields[1]),
+		Version:      strings.TrimSpace(fields[2]),
+		Release:      strings.TrimSpace(fields[3]),
+		Architecture: strings.TrimSpace(fields[4]),
+		SourceRPM:    strings.TrimSpace(fields[5]),
+		Vendor:       strings.TrimSpace(fields[6]),
+	}
+	if pkg.Name == "" || pkg.Version == "" {
+		return InstalledPackage{}, false
+	}
+	// EPOCHNUM gives "0" also when the package has no epoch; we record that as a
+	// missing epoch, because that is how the advisories speak about it.
+	if pkg.Epoch == "0" || pkg.Epoch == "(none)" {
+		pkg.Epoch = ""
+	}
+	if pkg.Vendor == "(none)" {
+		pkg.Vendor = ""
+	}
+	pkg.SourceName, pkg.SourceVersion = SourceFromSourceRPM(pkg.SourceRPM)
+	return pkg, true
 }
 
 // SourceFromSourceRPM extracts the name and the version of the source out of

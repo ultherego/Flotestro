@@ -13,40 +13,96 @@ var errorMarkers = []string{
 	"no match", "nothing provides", "sub-process", "unmet dependencies",
 }
 
-// errorDescription picks from the output of a tool the lines that really say
-// what went wrong.
-func errorDescription(stderr, stdout string) string {
-	lines := append(usefulLines(stderr), usefulLines(stdout)...)
-	if len(lines) == 0 {
-		return ""
-	}
+// trailingLines is how much of the end of an output stands for it when no line
+// carries a marker.
+const trailingLines = 3
 
-	// The line with an error marker and what follows it: dnf writes "Error:
-	// Transaction failed" and the details only below.
-	for i, line := range lines {
-		if hasErrorMarker(line) {
-			return joinLines(lines[i:])
+// errorDescription picks from the output of a tool the lines that really say
+// what went wrong. It walks the streams instead of splitting them: a failed
+// transaction writes megabytes, and only a sentence of it is ever shown.
+func errorDescription(stderr, stdout string) string {
+	var found []string
+	var tail [trailingLines]string
+	count := 0
+
+	forEachUsefulLine(stderr, stdout, func(line string) bool {
+		// The line with an error marker and what follows it: dnf writes "Error:
+		// Transaction failed" and the details only below.
+		if len(found) > 0 || hasErrorMarker(line) {
+			found = append(found, line)
+			return joinedLength(found) <= maxReasonLength
 		}
+		tail[count%trailingLines] = line
+		count++
+		return true
+	})
+
+	if len(found) > 0 {
+		return joinLines(found)
 	}
 	// Without a marker what counts is the end of the output rather than the
 	// beginning.
-	if len(lines) > 3 {
-		lines = lines[len(lines)-3:]
+	kept := make([]string, 0, trailingLines)
+	for i := max(count-trailingLines, 0); i < count; i++ {
+		kept = append(kept, tail[i%trailingLines])
 	}
-	return joinLines(lines)
+	return joinLines(kept)
 }
 
-// usefulLines sifts out the progress bars and the empty lines.
-func usefulLines(text string) []string {
-	var result []string
-	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimSpace(line)
+// forEachUsefulLine walks the lines of both streams in order, skipping the
+// progress bars and the empty lines, until the caller has seen enough.
+func forEachUsefulLine(stderr, stdout string, visit func(string) bool) {
+	for _, text := range [2]string{stderr, stdout} {
+		if !forEachUsefulLineIn(text, visit) {
+			return
+		}
+	}
+}
+
+// forEachUsefulLineIn walks one stream. It returns false when the caller
+// stopped it.
+func forEachUsefulLineIn(text string, visit func(string) bool) bool {
+	for rest := text; rest != ""; {
+		var raw string
+		raw, rest, _ = strings.Cut(rest, "\n")
+		line := strings.TrimSpace(raw)
 		if line == "" || progressLine(line) {
 			continue
 		}
-		result = append(result, line)
+		if !visit(line) {
+			return false
+		}
 	}
-	return result
+	return true
+}
+
+// lastUsefulLines keeps the last lines of a stream without ever holding all of
+// them: a failed transaction writes far more than a result shows.
+func lastUsefulLines(text string, count int) []string {
+	if count <= 0 {
+		return nil
+	}
+	ring := make([]string, count)
+	seen := 0
+	forEachUsefulLineIn(text, func(line string) bool {
+		ring[seen%count] = line
+		seen++
+		return true
+	})
+	kept := make([]string, 0, min(seen, count))
+	for i := max(seen-count, 0); i < seen; i++ {
+		kept = append(kept, ring[i%count])
+	}
+	return kept
+}
+
+// joinedLength is how long the lines gathered so far read as one sentence.
+func joinedLength(lines []string) int {
+	total := 3 * (len(lines) - 1)
+	for _, line := range lines {
+		total += len(line)
+	}
+	return total
 }
 
 // progressLine recognises a progress bar. Dnf builds it out of percentages and

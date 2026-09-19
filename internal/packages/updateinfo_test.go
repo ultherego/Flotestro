@@ -126,3 +126,41 @@ func TestTheAdvisoryReadNeverFetches(t *testing.T) {
 		t.Error("the advisory read does not pass --cacheonly")
 	}
 }
+
+// Every advisory the vendor ever published is in that answer, and a host
+// carries a handful of them. The blocks are narrowed as they close, so the
+// findings that do not concern this host never pile up - and the result has to
+// be the one the whole answer would have given.
+func TestTheStreamedReadNarrowsToTheSameFindings(t *testing.T) {
+	installed := []InstalledPackage{
+		{Name: "openssh-server", Architecture: "x86_64"},
+		{Name: "firewalld", Architecture: "noarch"},
+	}
+	present := installedSet(installed)
+
+	var streamed []Advisory
+	reader := newUpdateinfoReader(func(advisory Advisory) {
+		if narrowed, ok := narrowAdvisory(advisory, present); ok {
+			streamed = append(streamed, narrowed)
+		}
+	})
+	for _, line := range strings.Split(updateinfoOutput, "\n") {
+		reader.line(line)
+	}
+	reader.done()
+
+	whole := NarrowToInstalled(ParseUpdateinfo(updateinfoOutput), installed)
+	if len(streamed) != len(whole) {
+		t.Fatalf("the streamed read gave %d findings and the whole one %d", len(streamed), len(whole))
+	}
+	for i := range whole {
+		if streamed[i].ID != whole[i].ID || len(streamed[i].Packages) != len(whole[i].Packages) {
+			t.Errorf("finding %d: %+v, expected %+v", i, streamed[i], whole[i])
+		}
+	}
+	// The bug fix of firewalld is not a vulnerability and must not survive the
+	// narrowing, however much of it the host carries.
+	if len(streamed) != 1 || streamed[0].Type != TypeSecurity {
+		t.Errorf("the narrowing kept %+v", streamed)
+	}
+}

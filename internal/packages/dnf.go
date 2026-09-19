@@ -264,11 +264,14 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 func (d *DNF) installedVersions(ctx context.Context) map[string]string {
 	// The architecture is recorded next to the bare name: a plan that names
 	// kernel-core.
-	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", "%{NAME} %{ARCH} %{EVR}\n")
-	if !result.Ran || result.ExitCode != 0 {
+	versions := map[string]string{}
+	result := runLines(ctx, 2*time.Minute, func(line string) {
+		addInstalledRPM(versions, line)
+	}, rpmPath, "-qa", "--qf", "%{NAME} %{ARCH} %{EVR}\n")
+	if !result.Complete() {
 		return nil
 	}
-	return parseInstalledRPM(result.Stdout)
+	return versions
 }
 
 // parseInstalledRPM reads what rpm printed. Several versions of the same
@@ -276,17 +279,22 @@ func (d *DNF) installedVersions(ctx context.Context) map[string]string {
 func parseInstalledRPM(output string) map[string]string {
 	versions := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 3 {
-			continue
-		}
-		name, architecture, version := fields[0], fields[1], fields[2]
-		if previous, seen := versions[name]; !seen || CompareRPMVersions(previous, version) < 0 {
-			versions[name] = version
-		}
-		versions[name+"."+architecture] = version
+		addInstalledRPM(versions, line)
 	}
 	return versions
+}
+
+// addInstalledRPM records one row of "rpm -qa".
+func addInstalledRPM(versions map[string]string, line string) {
+	fields := strings.Fields(line)
+	if len(fields) != 3 {
+		return
+	}
+	name, architecture, version := fields[0], fields[1], fields[2]
+	if previous, seen := versions[name]; !seen || CompareRPMVersions(previous, version) < 0 {
+		versions[name] = version
+	}
+	versions[name+"."+architecture] = version
 }
 
 // rebootRequired asks dnf about the need for a restart.

@@ -63,7 +63,14 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 	}
 
 	timeout := timeoutOf(task, opspec.ActionReadJournal)
-	result := runCommand(ctx, timeout, journalctlPath, args...)
+	// The answer is trimmed to the limit anyway, so the limit is applied while
+	// journalctl writes: a read of ten thousand lines never exists whole.
+	limit := int(task.GetLimits().GetMaxOutputBytes())
+	if limit <= 0 {
+		limit = defaultJournalBytes
+	}
+	tail := newTailBuffer(limit)
+	result := runCommandTo(ctx, timeout, tail, journalctlPath, args...)
 	if !result.Ran {
 		status := agentv1.TaskResult_STATUS_FAILED
 		if ctx.Err() != nil {
@@ -75,30 +82,18 @@ func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelo
 		return rejected(agentv1.TaskResult_STATUS_FAILED, "journal_failed", result.Reason())
 	}
 
-	limit := int(task.GetLimits().GetMaxOutputBytes())
-	if limit <= 0 {
-		limit = 256 << 10
-	}
-	stdout, truncated := clampBytes([]byte(result.Stdout), limit)
-
 	return &agentv1.TaskResult{
 		Status:          agentv1.TaskResult_STATUS_SUCCEEDED,
 		ExitCode:        0,
-		Stdout:          stdout,
-		OutputTruncated: truncated,
+		Stdout:          tail.data,
+		OutputTruncated: tail.cut,
 	}
 }
 
-// clampBytes trims the result to the limit and signals the cut. The result of a
-// task must not grow to an arbitrary size.
-func clampBytes(data []byte, limit int) ([]byte, bool) {
-	if len(data) <= limit {
-		return data, false
-	}
-	// The cut is made from the start: in a journal read the freshest entries are
-	// at the end and those are the ones needed.
-	return data[len(data)-limit:], true
-}
+// defaultJournalBytes is what a journal read answers with when the task names
+// no limit of its own. The cut is made from the start: in a journal read the
+// freshest entries are at the end and those are the ones needed.
+const defaultJournalBytes = 256 << 10
 
 // readLogFile reads a log file through the helper.
 func (e *TaskExecutor) readLogFile(ctx context.Context, task *agentv1.TaskEnvelope,

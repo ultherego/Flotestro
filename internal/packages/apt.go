@@ -1,6 +1,7 @@
 package packages
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -438,31 +439,39 @@ func (a *APT) installedVersions(ctx context.Context) map[string]string {
 	// Both spellings of the name are recorded: a package that may be installed
 	// for more than one architecture is printed by dpkg as name:arch, while apt
 	// names it without the suffix in a plan.
-	result := run(ctx, 2*time.Minute, dpkgQueryPath, "-W", "-f",
+	versions := map[string]string{}
+	result := runLines(ctx, 2*time.Minute, func(line string) {
+		addInstalledDebian(versions, line)
+	}, dpkgQueryPath, "-W", "-f",
 		"${Package} ${Architecture} ${Version} ${db:Status-Status}\n")
-	if !result.Ran || result.ExitCode != 0 {
+	if !result.Complete() {
 		return nil
 	}
-	return parseInstalledDebian(result.Stdout)
+	return versions
 }
 
 // parseInstalledDebian reads what dpkg-query printed.
 func parseInstalledDebian(output string) map[string]string {
 	versions := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 4 || fields[3] != "installed" {
-			continue
-		}
-		name, architecture, version := fields[0], fields[1], fields[2]
-		// A second architecture of the same package would otherwise overwrite the
-		// first under the bare name; the qualified name stays exact either way.
-		if _, taken := versions[name]; !taken {
-			versions[name] = version
-		}
-		versions[name+":"+architecture] = version
+		addInstalledDebian(versions, line)
 	}
 	return versions
+}
+
+// addInstalledDebian records one row of "dpkg-query -W".
+func addInstalledDebian(versions map[string]string, line string) {
+	fields := strings.Fields(line)
+	if len(fields) != 4 || fields[3] != "installed" {
+		return
+	}
+	name, architecture, version := fields[0], fields[1], fields[2]
+	// A second architecture of the same package would otherwise overwrite the
+	// first under the bare name; the qualified name stays exact either way.
+	if _, taken := versions[name]; !taken {
+		versions[name] = version
+	}
+	versions[name+":"+architecture] = version
 }
 
 // DatabaseBroken checks whether dpkg was left in a state that needs repairing.
@@ -488,37 +497,53 @@ func (a *APT) blockedFromStatus() []Blocked {
 }
 
 // blockedFromStatusFile is separated out so that the parsing can be checked
-// without changing the package database of a running system.
+// without changing the package database of a running system. The file carries
+// the description of every package, so it is read stanza by stanza.
 func blockedFromStatusFile(path string) []Blocked {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
+	defer file.Close()
+
 	var blocked []Blocked
-	for _, stanza := range strings.Split(string(data), "\n\n") {
-		var name, status string
-		for _, line := range strings.Split(stanza, "\n") {
-			switch {
-			case strings.HasPrefix(line, "Package: "):
-				name = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
-			case strings.HasPrefix(line, "Status: "):
-				status = strings.TrimSpace(strings.TrimPrefix(line, "Status: "))
-			}
-		}
+	var name, status string
+	closeStanza := func() {
+		defer func() { name, status = "", "" }()
 		if name == "" || status == "" {
-			continue
+			return
 		}
 		fields := strings.Fields(status)
 		if len(fields) != 3 {
-			continue
+			return
 		}
 		// The third field describes the actual state of the package.
 		switch fields[2] {
 		case "installed", "config-files", "not-installed":
-			continue
+			return
 		}
 		blocked = append(blocked, Blocked{Name: name, Status: status})
 	}
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64<<10), maxLineBytes)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case line == "":
+			closeStanza()
+		case strings.HasPrefix(line, "Package: "):
+			name = strings.TrimSpace(strings.TrimPrefix(line, "Package: "))
+		case strings.HasPrefix(line, "Status: "):
+			status = strings.TrimSpace(strings.TrimPrefix(line, "Status: "))
+		}
+	}
+	if scanner.Err() != nil {
+		// A file read only in part says nothing about the packages below the
+		// hole, and a shorter list of blocked packages would read as fewer.
+		return nil
+	}
+	closeStanza()
 	return blocked
 }
 

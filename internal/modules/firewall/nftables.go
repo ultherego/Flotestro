@@ -174,11 +174,20 @@ func markOrigin(snapshot *Snapshot, owners map[string]string) {
 	}
 }
 
-// Fingerprint computes the digest of a ruleset.
+// Fingerprint computes the digest of a ruleset. It hashes line by line: a
+// counter never spans a newline, so the digest is the same as over the whole
+// text, and a ruleset of a busy host is not copied twice to arrive at it.
 func Fingerprint(ruleset string) string {
-	withoutCounters := ruleCounters.ReplaceAllString(ruleset, "counter")
-	sum := sha256.Sum256([]byte(withoutCounters))
-	return hex.EncodeToString(sum[:12])
+	sum := sha256.New()
+	for rest, more := ruleset, true; more; {
+		var line string
+		line, rest, more = strings.Cut(rest, "\n")
+		sum.Write([]byte(ruleCounters.ReplaceAllString(line, "counter")))
+		if more {
+			sum.Write([]byte{'\n'})
+		}
+	}
+	return hex.EncodeToString(sum.Sum(nil)[:12])
 }
 
 func number(value string) int {

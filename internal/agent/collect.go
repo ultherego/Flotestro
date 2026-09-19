@@ -98,7 +98,9 @@ func moduleSet(modules []string) map[string]bool {
 func failedUnits(ctx context.Context) ([]string, bool) {
 	result := runCommand(ctx, 15*time.Second,
 		"/usr/bin/systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager")
-	if !result.Ran || result.ExitCode != 0 {
+	if !result.Complete() {
+		// A cut listing would name fewer failed units than the host has, and
+		// fewer would read as a host in better shape than it is.
 		return nil, false
 	}
 	var units []string
@@ -116,23 +118,21 @@ func failedUnits(ctx context.Context) ([]string, bool) {
 func aptSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: "apt"}
 
-	if result := runCommand(ctx, 30*time.Second,
-		"/usr/bin/dpkg-query", "-f", "${binary:Package}\n", "-W"); result.Ran && result.ExitCode == 0 {
-		installed := uint32(len(strings.Fields(result.Stdout)))
+	// The listings are counted as they arrive: only the counters are kept, never
+	// the list of every package of the host.
+	var installed uint32
+	if result := runCommandLines(ctx, 30*time.Second, func(line string) {
+		if strings.TrimSpace(line) != "" {
+			installed++
+		}
+	}, "/usr/bin/dpkg-query", "-f", "${binary:Package}\n", "-W"); result.Complete() {
 		summary.Installed = &installed
 	}
 
-	result := runCommand(ctx, 120*time.Second,
-		"/usr/bin/apt-get", "--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
-	if !result.Ran || result.ExitCode != 0 {
-		summary.UnavailableReason = result.Reason()
-		return summary
-	}
-
 	var upgradable, security uint32
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	result := runCommandLines(ctx, 120*time.Second, func(line string) {
 		if !strings.HasPrefix(line, "Inst ") {
-			continue
+			return
 		}
 		upgradable++
 		// The origin is in brackets at the end of the line; the security
@@ -140,7 +140,12 @@ func aptSummary(ctx context.Context) Packages {
 		if strings.Contains(line, "-security") || strings.Contains(line, "Debian-Security") {
 			security++
 		}
+	}, "/usr/bin/apt-get", "--simulate", "--quiet", "-o", "Debug::NoLocking=true", "upgrade")
+	if !result.Complete() {
+		summary.UnavailableReason = result.Reason()
+		return summary
 	}
+
 	summary.Upgradable = &upgradable
 	summary.SecurityUpgradable = &security
 	return summary
@@ -151,27 +156,29 @@ func aptSummary(ctx context.Context) Packages {
 func dnfSummary(ctx context.Context) Packages {
 	summary := Packages{Manager: "dnf"}
 
-	if result := runCommand(ctx, 30*time.Second,
-		"/usr/bin/rpm", "-qa", "--qf", "%{NAME}\n"); result.Ran && result.ExitCode == 0 {
-		installed := uint32(len(strings.Fields(result.Stdout)))
+	var installed uint32
+	if result := runCommandLines(ctx, 30*time.Second, func(line string) {
+		if strings.TrimSpace(line) != "" {
+			installed++
+		}
+	}, "/usr/bin/rpm", "-qa", "--qf", "%{NAME}\n"); result.Complete() {
 		summary.Installed = &installed
 	}
 
-	result := runCommand(ctx, 180*time.Second,
-		"/usr/bin/dnf", "--quiet", "--cacheonly", "check-update")
-	if !result.Ran || (result.ExitCode != 0 && result.ExitCode != 100) {
-		summary.UnavailableReason = result.Reason()
-		return summary
-	}
-
 	var upgradable uint32
-	for _, line := range strings.Split(result.Stdout, "\n") {
+	result := runCommandLines(ctx, 180*time.Second, func(line string) {
 		fields := strings.Fields(line)
 		// An update line is: name.arch  version  repository.
 		if len(fields) == 3 && strings.Contains(fields[0], ".") && !strings.HasPrefix(line, " ") {
 			upgradable++
 		}
+	}, "/usr/bin/dnf", "--quiet", "--cacheonly", "check-update")
+	if !result.Ran || result.Truncated ||
+		(result.ExitCode != 0 && result.ExitCode != 100) {
+		summary.UnavailableReason = result.Reason()
+		return summary
 	}
+
 	summary.Upgradable = &upgradable
 	// Fedora does not publish consistent security metadata for all repositories,
 	// so the security counter stays undetermined instead of a false zero.

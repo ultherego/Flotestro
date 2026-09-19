@@ -1355,11 +1355,15 @@ const OriginForeign = "foreign"
 
 // installedPacman reads the local database.
 func installedPacman(ctx context.Context) ([]InstalledPackage, string) {
-	result := run(ctx, 2*time.Minute, pacmanPath, "-Q")
-	if !result.Ran || result.ExitCode != 0 {
-		return nil, "pacman -Q: " + result.Reason()
+	var pkgs []InstalledPackage
+	result := runLines(ctx, 2*time.Minute, func(line string) {
+		if pkg, ok := PacmanQueryLine(line); ok {
+			pkgs = append(pkgs, pkg)
+		}
+	}, pacmanPath, "-Q")
+	if !result.Complete() {
+		return nil, result.unreadable("pacman -Q")
 	}
-	pkgs := ParsePacmanQuery(result.Stdout)
 	if len(pkgs) == 0 {
 		return nil, "pacman -Q returned an empty list"
 	}
@@ -1367,21 +1371,38 @@ func installedPacman(ctx context.Context) ([]InstalledPackage, string) {
 	// -Qm ends with the code 1 and no output when nothing is foreign; that is
 	// an answer rather than an error.
 	foreign := map[string]bool{}
-	foreignResult := run(ctx, 2*time.Minute, pacmanPath, "-Qm")
-	foreignKnown := foreignResult.Ran && (foreignResult.ExitCode == 0 ||
-		(foreignResult.ExitCode == 1 && strings.TrimSpace(foreignResult.Stderr) == ""))
-	if foreignKnown {
-		for _, pkg := range ParsePacmanQuery(foreignResult.Stdout) {
+	foreignResult := runLines(ctx, 2*time.Minute, func(line string) {
+		if pkg, ok := PacmanQueryLine(line); ok {
 			foreign[pkg.Name] = true
 		}
+	}, pacmanPath, "-Qm")
+	foreignKnown := foreignResult.Ran && !foreignResult.Truncated &&
+		(foreignResult.ExitCode == 0 ||
+			(foreignResult.ExitCode == 1 && strings.TrimSpace(foreignResult.Stderr) == ""))
+	if !foreignKnown {
+		clear(foreign)
 	}
 
 	// -Sl reads the sync databases the host has; without them nothing is
 	// known about the repositories, and the origin stays unknown.
-	repositories := map[string]string{}
-	syncResult := run(ctx, 2*time.Minute, pacmanPath, "-Sl")
-	if syncResult.Ran && syncResult.ExitCode == 0 {
-		repositories = ParsePacmanSyncList(syncResult.Stdout)
+	installed := make(map[string]bool, len(pkgs))
+	for i := range pkgs {
+		installed[pkgs[i].Name] = true
+	}
+	repositories := make(map[string]string, len(pkgs))
+	syncResult := runLines(ctx, 2*time.Minute, func(line string) {
+		name, repository, ok := PacmanSyncListLine(line)
+		// The sync databases name every package of every repository and this host
+		// asks only about the ones it has: the rest is read past, not kept.
+		if !ok || !installed[name] {
+			return
+		}
+		if _, seen := repositories[name]; !seen {
+			repositories[name] = repository
+		}
+	}, pacmanPath, "-Sl")
+	if !syncResult.Complete() {
+		clear(repositories)
 	}
 	FillPacmanOrigin(pkgs, foreign, foreignKnown, repositories)
 	return pkgs, ""
@@ -1392,22 +1413,29 @@ func installedPacman(ctx context.Context) ([]InstalledPackage, string) {
 func ParsePacmanQuery(output string) []InstalledPackage {
 	var pkgs []InstalledPackage
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
+		if pkg, ok := PacmanQueryLine(line); ok {
+			pkgs = append(pkgs, pkg)
 		}
-		pkg := InstalledPackage{Name: fields[0]}
-		pkg.Epoch, pkg.Version, pkg.Release = SplitPacmanVersion(fields[1])
-		if pkg.Name == "" || pkg.Version == "" {
-			continue
-		}
-		// Arch builds one package from one recipe; a split package keeps the name of
-		// its base only in the local database, which the list does not read.
-		pkg.SourceName = pkg.Name
-		pkg.SourceVersion = fields[1]
-		pkgs = append(pkgs, pkg)
 	}
 	return pkgs
+}
+
+// PacmanQueryLine reads one "name version" line of the local database.
+func PacmanQueryLine(line string) (InstalledPackage, bool) {
+	fields := strings.Fields(line)
+	if len(fields) != 2 {
+		return InstalledPackage{}, false
+	}
+	pkg := InstalledPackage{Name: fields[0]}
+	pkg.Epoch, pkg.Version, pkg.Release = SplitPacmanVersion(fields[1])
+	if pkg.Name == "" || pkg.Version == "" {
+		return InstalledPackage{}, false
+	}
+	// Arch builds one package from one recipe; a split package keeps the name of
+	// its base only in the local database, which the list does not read.
+	pkg.SourceName = pkg.Name
+	pkg.SourceVersion = fields[1]
+	return pkg, true
 }
 
 // SplitPacmanVersion breaks "epoch:version-release" into its parts. The
@@ -1429,15 +1457,24 @@ func SplitPacmanVersion(full string) (epoch, version, release string) {
 func ParsePacmanSyncList(output string) map[string]string {
 	repositories := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
+		name, repository, ok := PacmanSyncListLine(line)
+		if !ok {
 			continue
 		}
-		if _, seen := repositories[fields[1]]; !seen {
-			repositories[fields[1]] = fields[0]
+		if _, seen := repositories[name]; !seen {
+			repositories[name] = repository
 		}
 	}
 	return repositories
+}
+
+// PacmanSyncListLine reads one "repository name version [installed]" line.
+func PacmanSyncListLine(line string) (name, repository string, ok bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 3 {
+		return "", "", false
+	}
+	return fields[1], fields[0], true
 }
 
 // FillPacmanOrigin classifies the packages by where they come from.
