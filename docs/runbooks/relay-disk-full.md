@@ -5,13 +5,16 @@
 Handle a site relay that has run out of room and put it back into service. Two resources
 are involved:
 
-- The **message buffer** holds what the site's agents send while the link to the centre is
-  down. It lives in the relay's memory, bounded by `buffer_max_bytes` in `relay.yaml`; nothing
-  of it is written to disk, and a restart of `flotestro-relay` empties it.
+- The **message buffer** is the spool: append-only segments under `spool/` in the state
+  directory, bounded by `buffer_max_bytes` in `relay.yaml` (1 GiB by default). It holds what
+  the site's agents send while the link to the centre is down, and it survives a restart of
+  `flotestro-relay` - the index is rebuilt from the segments and a record damaged at the end of
+  the last one is cut off without touching the records before it.
 - The **state directory** (`state_dir`, default `/var/lib/flotestro-relay`, the only writable
-  path of the unit) holds the identity (`identity/current -> generations/<serial>/` with
-  `agent.key`, `agent.pem`, `trust-bundle.pem`), `status.json` and the renewal throttle file.
-  A full filesystem there breaks certificate renewal, not the buffer.
+  path of the unit) holds that spool, the identity (`identity/current -> generations/<serial>/`
+  with `agent.key`, `agent.pem`, `trust-bundle.pem`), `status.json` and the renewal throttle
+  file. A full filesystem there stops certificate renewal and the spool alike: nothing is
+  appended below `min_free_bytes` (256 MiB by default), whatever the class.
 
 ## Signals
 
@@ -82,22 +85,44 @@ are involved:
 
 ### What is kept and what is dropped
 
-A new message is refused once `bytes + len(payload) > buffer_max_bytes`; the older ones stay,
-because an old result usually belongs to a finished job and is closest to delivery. Every kind
-of agent message is treated alike (results, progress, log lines, inventory, metrics samples,
-heartbeats); there is no priority by kind. Delivery is oldest first, per host, once that host's
-session to the centre is open again, and a message leaves the buffer only after a confirmed
-send. Agents keep no spool of their own: what the relay drops is gone. The panel returns the
-job to `queued` when its lease expires and dispatches it again once the host is back; the
-agent answers from its idempotency journal (24 hours), so a dropped result is usually
-recovered. A job whose time to live passes first ends `expired`; a campaign target ends
-`unknown` with the code `lease_expired`.
+Every message carries a class, and the class decides what happens when the room runs out:
+
+| Class | Priority | When the spool is full |
+| --- | --- | --- |
+| identity, control | 0 | keeps the reserve; new sessions are refused before an existing record is lost |
+| job result, acknowledgement | 1 | keeps the reserve; `relay_spool_critical` |
+| inventory, security | 2 | coalesced to the newest full revision |
+| metrics | 3 | oldest dropped first, counted in `dropped_total` |
+| interactive logs | 4 | the stream is cut with `resource_exhausted` |
+
+The last `critical_reserve_bytes` of the quota (128 MiB by default) are for classes 0 and 1
+alone, so a site streaming metrics cannot starve the acknowledgement of a job. A message of a
+light class is refused with `resource_exhausted` and one of a durable class with
+`relay_spool_critical`; both are counted and both are named in the log.
+
+Delivery is priority first, then sequence, per host, once that host's session to the centre is
+open again, and at most `max_inflight_per_host` records (64) are out at a time. **A record
+leaves the spool when the panel says it consumed the message, never on a successful send**: the
+panel names the record in its acknowledgement - by the sequence of the agent's signed envelope,
+or by the identifier the relay gave it for an agent that signs none - and a record nobody
+acknowledges within `ack_timeout` (30 s) is sent again. A panel of a release older than 0.58.0
+cannot name a record that has no sequence; the relay waits four delivery attempts for it and
+then lets the record go on its delivery alone, saying so in the log ("the centre does not
+acknowledge a message by its record identifier").
+
+Agents keep no spool of their own: what the relay drops is gone. The panel returns the job to
+`queued` when its lease expires and dispatches it again once the host is back; the agent
+answers from its idempotency journal (24 hours), so a dropped result is usually recovered. A
+job whose time to live passes first ends `expired`; a campaign target ends `unknown` with the
+code `lease_expired`.
 
 ### Buffer full (link to the centre down)
 
 1. Confirm: `sudo -u flotestro-relay flotestro-relayctl status` (`Centre:`, `Buffer:`), then
    `flotestro-relayctl diagnose` for the `dns.*`, `tls.*` and `upstream` checks of `upstream.gateway_urls`.
-2. Restore the link. Do not restart the relay to "free" the buffer: the restart discards it.
+2. Restore the link. Restarting the relay frees nothing - the spool is on disk and comes back
+   with the process - and it costs the site every open session, so restart only for a reason of
+   its own.
 3. Once `Centre:` shows a last contact, watch `buffer_bytes` fall and `buffered_items` reach 0
    on `GET /api/v1/relays/{id}`; a host's buffered messages go out with its new session. The
    history over the same window says how long the site was cut off and whether anything was lost
@@ -146,9 +171,10 @@ recovered. A job whose time to live passes first ends `expired`; a campaign targ
 - `GET /api/v1/relays/{id}`: `state: "active"`, `buffer_dropped: 0` after the restart,
   `hosts_attested` back to the site's count; "Relay buffers high" no longer counts the relay.
 - `GET /api/v1/relays/{id}/buffer-history?range=24h`: the newest points have `disconnected: false`,
-  `dropped_delta: 0` and a falling `bytes_used`, and `alerts` is empty. A restart to free the
-  spool shows as `restarted: true` with the drop counter starting again - the history keeps what
-  the earlier process lost, which the counter itself no longer does.
+  `dropped_delta: 0` and a falling `bytes_used`, and `alerts` is empty. A restart shows as
+  `restarted: true` with the drop counter starting again - the history keeps what the earlier
+  process lost, which the counter itself no longer does. The spool is not emptied by the
+  restart, so `bytes_used` carries on from where it stood.
 - `flotestro-relayctl status` exits 0; `flotestro-relayctl diagnose` shows no `fail`.
 - The site's hosts show sessions on their host pages; new jobs to them complete.
 
@@ -169,7 +195,9 @@ The error guide has no relay entries; a relay incident shows on jobs as `lease_e
 `relay_upstream_unreached`, `relay_upstream_stale`, `state_dir_low_space`, `state_dir_unwritable`,
 `identity_missing`, `identity_expired`, `identity_expiring`, `listener_unavailable`) and the
 configuration loader (`relay_config_buffer_out_of_range`, `relay_config_state_dir_invalid`,
-`relay_config_gateway_missing`, `relay_config_health_listen_invalid`). The health answers of
+`relay_config_gateway_missing`, `relay_config_health_listen_invalid`). The spool refuses a
+message of a light class with `resource_exhausted` and one of a durable class with
+`relay_spool_critical`. The health answers of
 the relay carry their own codes, and those are in the guide: `relay_listener_unavailable`,
 `relay_upstream_unreachable`, `relay_spool_critical`, `relay_spool_unwritable`,
 `relay_certificate_expired`, `relay_certificate_unknown`.
