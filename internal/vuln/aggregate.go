@@ -269,7 +269,9 @@ const hostStateColumns = `h.id::text, h.hostname,
 	coalesce(v.affected, 0), coalesce(v.affected_with_vendor_fix, 0), coalesce(v.affected_no_fix, 0),
 	coalesce(v.unknown, 0), coalesce(v.affected_packages, 0), coalesce(v.unique_advisories, 0),
 	coalesce(v.unique_cves, 0), coalesce(v.coverage_reason, ''), coalesce(v.advisories_reason, ''),
-	v.evaluated_at, coalesce(v.generation_id::text, ''), v.generation_at`
+	v.evaluated_at, coalesce(v.generation_id::text, ''), v.generation_at,
+	coalesce(v.evaluation_failed_reason, ''), coalesce(v.evaluation_failed_source, ''),
+	v.evaluation_failed_at, v.last_successful_at, coalesce(v.release_digest, '')`
 
 // FleetPage reads one page of the fleet table under the filter's order. A
 // cursor issued under another order is refused.
@@ -322,7 +324,9 @@ func (s *Store) FleetPage(ctx context.Context, filter FleetFilter, cursor FleetC
 			&state.PackagesTotal, &state.PackagesCovered, &state.Affected, &state.AffectedWithVendorFix,
 			&state.AffectedNoFix, &state.Unknown, &state.AffectedPackages, &state.UniqueAdvisories,
 			&state.UniqueCVEs, &state.CoverageReason, &state.AdvisoriesReason, &state.EvaluatedAt,
-			&state.GenerationID, &state.GenerationAt, &key[0], &key[1]); err != nil {
+			&state.GenerationID, &state.GenerationAt, &state.EvaluationFailedReason,
+			&state.EvaluationFailedSource, &state.EvaluationFailedAt, &state.LastSuccessfulAt,
+			&state.ReleaseDigest, &key[0], &key[1]); err != nil {
 			return page, err
 		}
 		if state.EvaluatedAt == nil {
