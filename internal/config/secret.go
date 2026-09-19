@@ -10,32 +10,14 @@ import (
 	"syscall"
 )
 
-// The contract for secrets.
-//
-// A non-secret setting may live in the environment; a secret may not. In a
-// container the value of an environment variable sits in the inspection
-// output of the engine, in the shell history of whoever started it and in
-// the environment of every child process, so the installation mounts a
-// secret as a file and names the file instead: for every variable NAME the
-// panel also accepts NAME_FILE and reads the value from that file once, at
-// start.
-//
-// Nothing in this file ever puts a value into an error, a log line or a
-// String method, and no type here keeps a secret in a field. A refusal
-// names the variable, the path and what was wrong with it - never the
-// value, because a refusal is the one message an operator copies into a
-// ticket.
+// The contract for secrets. A non-secret setting may live in the environment;
+// a secret may not.
 
-// maxSecretFileSize is the largest file this contract reads. A secret is a
-// password, a key or a token; a file of megabytes is a mount that points at
-// the wrong thing, and reading it whole would only turn a mistake into
-// memory pressure.
+// maxSecretFileSize is the largest file this contract reads.
 const maxSecretFileSize = 64 << 10
 
 // ErrSecretMissing marks the one refusal a caller is allowed to ignore: the
-// secret is not configured in either form. An optional secret may stay
-// absent, but a configured one that cannot be read is never treated as
-// absent - that is how a signature quietly stops being checked.
+// secret is not configured in either form.
 var ErrSecretMissing = errors.New("the secret is not configured")
 
 // SecretReason says which of the refusals happened. The text of a message
@@ -63,10 +45,7 @@ const (
 	SecretReasonUnreadable SecretReason = "unreadable"
 )
 
-// SecretError is the refusal of this contract. It carries the name of the
-// variable, the path it named and the reason, and it never carries the
-// value: neither Error nor any other method of it can leak a secret into a
-// log.
+// SecretError is the refusal of this contract.
 type SecretError struct {
 	// Name is the secret, for example FLOTESTRO_WEBHOOK_SECRET. It is empty
 	// when a file was checked on its own, through CheckSecretFile.
@@ -118,22 +97,14 @@ func (e *SecretError) Error() string {
 // caller can ask errors.Is about ErrSecretMissing or about os.ErrNotExist.
 func (e *SecretError) Unwrap() error { return e.cause }
 
-// SecretValue reads the secret NAME. The value comes either from the
-// variable itself or from the file NAME_FILE names, never from both, and
-// the file is read once - the caller keeps the value, this package keeps
-// nothing.
-//
-// A secret that is not configured at all comes back wrapping
-// ErrSecretMissing, which is what tells an optional secret apart from a
-// broken mount.
+// SecretValue reads the secret NAME.
 func SecretValue(name string) (string, error) {
 	value, valueSet := os.LookupEnv(name)
 	path, fileSet := os.LookupEnv(name + "_FILE")
 
-	// Both forms at once is a refusal rather than a precedence rule: the
-	// two mean different things to whoever set them, and starting with one
-	// of them silently is how an installation signs with a secret nobody
-	// believes is in use any more.
+	// Both forms at once is a refusal rather than a precedence rule: the two mean
+	// different things to whoever set them, and starting with one of them
+	// silently is how an installation signs with a secret nobody believes is in
 	if valueSet && fileSet {
 		return "", &SecretError{Name: name, Reason: SecretReasonConflict}
 	}
@@ -156,19 +127,6 @@ func SecretValue(name string) (string, error) {
 }
 
 // OptionalSecretValue reads a secret a deployment may leave out.
-//
-// A secret that is not configured comes back empty and without an error,
-// and for an optional one an empty variable says exactly that: an
-// environment file listing every variable the product knows, each with
-// nothing after the equals sign, is how a package ships its configuration,
-// and a panel that refuses to start over one of those lines would be
-// refusing its own defaults. An empty variable is a statement for a
-// required secret - SecretValue keeps refusing it - and no statement at
-// all for an optional one.
-//
-// A configured secret that cannot be read is still a refusal, whichever
-// kind it is: falling back to "no secret" on an unreadable mount turns a
-// mounting mistake into a panel that quietly stops signing.
 func OptionalSecretValue(name string) (string, error) {
 	value, err := SecretValue(name)
 	var refusal *SecretError
@@ -182,9 +140,7 @@ func OptionalSecretValue(name string) (string, error) {
 }
 
 // SecretConfigured says whether the installation set the secret at all, in
-// either form. It answers the settings screen, which shows that a secret is
-// in place without ever showing one, and it answers a caller that only
-// enables a feature when its secret exists.
+// either form.
 func SecretConfigured(name string) bool {
 	if value, ok := os.LookupEnv(name); ok && value != "" {
 		return true
@@ -195,9 +151,7 @@ func SecretConfigured(name string) bool {
 
 // CheckSecretFile runs the protections of this contract over a secret that
 // stays a file - the keytab of the directory connector, for instance, whose
-// path the panel hands to a library rather than reading the bytes. A keytab
-// anyone on the machine can read hands out the identity of the connector
-// just as surely as a leaked password.
+// path the panel hands to a library rather than reading the bytes.
 func CheckSecretFile(path string) error {
 	file, err := openSecretFile(path)
 	if err != nil {
@@ -214,9 +168,9 @@ func readSecretFile(path string) (string, error) {
 	}
 	defer file.Close()
 
-	// One byte over the limit on purpose: a file that grew between the
-	// check and the read is refused rather than silently handed over
-	// truncated, which would be a secret nobody can explain afterwards.
+	// One byte over the limit on purpose: a file that grew between the check and
+	// the read is refused rather than silently handed over truncated, which would
+	// be a secret nobody can explain afterwards.
 	raw, err := io.ReadAll(io.LimitReader(file, maxSecretFileSize+1))
 	if err != nil {
 		return "", &SecretError{Path: path, Reason: SecretReasonUnreadable, cause: err}
@@ -235,13 +189,13 @@ func readSecretFile(path string) (string, error) {
 	return value, nil
 }
 
-// openSecretFile opens the path and makes sure what it opened is a secret
-// and not something else that was put in its place: the checks run on the
+// openSecretFile opens the path and makes sure what it opened is a secret and
+// not something else that was put in its place: the checks run on the
 // descriptor, so the file that was inspected is the file that is read.
 func openSecretFile(path string) (*os.File, error) {
-	// The Lstat comes first for two reasons: the refusal has to name the
-	// symlink rather than whatever it points at, and a named pipe would
-	// otherwise hold the open until somebody writes to it.
+	// The Lstat comes first for two reasons: the refusal has to name the symlink
+	// rather than whatever it points at, and a named pipe would otherwise hold
+	// the open until somebody writes to it.
 	info, err := os.Lstat(path)
 	if err != nil {
 		return nil, &SecretError{Path: path, Reason: SecretReasonUnreadable, cause: err}
@@ -249,9 +203,9 @@ func openSecretFile(path string) (*os.File, error) {
 	if kind := irregularKind(info.Mode()); kind != "" {
 		return nil, &SecretError{Path: path, Reason: SecretReasonNotRegular, Detail: kind}
 	}
-	// O_NOFOLLOW and O_NONBLOCK close the window between the Lstat and the
-	// open: if the path became a link or a pipe in the meantime, the open
-	// fails or returns at once instead of following it or blocking.
+	// O_NOFOLLOW and O_NONBLOCK close the window between the Lstat and the open:
+	// if the path became a link or a pipe in the meantime, the open fails or
+	// returns at once instead of following it or blocking.
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, &SecretError{Path: path, Reason: SecretReasonUnreadable, cause: err}
@@ -265,9 +219,9 @@ func openSecretFile(path string) (*os.File, error) {
 		file.Close()
 		return nil, &SecretError{Path: path, Reason: SecretReasonNotRegular, Detail: kind}
 	}
-	// A secret the group or others may touch is a secret of the whole
-	// machine: reading it is the leak, writing it is worse, so both are
-	// refused rather than reported.
+	// A secret the group or others may touch is a secret of the whole machine:
+	// reading it is the leak, writing it is worse, so both are refused rather
+	// than reported.
 	perm := opened.Mode().Perm()
 	if perm&0o077 != 0 {
 		file.Close()
@@ -321,18 +275,14 @@ func irregularKind(mode os.FileMode) string {
 }
 
 // trimSecretNewline removes the single newline an editor or a here-document
-// leaves at the end of a secret file, and nothing else. TrimSpace would hand
-// the caller a different value than the one the operator mounted: a password
-// may legitimately begin or end with a space, and a generated key may end
-// with several newlines that belong to it.
+// leaves at the end of a secret file, and nothing else.
 func trimSecretNewline(value string) string {
 	if !strings.HasSuffix(value, "\n") {
 		return value
 	}
 	value = strings.TrimSuffix(value, "\n")
-	// A file written on Windows ends the line with CR LF, and the CR
-	// belongs to the line ending. A lone CR without a newline after it is
-	// left alone, because then it is a byte of the value.
+	// A file written on Windows ends the line with CR LF, and the CR belongs to
+	// the line ending.
 	return strings.TrimSuffix(value, "\r")
 }
 

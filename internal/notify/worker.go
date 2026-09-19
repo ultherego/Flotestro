@@ -15,18 +15,14 @@ import (
 
 // The settings of the worker and their defaults.
 const (
-	// DefaultLease is how long a claimed row is one worker's. A send is
-	// bounded by sendTimeout, half of it; the lease is renewed while a
-	// send runs, so a slow receiver does not hand the row to a second
-	// worker while the first still waits for it.
+	// DefaultLease is how long a claimed row is one worker's.
 	DefaultLease = 30 * time.Second
 	// DefaultBaseBackoff is the pause before the second attempt; each
 	// attempt after it doubles the pause, up to DefaultMaxBackoff.
 	DefaultBaseBackoff = 30 * time.Second
 	DefaultMaxBackoff  = time.Hour
-	// DefaultMaxAttempts is how many attempts a row gets before it is a
-	// dead letter: with the backoff, about a day of a receiver being
-	// down.
+	// DefaultMaxAttempts is how many attempts a row gets before it is a dead
+	// letter: with the backoff, about a day of a receiver being down.
 	DefaultMaxAttempts = 20
 	// DefaultBatch is how many rows one claim takes.
 	DefaultBatch = 50
@@ -70,12 +66,7 @@ func (o Options) withDefaults() Options {
 	return o
 }
 
-// Worker sends the rows of the queue. Every instance of the panel runs
-// one; the claim locks the rows it takes and skips the ones another
-// instance holds, so two workers never send the same row at once, and a
-// row whose worker died is reclaimed when its lease runs out. The
-// worker owns nothing in memory: a restart of the panel resumes from
-// the rows.
+// Worker sends the rows of the queue.
 type Worker struct {
 	store     *Store
 	senders   map[string]Sender
@@ -149,9 +140,8 @@ func (w *Worker) housekeep(ctx context.Context) {
 	}
 }
 
-// Round reclaims the rows whose lease ran out, claims a batch of due
-// rows and sends them one after another. It returns how many rows it
-// took; an error is the database's.
+// Round reclaims the rows whose lease ran out, claims a batch of due rows and
+// sends them one after another.
 func (w *Worker) Round(ctx context.Context) (int, error) {
 	reclaimed, err := w.store.ReclaimStale(ctx)
 	if err != nil {
@@ -175,10 +165,7 @@ func (w *Worker) Round(ctx context.Context) (int, error) {
 	return len(claimed), nil
 }
 
-// send delivers one claimed row and settles it. The lease is renewed
-// right before the send - the row may have waited behind the rest of
-// the batch - and while the send runs; a renewal that finds the row
-// taken by another worker stops this one, and the other settles it.
+// send delivers one claimed row and settles it.
 func (w *Worker) send(ctx context.Context, row Delivery) error {
 	held, err := w.store.Renew(ctx, row.ID, w.owner, w.options.Lease)
 	if err != nil {
@@ -203,18 +190,15 @@ func (w *Worker) send(ctx context.Context, row Delivery) error {
 	return nil
 }
 
-// attempt sends the row once and classifies what happened. The second
-// result is false when the row stopped being this worker's during the
-// send: the worker that took it settles it.
+// attempt sends the row once and classifies what happened.
 func (w *Worker) attempt(ctx context.Context, row Delivery) (Outcome, bool) {
 	channel, err := w.store.get(ctx, row.ChannelID)
 	if err != nil {
 		return w.classify(SendError{Code: CodeInvalidConfig, Err: err}, row.Attempt), true
 	}
 	if !channel.Enabled {
-		// A channel disabled while its rows waited does not send them:
-		// the operator said "nothing through here", and the rows say
-		// why they went nowhere.
+		// A channel disabled while its rows waited does not send them: the operator
+		// said "nothing through here", and the rows say why they went nowhere.
 		return Outcome{State: StateDeadLetter, ErrorCode: CodeChannelMisconfigured, Error: "the channel is disabled"}, true
 	}
 	sender, ok := w.senders[channel.Kind]
@@ -281,14 +265,9 @@ func (w *Worker) classify(err error, attempt int) Outcome {
 	return outcome
 }
 
-// Classify is the classification of the document, without the worker:
-// nothing wrong is delivered; a receiver that answered 408, 429 or 5xx,
-// or that could not be reached at all, gets another attempt until the
-// attempts run out; 401 and 403 are the credential's fault and a dead
-// letter at once; any other status is a dead letter as a permanent
-// error of the address or the body. A mail relay follows the same lines
-// by its reply codes: a refused login is the credential's fault, a 4xx
-// reply passes, a 5xx reply is permanent.
+// Classify is the classification of the document, without the worker: nothing
+// wrong is delivered; a receiver that answered 408, 429 or 5xx, or that could
+// not be reached at all, gets another attempt until the attempts run out; 401
 func Classify(err error, attempt, maxAttempts int) Outcome {
 	if err == nil {
 		return Outcome{State: StateDelivered}
@@ -297,12 +276,9 @@ func Classify(err error, attempt, maxAttempts int) Outcome {
 	sentence := failure.Error()
 	retry := func() Outcome {
 		if attempt >= maxAttempts {
-			// The delivery keeps the reason it failed for, not the fact
-			// that the queue stopped trying: the state already says that,
-			// and an operator reading "attempts exhausted" learns nothing
-			// about the receiver. A test of a channel is one attempt, so
-			// the reason would otherwise be lost exactly where it is the
-			// whole answer.
+			// The delivery keeps the reason it failed for, not the fact that the queue
+			// stopped trying: the state already says that, and an operator reading
+			// "attempts exhausted" learns nothing about the receiver.
 			return Outcome{State: StateDeadLetter, ErrorCode: failure.Code,
 				Error: fmt.Sprintf("%d attempts; last: %s", attempt, sentence)}
 		}
@@ -329,20 +305,17 @@ func Classify(err error, attempt, maxAttempts int) Outcome {
 	case CodeInvalidConfig:
 		return Outcome{State: StateDeadLetter, ErrorCode: CodeChannelMisconfigured, Error: sentence}
 	case CodeConnectionRefused, CodeDNSFailure, CodeTimeout, CodeTLSFailure, CodeUnreachable, CodeSecretUnavailable:
-		// A network error, and a secret store that did not answer, pass:
-		// the receiver may be back, the key may be back, and the operator
-		// who replaces a retired secret wants the waiting rows to go out
-		// with the new one.
+		// A network error, and a secret store that did not answer, pass: the
+		// receiver may be back, the key may be back, and the operator who replaces a
+		// retired secret wants the waiting rows to go out with the new one.
 		return retry()
 	}
 	return retry()
 }
 
 // Backoff is the pause before the next attempt after the given one:
-// exponential from the base, capped, with full jitter - a uniform draw
-// between nothing and the exponential pause, so a thousand rows that
-// failed together do not come back together. The draw is the caller's
-// number in [0, 1).
+// exponential from the base, capped, with full jitter - a uniform draw between
+// nothing and the exponential pause, so a thousand rows that failed together
 func Backoff(attempt int, base, ceiling time.Duration, draw float64) time.Duration {
 	if attempt < 1 {
 		attempt = 1
@@ -362,9 +335,8 @@ func Backoff(attempt int, base, ceiling time.Duration, draw float64) time.Durati
 }
 
 // Summarize writes, for every silence with send_summary that ended, one
-// summary row per channel that had rows kept back, and marks those rows
-// as summarized. The kept rows themselves stay suppressed: the end of a
-// silence is never a flood.
+// summary row per channel that had rows kept back, and marks those rows as
+// summarized.
 func (w *Worker) Summarize(ctx context.Context) error {
 	work, err := w.store.EndedSilences(ctx)
 	if err != nil {

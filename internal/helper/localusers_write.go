@@ -36,25 +36,18 @@ const (
 	// ErrorProtectedAccount marks the account the agent itself runs under:
 	// changing it from the panel would cut the host off from the panel.
 	ErrorProtectedAccount = "protected_account"
-	// ErrorSymlink marks a home directory or a key directory that is a
-	// symbolic link. The helper runs as root and a link placed by the user
-	// would point its writes at somebody else's files.
+	// ErrorSymlink marks a home directory or a key directory that is a symbolic
+	// link.
 	ErrorSymlink = "symlink_refused"
-	// The refusals of the key operations (security remediation, chapter
-	// 14.1): a removal of a key that is not there, the last key of an
-	// account with no password login, a managed file sshd does not read,
-	// material that is not a public key, and a replace whose list the
-	// operator saw is not the list the host has.
+	// The refusals of the key operations (security remediation, chapter 14.
 	ErrorKeyNotFound        = "key_not_found"
 	ErrorLastKeyLockout     = "last_key_lockout"
 	ErrorManagedFileNotRead = "managed_file_not_read"
 	ErrorInvalidKey         = "invalid_ssh_key"
 	ErrorStaleKeyList       = "stale_plan"
-	// ErrorAccountToolMissing marks an operation the host has no tool for:
-	// the shadow tools are a dependency of the agent package, and a host
-	// that lost one of them is to hear which one before anything is
-	// attempted. The same fact is in the capability registry, so this
-	// refusal is the second line of defence rather than the first.
+	// ErrorAccountToolMissing marks an operation the host has no tool for: the
+	// shadow tools are a dependency of the agent package, and a host that lost
+	// one of them is to hear which one before anything is attempted.
 	ErrorAccountToolMissing = "account_tool_missing"
 )
 
@@ -69,10 +62,7 @@ var accountOperationTools = map[helperv1.LocalUserActionRequest_Operation]string
 	helperv1.LocalUserActionRequest_OPERATION_DELETE:     toolUserdel,
 }
 
-// uidRangeReader reads the UID range of people from the host's login.defs
-// right before a write: the same classifier the inventory uses, read
-// again root-side so a change of the file between the report and the
-// order is judged on what the host says now. A test replaces it.
+// uidRangeReader reads the UID range of people from the host's login.
 var uidRangeReader = accounts.LoadUIDRange
 
 // maxAuthorizedKeysBytes bounds the key file the helper reads back. A file
@@ -80,8 +70,7 @@ var uidRangeReader = accounts.LoadUIDRange
 const maxAuthorizedKeysBytes = 1 << 20
 
 // accountRecord is what the helper knows about an account before it changes
-// it. The lookup is a function of the server, so the handlers can be checked
-// without an account on the machine running the tests.
+// it.
 type accountRecord struct {
 	Name     string
 	UID      int
@@ -127,10 +116,6 @@ func (s *Server) tool() accountTool {
 }
 
 // applyLocalUserAction changes a local account on the host.
-//
-// The panel does not manage passwords: accounts are created locked and access
-// is granted with an SSH key. A password in the envelope of a task would be a
-// secret in the database and in the logs.
 func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.LocalUserActionRequest) *helperv1.HelperResponse {
 	name := action.GetName()
@@ -150,9 +135,6 @@ func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.Hel
 	defer cancel()
 
 	// The tool the operation needs is checked before the account is touched.
-	// Without it the tool runner would fail halfway through with a sentence
-	// about a missing binary, and a refusal that names the tool and the
-	// package is an answer the operator can act on.
 	if tool, needed := accountOperationTools[action.GetOperation()]; needed && !accountToolPresent(tool) {
 		return reject(ErrorAccountToolMissing, fmt.Sprintf(
 			"this host has no %s, so the operation cannot be carried out; install %s",
@@ -187,9 +169,8 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	name := action.GetName()
 
 	if existing, err := s.accounts()(name); err == nil {
-		// An account resolved through NSS but absent from /etc/passwd comes from
-		// the directory. Creating a local copy would shadow the identity from the
-		// directory and make the UIDs diverge between hosts.
+		// An account resolved through NSS but absent from /etc/passwd comes from the
+		// directory.
 		if !existing.InPasswd {
 			return reject(ErrorShadowsDirectory, fmt.Sprintf(
 				"the account %s comes from the directory (UID %d); a local copy would shadow it",
@@ -211,16 +192,15 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 	if action.GetCreateHome() {
 		args = append(args, "--create-home")
 	}
-	// A service account is allocated below the range of people, as
-	// useradd --system does; the order has to say so, because an account
-	// in the wrong range is either invisible to the panel or a person's
-	// identifier taken by a daemon.
+	// A service account is allocated below the range of people, as useradd
+	// --system does; the order has to say so, because an account in the wrong
+	// range is either invisible to the panel or a person's identifier taken by a
 	if action.GetSystem() {
 		args = append(args, "--system")
 	}
-	// The material has to parse before the account exists: an account
-	// created and then refused its keys would be an account with no way
-	// in that nobody asked for.
+	// The material has to parse before the account exists: an account created and
+	// then refused its keys would be an account with no way in that nobody asked
+	// for.
 	var keys []accounts.KeyInput
 	for _, key := range action.GetSshKeys() {
 		if err := validatePublicKey(key); err != nil {
@@ -233,24 +213,19 @@ func (s *Server) createLocalUser(ctx context.Context, request *helperv1.HelperRe
 		return reject(ErrorInvalidKey, err.Error())
 	}
 	if len(keys) == 0 && !action.GetInactive() {
-		// The panel refuses this earlier; the host refuses it too, because
-		// the host is the boundary that holds when the panel is not the
-		// one asking.
+		// The panel refuses this earlier; the host refuses it too, because the host
+		// is the boundary that holds when the panel is not the one asking.
 		return reject(ErrorInvalidAccount,
 			"the account would have neither a key nor a password; say inactive to create it without a way in")
 	}
 	switch {
 	case action.GetInactive():
-		// An account nobody is to enter is created locked: the lock is a
-		// fact the inventory shows as such, and a key somebody drops into
-		// its home by hand opens nothing until an unlock is ordered.
+		// An account nobody is to enter is created locked: the lock is a fact the
+		// inventory shows as such, and a key somebody drops into its home by hand
+		// opens nothing until an unlock is ordered.
 		args = append(args, "--password", "!*")
 	default:
 		// The account is created with password login disabled, not locked.
-		// useradd leaves an exclamation mark in shadow, which means "locked
-		// by the administrator"; for an account served by an SSH key that is
-		// a false state, and on top of that it makes a later unlock
-		// impossible.
 		args = append(args, "--password", "*")
 	}
 	args = append(args, name)
@@ -291,11 +266,6 @@ func (s *Server) setLocalUserLock(ctx context.Context, name string, system, lock
 }
 
 // setLocalUserGroups sets the complete list of supplementary groups.
-//
-// The list is exact, not additive: usermod -G replaces the membership, so
-// the state after the operation is the one in the order and nothing the
-// account collected earlier survives unseen. The primary group is not
-// touched.
 func (s *Server) setLocalUserGroups(ctx context.Context, name string, system bool, groups []string) *helperv1.HelperResponse {
 	if _, response := s.requireLocalAccount(name, system); response != nil {
 		return response
@@ -335,12 +305,8 @@ func (s *Server) setLocalUserExpiry(ctx context.Context, name string, system boo
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// deleteLocalUser removes the account, and its home directory when the
-// order says so.
-//
-// A home directory that is a symbolic link is refused: userdel -r would
-// follow it as root and empty whatever it points at. A home that belongs to
-// somebody else is refused for the same reason.
+// deleteLocalUser removes the account, and its home directory when the order
+// says so.
 func (s *Server) deleteLocalUser(ctx context.Context, request *helperv1.HelperRequest,
 	name string, system, removeHome bool) *helperv1.HelperResponse {
 	account, response := s.requireLocalAccount(name, system)
@@ -363,9 +329,9 @@ func (s *Server) deleteLocalUser(ctx context.Context, request *helperv1.HelperRe
 	return &helperv1.HelperResponse{Accepted: true}
 }
 
-// checkRemovableHome says whether the home directory may go with the
-// account: a real directory, owned by the account, and not one of the
-// places every host has.
+// checkRemovableHome says whether the home directory may go with the account:
+// a real directory, owned by the account, and not one of the places every host
+// has.
 func checkRemovableHome(account accountRecord) error {
 	home := filepath.Clean(account.Home)
 	switch home {
@@ -399,15 +365,8 @@ func (e *symlinkError) Error() string {
 	return "the path " + e.path + " is or leads through a symbolic link and is not followed"
 }
 
-// writeAuthorizedKeys replaces the key file of an account.
-//
-// The helper runs as root in a directory the user controls, so nothing here
-// follows a link. The home is opened without resolving symlinks, the key
-// directory is created and opened relative to it and checked to be a plain
-// directory owned by the user or by root, and the file is created with
-// O_EXCL and O_NOFOLLOW under that directory and renamed within it. A link
-// planted as ~/.ssh or ~/.ssh/authorized_keys ends in a refusal, not in
-// root's own key file being rewritten.
+// writeAuthorizedKeys replaces the key file of an account. The helper runs as
+// root in a directory the user controls, so nothing here follows a link.
 func writeAuthorizedKeys(home string, uid, gid int, content string) error {
 	home = filepath.Clean(home)
 	if !filepath.IsAbs(home) {
@@ -470,10 +429,8 @@ func writeAuthorizedKeys(home string, uid, gid int, content string) error {
 		return fmt.Errorf("protecting .ssh: %w", err)
 	}
 
-	// An atomic write: an interrupted write must not leave a file that cuts
-	// off access or grants it only in part. The temporary file is created
-	// exclusively, so a link left there by the user is an error, not a
-	// target.
+	// An atomic write: an interrupted write must not leave a file that cuts off
+	// access or grants it only in part.
 	const temporary = "authorized_keys.flotestro-tmp"
 	_ = unix.Unlinkat(sshFD, temporary, 0)
 	fileFD, err := unix.Openat(sshFD, temporary,
@@ -506,10 +463,8 @@ func writeAuthorizedKeys(home string, uid, gid int, content string) error {
 	return nil
 }
 
-// readAuthorizedKeysFile returns the content of an account's key file
-// without following a link anywhere on the way, or nothing when there is
-// no file. The helper runs as root: a link planted by the user must not
-// make it read somebody else's file.
+// readAuthorizedKeysFile returns the content of an account's key file without
+// following a link anywhere on the way, or nothing when there is no file.
 func readAuthorizedKeysFile(home string) ([]byte, error) {
 	home = filepath.Clean(home)
 	info, err := os.Lstat(home)
@@ -562,13 +517,8 @@ func ownerOf(info os.FileInfo) (int, bool) {
 	return int(stat.Uid), true
 }
 
-// requireLocalAccount rejects operations on system accounts, on accounts
-// that come from the directory and on the account of the agent itself.
-//
-// A system account is one outside the UID range of people in the host's
-// login.defs, read again here: the inventory classified the account with
-// the same file, and the order says with allowSystem that it means a
-// service account. Root and the agent's account are refused either way.
+// requireLocalAccount rejects operations on system accounts, on accounts that
+// come from the directory and on the account of the agent itself.
 func (s *Server) requireLocalAccount(name string, allowSystem bool) (accountRecord, *helperv1.HelperResponse) {
 	account, err := s.accounts()(name)
 	if err != nil {
@@ -583,10 +533,8 @@ func (s *Server) requireLocalAccount(name string, allowSystem bool) (accountReco
 			"the root account is not changed through the panel")
 	}
 	// The agent's own account is what the panel talks to the host through:
-	// locking, deleting or regrouping it would cut the host off from the
-	// panel with no way back. It is judged before the UID range, because
-	// it is a system account as well and the operator is to read why the
-	// change is refused, not merely that the account is a service one.
+	// locking, deleting or regrouping it would cut the host off from the panel
+	// with no way back.
 	if uint32(account.UID) == s.allowedUID {
 		return accountRecord{}, reject(ErrorProtectedAccount, fmt.Sprintf(
 			"the account %s is the agent's own account and is not changed through the panel", name))

@@ -13,15 +13,9 @@ import (
 type Expectation struct {
 	// Kind names the request for the log.
 	Kind string
-	// Mutating says the request changes the host. Only a mutating request
-	// needs a capability; a read, a plan and the confirmation that disarms
-	// a rollback need none, and one they carry is not looked at - a read
-	// is not something the panel authorizes per task.
+	// Mutating says the request changes the host.
 	Mutating bool
 	// Actions are the action types a capability may name for the request.
-	// A request may be one step of an operation of another name - an agent
-	// upgrade installs a package, a rollback of a file writes one - so the
-	// table lists every operation that legitimately makes the request.
 	Actions []opspec.ActionType
 }
 
@@ -39,12 +33,7 @@ func read(kind string) Expectation {
 	return Expectation{Kind: kind, Mutating: false}
 }
 
-// Expect maps a request to the operations that may have produced it. The
-// table is the contract between the request shape and the registry of
-// operations: a capability for unit.restart must not start a package
-// transaction. An operation the table does not know is taken as mutating
-// with no operation allowed, so an unknown request is refused rather than
-// let through.
+// Expect maps a request to the operations that may have produced it.
 func Expect(request *helperv1.HelperRequest) Expectation {
 	switch action := request.GetAction().(type) {
 	case *helperv1.HelperRequest_UnitAction:
@@ -69,9 +58,8 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	case *helperv1.HelperRequest_PackageAction:
 		switch action.PackageAction.GetOperation() {
 		case helperv1.PackageActionRequest_OPERATION_REFRESH:
-			// A refresh rewrites the manager's metadata cache and nothing
-			// the operator owns; it is the first step of a plan as much as
-			// of a transaction.
+			// A refresh rewrites the manager's metadata cache and nothing the operator
+			// owns; it is the first step of a plan as much as of a transaction.
 			return read("packages.refresh")
 		case helperv1.PackageActionRequest_OPERATION_UPGRADE:
 			return mutating("packages.upgrade", opspec.ActionPackageUpgrade)
@@ -95,11 +83,8 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 	case *helperv1.HelperRequest_Hostname:
 		return mutating("system.hostname", opspec.ActionSystemHostnameSet)
 	case *helperv1.HelperRequest_FinalWipe:
-		// The final wipe is the end of the decommission handshake, a typed
-		// message rather than a task, so no capability exists for it. It
-		// removes the agent's own identity and disables the agent: a
-		// process that ordered it out of turn takes the host out of the
-		// fleet, which is not a privilege it gained.
+		// The final wipe is the end of the decommission handshake, a typed message
+		// rather than a task, so no capability exists for it.
 		return read("final_wipe")
 
 	case *helperv1.HelperRequest_IdentityProbe:
@@ -215,11 +200,8 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 		case helperv1.NetworkRequest_OPERATION_READ, helperv1.NetworkRequest_OPERATION_PLAN:
 			return read("network.read")
 		case helperv1.NetworkRequest_OPERATION_CONFIRM:
-			// The confirmation disarms the rollback of a change already
-			// verified under its own capability. It may come minutes
-			// later, after the host proved it still reaches the panel;
-			// the window of the change must not decide whether the
-			// change is kept.
+			// The confirmation disarms the rollback of a change already verified under
+			// its own capability.
 			return read("network.confirm")
 		case helperv1.NetworkRequest_OPERATION_SET_MTU:
 			return mutating("network.mtu", opspec.ActionNetworkMTUSet)
@@ -382,20 +364,16 @@ func Expect(request *helperv1.HelperRequest) Expectation {
 		// and is never authorized by a capability.
 		return read("trust.update")
 	case nil:
-		// A request without an action runs nothing: the helper refuses it
-		// as unknown. The agent asks the helper's mode with exactly such a
-		// request, and that question is not a legacy mutation.
+		// A request without an action runs nothing: the helper refuses it as
+		// unknown.
 		return read("none")
 	}
 	return mutating("unknown")
 }
 
 // CheckBinding compares what the request names with what the bound payload
-// names, for the operations whose payload carries the target: the unit,
-// the packages, the schedule entry with its user and command, the file
-// path, the account name. The digest already proves the payload is the
-// approved one; this proves the request is about that payload and not
-// about another target under an approved digest.
+// names, for the operations whose payload carries the target: the unit, the
+// packages, the schedule entry with its user and command, the file path, the
 func CheckBinding(request *helperv1.HelperRequest, bound *BoundPayload) error {
 	payload := bound.Payload
 	switch action := request.GetAction().(type) {
@@ -497,10 +475,9 @@ func agentPackagesOnly(action *helperv1.PackageActionRequest, upgrade *opspec.Ag
 			return binding(fmt.Sprintf("an agent upgrade does not install %s", name))
 		}
 	}
-	// The digest the helper checks the artefact against and the version it
-	// keeps a way back to are part of what the operator approved: an agent
-	// must not ask the helper to verify another file or to prepare a
-	// return to a version nobody named.
+	// The digest the helper checks the artefact against and the version it keeps
+	// a way back to are part of what the operator approved: an agent must not ask
+	// the helper to verify another file or to prepare a return to a version
 	if err := same("package digest", action.GetPackageSha256(), upgrade.PackageSHA256); err != nil {
 		return err
 	}

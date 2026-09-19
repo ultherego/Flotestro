@@ -11,49 +11,21 @@ import (
 	"time"
 )
 
-// This file answers the question a container runtime asks about a relay,
-// and it answers it twice, because the two answers are not the same
-// question.
-//
-// Liveness says whether this process still works: it runs, it serves, and
-// the listener the agents of the site connect to still accepts. It says
-// nothing about the link to the centre, on purpose. A relay whose WAN is
-// down is exactly the relay that must keep running - it holds the spool
-// of the site, and every result waiting in it is lost the moment somebody
-// restarts the process. A liveness check that failed during an outage
-// would restart the one process that must not be restarted, over and over,
-// for as long as the outage lasts.
-//
-// Readiness says whether the relay can carry work right now: the session
-// upstream is established, the spool is not past its bound and can be
-// written, and the certificate the relay presents is still valid. A relay
-// that is not ready is not a relay to restart - it is a relay whose site
-// keeps working locally while the answer names what is false.
-//
-// The answers are served on a listener of their own, in plain HTTP,
-// because the listener of the agents terminates TLS and demands a
-// certificate of the fleet. A health check inside the image has no
-// certificate and no shell; asking it for one would mean putting the
-// identity of a host into the container just to answer "are you alive".
-// The address is health_listen in relay.yaml, the loopback by default.
+// This file answers the question a container runtime asks about a relay, and
+// it answers it twice, because the two answers are not the same question.
 
-// The paths of the two answers. /healthz is the name the control plane
-// already answers under, so one health check knows both processes;
-// /livez and /readyz are the names a container runtime and its operators
-// expect for the two questions apart.
+// The paths of the two answers.
 const (
 	HealthPathLive  = "/healthz"
 	HealthPathAlias = "/livez"
 	HealthPathReady = "/readyz"
 )
 
-// The codes a health answer names. They are stable: the operator reads
-// them out of a container that has marked itself unhealthy, and the error
-// guide explains each one.
+// The codes a health answer names.
 const (
-	// HealthListenerUnavailable is the listener of the agents gone or
-	// refusing every connection: this process is the wedged one, and a
-	// restart is the answer.
+	// HealthListenerUnavailable is the listener of the agents gone or refusing
+	// every connection: this process is the wedged one, and a restart is the
+	// answer.
 	HealthListenerUnavailable = "relay_listener_unavailable"
 	// HealthUpstreamUnreachable is the link to the centre: the relay
 	// buffers instead of forwarding. It is not a reason to restart.
@@ -61,13 +33,13 @@ const (
 	// HealthSpoolCritical is the spool in its reserve: new sessions are
 	// refused before an existing record is lost.
 	HealthSpoolCritical = "relay_spool_critical"
-	// HealthSpoolUnwritable is the spool that cannot reach the disk: the
-	// batched sync of the light classes failed, so what the relay takes
-	// now is not what it holds after a power failure.
+	// HealthSpoolUnwritable is the spool that cannot reach the disk: the batched
+	// sync of the light classes failed, so what the relay takes now is not what
+	// it holds after a power failure.
 	HealthSpoolUnwritable = "relay_spool_unwritable"
-	// HealthCertificateExpired is the identity of the relay past its end:
-	// the centre and the agents refuse it, and the renewal has to succeed
-	// before the relay carries anything again.
+	// HealthCertificateExpired is the identity of the relay past its end: the
+	// centre and the agents refuse it, and the renewal has to succeed before the
+	// relay carries anything again.
 	HealthCertificateExpired = "relay_certificate_expired"
 	// HealthCertificateUnknown is an identity without an end date. Unknown
 	// is not valid: the relay says so rather than reporting ready.
@@ -90,9 +62,7 @@ type HealthOptions struct {
 	// Listener watches the listener of the agents; nil means the liveness
 	// answer speaks for the process alone.
 	Listener *ListenerState
-	// Identity returns the identity the relay presents now. A renewal
-	// swaps it while the process runs, so the answer reads it at every
-	// call rather than keeping a copy.
+	// Identity returns the identity the relay presents now.
 	Identity func() Identity
 	// Version is the release of the binary, for the operator reading the
 	// answer of a container.
@@ -104,9 +74,7 @@ type HealthOptions struct {
 }
 
 // DefaultListenerGrace is how long accepts may fail in a row before the
-// liveness answer turns. Long enough that a burst of failures under load
-// passes, short enough that a runtime restarts a wedged relay within a
-// probe or two.
+// liveness answer turns.
 const DefaultListenerGrace = 30 * time.Second
 
 // Health serves the liveness and readiness of a relay.
@@ -126,9 +94,8 @@ func NewHealth(options HealthOptions) *Health {
 	return &Health{options: options, startedAt: options.Now()}
 }
 
-// Handler serves the two answers. Nothing else is served here: the
-// listener carries no identity, so it answers the two questions and
-// refuses the rest.
+// Handler serves the two answers. Nothing else is served here: the listener
+// carries no identity, so it answers the two questions and refuses the rest.
 func (h *Health) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+HealthPathLive, h.serveLiveness)
@@ -152,9 +119,9 @@ type LivenessReport struct {
 	// Code names what is wrong, empty while the relay is alive.
 	Code   string `json:"code,omitempty"`
 	Detail string `json:"detail,omitempty"`
-	// Upstream is reported and never judged here: an operator reading a
-	// liveness answer during an outage has to see that the relay knows
-	// the link is down and stayed alive anyway.
+	// Upstream is reported and never judged here: an operator reading a liveness
+	// answer during an outage has to see that the relay knows the link is down
+	// and stayed alive anyway.
 	Upstream      string `json:"upstream"`
 	RelayID       string `json:"relay_id,omitempty"`
 	InstanceID    string `json:"instance_id"`
@@ -179,8 +146,8 @@ type ReadinessReport struct {
 	// they were asked: what a runtime logs when it has room for one line.
 	Reasons []string `json:"reasons,omitempty"`
 	// SafeToRestart is the condition of the containerisation document for
-	// restarting a relay without losing anything: the link is up, nothing
-	// waits in the spool and nothing was dropped since the start.
+	// restarting a relay without losing anything: the link is up, nothing waits
+	// in the spool and nothing was dropped since the start.
 	SafeToRestart bool   `json:"safe_to_restart"`
 	Upstream      string `json:"upstream"`
 	Gateway       string `json:"gateway,omitempty"`
@@ -196,10 +163,7 @@ type ReadinessReport struct {
 	CertificateNotAfter string `json:"certificate_not_after,omitempty"`
 }
 
-// Liveness answers whether the process works. It touches no lock of the
-// spool: a spool wedged behind its own mutex must show up as a readiness
-// that times out, never as a liveness answer that hangs and is read as a
-// dead process.
+// Liveness answers whether the process works.
 func (h *Health) Liveness() LivenessReport {
 	report := LivenessReport{
 		Status:        "alive",
@@ -238,9 +202,8 @@ func (h *Health) Readiness() ReadinessReport {
 		report.SpooledBytes = stats.Bytes
 		report.SpoolMaxBytes = stats.MaxBytes
 		report.SpoolDropped = stats.Dropped
-		// The condition of the document, word for word: the link is up,
-		// the spool is empty and nothing was dropped. Only then does a
-		// restart of the container cost the site nothing.
+		// The condition of the document, word for word: the link is up, the spool is
+		// empty and nothing was dropped.
 		report.SafeToRestart = upstreamOK && stats.Messages == 0 && stats.Dropped == 0
 		checks = append(checks, upstreamCheck(upstreamOK, report.Upstream, stats),
 			spoolCheck(stats, h.options.Relay.SpoolError()))
@@ -263,8 +226,6 @@ func (h *Health) Readiness() ReadinessReport {
 }
 
 // listenerCheck says whether the listener of the agents still accepts.
-// Without a watched listener the answer is the process itself: this
-// handler answered, so the process serves.
 func (h *Health) listenerCheck() HealthCheck {
 	if h.options.Listener == nil {
 		return HealthCheck{Name: CheckListener, OK: true,
@@ -293,9 +254,7 @@ func (h *Health) accepted() uint64 {
 	return h.options.Listener.Accepted()
 }
 
-// upstreamCheck says whether the relay forwards live. A relay that
-// buffers is not ready - it cannot carry work to the centre now - and it
-// is not broken either: the detail says what it holds meanwhile.
+// upstreamCheck says whether the relay forwards live.
 func upstreamCheck(upstreamOK bool, state string, stats Stats) HealthCheck {
 	if upstreamOK {
 		return HealthCheck{Name: CheckUpstream, OK: true,
@@ -326,9 +285,7 @@ func spoolCheck(stats Stats, syncErr error) HealthCheck {
 }
 
 // certificateCheck says whether the identity the relay presents is still
-// valid. An identity without an end date is unknown rather than valid: a
-// relay that cannot say when its certificate ends is not one to report
-// ready.
+// valid.
 func certificateCheck(identity Identity, now time.Time) HealthCheck {
 	if identity.NotAfter.IsZero() {
 		return HealthCheck{Name: CheckCertificate, Code: HealthCertificateUnknown,
@@ -344,9 +301,7 @@ func certificateCheck(identity Identity, now time.Time) HealthCheck {
 			identity.NotAfter.UTC().Format(time.RFC3339)}
 }
 
-// serveLiveness answers the liveness question. The status code is the
-// answer for a check that reads no body: 200 for a process to leave
-// alone, 503 for one to restart.
+// serveLiveness answers the liveness question.
 func (h *Health) serveLiveness(w http.ResponseWriter, r *http.Request) {
 	report := h.Liveness()
 	status := http.StatusOK
@@ -375,15 +330,8 @@ func writeHealth(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-// ListenerState watches the listener of the agents so that the liveness
-// answer can speak about the listener rather than about the process
-// around it.
-//
-// A dial of the listener would prove less: the kernel accepts a
-// connection into the backlog of a socket whose process has stopped
-// calling Accept, so a wedged relay would answer a dial and look
-// healthy. What the wrapper sees is the accept itself - the connections
-// taken, and the errors that came instead.
+// ListenerState watches the listener of the agents so that the liveness answer
+// can speak about the listener rather than about the process around it.
 type ListenerState struct {
 	inner    net.Listener
 	accepted atomic.Uint64
@@ -445,10 +393,7 @@ type ListenerPicture struct {
 	Detail     string
 }
 
-// State describes the listener now. Accepts that fail in a row for
-// longer than the grace period are a wedged process - a relay out of
-// file descriptors accepts nothing and mends itself by being restarted -
-// while a burst that ends is none.
+// State describes the listener now.
 func (l *ListenerState) State(now time.Time, grace time.Duration) ListenerPicture {
 	l.mu.Lock()
 	defer l.mu.Unlock()

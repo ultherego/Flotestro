@@ -25,44 +25,23 @@ import (
 )
 
 // A diagnostic read fan-out.
-//
-// A fan-out is the same read the operator orders on one host, ordered on a
-// handful at once: the process list of the web tier, the journal of every
-// host in a site, a security scan of the environment. It is not a campaign
-// - it changes nothing, needs no approval and has no waves - and it is not
-// a new kind of job either: one ordinary job per host carries the result,
-// and the fan-out is a row that groups them and a view that merges what
-// they brought back.
-//
-// What bounds it is the control plane, not the hosts: every host answers
-// with its own output, and the panel holds and merges all of them at once.
-// Hence the ceilings - per operation, from the registry; per operator and
-// in total, for the fan-outs in flight; and the fleet's read budget, when
-// the installation describes one.
 
 // createReadRequest is a fan-out order.
 type createReadRequest struct {
 	Action  string          `json:"action"`
 	Payload json.RawMessage `json:"payload"`
-	// Selector names the hosts the way a campaign does: the flat filters,
-	// an explicit list, or the typed expression, which decides alone when
-	// present. An empty selector is refused: a read of the whole fleet is
-	// never the intent, and the document says as much.
+	// Selector names the hosts the way a campaign does: the flat filters, an
+	// explicit list, or the typed expression, which decides alone when present.
 	Selector campaigns.Selector `json:"selector"`
 	// Reason goes to the audit log next to the order.
 	Reason string `json:"reason,omitempty"`
 }
 
-// The ceilings of fan-outs in flight. A fan-out is in flight while any of
-// its jobs has not finished; the per-operator ceiling keeps one screen from
-// taking the whole allowance, the total keeps the panel from merging more
-// output than it should hold at once.
+// The ceilings of fan-outs in flight.
 const (
 	maxFanOutsPerOperator = 5
 	maxFanOutsInFlight    = 20
-	// fanOutTTL bounds how long a fan-out job waits for its host. A read
-	// is asked for now: a host that comes back in a quarter of an hour
-	// answers a question nobody is looking at any more.
+	// fanOutTTL bounds how long a fan-out job waits for its host.
 	fanOutTTL = 5 * time.Minute
 	// maxReadsListed is the default page of the operator's fan-out list;
 	// the screen asks for more with limit, up to the panel's ceiling.
@@ -78,9 +57,7 @@ type readFanOut struct {
 	Reason    string          `json:"reason,omitempty"`
 	CreatedAt time.Time       `json:"created_at"`
 	HostCount int             `json:"host_count"`
-	// Counts is the picture of the hosts by state, for the list. The
-	// states are the job states folded into four: what waits, what runs,
-	// what came back and what did not.
+	// Counts is the picture of the hosts by state, for the list.
 	Counts fanOutCounts `json:"counts"`
 }
 
@@ -113,9 +90,8 @@ type fanOutHost struct {
 	HostID   string `json:"host_id"`
 	Hostname string `json:"hostname"`
 	State    string `json:"state"`
-	// ErrorCode and Message are the result of a job that did not succeed:
-	// a host that refused the read says why, next to the ones that
-	// answered.
+	// ErrorCode and Message are the result of a job that did not succeed: a host
+	// that refused the read says why, next to the ones that answered.
 	ErrorCode  string     `json:"error_code,omitempty"`
 	Message    string     `json:"message,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
@@ -124,10 +100,9 @@ type fanOutHost struct {
 	// Lines is the output of a line read, as the host gave it; the merged
 	// timeline is built from these.
 	Lines []string `json:"lines,omitempty"`
-	// Detail is the typed result of a structured read, as the job stored
-	// it; Snapshot is the state the read refreshed in the inventory, for
-	// the reads whose answer lands there rather than in the job - a
-	// process snapshot, a security scan, a unit list.
+	// Detail is the typed result of a structured read, as the job stored it;
+	// Snapshot is the state the read refreshed in the inventory, for the reads
+	// whose answer lands there rather than in the job - a process snapshot, a
 	Detail   json.RawMessage `json:"detail,omitempty"`
 	Snapshot json.RawMessage `json:"snapshot,omitempty"`
 }
@@ -141,9 +116,7 @@ type timelineLine struct {
 	Line     string     `json:"line"`
 }
 
-// untimedLines are the lines of one host that carry no timestamp. They
-// cannot be placed on the merged timeline, so they stand grouped by host
-// under it rather than vanish.
+// untimedLines are the lines of one host that carry no timestamp.
 type untimedLines struct {
 	HostID   string   `json:"host_id"`
 	Hostname string   `json:"hostname"`
@@ -153,19 +126,17 @@ type untimedLines struct {
 // fanOutView is the fan-out with its hosts and the merged result.
 type fanOutView struct {
 	readFanOut
-	// Kind says how the result merges: "timeline" for line reads, whose
-	// lines are sorted into one sequence by their timestamps, and
-	// "structured" for reads that answer with a typed result per host.
+	// Kind says how the result merges: "timeline" for line reads, whose lines are
+	// sorted into one sequence by their timestamps, and "structured" for reads
+	// that answer with a typed result per host.
 	Kind  string       `json:"kind"`
 	Hosts []fanOutHost `json:"hosts"`
 	// Timeline and Untimed are set for a line read: the lines with a
 	// timestamp in one order, and those without, grouped by host.
 	Timeline []timelineLine `json:"timeline,omitempty"`
 	Untimed  []untimedLines `json:"untimed,omitempty"`
-	// Skipped names the matched hosts that got no job, with the reason:
-	// a quarantined host, a host without the adapter. Filled on creation
-	// only - the row does not keep them, and the operator reads them from
-	// the answer to the order.
+	// Skipped names the matched hosts that got no job, with the reason: a
+	// quarantined host, a host without the adapter.
 	Skipped []skippedHost `json:"skipped,omitempty"`
 }
 
@@ -179,10 +150,8 @@ type skippedHost struct {
 
 // handleCreateRead orders a diagnostic read on many hosts at once.
 func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
-	// Whoever asks must be somebody who may order operations somewhere,
-	// before the selector is read: what the selector matches is a fact
-	// about the fleet. Every host is checked again below, in its own
-	// scope.
+	// Whoever asks must be somebody who may order operations somewhere, before
+	// the selector is read: what the selector matches is a fact about the fleet.
 	principal, ok := s.authorizeCollection(w, r, authz.PermJobCreate, "read")
 	if !ok {
 		return
@@ -200,17 +169,15 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A fan-out is for reads, and for the reads the registry opens to it.
-	// A mutation on many hosts is a campaign, with the approval and the
-	// waves a campaign has; a refusal here names that.
 	if reason := opspec.FanOutRefusal(action); reason != "" {
 		problem(w, http.StatusBadRequest, "not_a_fanout_action", reason)
 		return
 	}
 	limit := action.FanOutLimit()
 
-	// The ceiling is checked on the order before any host is resolved: a
-	// list of a hundred identifiers is refused as a list, without a
-	// hundred host reads to find out.
+	// The ceiling is checked on the order before any host is resolved: a list of
+	// a hundred identifiers is refused as a list, without a hundred host reads to
+	// find out.
 	if len(request.Selector.HostIDs) > limit {
 		problem(w, http.StatusBadRequest, "fanout_too_broad",
 			fmt.Sprintf("%s fans out to at most %d hosts; the order names %d",
@@ -241,9 +208,8 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The fleet is resolved within the scopes of the read's own
-	// permission; the per-host check below is the second lock on the
-	// same door.
+	// The fleet is resolved within the scopes of the read's own permission; the
+	// per-host check below is the second lock on the same door.
 	candidates, ok := s.materialize(w, r, principal, authz.Permission(action.Permission()), chosen)
 	if !ok {
 		return
@@ -271,11 +237,8 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The same qualification a campaign runs, minus the conflicts: a read
-	// takes no lock, so another operation under way on the host is not an
-	// obstacle. A quarantined host and a host without the adapter get no
-	// job and are named in the answer; an offline host gets one and the
-	// time limit settles it.
+	// The same qualification a campaign runs, minus the conflicts: a read takes
+	// no lock, so another operation under way on the host is not an obstacle.
 	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
 	assessment := assessCandidates(kept, action, nil, time.Now().UTC())
 	assessment.Closed = append(assessment.Closed, excluded...)
@@ -313,10 +276,9 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 	fanOutID := uuid.NewString()
 	owner := fanOutOwner(fanOutID)
 
-	// The fleet's read budget, when the installation describes one: a
-	// fan-out of twenty hosts is twenty reads at once, and it asks for
-	// them the way one interactive operator does. A refusal is the same
-	// answer as a full allowance - wait - with the budget named.
+	// The fleet's read budget, when the installation describes one: a fan-out of
+	// twenty hosts is twenty reads at once, and it asks for them the way one
+	// interactive operator does.
 	if s.budgets != nil {
 		refusal, err := s.budgets.Acquire(r.Context(), owner, "reads:"+principal.Subject,
 			budgets.ClassInteractive, []budgets.Need{{Key: budgets.KeyGlobalReads, Weight: len(assessment.Ready)}})
@@ -355,9 +317,7 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One ordinary job per host. A read needs no approval, so every job
-	// starts queued; the precondition binds it to the host's family and
-	// adapter the way a single order does.
+	// One ordinary job per host.
 	created := make([]jobs.Job, 0, len(assessment.Ready))
 	for _, host := range assessment.Ready {
 		job, err := s.jobs.Create(r.Context(), tx, jobs.Spec{
@@ -407,14 +367,8 @@ func (s *Server) handleCreateRead(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, view)
 }
 
-// handleListReads lists the operator's own fan-outs, newest first, with
-// the picture of their hosts by state.
-//
-// The list is paged by the key of its last row - the moment of the order
-// and the identifier - like the other lists of the panel: an operator who
-// orders reads while browsing would see a row twice under an offset. The
-// page asks for one row more than it shows, so it knows whether there is
-// a next page without counting the whole table.
+// handleListReads lists the operator's own fan-outs, newest first, with the
+// picture of their hosts by state.
 func (s *Server) handleListReads(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermJobRead, "read")
 	if !ok {
@@ -481,10 +435,6 @@ func (s *Server) handleListReads(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetRead returns a fan-out with its hosts and the merged result.
-//
-// The hosts shown are the ones in the scopes the caller may read jobs in:
-// a fan-out is a group of jobs, and it inherits their visibility rather
-// than granting its own.
 func (s *Server) handleGetRead(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermJobRead, "read")
 	if !ok {
@@ -524,10 +474,6 @@ func (s *Server) handleGetRead(w http.ResponseWriter, r *http.Request) {
 
 // projectFanOut projects the fan-out from its jobs: the state of every host,
 // what each brought back, and the merge.
-//
-// The result is a projection, never state of its own: the jobs and their
-// attempts are the record, and the screen does not reconstruct anything
-// the database does not hold.
 func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []jobs.Job) fanOutView {
 	action := opspec.ActionType(stored.Action)
 	view := fanOutView{readFanOut: stored, Kind: fanOutKind(action), Hosts: make([]fanOutHost, 0, len(listed))}
@@ -547,9 +493,9 @@ func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []
 	if module != "" {
 		fragments = s.moduleFragments(ctx, listed, module)
 	}
-	// A package list lands in its own table, and is thousands of rows per
-	// host: the fan-out carries its summary - how many packages, the
-	// digest, when - and the vulnerability page reads the rows.
+	// A package list lands in its own table, and is thousands of rows per host:
+	// the fan-out carries its summary - how many packages, the digest, when - and
+	// the vulnerability page reads the rows.
 	if action == opspec.ActionPackageList {
 		fragments = s.packageStates(ctx, listed)
 	}
@@ -585,9 +531,7 @@ func (s *Server) projectFanOut(ctx context.Context, stored readFanOut, listed []
 	if view.Kind == "timeline" {
 		view.Timeline, view.Untimed = mergeTimeline(view.Hosts, stored.CreatedAt)
 	}
-	// A finished fan-out gives its read tokens back. The lease would
-	// expire on its own; giving it back at once is what keeps the next
-	// fan-out from waiting for capacity nobody uses.
+	// A finished fan-out gives its read tokens back.
 	if finished && len(listed) > 0 {
 		s.releaseFanOut(ctx, fanOutOwner(stored.ID))
 	}
@@ -703,8 +647,7 @@ func fanOutKind(action opspec.ActionType) string {
 }
 
 // resultModule names the inventory module a read refreshes, for the reads
-// whose answer lands there rather than in the job. Empty means the job
-// carries the answer.
+// whose answer lands there rather than in the job.
 func resultModule(action opspec.ActionType) string {
 	switch action {
 	case opspec.ActionProcessList:
@@ -719,9 +662,9 @@ func resultModule(action opspec.ActionType) string {
 	return ""
 }
 
-// resultLines takes the lines of a line read out of its attempt: the
-// journal comes back as text on the standard output, a log file and a
-// container log as a list in the typed result, a file as its content.
+// resultLines takes the lines of a line read out of its attempt: the journal
+// comes back as text on the standard output, a log file and a container log as
+// a list in the typed result, a file as its content.
 func resultLines(action opspec.ActionType, attempt *jobs.Attempt) []string {
 	if action == opspec.ActionReadJournal {
 		return splitLines(attempt.Stdout)
@@ -753,9 +696,7 @@ func splitLines(text string) []string {
 }
 
 // mergeTimeline sorts the lines of every host into one sequence by their
-// timestamps. The order between hosts is best-effort - clocks differ - and
-// the order within a host is kept as the host gave it. A line without a
-// timestamp cannot be placed and stays with its host, under the timeline.
+// timestamps.
 func mergeTimeline(hosts []fanOutHost, ordered time.Time) ([]timelineLine, []untimedLines) {
 	type placed struct {
 		line     timelineLine
@@ -798,9 +739,9 @@ func mergeTimeline(hosts []fanOutHost, ordered time.Time) ([]timelineLine, []unt
 	return timeline, untimed
 }
 
-// The timestamp layouts a log line may start with: journalctl's short-iso,
-// RFC 3339 with or without fractions, a plain date and time, and the
-// classic syslog stamp, which carries no year.
+// The timestamp layouts a log line may start with: journalctl's short-iso, RFC
+// 3339 with or without fractions, a plain date and time, and the classic
+// syslog stamp, which carries no year.
 var isoLayouts = []string{
 	"2006-01-02T15:04:05-0700",
 	"2006-01-02T15:04:05.000000-0700",
@@ -845,8 +786,8 @@ func lineTimestamp(line string, ordered time.Time) (time.Time, bool) {
 }
 
 // payloadJSON keeps the payload as given, or an empty object for an order
-// without one: the column holds an object, and the screen re-reads it to
-// order the same again.
+// without one: the column holds an object, and the screen re-reads it to order
+// the same again.
 func payloadJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
 		return json.RawMessage("{}")

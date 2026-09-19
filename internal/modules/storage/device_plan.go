@@ -9,13 +9,8 @@ import (
 	"strings"
 )
 
-// DevicePlan describes what a check, a filesystem resize or a volume
-// extension does on a single host.
-//
-// "Extend /dev/vg0/data by 10G" is backed by free space in the group on one
-// host and not on another; "check /dev/sdb1" is unmounted on one and holds
-// production data on another. The plan says so before approval, not
-// half-way through the fleet.
+// DevicePlan describes what a check, a filesystem resize or a volume extension
+// does on a single host.
 type DevicePlan struct {
 	// Operation names what was planned: check, resize or lvm_extend.
 	Operation string `json:"operation"`
@@ -36,11 +31,7 @@ type DevicePlan struct {
 	Size       string   `json:"size,omitempty"`
 	Changes    []string `json:"changes,omitempty"`
 
-	// The identity of the device the plan binds to. ByID, WWN and Serial
-	// are what the host compares again right before a destructive change;
-	// the size above is a signal for the operator reading the plan, never
-	// an identity. Model and Parent describe; Holders and the three flags
-	// say what stands on the device.
+	// The identity of the device the plan binds to.
 	ByID                      string   `json:"by_id,omitempty"`
 	WWN                       string   `json:"wwn,omitempty"`
 	Serial                    string   `json:"serial,omitempty"`
@@ -55,26 +46,19 @@ type DevicePlan struct {
 	DesiredFSType string `json:"desired_fs_type,omitempty"`
 	DesiredLabel  string `json:"desired_label,omitempty"`
 
-	// The LVM identity a volume operation binds to. A group and a volume
-	// are known by their UUID: a name can be given to another group or
-	// another volume tomorrow, and a plan that named one by name would
-	// carry the consent over to whatever holds the name at execution time.
+	// The LVM identity a volume operation binds to.
 	GroupUUID  string `json:"group_uuid,omitempty"`
 	VolumeName string `json:"volume_name,omitempty"`
 	VolumeUUID string `json:"volume_uuid,omitempty"`
 	// OriginName and OriginUUID name the volume a snapshot is taken of.
 	OriginName string `json:"origin_name,omitempty"`
 	OriginUUID string `json:"origin_uuid,omitempty"`
-	// ExtentSizeBytes is the grain the group allocates in, and
-	// RequestedBytes what the order asks for once it is read as a number of
-	// bytes. A request smaller than one extent becomes one extent, and the
-	// plan says so rather than surprising the operator with the size after.
+	// ExtentSizeBytes is the grain the group allocates in, and RequestedBytes
+	// what the order asks for once it is read as a number of bytes.
 	ExtentSizeBytes uint64 `json:"extent_size_bytes,omitempty"`
 	RequestedBytes  uint64 `json:"requested_bytes,omitempty"`
 
-	// The array identity a member operation binds to. The UUID out of the
-	// superblock is the only name of an array that survives a reboot;
-	// /dev/md0 is whichever array the kernel assembled first.
+	// The array identity a member operation binds to.
 	Array          string `json:"array,omitempty"`
 	ArrayUUID      string `json:"array_uuid,omitempty"`
 	ArrayLevel     string `json:"array_level,omitempty"`
@@ -85,16 +69,15 @@ type DevicePlan struct {
 	RaidDevices    int    `json:"raid_devices,omitempty"`
 	ActiveDevices  int    `json:"active_devices,omitempty"`
 	SpareDevices   int    `json:"spare_devices,omitempty"`
-	// MemberRole is what the array thinks the member is now, and
-	// RedundancyAfter what the array is left with once the change lands -
-	// the sentence the operator is really approving.
+	// MemberRole is what the array thinks the member is now, and RedundancyAfter
+	// what the array is left with once the change lands - the sentence the
+	// operator is really approving.
 	MemberRole      string `json:"member_role,omitempty"`
 	RedundancyAfter string `json:"redundancy_after,omitempty"`
 
 	Refusal string `json:"refusal,omitempty"`
 	// RefusalCode is the typed code of the refusal where one exists:
-	// stable_identity_required, disk_changed, disk_in_use. A refusal
-	// without a code is a plain description of why nothing will happen.
+	// stable_identity_required, disk_changed, disk_in_use.
 	RefusalCode string `json:"refusal_code,omitempty"`
 	PlanHash    string `json:"plan_hash"`
 }
@@ -107,19 +90,16 @@ const (
 	PlanFormat   = "format"
 	PlanWipe     = "wipe"
 
-	// The LVM operations beyond growing a volume: a new volume in an
-	// existing group, a new disk under a group, a snapshot and its removal,
-	// and the removal of a volume, which deletes everything on it.
+	// The LVM operations beyond growing a volume: a new volume in an existing
+	// group, a new disk under a group, a snapshot and its removal, and the
+	// removal of a volume, which deletes everything on it.
 	PlanLVCreate       = "lvm_lv_create"
 	PlanLVRemove       = "lvm_lv_remove"
 	PlanVGExtend       = "lvm_vg_extend"
 	PlanSnapshotCreate = "lvm_snapshot_create"
 	PlanSnapshotRemove = "lvm_snapshot_remove"
 
-	// The member operations of a software array. Creating and destroying an
-	// array is deliberately not among them: that is a decision about a
-	// machine's whole disk layout, taken once when the machine is built,
-	// not an operation on a running fleet.
+	// The member operations of a software array.
 	PlanRAIDMemberFail   = "raid_member_fail"
 	PlanRAIDMemberRemove = "raid_member_remove"
 	PlanRAIDMemberAdd    = "raid_member_add"
@@ -128,10 +108,6 @@ const (
 )
 
 // KnownPlanKind says whether the panel knows a plan by that name.
-//
-// A plan kind the host does not know would come back as a refusal from the
-// far end of a job. Refusing it where it is typed says the same thing
-// earlier and to the person who can fix it.
 func KnownPlanKind(kind string) bool {
 	switch kind {
 	case PlanCheck, PlanFSResize, PlanLVExtend, PlanFormat, PlanWipe,
@@ -143,10 +119,6 @@ func KnownPlanKind(kind string) bool {
 }
 
 // Destructive says whether the plan kind loses the data on the device.
-//
-// Removing a logical volume belongs here: the extents go back to the group
-// and the filesystem on them is gone, which is the same loss as a format
-// and gets the same treatment - two approvals and the target typed out.
 func Destructive(kind string) bool {
 	return kind == PlanFormat || kind == PlanWipe || kind == PlanLVRemove || kind == PlanVGExtend
 }
@@ -258,12 +230,6 @@ func ComputeLVExtend(state Snapshot, device, size string) DevicePlan {
 }
 
 // ComputeFormat computes the plan of creating a filesystem on a device.
-//
-// The plan carries the identity the host has for the device now; the
-// change comes back with that identity and the host compares it once more
-// under the storage lock. A device without a stable identity, or with
-// anything standing on it, is refused here - before the consent, with the
-// reason in the plan.
 func ComputeFormat(state Snapshot, device, fsType, label string) DevicePlan {
 	plan := DevicePlan{Operation: PlanFormat, Device: device, DesiredFSType: fsType, DesiredLabel: label}
 	arguments, err := FormatArguments(device, fsType, label)
@@ -305,9 +271,8 @@ func ComputeWipe(state Snapshot, device string) DevicePlan {
 	return plan
 }
 
-// destructiveTarget finds the device and copies its identity into the
-// plan; a state that could not be read or a device the host does not see
-// is a refusal.
+// destructiveTarget finds the device and copies its identity into the plan; a
+// state that could not be read or a device the host does not see is a refusal.
 func (p *DevicePlan) destructiveTarget(state Snapshot) (*Device, string) {
 	if state.UnavailableReason != "" {
 		return nil, state.UnavailableReason

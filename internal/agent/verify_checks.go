@@ -23,18 +23,6 @@ import (
 
 // The verifiers themselves: one read of the host per promise the contract
 // makes, compared with what the payload or the plan asked for.
-//
-// Every one of them follows the same three answers. A state that matches is
-// verified. A state that does not is unverified, and the reason names what
-// is different - the operator is to know what the host shows without
-// logging into it. A host that could not be read at all is unreadable:
-// unknown is never a pass, and verifyOutcome never rolls back on it either,
-// because a rollback onto a state nobody read lands blind.
-//
-// What the two sides of an observation carry is deliberately small: a state
-// word, a version, a count, a short digest, a fingerprint. Never the content
-// of a file, never a key, never a secret - the observation travels to the
-// panel, into the job record and into the campaign report.
 
 // sortStrings orders a list of names, so that a sentence naming several of
 // them reads the same way twice.
@@ -55,9 +43,9 @@ func listOf(values []string) string {
 	return strings.Join(ordered, ", ")
 }
 
-// collapsed squeezes the whitespace of a value read from the host, so that
-// a setting written with a tab and the same setting written with a space
-// compare equal.
+// collapsed squeezes the whitespace of a value read from the host, so that a
+// setting written with a tab and the same setting written with a space compare
+// equal.
 func collapsed(value string) string { return strings.Join(strings.Fields(value), " ") }
 
 // yesNo picks the word an observation carries for a promise of two states.
@@ -163,9 +151,7 @@ func verifyUnitState(ctx context.Context, readers *hostReaders, in verifyInput) 
 	case state.ActiveState == "activating", state.ActiveState == "reloading":
 		return verified(expected, observed)
 	case state.ActiveState == "inactive" && state.Result == "success":
-		// A one-shot unit is inactive once it has run. The result word is
-		// what tells "it ran and finished" from "it never came up", so it
-		// is the word the observation carries.
+		// A one-shot unit is inactive once it has run.
 		return verified(expected, observed+", ran to completion")
 	}
 	return unverified(expected, observed, "the unit "+unit+" is "+observed+" after the change, result "+
@@ -226,11 +212,9 @@ func verifyScheduleEntry(ctx context.Context, readers *hostReaders, in verifyInp
 			"the entry "+payload.ID+" runs on "+collapsed(found.Expression)+
 				" and not on "+collapsed(payload.Expression))
 	}
-	// An order that named the mechanism is verified against it: an entry
-	// written as a cron line where a timer was ordered runs the command,
-	// but it is not what the operator asked the host for, and the next
-	// order would write the timer beside it. An order that left the choice
-	// to the host accepts whichever it made.
+	// An order that named the mechanism is verified against it: an entry written
+	// as a cron line where a timer was ordered runs the command, but it is not
+	// what the operator asked the host for, and the next order would write the
 	if in.action == opspec.ActionScheduleEnsure &&
 		(payload.Kind == opspec.ScheduleKindCron || payload.Kind == opspec.ScheduleKindTimer) &&
 		found.Kind != payload.Kind {
@@ -313,9 +297,7 @@ func uniqueNames(values []string) []string {
 }
 
 // packageAtVersion says whether the installed package is at the version the
-// plan named. The version is compared in all three forms a manager writes
-// it, because a plan from apt and a plan from dnf name the same package
-// differently.
+// plan named.
 func packageAtVersion(found packages.InstalledPackage, wanted string) bool {
 	if wanted == "" {
 		return true
@@ -347,9 +329,6 @@ func packageExpectation(wanted map[string]string, removed []string) string {
 }
 
 // verifyPackageVersions reads the package database after the transaction.
-// The database, not the output of the tool: a transaction that printed a
-// success and left the old version behind is exactly what this verifier is
-// here for.
 func verifyPackageVersions(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	wanted, removed := packageTargets(in)
 	expected := packageExpectation(wanted, removed)
@@ -443,9 +422,8 @@ func verifyPackageHold(ctx context.Context, readers *hostReaders, in verifyInput
 	return unverified(expected, observed, "the hold list of the manager says "+observed)
 }
 
-// verifyPackageDatabase reads whether the database still needs attention
-// after a repair. It takes no order: the promise is about the host, not
-// about a named package.
+// verifyPackageDatabase reads whether the database still needs attention after
+// a repair.
 func verifyPackageDatabase(ctx context.Context, readers *hostReaders) observation {
 	expected := "a package database that needs no repair"
 	if readers.packageState == nil {
@@ -511,10 +489,9 @@ func verifyRepository(ctx context.Context, readers *hostReaders, in verifyInput)
 	return verified(expected, observed)
 }
 
-// verifyFileContent reads the file after the write: the digest of the
-// content ordered, with the mode and the owner ordered, or a file that is
-// no longer there after a removal. The content itself never reaches the
-// observation - only the first bytes of its digest.
+// verifyFileContent reads the file after the write: the digest of the content
+// ordered, with the mode and the owner ordered, or a file that is no longer
+// there after a removal.
 func verifyFileContent(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.File
 	if payload == nil || payload.Path == "" {
@@ -530,9 +507,9 @@ func verifyFileContent(ctx context.Context, readers *hostReaders, in verifyInput
 		case payload.VersionSHA256 != "":
 			wanted = payload.VersionSHA256
 		default:
-			// A file whose content comes from the secret store: the order
-			// carries a reference, so the digest the helper reported after
-			// the write is the only description of it that may be shown.
+			// A file whose content comes from the secret store: the order carries a
+			// reference, so the digest the helper reported after the write is the only
+			// description of it that may be shown.
 			wanted = in.result.GetFileResult().GetSha256()
 		}
 	}
@@ -587,8 +564,8 @@ func verifyFileContent(ctx context.Context, readers *hostReaders, in verifyInput
 }
 
 // verifyMountState reads the mount point after the change: mounted from the
-// source with the filesystem ordered and in fstab where the order persists
-// it, or unmounted and out of fstab after a removal.
+// source with the filesystem ordered and in fstab where the order persists it,
+// or unmounted and out of fstab after a removal.
 func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Storage
 	if payload == nil || payload.Target == "" {
@@ -650,15 +627,8 @@ func verifyMountState(ctx context.Context, readers *hostReaders, in verifyInput)
 }
 
 // verifyStorageLayout reads the device after the change: a volume or a
-// filesystem that grew, a device that carries the filesystem ordered, a
-// device that carries no signature after a wipe, an array that knows its
-// member under the role ordered, or a volume the group really holds.
-//
-// Every one of these is a read of the host afterwards. None of them is the
-// exit code of the tool: mdadm exits zero on a member it accepted and on
-// one it had already forgotten, lvcreate rounds a size up to whole extents
-// without saying so, and fsck answers in a bit field that means two
-// different things.
+// filesystem that grew, a device that carries the filesystem ordered, a device
+// that carries no signature after a wipe, an array that knows its member under
 func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Storage
 	if payload == nil {
@@ -679,11 +649,8 @@ func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInp
 
 	switch in.action {
 	case opspec.ActionFilesystemCheck:
-		// A check that ran is confirmed by the filesystem still being there
-		// and still being the one that was checked. A repair can end with a
-		// filesystem the host no longer recognises, and that is the outcome
-		// this read is for; whether errors were left behind is decided on
-		// the host by a second, read-only pass.
+		// A check that ran is confirmed by the filesystem still being there and
+		// still being the one that was checked.
 		expected := "the filesystem on " + device + " is still there after the check"
 		snapshot, reason := storageLayers(ctx, readers)
 		if reason != "" {
@@ -822,12 +789,6 @@ func verifyStorageLayout(ctx context.Context, readers *hostReaders, in verifyInp
 
 // storageLayers reads the whole picture of the host's disks: the block
 // devices, the volume manager and the software arrays.
-//
-// A volume is a device, a group and a UUID at once, and an array member is
-// a device the array knows under a slot, so all three layers are read
-// together or the answer means nothing. The reason of a read that failed
-// is carried back rather than an empty snapshot: an array nobody could ask
-// about is not a host without arrays.
 func storageLayers(ctx context.Context, readers *hostReaders) (storage.Snapshot, string) {
 	if readers.storage != nil {
 		snapshot := readers.storage(ctx)
@@ -848,11 +809,8 @@ func storageLayers(ctx context.Context, readers *hostReaders) (storage.Snapshot,
 	return snapshot, ""
 }
 
-// verifyArrayMember reads the array back after a member change.
-//
-// mdadm exits zero on a member it has accepted and on one the array had
-// already forgotten. What settles the change is the array's own list: the
-// role the member has now, and how many slots of the array are filled.
+// verifyArrayMember reads the array back after a member change. mdadm exits
+// zero on a member it has accepted and on one the array had already forgotten.
 func verifyArrayMember(ctx context.Context, readers *hostReaders,
 	action opspec.ActionType, payload *opspec.StoragePayload) observation {
 	member, arrayPath := payload.Device, payload.Array
@@ -927,11 +885,6 @@ func arrayState(array storage.RAIDArray) string {
 }
 
 // verifyVolumeLayer reads the volume manager back after a change.
-//
-// lvcreate rounds a request up to whole extents and says nothing about it,
-// and lvremove exits zero on a volume it has already dropped. The group's
-// own list is what settles the change, and the size read back is the size
-// the host really gave.
 func verifyVolumeLayer(ctx context.Context, readers *hostReaders,
 	action opspec.ActionType, payload *opspec.StoragePayload) observation {
 	snapshot, reason := storageLayers(ctx, readers)
@@ -1025,8 +978,7 @@ func verifyVolumeLayer(ctx context.Context, readers *hostReaders,
 		observed += ", a snapshot of " + firstNonEmpty(created.Origin, "a volume the host did not name")
 	}
 	// The size asked for is a floor, not a promise of the exact number: LVM
-	// allocates whole extents and rounds up. A volume smaller than the order
-	// is the failure worth catching.
+	// allocates whole extents and rounds up.
 	if wanted, absolute := storage.SizeInBytes(payload.Size); absolute && created.SizeBytes < wanted {
 		return unverified(expected+" of at least "+strconv.FormatUint(wanted>>20, 10)+" MiB", observed,
 			"LVM gave "+name+" less space than the order asked for")
@@ -1052,9 +1004,8 @@ func verifyHostname(readers *hostReaders, in verifyInput) observation {
 	observed := firstNonEmpty(name, "unknown")
 	wanted := strings.ToLower(strings.TrimSuffix(expected, "."))
 	found := strings.ToLower(strings.TrimSuffix(name, "."))
-	// A host renamed to a fully qualified name reports on some
-	// distributions only its first label; that is the same name, not
-	// another one.
+	// A host renamed to a fully qualified name reports on some distributions only
+	// its first label; that is the same name, not another one.
 	label, _, _ := strings.Cut(wanted, ".")
 	if found == wanted || found == label {
 		return verified(expected, observed)
@@ -1160,9 +1111,8 @@ func verifyKernelModule(ctx context.Context, readers *hostReaders, in verifyInpu
 		"the kernel does not list the module "+payload.Module+" after the change")
 }
 
-// verifySSHDConfig reads the effective sshd configuration and compares it
-// with the settings of the order. An empty field of the order means "do not
-// change" and is not compared.
+// verifySSHDConfig reads the effective sshd configuration and compares it with
+// the settings of the order.
 func verifySSHDConfig(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.SSH
 	if payload == nil || !payload.DescribesChange() {
@@ -1232,8 +1182,7 @@ func verifySSHDConfig(ctx context.Context, readers *hostReaders, in verifyInput)
 }
 
 // verifySSHHostKey reads the host key of the type ordered and compares its
-// fingerprint with the one from before the rotation. A key that is the same
-// one is a rotation that did not happen.
+// fingerprint with the one from before the rotation.
 func verifySSHHostKey(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	keyType := ""
 	if in.payload.SSH != nil {
@@ -1459,9 +1408,7 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 	if snapshot.UnavailableReason != "" {
 		return unreadable(expected, snapshot.UnavailableReason)
 	}
-	// A removal is the one order whose success is an interface that is not
-	// there. It is answered before the interface is looked up, because the
-	// lookup failing is exactly what it wants.
+	// A removal is the one order whose success is an interface that is not there.
 	if in.action == opspec.ActionNetworkLinkRemove {
 		if gone := snapshot.InterfaceByName(subject); gone != nil {
 			return unverified(expected, "the interface "+subject+" is still there",
@@ -1480,10 +1427,8 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 		return verifyNetworkLayer(expected, snapshot, *link, *payload.Link)
 	}
 
-	// An order that carries anything about the second family is verified
-	// against a host that has it. A host with IPv6 switched off would let
-	// every address be written and report none of them back, and "no such
-	// address" would be the wrong answer to give the operator.
+	// An order that carries anything about the second family is verified against
+	// a host that has it.
 	if payload.Method6 != "" || len(payload.Addresses6) > 0 || payload.Gateway6 != "" ||
 		payload.AcceptRA != "" || payload.Privacy != "" {
 		if link.IPv6 != nil && link.IPv6.Off() {
@@ -1523,10 +1468,9 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 			"the routing table does not carry "+listOf(missing)+" on "+payload.Interface)
 	}
 
-	// Both families are read back, because both were ordered: an IPv6
-	// address that never landed is as much a failed change as an IPv4 one,
-	// and a verifier that looked only at the first family would call it a
-	// success.
+	// Both families are read back, because both were ordered: an IPv6 address
+	// that never landed is as much a failed change as an IPv4 one, and a verifier
+	// that looked only at the first family would call it a success.
 	if ordered := append(append([]string(nil), payload.Addresses...),
 		payload.Addresses6...); len(ordered) > 0 {
 		have := make([]string, 0, len(link.Addresses))
@@ -1561,16 +1505,9 @@ func verifyNetworkState(ctx context.Context, readers *hostReaders, in verifyInpu
 	return verified(expected, observed)
 }
 
-// verifyIPv6Switches reads the two switches of the second family back from
-// the kernel after they were ordered, and returns a failed observation when
-// the host does not have what was asked for.
-//
-// A switch the kernel did not report stays unread rather than failing: the
-// order may have gone to a mechanism whose write is still settling, and
-// "unknown" is not "wrong". The two ways of saying yes to router
-// advertisements are one answer here: the mechanisms write a single flag,
-// and whether the host also forwards is a different question from whether
-// it listens.
+// verifyIPv6Switches reads the two switches of the second family back from the
+// kernel after they were ordered, and returns a failed observation when the
+// host does not have what was asked for.
 func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload,
 	settings *network.IPv6Settings) *observation {
 	if settings == nil {
@@ -1599,13 +1536,6 @@ func verifyIPv6Switches(expected, subject string, payload *opspec.NetworkPayload
 }
 
 // verifyNetworkLayer reads the layering back after a layered change.
-//
-// A layer that came up is not yet the layer that was ordered: a bond whose
-// second member never joined carries traffic and has no redundancy, and a
-// VLAN that landed on another parent carries somebody else's traffic. So
-// the verifier compares what the host reports against what the operator
-// approved, member by member, rather than settling for the interface being
-// there.
 func verifyNetworkLayer(expected string, snapshot network.Snapshot,
 	link network.Interface, spec network.LinkSpec) observation {
 	state := network.LinkStateOf(snapshot, spec.Name)
@@ -1647,19 +1577,15 @@ func verifyNetworkLayer(expected string, snapshot network.Snapshot,
 			"the bond "+spec.Name+" runs in the mode "+firstNonEmpty(state.Mode, "unknown")+
 				" and not in "+spec.Mode)
 	}
-	// A layer with members that is down carries nothing, whatever it is
-	// made of. A bridge built with no members yet is another matter: the
-	// virtual machines are attached to it afterwards, and until then it is
-	// down because it has nothing to carry.
+	// A layer with members that is down carries nothing, whatever it is made of.
 	if link.OperState == "down" && len(state.Members) > 0 {
 		return unverified(expected, observed+", down", "the "+spec.Kind+" "+spec.Name+" is down after the change")
 	}
 	return verified(expected, observed)
 }
 
-// routeInTable says whether the routing table carries the ordered route on
-// the interface. The order names a destination and, where it matters, a
-// gateway; both have to be what the table shows.
+// routeInTable says whether the routing table carries the ordered route on the
+// interface.
 func routeInTable(routes []network.Route, device, wanted string) bool {
 	fields := strings.Fields(wanted)
 	if len(fields) == 0 {
@@ -1687,9 +1613,9 @@ func routeInTable(routes []network.Route, device, wanted string) bool {
 	return false
 }
 
-// verifyFirewallRuleset reads the live ruleset after the change: the rule
-// or the zone entry there, or gone after a removal; a restore reads the
-// digest of the ruleset restored.
+// verifyFirewallRuleset reads the live ruleset after the change: the rule or
+// the zone entry there, or gone after a removal; a restore reads the digest of
+// the ruleset restored.
 func verifyFirewallRuleset(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Firewall
 	if payload == nil {
@@ -1837,8 +1763,7 @@ func verifyMACMode(ctx context.Context, readers *hostReaders, in verifyInput) ob
 }
 
 // verifyAuditRules reads whether the audit subsystem carries loaded rules
-// after the reload. It takes no order: the reload names no rule, it loads
-// what the files hold.
+// after the reload.
 func verifyAuditRules(ctx context.Context, readers *hostReaders) observation {
 	expected := "loaded audit rules"
 	if readers.security == nil {
@@ -1905,8 +1830,8 @@ func verifyTrustAnchor(ctx context.Context, readers *hostReaders, in verifyInput
 }
 
 // verifyCertificate reads the certificate at the path of the order: the
-// fingerprint deployed, or, after a renewal, another certificate than the
-// one from before.
+// fingerprint deployed, or, after a renewal, another certificate than the one
+// from before.
 func verifyCertificate(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.Certificate
 	if payload == nil || payload.Path == "" {
@@ -1974,9 +1899,9 @@ func verifyCertificate(ctx context.Context, readers *hostReaders, in verifyInput
 		"the file "+payload.Path+" carries the certificate it carried before the renewal")
 }
 
-// verifyLocalAccount reads the account after the change: there with the
-// shell, the groups, the expiry, the lock state or the keys ordered, or
-// gone after a deletion.
+// verifyLocalAccount reads the account after the change: there with the shell,
+// the groups, the expiry, the lock state or the keys ordered, or gone after a
+// deletion.
 func verifyLocalAccount(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.LocalUser
 	if payload == nil || payload.Name == "" {
@@ -2080,8 +2005,7 @@ func verifyLocalAccount(ctx context.Context, readers *hostReaders, in verifyInpu
 }
 
 // verifyAccountKeys compares the fingerprints the account carries with the
-// keys of the order. Only fingerprints travel: the key material stays on
-// the host and in the order.
+// keys of the order.
 func verifyAccountKeys(in verifyInput, account *LocalAccount, expected string) observation {
 	payload := in.payload.LocalUser
 	if account.UnavailableReason != "" {
@@ -2333,12 +2257,6 @@ func verifyComposeServices(ctx context.Context, readers *hostReaders, in verifyI
 }
 
 // verifyContainerSpec reads the container of a declaration back.
-//
-// A container that carries the digest of the description it was created
-// from is the container that was declared; one that carries another digest,
-// or none, is a container somebody else's order put there. That is the
-// whole point of this verifier: the identity here is the name, and a name
-// alone proves nothing about what stands under it.
 func verifyContainerSpec(ctx context.Context, readers *hostReaders, in verifyInput) observation {
 	payload := in.payload.DockerEnsure
 	if payload == nil || payload.Container == nil {
@@ -2349,15 +2267,14 @@ func verifyContainerSpec(ctx context.Context, readers *hostReaders, in verifyInp
 	if err != nil {
 		return unreadable("the container "+name+" as declared", err.Error())
 	}
-	// The digest of the image is what the plan bound on the host, not what
-	// the order wrote: the order names a tag, the plan says what that tag
-	// meant at that moment, and the container was created from that.
+	// The digest of the image is what the plan bound on the host, not what the
+	// order wrote: the order names a tag, the plan says what that tag meant at
+	// that moment, and the container was created from that.
 	outcome := declarationOutcome(in.result)
 	if outcome.Plan.ImageDigest == "" {
-		// Without the digest the plan bound there is nothing to compare
-		// the container's mark against, and a comparison against a
-		// description with no image would read as a mismatch that is not
-		// one. Unknown is said as unknown.
+		// Without the digest the plan bound there is nothing to compare the
+		// container's mark against, and a comparison against a description with no
+		// image would read as a mismatch that is not one.
 		return unreadable("the container "+name+" as declared",
 			"the host sent back no plan, so the image the container was to run is not known here")
 	}
@@ -2509,9 +2426,7 @@ func verifyDockerVolume(ctx context.Context, readers *hostReaders, in verifyInpu
 	return verified(expected, found.Driver)
 }
 
-// readEngine reads the engine state for a verifier, or says why it could
-// not. An engine that does not answer leaves the state unknown, and
-// unknown is never a pass.
+// readEngine reads the engine state for a verifier, or says why it could not.
 func readEngine(ctx context.Context, readers *hostReaders, expected string) (docker.Snapshot, *observation) {
 	if readers.docker == nil {
 		problem := unreadable(expected, noReader("the container engine"))
@@ -2529,10 +2444,7 @@ func readEngine(ctx context.Context, readers *hostReaders, expected string) (doc
 	return snapshot, nil
 }
 
-// declarationOutcome reads what the host reported about the change. An
-// answer that cannot be read leaves an empty outcome: the verifier then
-// compares against a description without a bound image digest and says so
-// by not matching, which is the honest answer.
+// declarationOutcome reads what the host reported about the change.
 func declarationOutcome(result *agentv1.TaskResult) docker.EnsureResult {
 	outcome := docker.EnsureResult{}
 	raw := result.GetDockerEnsureResult().GetPayload()
@@ -2607,10 +2519,7 @@ func verifyRestoreTarget(readers *hostReaders, in verifyInput) observation {
 	}
 	exists, entries, err := readers.directory(payload.Target)
 	if err != nil {
-		// A restore writes as root, often into a directory the agent may
-		// not open. The helper counted what it wrote, and that count is a
-		// reading of the host by the part of it that may look; without one
-		// the state stays unknown, which is not the same as empty.
+		// A restore writes as root, often into a directory the agent may not open.
 		if counted := in.result.GetBackupResult(); counted.GetTargetRead() {
 			exists, entries, err = true, int(counted.GetTargetEntries()), nil
 		} else {
@@ -2665,11 +2574,8 @@ func verifyDomainMembership(ctx context.Context, readers *hostReaders, in verify
 		return unverified(expected, observed,
 			"the host is joined to "+state.Domain+" and not to "+domain)
 	}
-	// The keytab is root's file, so the agent's own read never sees it: a
-	// missing key version here says nothing about the host. The privileged
-	// read answers the question, and where there is none the join is
-	// unconfirmed rather than declared keyless - an unreadable file is not
-	// an absent one.
+	// The keytab is root's file, so the agent's own read never sees it: a missing
+	// key version here says nothing about the host.
 	kvno := state.KeytabKVNO
 	if kvno == nil {
 		if readers.keytabKVNO == nil {

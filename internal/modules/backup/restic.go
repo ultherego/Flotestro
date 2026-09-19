@@ -43,10 +43,6 @@ func (r *Restic) Version(ctx context.Context) string {
 }
 
 // baseArguments assembles the arguments common to every invocation.
-//
-// The repository address goes as an argument, because it is not a secret:
-// it is the target name the panel shows anyway. The password goes through
-// the environment.
 func (r *Restic) baseArguments(order Order) []string {
 	return []string{"--repo", order.Repository, "--json"}
 }
@@ -78,9 +74,9 @@ func (r *Restic) Plan(ctx context.Context, order Order) (State, error) {
 		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
 	if !result.Ran || result.ExitCode != 0 || result.Err != nil {
 		state.UnavailableReason = result.Reason()
-		// A repository nobody has created yet holds no copies, and that is
-		// an answer: the first backup into it can then be confirmed by the
-		// copy that appears. Any other refusal leaves the state unknown.
+		// A repository nobody has created yet holds no copies, and that is an
+		// answer: the first backup into it can then be confirmed by the copy that
+		// appears.
 		if result.Ran && repositoryAbsent(result.Stderr+"\n"+result.Stdout) {
 			return state, fmt.Errorf("restic snapshots: %s: %w", result.Reason(), ErrRepositoryAbsent)
 		}
@@ -105,9 +101,8 @@ func (r *Restic) Plan(ctx context.Context, order Order) (State, error) {
 	SortSnapshots(state.Snapshots)
 	state.LastSuccessAt = LastSuccess(state.Snapshots)
 
-	// The repository size is a separate question and a separate cost:
-	// restic computes it by walking the index. A failed read leaves no
-	// knowledge, not zero - a repository without a size still has copies.
+	// The repository size is a separate question and a separate cost: restic
+	// computes it by walking the index.
 	size := run(ctx, r.path(),
 		append(r.baseArguments(order), "stats", "--mode", "raw-data"),
 		toolEnvironment(order, ResticPasswordVariable), orderSecrets(order), nil)
@@ -197,9 +192,7 @@ func (r *Restic) Run(ctx context.Context, order Order, progress ProgressFunc) (R
 	if execution.Err != nil || !execution.Ran {
 		return result, fmt.Errorf("restic backup: %s", execution.Reason())
 	}
-	// Code 3 means a copy made despite files that could not be read. That
-	// is not a success and not a failure: the copy exists, but is
-	// incomplete - and that is how it has to be named.
+	// Code 3 means a copy made despite files that could not be read.
 	if execution.ExitCode != 0 && execution.ExitCode != 3 {
 		return result, fmt.Errorf("restic backup: %s", execution.Reason())
 	}
@@ -287,9 +280,8 @@ func (r *Restic) Verify(ctx context.Context, order Order) (Result, error) {
 	}
 	arguments := append(r.baseArguments(order), "check")
 	if order.ReadData {
-		// A structure check says the index agrees; only reading the data
-		// says the copy can be restored. The latter costs traffic and time,
-		// so it is the operator's explicit choice.
+		// A structure check says the index agrees; only reading the data says the
+		// copy can be restored.
 		arguments = append(arguments, "--read-data-subset", "5%")
 	}
 	execution := run(ctx, r.path(), arguments,
@@ -366,11 +358,8 @@ func first(values []string, count int) []string {
 	return values[:count]
 }
 
-// ensureExists creates the repository if the definition allows it.
-//
-// It is created only when the operator asked for it. A repository created
-// quietly on a typo in the address looks like a working backup - and is an
-// empty directory next to the right one.
+// ensureExists creates the repository if the definition allows it. It is
+// created only when the operator asked for it.
 func (r *Restic) ensureExists(ctx context.Context, order Order) error {
 	check := run(ctx, r.path(),
 		append(r.baseArguments(order), "cat", "config"),

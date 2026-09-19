@@ -18,23 +18,6 @@ import (
 )
 
 // Scheduled and recurring campaigns.
-//
-// A schedule keeps a campaign order for a moment, or for a rule of
-// moments: the monthly patch window, the weekly restart of a tier. When
-// the moment comes the loop places the order through the same door a
-// request takes - orderCampaign, with every check it makes - under the
-// rights of the person who wrote the schedule, read anew at that moment.
-// The campaign it places is an ordinary one and always waits for its
-// approval: the door binds the consent to the fingerprint of what runs on
-// many hosts, and a stored order cannot waive it any more than a typed
-// one can (requires_approval in the order is read the way the door reads
-// it - as true). What the schedule adds is the moment; what it cannot add
-// is a fresh authentication, so an operation the step-up policy denies to
-// tokens is refused at the moment and the refusal is kept on the row.
-//
-// The rights are the campaign rights: creating a schedule is the right to
-// create campaigns, because a schedule is a campaign order; reading them
-// is the right to read campaigns.
 
 // handleListCampaignSchedules lists every schedule, the next to fire
 // first.
@@ -50,12 +33,7 @@ func (s *Server) handleListCampaignSchedules(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, map[string]any{"items": schedules, "count": len(schedules)})
 }
 
-// readScheduleSpec decodes and checks a schedule. The order inside is
-// held to what the door would refuse before any host is read - a known
-// operation that runs in bulk, a selector that parses - so an order that
-// can never be placed is refused now with the door's own code rather
-// than at two in the morning. The answer has been written when the
-// second result is false.
+// readScheduleSpec decodes and checks a schedule.
 func (s *Server) readScheduleSpec(w http.ResponseWriter, r *http.Request) (*campaigns.CheckedSchedule, bool) {
 	var spec campaigns.ScheduleSpec
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<18)).Decode(&spec); err != nil {
@@ -175,10 +153,7 @@ func (s *Server) handleGetCampaignSchedule(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, found)
 }
 
-// handleUpdateCampaignSchedule rewrites a schedule. Whoever writes it
-// becomes its author: the orders are placed under the rights of the
-// person who last wrote the order, so an editor cannot widen a
-// colleague's schedule onto hosts only the colleague may change.
+// handleUpdateCampaignSchedule rewrites a schedule.
 func (s *Server) handleUpdateCampaignSchedule(w http.ResponseWriter, r *http.Request) {
 	found, principal, ok := s.scheduleFor(w, r, authz.PermCampaignCreate)
 	if !ok {
@@ -238,12 +213,9 @@ func (s *Server) handleDeleteCampaignSchedule(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleRunCampaignScheduleNow places the schedule's order at once,
-// without moving its next moment: a rehearsal of the monthly window, or
-// the window brought forward. The order goes through the same door under
-// the schedule's author, not the caller: what is placed is what the
-// schedule would place, and the caller's right is the right to create
-// campaigns, checked here.
+// handleRunCampaignScheduleNow places the schedule's order at once, without
+// moving its next moment: a rehearsal of the monthly window, or the window
+// brought forward.
 func (s *Server) handleRunCampaignScheduleNow(w http.ResponseWriter, r *http.Request) {
 	found, principal, ok := s.scheduleFor(w, r, authz.PermCampaignCreate)
 	if !ok {
@@ -283,17 +255,8 @@ func (s *Server) handleRunCampaignScheduleNow(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusCreated, campaign)
 }
 
-// OrderFromSchedule places the order of a schedule through the door of
-// the campaign API. It is what the loop calls at the moment and what
-// run-now calls on demand.
-//
-// The order is placed as the schedule - subject schedule:<id> - holding
-// the rights of its author as they stand now: an author whose rights
-// were taken away, or who was disabled, places nothing, and the refusal
-// says so. Every check the door makes is made here, because the order is
-// carried through orderCampaign itself with the answer caught instead of
-// sent; the door's refusal comes back typed, with its code and sentence,
-// for the row and the log.
+// OrderFromSchedule places the order of a schedule through the door of the
+// campaign API.
 func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Schedule, runAt time.Time) (*campaigns.Campaign, error) {
 	if s.authz == nil {
 		return nil, errors.New("no authorization store is configured")
@@ -312,9 +275,9 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 		s.recordScheduleRefusal(ctx, schedule, "invalid_order", err.Error())
 		return nil, campaigns.ScheduleRefusal{Code: "invalid_order", Detail: "the stored order does not read: " + err.Error()}
 	}
-	// A recurring order names the moment in the campaign's name, so the
-	// list tells October's window from November's; a single moment keeps
-	// the name as written.
+	// A recurring order names the moment in the campaign's name, so the list
+	// tells October's window from November's; a single moment keeps the name as
+	// written.
 	if schedule.Recurrence != "" {
 		request.Name = strings.TrimSpace(request.Name) + " " + runAt.In(schedule.Location()).Format("2006-01-02")
 	}
@@ -324,10 +287,8 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 	// One moment places one order: a second pass over the same moment -
 	// two panels, a retried tick - gets the campaign already placed.
 	request.IdempotencyKey = fmt.Sprintf("schedule:%s:%d", schedule.ID, runAt.Unix())
-	// A schedule places its order at a moment nobody is watching, so there
-	// is no preview behind it. A token stored with the order when the
-	// schedule was created would describe a fleet of weeks ago; the order
-	// carries none and is checked, host by host, the way it always is.
+	// A schedule places its order at a moment nobody is watching, so there is no
+	// preview behind it.
 	request.PreviewID, request.PreviewDigest = "", ""
 
 	actor := *author
@@ -365,9 +326,9 @@ func (s *Server) OrderFromSchedule(ctx context.Context, schedule campaigns.Sched
 	return &campaign, nil
 }
 
-// recordScheduleRefusal writes a refused moment on the trail: a schedule
-// that places nothing is a change that did not happen, and the trail is
-// to say why as much as it says what happened.
+// recordScheduleRefusal writes a refused moment on the trail: a schedule that
+// places nothing is a change that did not happen, and the trail is to say why
+// as much as it says what happened.
 func (s *Server) recordScheduleRefusal(ctx context.Context, schedule campaigns.Schedule, code, detail string) {
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorSystem, ActorID: "schedule:" + schedule.ID,
@@ -380,9 +341,9 @@ func (s *Server) recordScheduleRefusal(ctx context.Context, schedule campaigns.S
 	})
 }
 
-// caughtAnswer is the door's answer caught in memory: the status, the
-// headers it set and the body it wrote, so the same handler serves a
-// request and a schedule.
+// caughtAnswer is the door's answer caught in memory: the status, the headers
+// it set and the body it wrote, so the same handler serves a request and a
+// schedule.
 type caughtAnswer struct {
 	header http.Header
 	status int
@@ -419,9 +380,8 @@ func (a *caughtAnswer) refusal() campaigns.ScheduleRefusal {
 
 // The maintenance calendar.
 
-// calendarEntry is one moment or window of the calendar, whatever its
-// source: a host in maintenance, a campaign's window, a schedule's next
-// moments.
+// calendarEntry is one moment or window of the calendar, whatever its source:
+// a host in maintenance, a campaign's window, a schedule's next moments.
 type calendarEntry struct {
 	// Kind is host_window, campaign_window or schedule.
 	Kind string `json:"kind"`
@@ -438,21 +398,17 @@ type calendarEntry struct {
 	SetBy string `json:"set_by,omitempty"`
 }
 
-// The bounds of a calendar read: a year at most, so a range typed wrong
-// does not draw every window ever recorded; and at most this many moments
-// of one schedule, however dense its rule.
+// The bounds of a calendar read: a year at most, so a range typed wrong does
+// not draw every window ever recorded; and at most this many moments of one
+// schedule, however dense its rule.
 const (
 	maxCalendarRange       = 366 * 24 * time.Hour
 	maxScheduleOccurrences = 100
 )
 
-// handleMaintenanceCalendar lists, for a range, the maintenance windows
-// of the hosts, the windows of the campaigns and the next moments of the
-// schedules, in one list ordered by start. Each source is narrowed the
-// way its own list is: hosts to the scopes the caller may read hosts in,
-// campaigns to the scopes they may read campaigns in; the schedules,
-// having no scope of their own, come with the campaign right the whole
-// read asks for.
+// handleMaintenanceCalendar lists, for a range, the maintenance windows of the
+// hosts, the windows of the campaigns and the next moments of the schedules,
+// in one list ordered by start.
 func (s *Server) handleMaintenanceCalendar(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign_schedule")
 	if !ok {
@@ -544,9 +500,9 @@ func (s *Server) handleMaintenanceCalendar(w http.ResponseWriter, r *http.Reques
 	})
 }
 
-// sortCalendar orders the entries by start, an entry without a start by
-// its end; a stable order so two windows opening together keep the order
-// their sources gave.
+// sortCalendar orders the entries by start, an entry without a start by its
+// end; a stable order so two windows opening together keep the order their
+// sources gave.
 func sortCalendar(entries []calendarEntry) {
 	moment := func(entry calendarEntry) time.Time {
 		if entry.Start != nil {

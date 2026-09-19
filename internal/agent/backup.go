@@ -14,11 +14,6 @@ import (
 )
 
 // BackupState describes the backup tools visible on the host.
-//
-// This is everything that can be said about backups without credentials:
-// whether the host has anything to make them with. The state of the repository
-// - when the last copy succeeded and how much room it takes - needs a password,
-// so it is an operation and not inventory.
 type BackupState struct {
 	Tools []BackupTool `json:"tools"`
 	// Runbooks lists the scripts the administrator of the host made available to
@@ -93,9 +88,7 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		Plan: payload.Plan, PlanHash: payload.PlanHash,
 	}
 
-	// The credentials are fetched only now, right before the operation. They
-	// live for a moment in the memory of the agent and of the helper - they are
-	// not in the envelope of the task, in the journal or in the result.
+	// The credentials are fetched only now, right before the operation.
 	if !payload.PasswordSecret.Empty() {
 		value, refusal := e.fetchSecret(callCtx, task, *payload.PasswordSecret)
 		if refusal != nil {
@@ -132,9 +125,9 @@ func (e *TaskExecutor) applyBackup(ctx context.Context, task *agentv1.TaskEnvelo
 		Message:  result.GetMessage(),
 		Plan:     result.GetPlan(),
 		Verified: result.GetVerified(),
-		// What the helper counted under the restore target travels with
-		// the result: the agent itself cannot read a directory root wrote,
-		// and the verifier below needs an answer rather than a refusal.
+		// What the helper counted under the restore target travels with the result:
+		// the agent itself cannot read a directory root wrote, and the verifier
+		// below needs an answer rather than a refusal.
 		TargetEntries: result.GetTargetEntries(),
 		TargetRead:    result.GetTargetRead(),
 	}
@@ -160,12 +153,9 @@ func (e *TaskExecutor) fetchSecret(ctx context.Context, task *agentv1.TaskEnvelo
 		return nil, rejected(agentv1.TaskResult_STATUS_FAILED, RejectInternalError,
 			"the agent has no connection through which a secret could be fetched")
 	}
-	// The panel issues one lease per task and redeems it once: a task that
-	// reads the repository before the change, writes it and reads it again
-	// to verify asks for the same secret three times, and the second ask
-	// would be refused. The value is therefore fetched once and kept for
-	// the life of this task - in memory, next to the task that is using it
-	// anyway - and forgotten with it.
+	// The panel issues one lease per task and redeems it once: a task that reads
+	// the repository before the change, writes it and reads it again to verify
+	// asks for the same secret three times, and the second ask would be refused.
 	if value, held := e.taskSecret(task.GetTaskId(), reference); held {
 		return value, nil
 	}
@@ -204,9 +194,7 @@ func (e *TaskExecutor) keepTaskSecret(taskID string, reference opspec.SecretRef,
 	e.taskSecrets[secretKey(taskID, reference)] = value
 }
 
-// forgetTaskSecrets drops what a finished task fetched. The values are
-// overwritten before they are dropped: the memory is reused by whatever
-// runs next, and a secret has no business being in it.
+// forgetTaskSecrets drops what a finished task fetched.
 func (e *TaskExecutor) forgetTaskSecrets(taskID string) {
 	e.secretsMu.Lock()
 	defer e.secretsMu.Unlock()

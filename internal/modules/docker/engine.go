@@ -15,11 +15,6 @@ import (
 )
 
 // The engine calls that create and change objects.
-//
-// Every one of them has its own method with its own parameters, like the
-// reads: the client never takes a path from outside the module, because a
-// helper that relayed a path would be a way to call any Engine API at all -
-// and that is root by another name.
 
 // callJSON performs a request with a JSON body.
 func (c *Client) callJSON(ctx context.Context, method, path string, query url.Values,
@@ -55,11 +50,6 @@ func (c *Client) callJSON(ctx context.Context, method, path string, query url.Va
 }
 
 // engineError turns the engine's answer into an error of this module.
-//
-// The status carries the meaning the operator needs: 404 is an object that
-// is not there, 409 an object something else is holding. Both have their
-// own code in the panel, so they must not arrive as one undifferentiated
-// failure.
 func engineError(status int, body string) error {
 	message := strings.TrimSpace(body)
 	var payload struct {
@@ -77,10 +67,7 @@ func engineError(status int, body string) error {
 	return fmt.Errorf("the engine answered %d: %s", status, message)
 }
 
-// ContainerDetail is the full state of one container as the engine keeps
-// it. Unlike the container list, it carries what a container was created
-// with - the command, the limits, the mounts - which is what a plan
-// compares a specification against.
+// ContainerDetail is the full state of one container as the engine keeps it.
 type ContainerDetail struct {
 	ID           string
 	Name         string
@@ -173,10 +160,6 @@ type engineContainer struct {
 }
 
 // InspectContainer reads the full state of one container.
-//
-// A container the host does not have is ErrNotFound rather than an empty
-// answer: a plan that treated a missing container as "nothing to compare"
-// would silently create a second one.
 func (c *Client) InspectContainer(ctx context.Context, reference string) (ContainerDetail, error) {
 	var raw engineContainer
 	if err := c.get(ctx, "/containers/"+url.PathEscape(reference)+"/json", nil, &raw); err != nil {
@@ -188,10 +171,9 @@ func (c *Client) InspectContainer(ctx context.Context, reference string) (Contai
 	return detailFrom(raw), nil
 }
 
-// detailFrom turns the engine's answer into the specification the
-// container really runs under, so that a plan compares two descriptions of
-// the same shape instead of a description against a data structure of the
-// daemon.
+// detailFrom turns the engine's answer into the specification the container
+// really runs under, so that a plan compares two descriptions of the same
+// shape instead of a description against a data structure of the daemon.
 func detailFrom(raw engineContainer) ContainerDetail {
 	detail := ContainerDetail{
 		ID:           raw.ID,
@@ -275,10 +257,8 @@ func detailFrom(raw engineContainer) ContainerDetail {
 			})
 		}
 	}
-	// The mount list of the host configuration is what the container was
-	// created with; the top level Mounts is what it ended up with. The
-	// first is the description to compare against, and the bind list is
-	// the older way of writing the same thing.
+	// The mount list of the host configuration is what the container was created
+	// with; the top level Mounts is what it ended up with.
 	for _, mount := range raw.HostConfig.Mounts {
 		entry := MountSpec{
 			Type: mount.Type, Source: mount.Source,
@@ -330,9 +310,7 @@ func mountFromBind(bind string) (MountSpec, bool) {
 	return mount, true
 }
 
-// tmpfsSize reads the size out of the mount options of a tmpfs. An option
-// list without one leaves the size unstated rather than zero: zero would
-// read as a mount of no size at all.
+// tmpfsSize reads the size out of the mount options of a tmpfs.
 func tmpfsSize(options string) int64 {
 	for _, option := range strings.Split(options, ",") {
 		if value, found := strings.CutPrefix(option, "size="); found {
@@ -358,14 +336,6 @@ func splitPort(port string) (uint16, string) {
 }
 
 // ResolveImageDigest answers with the digest the reference will run from.
-//
-// The registry is asked first, through the engine's own distribution
-// endpoint: it reads the manifest without pulling the image, so a plan
-// learns what a tag means today even for an image the host has never seen.
-// A registry that does not answer - no credentials, no network - leaves the
-// image already on the host, whose digest was recorded when it was pulled.
-// A reference neither can resolve is not planned: a tag the plan did not
-// bind is a deployment of whatever the registry serves at that moment.
 func (c *Client) ResolveImageDigest(ctx context.Context, reference string) (digest, source string, err error) {
 	if pinned := PinnedDigest(reference); pinned != "" {
 		return pinned, DigestFromReference, nil
@@ -394,10 +364,8 @@ func (c *Client) ResolveImageDigest(ctx context.Context, reference string) (dige
 				return pinned, DigestFromLocal, nil
 			}
 		}
-		// An image built on the host never came from a registry, so no
-		// digest names it there. Its own identifier is what the container
-		// would run from, and saying so is better than refusing a plan for
-		// an image the host really has.
+		// An image built on the host never came from a registry, so no digest names
+		// it there.
 		if digestReference.MatchString(image.ID) {
 			return image.ID, DigestFromLocal, nil
 		}
@@ -430,9 +398,7 @@ func PinnedDigest(reference string) string {
 	return digest
 }
 
-// PinReference replaces the tag of a reference with a digest. The tag is
-// the part after the last colon that comes after the last slash - a colon
-// before the last slash is the port of a registry.
+// PinReference replaces the tag of a reference with a digest.
 func PinReference(reference, digest string) string {
 	if PinnedDigest(reference) != "" {
 		return reference
@@ -448,13 +414,8 @@ func PinReference(reference, digest string) string {
 	return repository + "@" + digest
 }
 
-// CreateContainer creates a container from the specification and returns
-// its identifier. The container does not start: starting is a separate
-// step, so that a container the order wanted stopped never runs at all.
-//
-// The environment values of the secret variables come in separately and
-// never through the specification: the specification is hashed into the
-// plan, stored with the job and read back by the verifier.
+// CreateContainer creates a container from the specification and returns its
+// identifier.
 func (c *Client) CreateContainer(ctx context.Context, spec ContainerSpec,
 	secrets map[string][]byte) (string, error) {
 	body := createBody(spec, secrets)
@@ -564,9 +525,9 @@ func createBody(spec ContainerSpec, secrets map[string][]byte) map[string]any {
 	return config
 }
 
-// ImageOf is the reference a container is created from: the repository
-// with the digest the plan bound, never the tag as the registry serves it
-// at that moment.
+// ImageOf is the reference a container is created from: the repository with
+// the digest the plan bound, never the tag as the registry serves it at that
+// moment.
 func ImageOf(spec ContainerSpec) string {
 	if spec.ImageDigest == "" {
 		return spec.Image
@@ -625,12 +586,8 @@ func mountBodies(mounts []MountSpec) []map[string]any {
 	return bodies
 }
 
-// environmentList assembles the variables in a fixed order, the values of
-// the secret ones taken from the store.
-//
-// A secret whose value did not arrive is left out rather than set empty: a
-// container that starts with an empty password reads as a working one and
-// is not.
+// environmentList assembles the variables in a fixed order, the values of the
+// secret ones taken from the store.
 func environmentList(spec ContainerSpec, secrets map[string][]byte) []string {
 	names := make([]string, 0, len(spec.Env)+len(spec.EnvSecrets))
 	for name := range spec.Env {
@@ -657,14 +614,10 @@ func environmentList(spec ContainerSpec, secrets map[string][]byte) []string {
 
 // The labels the module puts on what it creates.
 const (
-	// LabelManaged marks an object created from a specification of the
-	// panel. An object without it was made by hand, and its description is
-	// unknown - which is not the same as matching.
+	// LabelManaged marks an object created from a specification of the panel.
 	LabelManaged = "io.flotestro.managed"
-	// LabelSpecDigest carries the digest of the specification the object
-	// was created from. It is what lets a plan see a change the engine's
-	// own state does not show: a secret rotated to a new version, a
-	// variable moved from the order into the store.
+	// LabelSpecDigest carries the digest of the specification the object was
+	// created from.
 	LabelSpecDigest = "io.flotestro.spec"
 )
 
@@ -749,9 +702,7 @@ func (c *Client) ConnectNetwork(ctx context.Context, network, container string,
 		"/networks/"+url.PathEscape(network)+"/connect", nil, body, nil)
 }
 
-// DisconnectNetwork detaches a container from a network. force detaches a
-// container that is running: without it the engine refuses, and a network
-// nothing can be detached from cannot be replaced either.
+// DisconnectNetwork detaches a container from a network.
 func (c *Client) DisconnectNetwork(ctx context.Context, network, container string, force bool) error {
 	body := map[string]any{"Container": container, "Force": force}
 	return c.callJSON(ctx, http.MethodPost,
@@ -775,8 +726,7 @@ func (c *Client) CreateVolume(ctx context.Context, spec VolumeSpec) error {
 }
 
 // RemoveVolumeForced removes a volume, asking the engine to remove one it
-// would otherwise keep. The engine still refuses a volume a container
-// references, and that refusal is the answer the operator gets.
+// would otherwise keep.
 func (c *Client) RemoveVolumeForced(ctx context.Context, name string) error {
 	query := url.Values{}
 	query.Set("force", "1")

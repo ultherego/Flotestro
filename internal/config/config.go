@@ -24,10 +24,6 @@ type ControlPlane struct {
 }
 
 // Vulnerabilities describes the CVE correlator.
-//
-// The tracker of the distribution vendor settles the matter; upstream feeds
-// may later add a description and a CVSS, but they must not change the answer
-// "vulnerable / not vulnerable".
 type Vulnerabilities struct {
 	Enabled bool
 	// SyncInterval says how often the panel asks the trackers about changes.
@@ -44,21 +40,14 @@ type Vulnerabilities struct {
 	// RedHatURL names the directory with the CSAF/VEX data of Red Hat; empty
 	// disables this source.
 	RedHatURL string
-	// RedHatCache is the directory the panel keeps the Red Hat findings it
-	// has read in between cycles. The full data are a three hundred megabyte
-	// archive, so without a memory every cycle would fetch them anew.
+	// RedHatCache is the directory the panel keeps the Red Hat findings it has
+	// read in between cycles.
 	RedHatCache string
-	// NVDURL points at the NVD API; empty disables enrichment. This source
-	// settles nothing - it only adds the CVSS score and the description of a
-	// vulnerability.
+	// NVDURL points at the NVD API; empty disables enrichment.
 	NVDURL string
-	// NVDKey is the API key for NVD. Without a key five requests per thirty
-	// seconds are allowed, so the first read takes around twenty minutes; with
-	// a key a few minutes.
+	// NVDKey is the API key for NVD.
 	NVDKey string
-	// NVDInterval says how often the panel asks NVD about changes. Less often
-	// than about vulnerabilities: these data do not change a single answer
-	// about hosts.
+	// NVDInterval says how often the panel asks NVD about changes.
 	NVDInterval time.Duration
 }
 
@@ -84,8 +73,7 @@ func EnvInt(key string, fallback int) int {
 }
 
 // EnvDuration reads an environment variable expressed as a duration, for
-// example "5m". An unreadable value must not silently switch a safeguard off,
-// so the default value stays.
+// example "5m".
 func EnvDuration(key string, fallback time.Duration) time.Duration {
 	value, ok := os.LookupEnv(key)
 	if !ok || value == "" {
@@ -109,16 +97,9 @@ func (c ControlPlane) Validate() error {
 	return nil
 }
 
-// Effective is the configuration the control plane resolved at start, as
-// the settings screen shows it: every value after the defaults, the
-// environment and the flags had their say. It carries no secret - only
-// whether one is set - so nothing that reads it can leak one, whatever it
-// renders.
-//
-// The values are set in /etc/flotestro/control-plane.env; the screen shows
-// them and changes nothing. A panel that let its own configuration be
-// edited over the API would let a stolen session redirect the login to a
-// provider of the thief's choosing.
+// Effective is the configuration the control plane resolved at start, as the
+// settings screen shows it: every value after the defaults, the environment
+// and the flags had their say.
 type Effective struct {
 	Version   string
 	Commit    string
@@ -163,11 +144,8 @@ type Effective struct {
 	// itself is not here.
 	SecretsKeyFile string
 
-	// DatabasePool is the shape of the connection pool of this replica,
-	// as it was resolved. The screens show it because the budget it takes
-	// out of the database is shared with every other replica, and the
-	// first question after "too many clients already" is how much this
-	// one was allowed to take.
+	// DatabasePool is the shape of the connection pool of this replica, as it was
+	// resolved.
 	DatabasePool DatabasePool
 	// Migration says how this process treats the schema: whether it
 	// brings it forward itself, and under which role it would.

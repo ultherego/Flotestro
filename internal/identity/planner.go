@@ -9,9 +9,7 @@ import (
 	"github.com/ultherego/flotestro/internal/freeipa"
 )
 
-// Directory is the part of the directory client the planner reads. It is an
-// interface so the impact rules can be checked against a fake directory
-// without a Kerberos session.
+// Directory is the part of the directory client the planner reads.
 type Directory interface {
 	Principal() string
 	Users(ctx context.Context) ([]freeipa.User, error)
@@ -23,25 +21,19 @@ type Directory interface {
 	SudoRules(ctx context.Context) ([]freeipa.SudoRule, error)
 	Zones(ctx context.Context) ([]freeipa.Zone, error)
 	Records(ctx context.Context, zone string) ([]freeipa.Record, error)
-	// Services lists the Kerberos service principals; a keytab rotation
-	// plans against them, so a principal the directory does not know is a
-	// conflict before the approval rather than a failure after it.
+	// Services lists the Kerberos service principals; a keytab rotation plans
+	// against them, so a principal the directory does not know is a conflict
+	// before the approval rather than a failure after it.
 	Services(ctx context.Context) ([]freeipa.Service, error)
 	// UserEntry reads the identity of an account's entry, so the plan can
 	// be bound to the entry it was made for.
 	UserEntry(ctx context.Context, uid string) (freeipa.EntryReference, error)
-	// CapabilitiesFor says what the directory can do to one account's
-	// entry, so an operation it would refuse is refused before it is
-	// approved. It asks about that entry rather than about a sample: an
-	// ACI is written against a container, a filter or a group as often as
-	// against the whole subtree, and only the answer about this entry
-	// decides this operation.
+	// CapabilitiesFor says what the directory can do to one account's entry, so
+	// an operation it would refuse is refused before it is approved.
 	CapabilitiesFor(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 }
 
-// Planner builds a preview of a change's impact. The plan shows the resulting
-// membership, the hosts reachable through HBAC and the sudo rules before
-// anything happens.
+// Planner builds a preview of a change's impact.
 type Planner struct {
 	directory Directory
 }
@@ -348,10 +340,6 @@ func matchesSubject(ruleUsers, ruleGroups []string, uid string, groups []string)
 }
 
 // planRecord describes what will happen to a record in the directory.
-//
-// The reverse record is a separate step of the plan rather than a detail of
-// the write: it decides what a query about an address answers, and it is the
-// thing most often forgotten.
 func (p *Planner) planRecord(ctx context.Context, spec *DNSRecordPayload, adding bool) (Plan, error) {
 	verb := "Adding"
 	step := "adding the record"
@@ -373,9 +361,9 @@ func (p *Planner) planRecord(ctx context.Context, spec *DNSRecordPayload, adding
 		}
 		reverseZone, reverseName = computed, name
 		if spec.ReverseZone != "" {
-			// A zone named explicitly is sometimes narrower than /24: the
-			// relative name is then computed against it rather than against
-			// the split the panel assumed by itself.
+			// A zone named explicitly is sometimes narrower than /24: the relative name
+			// is then computed against it rather than against the split the panel
+			// assumed by itself.
 			reverseZone = strings.TrimSuffix(spec.ReverseZone, ".")
 			reverseName, err = freeipa.NameInZone(spec.Value, reverseZone)
 			if err != nil {
@@ -408,9 +396,8 @@ func (p *Planner) planRecord(ctx context.Context, spec *DNSRecordPayload, adding
 	// The current state of the record: whether such an entry exists and with what value.
 	records, err := p.directory.Records(ctx, strings.TrimSuffix(spec.Zone, "."))
 	if err != nil {
-		// No access to the zone does not invalidate the plan, but the
-		// operator is to know that the panel did not compare it with the
-		// state of the directory.
+		// No access to the zone does not invalidate the plan, but the operator is to
+		// know that the panel did not compare it with the state of the directory.
 		plan.Conflicts = append(plan.Conflicts,
 			"the records of the zone were not read: "+err.Error())
 		return plan, nil
@@ -426,9 +413,8 @@ func (p *Planner) planRecord(ctx context.Context, spec *DNSRecordPayload, adding
 			}
 			continue
 		}
-		// A record with a different value is not an error: a name may point
-		// at several addresses. But the operator is to see that before the
-		// write.
+		// A record with a different value is not an error: a name may point at
+		// several addresses.
 		plan.Steps = append(plan.Steps, fmt.Sprintf("note: %s %s already points at %s",
 			spec.Type, full, strings.Join(record.Values, ", ")))
 		if !adding && !slices.Contains(record.Values, spec.Value) {

@@ -6,15 +6,8 @@ import (
 	"strings"
 )
 
-// The plans of the layers above a bare disk: the software array and the
-// volume manager.
-//
-// Both answer the same question the device plans answer - what would this
-// order do on this host - and both bind to an identity that survives a
-// reboot rather than to a path. An array is named by the UUID in its
-// superblock, a group and a volume by their LVM UUID, a member and a new
-// physical volume by their /dev/disk/by-id link. A plan that could not be
-// bound to one of those refuses here, before anybody approves it.
+// The plans of the layers above a bare disk: the software array and the volume
+// manager.
 
 // Refusal codes of the array and volume operations.
 const (
@@ -23,17 +16,15 @@ const (
 	CodeArrayUnknown = "array_unknown"
 	// CodeArrayMemberUnknown: the device is not a member of that array.
 	CodeArrayMemberUnknown = "array_member_unknown"
-	// CodeArrayRedundancyLost: the change would leave the array without a
-	// copy of the data - a level that keeps none, an array already
-	// degraded, or the last member that still carries data.
+	// CodeArrayRedundancyLost: the change would leave the array without a copy of
+	// the data - a level that keeps none, an array already degraded, or the last
+	// member that still carries data.
 	CodeArrayRedundancyLost = "array_redundancy_lost"
-	// CodeArrayRebuilding: the array is putting a member back. That is the
-	// moment it is least able to lose another one, and a member change
-	// interrupts the rebuild.
+	// CodeArrayRebuilding: the array is putting a member back.
 	CodeArrayRebuilding = "array_rebuilding"
-	// CodeArrayLifecycleOutOfScope: creating or destroying an array is a
-	// decision about a machine's whole disk layout, not an operation the
-	// panel runs over a fleet.
+	// CodeArrayLifecycleOutOfScope: creating or destroying an array is a decision
+	// about a machine's whole disk layout, not an operation the panel runs over a
+	// fleet.
 	CodeArrayLifecycleOutOfScope = "array_lifecycle_out_of_scope"
 	// CodeVolumeUnknown: the host has no such volume group or logical
 	// volume.
@@ -42,22 +33,18 @@ const (
 	// asks.
 	CodeVolumeGroupFull = "volume_group_full"
 	// CodeSnapshotOfSnapshot: the volume named as the origin is itself a
-	// snapshot. LVM would take a snapshot of the copy-on-write space, which
-	// is not what anybody means by it.
+	// snapshot.
 	CodeSnapshotOfSnapshot = "snapshot_of_snapshot"
 )
 
-// ArrayLifecycleRefusal is the answer to an order that would create or
-// destroy an array. It is stated once here so the catalogue, the host and
-// the panel say the same sentence.
+// ArrayLifecycleRefusal is the answer to an order that would create or destroy
+// an array.
 const ArrayLifecycleRefusal = "the panel manages the members of an array that exists; " +
 	"creating an array and destroying one are decisions about a machine's whole disk layout, " +
 	"taken on the machine when it is built, not operations run over a running fleet"
 
-// arrayLifecycleKinds are the plan names somebody reaches for when they
-// expect the panel to build or tear down an array. They are listed so the
-// answer is the sentence above with its own code, rather than "no such
-// plan" - the difference between a boundary drawn on purpose and a gap.
+// arrayLifecycleKinds are the plan names somebody reaches for when they expect
+// the panel to build or tear down an array.
 var arrayLifecycleKinds = map[string]bool{
 	"raid_create": true, "raid_destroy": true, "raid_stop": true, "raid_assemble": true,
 	"array_create": true, "array_destroy": true, "array_stop": true,
@@ -73,12 +60,6 @@ func ArrayLifecycleRefusalFor(kind string) *Refusal {
 }
 
 // ComputeRAIDMemberFail computes the plan of marking a member bad.
-//
-// Failing a member is how a dying disk is taken out of service before it
-// takes the array with it - and it is also the one move that turns a
-// healthy array into a degraded one. The plan therefore says what the
-// array is left with, and refuses on an array that has nothing left to
-// lose.
 func ComputeRAIDMemberFail(state Snapshot, arrayPath, member string) DevicePlan {
 	plan, array, found := raidTarget(state, PlanRAIDMemberFail, arrayPath, member)
 	if plan.Refusal != "" {
@@ -119,10 +100,6 @@ func ComputeRAIDMemberFail(state Snapshot, arrayPath, member string) DevicePlan 
 
 // ComputeRAIDMemberRemove computes the plan of taking a member out of an
 // array.
-//
-// A member that still carries data is not removed: the array would refuse
-// it anyway, and the honest order is to fail it first and then take it
-// out. That makes the two steps two decisions, which is what they are.
 func ComputeRAIDMemberRemove(state Snapshot, arrayPath, member string) DevicePlan {
 	plan, array, found := raidTarget(state, PlanRAIDMemberRemove, arrayPath, member)
 	if plan.Refusal != "" {
@@ -148,13 +125,8 @@ func ComputeRAIDMemberRemove(state Snapshot, arrayPath, member string) DevicePla
 	return plan
 }
 
-// ComputeRAIDMemberAdd computes the plan of adding a device to an array.
-//
-// The device joins as a spare; a degraded array starts rebuilding onto it
-// at once. mdadm writes its own superblock over the device, so whatever
-// the device carried is gone - and that is why this plan binds to the
-// stable identity of the device and refuses anything that is mounted, held
-// or carrying root, exactly as a format does.
+// ComputeRAIDMemberAdd computes the plan of adding a device to an array. The
+// device joins as a spare; a degraded array starts rebuilding onto it at once.
 func ComputeRAIDMemberAdd(state Snapshot, arrayPath, device string) DevicePlan {
 	plan := DevicePlan{Operation: PlanRAIDMemberAdd, Array: arrayPath, Device: device}
 	if _, err := RAIDMemberArguments(arrayPath, device, RAIDAdd); err != nil {
@@ -202,9 +174,8 @@ func ComputeRAIDMemberAdd(state Snapshot, arrayPath, device string) DevicePlan {
 	return plan
 }
 
-// raidTarget resolves the array and the member an operation names, and
-// copies the identity of both into the plan. The refusal, where there is
-// one, is already in the returned plan.
+// raidTarget resolves the array and the member an operation names, and copies
+// the identity of both into the plan.
 func raidTarget(state Snapshot, kind, arrayPath, member string) (DevicePlan, *RAIDArray, RAIDMember) {
 	plan := DevicePlan{Operation: kind, Array: arrayPath, Device: member}
 	verb := RAIDFail
@@ -239,9 +210,9 @@ func raidTarget(state Snapshot, kind, arrayPath, member string) (DevicePlan, *RA
 	return plan, array, *found
 }
 
-// arrayOf finds the array and insists it carries a UUID: the path is the
-// order the kernel assembled the arrays in, and an operation bound to that
-// is bound to nothing.
+// arrayOf finds the array and insists it carries a UUID: the path is the order
+// the kernel assembled the arrays in, and an operation bound to that is bound
+// to nothing.
 func arrayOf(state Snapshot, path string) (*RAIDArray, *Refusal) {
 	if state.RAIDUnavailableReason != "" {
 		return nil, &Refusal{Code: CodeArrayUnknown, Reason: state.RAIDUnavailableReason}
@@ -355,11 +326,6 @@ func (p *DevicePlan) describeArray(array RAIDArray) {
 
 // ComputeLVCreate computes the plan of creating a logical volume in an
 // existing group.
-//
-// The group is not created here: which disks a machine gives to LVM is
-// decided when the machine is built. What this plan answers is whether
-// this group, on this host, has the extents the order asks for - the most
-// common difference between two hosts that look alike.
 func ComputeLVCreate(state Snapshot, group, name, size string) DevicePlan {
 	plan := DevicePlan{Operation: PlanLVCreate, Group: group, VolumeName: name, Size: size}
 	if _, err := LVCreateArguments(group, name, size); err != nil {
@@ -389,11 +355,8 @@ func ComputeLVCreate(state Snapshot, group, name, size string) DevicePlan {
 	return plan
 }
 
-// ComputeLVRemove computes the plan of deleting a logical volume.
-//
-// The extents go back to the group and the filesystem on them is gone.
-// That is the same loss as a format, so the plan binds to the same kind of
-// stable identity and refuses the same way on anything that is in use.
+// ComputeLVRemove computes the plan of deleting a logical volume. The extents
+// go back to the group and the filesystem on them is gone.
 func ComputeLVRemove(state Snapshot, path string) DevicePlan {
 	plan := DevicePlan{Operation: PlanLVRemove, Device: path}
 	if _, err := LVRemoveArguments(path); err != nil {
@@ -433,10 +396,6 @@ func ComputeLVRemove(state Snapshot, path string) DevicePlan {
 }
 
 // ComputeVGExtend computes the plan of adding a disk to a volume group.
-//
-// pvcreate writes an LVM label over the device, so the device is read the
-// same way a format reads it: it needs a stable identity and it must carry
-// nothing that is in use.
 func ComputeVGExtend(state Snapshot, group, device string) DevicePlan {
 	plan := DevicePlan{Operation: PlanVGExtend, Group: group, Device: device}
 	if _, err := VGExtendArguments(group, device); err != nil {
@@ -477,12 +436,7 @@ func ComputeVGExtend(state Snapshot, group, device string) DevicePlan {
 	return plan
 }
 
-// ComputeSnapshotCreate computes the plan of taking a snapshot of a
-// volume.
-//
-// A snapshot needs room in the group for the copy-on-write space, and it
-// is taken of a volume, never of another snapshot: LVM would then copy the
-// copy-on-write space, which is not what anybody means by the word.
+// ComputeSnapshotCreate computes the plan of taking a snapshot of a volume.
 func ComputeSnapshotCreate(state Snapshot, origin, name, size string) DevicePlan {
 	plan := DevicePlan{Operation: PlanSnapshotCreate, Device: origin, VolumeName: name, Size: size}
 	if _, err := SnapshotArguments(origin, name, size); err != nil {
@@ -523,10 +477,6 @@ func ComputeSnapshotCreate(state Snapshot, origin, name, size string) DevicePlan
 }
 
 // ComputeSnapshotRemove computes the plan of dropping a snapshot.
-//
-// Only a snapshot: the same command on an ordinary volume deletes
-// somebody's filesystem, and that is a different decision with two
-// approvals behind it.
 func ComputeSnapshotRemove(state Snapshot, path string) DevicePlan {
 	plan := DevicePlan{Operation: PlanSnapshotRemove, Device: path}
 	if _, err := LVRemoveArguments(path); err != nil {
@@ -585,12 +535,8 @@ func volumeOf(state Snapshot, path string) (*LogicalVolume, *Refusal) {
 	return volume, nil
 }
 
-// spaceRefusal answers whether the group has room for the size asked.
-//
-// A group with no free extent at all refuses whatever the shape of the
-// request. A request in bytes is compared with what is free; a request
-// given as a share of what is free needs no comparison, because it is
-// defined by it.
+// spaceRefusal answers whether the group has room for the size asked. A group
+// with no free extent at all refuses whatever the shape of the request.
 func spaceRefusal(group VolumeGroup, size string, plan *DevicePlan) *Refusal {
 	if group.FreeBytes == 0 {
 		return &Refusal{Code: CodeVolumeGroupFull,
@@ -610,9 +556,7 @@ func spaceRefusal(group VolumeGroup, size string, plan *DevicePlan) *Refusal {
 	return nil
 }
 
-// SizeInBytes reads an LVM size written with a unit. The second value says
-// whether the size was absolute at all: a share of what is free is a size
-// too, only not one that can be compared with a number of bytes.
+// SizeInBytes reads an LVM size written with a unit.
 func SizeInBytes(size string) (uint64, bool) {
 	size = strings.TrimPrefix(strings.TrimSpace(size), "+")
 	if size == "" || strings.Contains(size, "%") {

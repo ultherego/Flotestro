@@ -25,9 +25,8 @@ type createCampaignRequest struct {
 	Name    string          `json:"name"`
 	Action  string          `json:"action"`
 	Payload json.RawMessage `json:"payload"`
-	// Selector is recorded as given; the typed expression, when present,
-	// decides alone. The exclusions name hosts the selector matches that
-	// are to stay out, and need a reason the approver will read.
+	// Selector is recorded as given; the typed expression, when present, decides
+	// alone.
 	Selector campaigns.Selector `json:"selector"`
 
 	CanarySize               *int       `json:"canary_size,omitempty"`
@@ -40,18 +39,13 @@ type createCampaignRequest struct {
 	RebootPolicy             string     `json:"reboot_policy,omitempty"`
 	HealthCheckUnits         []string   `json:"health_check_units,omitempty"`
 	JobTimeoutSeconds        *int       `json:"job_timeout_seconds,omitempty"`
-	// RebootTimeoutSeconds bounds the wait for a host to come back after
-	// the reboot the campaign ordered; absent or zero means the default
-	// of fifteen minutes. A value outside 60..7200 is refused rather than
-	// rounded: the approver reads the bound as it will apply.
+	// RebootTimeoutSeconds bounds the wait for a host to come back after the
+	// reboot the campaign ordered; absent or zero means the default of fifteen
+	// minutes.
 	RebootTimeoutSeconds *int  `json:"reboot_timeout_seconds,omitempty"`
 	RequiresApproval     *bool `json:"requires_approval,omitempty"`
-	// OfflinePolicy overrides what the operation declares for a host that
-	// is not connected when its turn comes. It may only tighten the
-	// declaration: wait_until_deadline may become skip_if_offline or
-	// require_online, and require_online may become nothing else - the
-	// operation's policy is the boundary its module drew. Empty means the
-	// operation's own policy.
+	// OfflinePolicy overrides what the operation declares for a host that is not
+	// connected when its turn comes.
 	OfflinePolicy string `json:"offline_policy,omitempty"`
 	// DeadlineMinutes bounds the wait for offline hosts, counted from the
 	// creation; the default is a day.
@@ -67,24 +61,16 @@ type createCampaignRequest struct {
 	// IdempotencyKey lets a caller that lost the answer ask again without a
 	// second campaign; the Idempotency-Key header does the same.
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	// PreviewID names the preview this order was placed from, and
-	// PreviewDigest is the fingerprint the preview answered with. Together
-	// they bind the order to the picture of the fleet the operator read:
-	// the creation resolves the fleet itself and refuses when what it
-	// resolved is not what was shown. An order without them is allowed
-	// while the installation runs the rollout in observe or prefer.
+	// PreviewID names the preview this order was placed from, and PreviewDigest
+	// is the fingerprint the preview answered with.
 	PreviewID     string `json:"preview_id,omitempty"`
 	PreviewDigest string `json:"preview_digest,omitempty"`
-	// CompensatesCampaignID names a finished campaign this one undoes. The
-	// operation has to be the declared reverse of that campaign's, and the
-	// targets have to be hosts it changed; an empty selector takes exactly
-	// those hosts. The original's record is linked, never rewritten.
+	// CompensatesCampaignID names a finished campaign this one undoes.
 	CompensatesCampaignID string `json:"compensates_campaign_id,omitempty"`
 }
 
-// campaignModeRefusal translates a refusal into a sentence the operator
-// knows what to do next from. A refusal without a reason looks like a
-// missing product feature.
+// campaignModeRefusal translates a refusal into a sentence the operator knows
+// what to do next from.
 func campaignModeRefusal(action opspec.ActionType) string {
 	switch action.CampaignMode() {
 	case opspec.CampaignPerHostPlan:
@@ -108,11 +94,9 @@ const (
 // handleCreateCampaign plans a campaign. The selector is immediately turned
 // into an immutable host snapshot; the creation itself changes nothing.
 func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
-	// Whoever asks must at least be somebody who may create campaigns
-	// somewhere, before the selector is read: the answers about the
-	// snapshot - how many hosts, in what state, which groups exist - are
-	// facts about the fleet, not for a stranger. Every host of the
-	// snapshot is checked again below, in its own scope.
+	// Whoever asks must at least be somebody who may create campaigns somewhere,
+	// before the selector is read: the answers about the snapshot - how many
+	// hosts, in what state, which groups exist - are facts about the fleet, not
 	if _, ok := s.authorizeCollection(w, r, authz.PermCampaignCreate, "campaign"); !ok {
 		return
 	}
@@ -126,9 +110,7 @@ func (s *Server) handleCreateCampaign(w http.ResponseWriter, r *http.Request) {
 
 // orderCampaign carries an order through every check to the record: the
 // operation and its bulk mode, the payload, the selector, the per-host
-// permissions, the fresh authentication and the audit event. A retry
-// walks the same way with the campaign it retries named, so a retried
-// order is refused exactly where a fresh one would be.
+// permissions, the fresh authentication and the audit event.
 func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request createCampaignRequest,
 	retriesID string, unattended bool) {
 	action := opspec.ActionType(request.Action)
@@ -137,37 +119,28 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 			"a campaign requires an operation that changes host state")
 		return
 	}
-	// An operation that requires typing the target name does not run in
-	// bulk. The target name is there the only gate between a click and an
-	// irreversible change, and a campaign by definition has no single target
-	// to type: wiping a disk or powering off a whole wave has no way back.
-	// An order the panel splits host by host is the exception: its mapping
-	// names every host one by one, so the typing is there - checked below,
-	// once the payload is read - and a host the mapping leaves out gets
-	// nothing rather than a shared value.
+	// An operation that requires typing the target name does not run in bulk.
 	if action.RequiresTargetConfirmation() && !opspec.PanelPlanned(action) {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action",
 			"this operation is irreversible and needs its target named; run it host by host")
 		return
 	}
-	// There are operations that must not be done in bulk at all - not
-	// because the panel cannot, but because their effect requires the
-	// operator's presence at every host separately.
+	// There are operations that must not be done in bulk at all - not because the
+	// panel cannot, but because their effect requires the operator's presence at
+	// every host separately.
 	if reason := opspec.CampaignExclusionReason(action); reason != "" {
 		problem(w, http.StatusBadRequest, "not_a_campaign_action", reason)
 		return
 	}
-	// The bulk mode is a declaration of the operation, not a conclusion from
-	// its risk. No declaration means a refusal: adding a new operation to the
-	// registry must not by itself open it to the whole fleet.
+	// The bulk mode is a declaration of the operation, not a conclusion from its
+	// risk.
 	if !opspec.ExecutableMode(action) {
 		problem(w, http.StatusBadRequest, "campaign_mode_unsupported",
 			campaignModeRefusal(action))
 		return
 	}
-	// The offline policy is a property of the operation the campaign may
-	// tighten and never loosen. It is settled before the payload, because
-	// it does not depend on it.
+	// The offline policy is a property of the operation the campaign may tighten
+	// and never loosen.
 	offlinePolicy, err := opspec.ResolveOfflinePolicy(action, opspec.OfflinePolicy(request.OfflinePolicy))
 	if errors.Is(err, opspec.ErrOfflinePolicyLoosened) {
 		problem(w, http.StatusBadRequest, "offline_policy_loosened", err.Error())
@@ -185,31 +158,21 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 			return
 		}
 	}
-	// A campaign order is validated differently than an operation on one
-	// host: there is no plan fingerprint yet, because the plan is made on the
-	// hosts.
-	// A refusal with a code of its own (a protocol this panel does not
-	// speak) keeps that code; a malformed payload stays invalid_payload.
+	// A campaign order is validated differently than an operation on one host:
+	// there is no plan fingerprint yet, because the plan is made on the hosts.
 	if err := opspec.ValidateCampaignRequest(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
-	// The per-host part of an order the panel splits itself: a rename
-	// names every host's new name in the mapping, and the typed payload
-	// does not carry it. A mapping that is missing, names a host twice or
-	// gives two hosts one name is refused before any host is resolved,
-	// because the mapping is the whole intent of the campaign.
+	// The per-host part of an order the panel splits itself: a rename names every
+	// host's new name in the mapping, and the typed payload does not carry it.
 	if err := opspec.ValidateCampaignMapping(action, request.Payload); err != nil {
 		problem(w, http.StatusBadRequest, "invalid_mapping", err.Error())
 		return
 	}
-	// A rollback names a version by its digest, as on one host: the
-	// content is attached here when the panel holds a copy, so the plans,
-	// the consent and what reaches the hosts are the same thing. The
-	// digest stays in the payload - the hosts keep copies of their own and
-	// restore the inode of the version, not only its bytes - and a version
-	// the panel never saw travels as the digest alone, which each host
-	// refuses with file_version_unknown unless it kept that version.
+	// A rollback names a version by its digest, as on one host: the content is
+	// attached here when the panel holds a copy, so the plans, the consent and
+	// what reaches the hosts are the same thing.
 	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
 		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
 		switch {
@@ -229,9 +192,9 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	}
 
 	principal := authz.FromContext(r.Context())
-	// The operation's permission has to be held somewhere before the
-	// fleet is resolved by it: a caller without it anywhere resolves
-	// nobody, and "no targets" would be the wrong answer to give them.
+	// The operation's permission has to be held somewhere before the fleet is
+	// resolved by it: a caller without it anywhere resolves nobody, and "no
+	// targets" would be the wrong answer to give them.
 	if _, ok := s.authorizeCollection(w, r, orderPermission(action), "campaign"); !ok {
 		return
 	}
@@ -239,16 +202,16 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	if !ok {
 		return
 	}
-	// A compensation is checked before the selector is resolved: the
-	// original decides which hosts may be named at all, and an order that
-	// names none takes the hosts the original changed.
+	// A compensation is checked before the selector is resolved: the original
+	// decides which hosts may be named at all, and an order that names none takes
+	// the hosts the original changed.
 	compensation, ok := s.checkCompensation(w, r, request.CompensatesCampaignID, action, &chosen)
 	if !ok {
 		return
 	}
-	// The resolver cuts the fleet to the scopes of the operation's
-	// permission: the preview ran the same query, so what the operator saw
-	// counted is what the order carries.
+	// The resolver cuts the fleet to the scopes of the operation's permission:
+	// the preview ran the same query, so what the operator saw counted is what
+	// the order carries.
 	candidates, ok := s.materialize(w, r, principal, orderPermission(action), chosen)
 	if !ok {
 		return
@@ -263,12 +226,7 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		}
 	}
 
-	// The qualification decides which hosts really move. A host in a
-	// maintenance window and a host without the required adapter stay in the
-	// snapshot, but closed at once and with a reason: vanishing quietly would
-	// hide the decision, and listing them as ready would call a missing
-	// capability a failure. A host the operator excluded by name is closed
-	// the same way, with the reason and the author.
+	// The qualification decides which hosts really move.
 	kept, excluded := excludeHosts(candidates, chosen, principal.Subject)
 	assessment := assessCandidates(kept, action, s.activeConflicts(r.Context()), time.Now().UTC())
 	assessment.Closed = append(assessment.Closed, excluded...)
@@ -278,10 +236,8 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		return
 	}
 
-	// There are changes that are correct only together: withdrawing an
-	// authority on part of the fleet leaves hosts the rest stops recognising.
-	// Such a campaign does not start at all while any target is uncertain -
-	// and says which.
+	// There are changes that are correct only together: withdrawing an authority
+	// on part of the fleet leaves hosts the rest stops recognising.
 	if reason := opspec.FullCoverageReason(action); reason != "" {
 		if uncertain := assessment.Uncertain(); len(uncertain) > 0 {
 			problem(w, http.StatusBadRequest, "incomplete_coverage",
@@ -290,9 +246,7 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		}
 	}
 
-	// The permission is checked for every host of the snapshot. A campaign
-	// covering one host outside the scope must not pass because the rest is
-	// inside it.
+	// The permission is checked for every host of the snapshot.
 	for _, host := range candidates {
 		scope := hosts.ScopeOf(&host)
 		if _, ok := s.authorize(w, r, authz.PermCampaignCreate, scope, "host", host.ID); !ok {
@@ -309,17 +263,14 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 	}
 
 	// The order is held to the preview it was placed from: the hosts just
-	// resolved have to be the hosts the operator was shown, under the
-	// rights they had then. What differs is named in the refusal, and the
-	// preview is taken again.
+	// resolved have to be the hosts the operator was shown, under the rights they
+	// had then.
 	if !s.checkPreviewToken(w, r, request, principal, orderPermission(action), action,
 		chosen, assessment.Ready, unattended) {
 		return
 	}
 
-	// A campaign must not be a way around the single-host gate. The same
-	// operation ordered by hand requires fresh authentication, so ordered on
-	// the whole fleet it requires it all the more.
+	// A campaign must not be a way around the single-host gate.
 	var stepUpEvidence map[string]any
 	if opspec.PayloadRequiresFreshAuth(action, payload) {
 		evidence, ok := s.requireStepUp(w, r, principal, request.Reason,
@@ -340,9 +291,9 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		Payload:    request.Payload,
 		Selector:   chosen,
 		CanarySize: valueOrDefault(request.CanarySize, 1),
-		// The concurrency is bounded whatever the request says: budgets are
-		// the safety net of the fleet, and an installation without them
-		// must not be one request away from restarting everything at once.
+		// The concurrency is bounded whatever the request says: budgets are the
+		// safety net of the fleet, and an installation without them must not be one
+		// request away from restarting everything at once.
 		WaveSize:                 min(valueOr(request.WaveSize, paceWave), maxWaveSize),
 		MaxConcurrent:            min(valueOr(request.MaxConcurrent, paceConcurrent), maxCampaignConcurrency),
 		FailureThresholdPercent:  valueOrDefault(request.FailureThresholdPercent, 20),
@@ -416,10 +367,7 @@ func (s *Server) orderCampaign(w http.ResponseWriter, r *http.Request, request c
 		s.fail(w, err)
 		return
 	}
-	// The spent preview names the campaign it created. The order is done
-	// either way - the preview was consumed before the campaign existed,
-	// because two orders must not share one approved picture of the fleet -
-	// so a failure to write the link is recorded and not raised.
+	// The spent preview names the campaign it created.
 	if request.PreviewID != "" && s.campaigns != nil {
 		if err := s.campaigns.AttachPreview(r.Context(), request.PreviewID, campaign.ID); err != nil {
 			s.log.Warn("the preview of a campaign was not linked to it",
@@ -436,20 +384,11 @@ type retryCampaignRequest struct {
 	// at a change that failed is a decision, and the record says why.
 	Reason string `json:"reason"`
 	// IncludeUnknown takes the hosts that ended without a result as well.
-	// Off by default: what such a host holds is a question to read off the
-	// host first, and the operator who ticks this has read it.
 	IncludeUnknown bool `json:"include_unknown"`
 }
 
-// handleRetryCampaign orders a new campaign with the same order as a
-// finished one, on exactly the hosts that failed - and the unknown ones
-// when asked. The new campaign goes through the ordinary door: the same
-// checks, the same per-host permissions, its own approval. The link to
-// the campaign it retries is written on the new record only.
-//
-// The right is the right to create a campaign, checked in the scope of
-// the original's targets here and host by host in the order below: a
-// retry is a new change on the fleet, not a control of the old one.
+// handleRetryCampaign orders a new campaign with the same order as a finished
+// one, on exactly the hosts that failed - and the unknown ones when asked.
 func (s *Server) handleRetryCampaign(w http.ResponseWriter, r *http.Request) {
 	original, ok := s.campaignFor(w, r, authz.PermCampaignCreate)
 	if !ok {
@@ -486,21 +425,15 @@ func (s *Server) handleRetryCampaign(w http.ResponseWriter, r *http.Request) {
 	for _, target := range picked {
 		hostIDs = append(hostIDs, target.HostID)
 	}
-	// A retry is not placed from a preview: the hosts are the ones the
-	// original campaign settled, read from its own record, and nobody is
-	// looking at a fresh count of the fleet. The binding has nothing to
-	// bind here, so it is not asked for.
+	// A retry is not placed from a preview: the hosts are the ones the original
+	// campaign settled, read from its own record, and nobody is looking at a
+	// fresh count of the fleet.
 	s.orderCampaign(w, r, retryOrder(*original, hostIDs, request.Reason), original.ID, true)
 }
 
-// retryOrder is the original's order written out again for the hosts
-// given: the same operation, payload and rollout policy, named as the
-// retry of the original. Two things are not copied as they were. The
-// maintenance window is dropped once it has closed - a retry that could
-// never start would be a campaign standing still with no reason given -
-// and the wait for offline hosts is carried as the length the original
-// asked for, counted again from the new order. Both are on the new
-// campaign's record for the approver to read.
+// retryOrder is the original's order written out again for the hosts given:
+// the same operation, payload and rollout policy, named as the retry of the
+// original.
 func retryOrder(original campaigns.Campaign, hostIDs []string, reason string) createCampaignRequest {
 	order := createCampaignRequest{
 		Name:                     campaigns.RetryName(original.Name),
@@ -520,9 +453,9 @@ func retryOrder(original campaigns.Campaign, hostIDs []string, reason string) cr
 		ManualGate:               &original.ManualGate,
 		ConnectivityLostAbsolute: intPointer(original.ConnectivityLostAbsolute),
 		Reason:                   reason,
-		// A retry of a compensation is still a compensation: the reverse
-		// on hosts the compensated campaign changed, linked so the
-		// compensate step lands on the original's targets.
+		// A retry of a compensation is still a compensation: the reverse on hosts
+		// the compensated campaign changed, linked so the compensate step lands on
+		// the original's targets.
 		CompensatesCampaignID: original.CompensatesCampaignID,
 	}
 	if original.MaintenanceEnd == nil || original.MaintenanceEnd.After(time.Now().UTC()) {
@@ -542,10 +475,6 @@ func intPointer(value int) *int {
 }
 
 // describeExclusions joins the refusal reasons into one sentence.
-//
-// The refusal "no host can run this" without reasons is silence: the
-// operator sees a selector that matched something, and a refusal unrelated
-// to what they see.
 func describeExclusions(groups []hostGroup) string {
 	description := ""
 	for i, group := range groups {
@@ -567,17 +496,8 @@ type compensationOrder struct {
 	changed  []campaigns.Target
 }
 
-// checkCompensation reads and checks the campaign an order says it undoes.
-// An empty identifier means an ordinary campaign and passes with nil. The
-// answer has already been written when the second result is false.
-//
-// The original has to exist and be readable by the caller in its scope -
-// the same door as reading it directly, so an identifier cannot be used
-// to learn about a campaign elsewhere. Then the rules of the package
-// apply: the original is settled, the operation is its declared reverse,
-// and there is something to compensate. An order with an empty selector
-// gets the changed hosts of the original as its host list: those are the
-// only hosts it may name, and the operator should not have to copy them.
+// checkCompensation reads and checks the campaign an order says it undoes. An
+// empty identifier means an ordinary campaign and passes with nil.
 func (s *Server) checkCompensation(w http.ResponseWriter, r *http.Request, compensatesID string,
 	action opspec.ActionType, chosen *campaigns.Selector) (*compensationOrder, bool) {
 	if compensatesID == "" {
@@ -611,15 +531,14 @@ func (s *Server) checkCompensation(w http.ResponseWriter, r *http.Request, compe
 		s.fail(w, err)
 		return nil, false
 	}
-	// A preview without an operation asks about the compensation itself;
-	// it is checked as the declared reverse would be. An original with no
-	// reverse is refused below, as it would be with any operation.
+	// A preview without an operation asks about the compensation itself; it is
+	// checked as the declared reverse would be.
 	if action == "" {
 		action, _ = opspec.ReverseAction(opspec.ActionType(original.ActionType))
 	}
-	// The rules are checked once here without hosts, so an order refused
-	// for its original or its operation is refused before the fleet is
-	// read; the hosts are checked once the selector resolved.
+	// The rules are checked once here without hosts, so an order refused for its
+	// original or its operation is refused before the fleet is read; the hosts
+	// are checked once the selector resolved.
 	if err := campaigns.CheckCompensation(*original, action, changed, nil); err != nil {
 		problem(w, http.StatusBadRequest, campaigns.CompensationCode(err), err.Error())
 		return nil, false
@@ -632,10 +551,8 @@ func (s *Server) checkCompensation(w http.ResponseWriter, r *http.Request, compe
 	return &compensationOrder{original: original, changed: changed}, true
 }
 
-// covers checks that every host the selector resolved to is one the
-// original changed, and answers the order that names another. The
-// hostname goes into the reason where there is one: an identifier alone
-// tells the operator nothing about which row of the list to take out.
+// covers checks that every host the selector resolved to is one the original
+// changed, and answers the order that names another.
 func (c *compensationOrder) covers(w http.ResponseWriter, candidates []hosts.Host, action opspec.ActionType) bool {
 	names := make([]string, 0, len(candidates))
 	for _, host := range candidates {
@@ -655,10 +572,8 @@ func (c *compensationOrder) covers(w http.ResponseWriter, candidates []hosts.Hos
 	return false
 }
 
-// checkSelector validates the selector of an order and answers a request
-// that does not hold together. The expression is validated and resolved
-// here, so an order naming a group that does not exist is refused with the
-// name rather than materialised as nothing.
+// checkSelector validates the selector of an order and answers a request that
+// does not hold together.
 func (s *Server) checkSelector(w http.ResponseWriter, chosen campaigns.Selector) (campaigns.Selector, bool) {
 	if chosen.Expression != nil {
 		if err := chosen.Expression.Validate(); err != nil {
@@ -689,12 +604,8 @@ func (s *Server) checkSelector(w http.ResponseWriter, chosen campaigns.Selector)
 	return chosen, true
 }
 
-// materialize turns the selector into the host list and answers a
-// selector that does not resolve or resolves to too much. An empty list is
-// an answer, not an error: the preview says "nobody", and the order
-// refuses it in its own words. An explicit list that names a host the
-// order cannot carry is refused with the reason per host. The answer has
-// already been written when the second result is false.
+// materialize turns the selector into the host list and answers a selector
+// that does not resolve or resolves to too much.
 func (s *Server) materialize(w http.ResponseWriter, r *http.Request, principal authz.Principal,
 	permission authz.Permission, chosen campaigns.Selector) ([]hosts.Host, bool) {
 	candidates, err := s.resolveTargets(r, principal, permission, chosen)
@@ -717,16 +628,12 @@ func (s *Server) materialize(w http.ResponseWriter, r *http.Request, principal a
 	return candidates, true
 }
 
-// The reasons an explicitly named host cannot be a target. They travel
-// per host in the targets_invalid refusal, so the operator sees which row
-// of the list to take out and why rather than a list that shrank.
+// The reasons an explicitly named host cannot be a target.
 const (
 	// TargetUnknownHost names an identifier that is no host of the fleet.
 	TargetUnknownHost = "unknown_host"
 	// TargetOutOfScope names a host the caller has no right over for this
-	// operation. It is told apart from an unknown host on purpose: the
-	// document asks for the reason per host, and a host the caller can
-	// name is one they were told about.
+	// operation.
 	TargetOutOfScope = "out_of_scope"
 	// TargetExcludedAndListed names a host on both the list and the
 	// exclusion list: the order does not say what it wants with it.
@@ -741,10 +648,7 @@ type targetRefusal struct {
 	Reason string `json:"reason"`
 }
 
-// targetsInvalidError carries the refusals of an explicit host list. The
-// list is strict: the order names exactly these hosts, and one that cannot
-// be honoured is an error with its reason rather than a quiet gap in the
-// snapshot the approver would never see.
+// targetsInvalidError carries the refusals of an explicit host list.
 type targetsInvalidError struct {
 	Refusals []targetRefusal
 }
@@ -774,19 +678,6 @@ func problemWithTargets(w http.ResponseWriter, invalid *targetsInvalidError) {
 
 // resolveTargets turns the selector into a host list, already cut to the
 // scopes in which the caller holds the permission the order needs.
-//
-// The scope is part of the query rather than a filter over its result:
-// the count of a preview, the sample and the snapshot of an order all come
-// from the same narrowed query, so a preview and a create by the same
-// caller answer the same question. A caller without the permission
-// anywhere resolves nobody.
-//
-// The typed expression, when present, decides alone: it is expanded of
-// its group references and compiled into the host query, the same query
-// the host list and the group page run. The flat filters page through the
-// list the same way. An explicit list is strict: every identifier has to
-// be a host in scope and not on the exclusion list at the same time, or
-// the whole list is refused with the reason per host.
 func (s *Server) resolveTargets(r *http.Request, principal authz.Principal,
 	permission authz.Permission, chosen campaigns.Selector) ([]hosts.Host, error) {
 	if len(chosen.HostIDs) > 0 {
@@ -797,15 +688,13 @@ func (s *Server) resolveTargets(r *http.Request, principal authz.Principal,
 		return nil, err
 	}
 	// The selector is read page by page, without a hidden limit: a campaign
-	// covering a thousand hosts is meant to mean a thousand hosts, not the
-	// first five hundred sorted alphabetically. The upper bound is explicit
-	// and ends in an error, not a quiet trimming of the list.
+	// covering a thousand hosts is meant to mean a thousand hosts, not the first
+	// five hundred sorted alphabetically.
 	return s.pageHosts(r.Context(), filter)
 }
 
-// orderScopes are the scopes the fleet is cut to for an order: those in
-// which the caller holds the permission. Never nil - nil would narrow
-// nothing, and a caller with no scope is to see nobody.
+// orderScopes are the scopes the fleet is cut to for an order: those in which
+// the caller holds the permission.
 func orderScopes(principal authz.Principal, permission authz.Permission) []authz.Scope {
 	scopes := principal.ScopesFor(permission)
 	if scopes == nil {
@@ -814,10 +703,9 @@ func orderScopes(principal authz.Principal, permission authz.Permission) []authz
 	return scopes
 }
 
-// selectorFilter is the host query of a selector that is not an explicit
-// list, cut to the caller's scopes: the typed expression expanded of its
-// groups when there is one, the flat filters otherwise. The count of a
-// preview and the snapshot of an order run this same filter.
+// selectorFilter is the host query of a selector that is not an explicit list,
+// cut to the caller's scopes: the typed expression expanded of its groups when
+// there is one, the flat filters otherwise.
 func (s *Server) selectorFilter(r *http.Request, principal authz.Principal,
 	permission authz.Permission, chosen campaigns.Selector) (hosts.ListFilter, error) {
 	scopes := orderScopes(principal, permission)
@@ -871,10 +759,8 @@ func (s *Server) resolveListedHosts(r *http.Request, scopes []authz.Scope,
 		host, inScope := byID[hostID]
 		switch {
 		case !inScope:
-			// The host was not in the narrowed query: either it is not a
-			// host at all or it lies outside the caller's scope. The two
-			// are told apart, so the operator knows whether to fix the
-			// list or to ask for the right.
+			// The host was not in the narrowed query: either it is not a host at all or
+			// it lies outside the caller's scope.
 			_, err := s.hosts.Get(r.Context(), hostID)
 			if errors.Is(err, hosts.ErrNotFound) {
 				refusals = append(refusals, targetRefusal{HostID: hostID, Reason: TargetUnknownHost})
@@ -897,8 +783,8 @@ func (s *Server) resolveListedHosts(r *http.Request, scopes []authz.Scope,
 }
 
 // orderPermission is the permission the resolver cuts the fleet by: the
-// operation's own where there is one, and the right to order a campaign
-// where the preview asks only how many hosts a selector covers.
+// operation's own where there is one, and the right to order a campaign where
+// the preview asks only how many hosts a selector covers.
 func orderPermission(action opspec.ActionType) authz.Permission {
 	if action == "" {
 		return authz.PermCampaignCreate
@@ -907,10 +793,7 @@ func orderPermission(action opspec.ActionType) authz.Permission {
 }
 
 // excludeHosts takes the hosts on the exclusion list out of the candidate
-// list. The rest goes to the qualification; the excluded ones come back
-// settled - closed at once with the reason and the author - so that they
-// enter the snapshot rather than vanish. A host on the list that the
-// selector did not match is not a target and leaves no trace.
+// list.
 func excludeHosts(candidates []hosts.Host, chosen campaigns.Selector, actor string) (kept []hosts.Host, closed []closedHost) {
 	if len(chosen.Exclude) == 0 {
 		return candidates, nil
@@ -929,9 +812,7 @@ func excludeHosts(candidates []hosts.Host, chosen campaigns.Selector, actor stri
 	return kept, closed
 }
 
-// maxCampaignSnapshot is the bound of one campaign. It does not protect the
-// database, only the human: a snapshot bigger than this is usually a wrong
-// selector, not an intent.
+// maxCampaignSnapshot is the bound of one campaign.
 const maxCampaignSnapshot = 10000
 
 // ErrSelectorTooBroad means a selector covering more hosts than one
@@ -940,11 +821,6 @@ var ErrSelectorTooBroad = errors.New("the selector covers too many hosts")
 
 // handleCampaignPreview answers the question "how many hosts does this
 // concern".
-//
-// The count comes from the database, not from the length of the first page
-// of the host list: the operator approves a change on as many machines as
-// shown, so the preview must not stop at a hidden limit. The sample is only
-// a sample and is named so.
 func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermCampaignRead, "campaign")
 	if !ok {
@@ -978,25 +854,22 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	if chosen, ok = s.checkSelector(w, chosen); !ok {
 		return
 	}
-	// Without an operation the preview answers only the question "how many
-	// hosts does this concern". The qualification depends on the operation:
-	// hosts without a package adapter are ready for a service restart and
-	// unable to update.
+	// Without an operation the preview answers only the question "how many hosts
+	// does this concern".
 	action := opspec.ActionType(query.Get("action"))
 	if action != "" && !action.Known() {
 		problem(w, http.StatusBadRequest, "unknown_action", "unknown action "+string(action))
 		return
 	}
-	// A preview of an operation is a step of ordering it: the caller has to
-	// hold the operation's permission somewhere, the way the order will
-	// ask. The right to read campaigns alone counts nobody's hosts.
+	// A preview of an operation is a step of ordering it: the caller has to hold
+	// the operation's permission somewhere, the way the order will ask.
 	permission := orderPermission(action)
 	if _, ok := s.authorizeCollection(w, r, permission, "campaign"); !ok {
 		return
 	}
-	// A compensation previews what the order would do: the same check,
-	// the same default host list, so the wizard shows the refusal before
-	// the form is filled in rather than after.
+	// A compensation previews what the order would do: the same check, the same
+	// default host list, so the wizard shows the refusal before the form is
+	// filled in rather than after.
 	compensation, ok := s.checkCompensation(w, r, query.Get("compensates"), action, &chosen)
 	if !ok {
 		return
@@ -1013,11 +886,9 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Without an operation the answer is a count and a sample, from the
-	// same filter the order would page through - in the caller's scopes -
-	// but counted in the database, so a selector wider than one campaign
-	// may carry is answered with its size rather than refused: the screen
-	// says "more than the limit" from the number.
+	// Without an operation the answer is a count and a sample, from the same
+	// filter the order would page through - in the caller's scopes - but counted
+	// in the database, so a selector wider than one campaign may carry is
 	if action == "" && len(chosen.HostIDs) == 0 {
 		filter, err := s.selectorFilter(r, principal, permission, chosen)
 		if err != nil {
@@ -1040,9 +911,8 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The count comes from the same resolver the order runs, in the same
-	// scopes: a preview counted differently than the creation would be
-	// worse than none.
+	// The count comes from the same resolver the order runs, in the same scopes:
+	// a preview counted differently than the creation would be worse than none.
 	candidates, ok := s.materialize(w, r, principal, permission, chosen)
 	if !ok {
 		return
@@ -1054,10 +924,8 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The qualification is computed on the same snapshot that would enter
-	// the campaign. A preview computed differently than the creation would be
-	// worse than none: the operator would approve one campaign and get
-	// another.
+	// The qualification is computed on the same snapshot that would enter the
+	// campaign.
 	if compensation != nil && !compensation.covers(w, candidates, action) {
 		return
 	}
@@ -1072,17 +940,14 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 	response["campaign_mode"] = string(action.CampaignMode())
 	response["requires_plan"] = opspec.CampaignPlans(action)
 	response["distribution"] = distribution(assessment.Ready, action)
-	// An order the panel splits host by host needs every ready host in
-	// view before the order, not a sample: the mapping names them by
-	// identifier, and the wizard shows a host it does not name as
-	// ineligible before anything is created.
+	// An order the panel splits host by host needs every ready host in view
+	// before the order, not a sample: the mapping names them by identifier, and
+	// the wizard shows a host it does not name as ineligible before anything is
 	if opspec.PanelPlanned(action) {
 		response["hosts"] = hostEntries(assessment.Ready)
 	}
-	// What was shown is recorded, so the order placed from this answer can
-	// be held to it. The token is part of the answer rather than a second
-	// call: an operator who previews has it, and one who orders without
-	// previewing is the case the mode decides.
+	// What was shown is recorded, so the order placed from this answer can be
+	// held to it.
 	token, ok := s.issuePreviewToken(w, r, principal, permission, action, chosen, assessment.Ready)
 	if !ok {
 		return
@@ -1094,12 +959,6 @@ func (s *Server) handleCampaignPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 // distribution describes what the frozen target snapshot consists of.
-//
-// The count of ready hosts does not say what is about to happen: thirty
-// hosts from one site is a different change than thirty scattered across
-// three, and the OS family decides what the host does at all. The operator
-// is meant to see that before approving, not infer it from the names in
-// the sample.
 func distribution(ready []hosts.Host, action opspec.ActionType) map[string][]hostGroup {
 	requirement := action.RequiredCapability()
 	by := map[string]map[string]*hostGroup{
@@ -1123,9 +982,9 @@ func distribution(ready []hosts.Host, action opspec.ActionType) map[string][]hos
 		addTo("site", host.Site, host)
 		addTo("environment", host.Environment, host)
 		addTo("os_family", host.OSFamily, host)
-		// The capability tells the hosts that accept the operation from those
-		// that have not reported their adapter registry yet - and the latter
-		// go into the campaign and are decided only on the host.
+		// The capability tells the hosts that accept the operation from those that
+		// have not reported their adapter registry yet - and the latter go into the
+		// campaign and are decided only on the host.
 		switch {
 		case requirement == "":
 			addTo("capability", "no requirements", host)
@@ -1178,11 +1037,9 @@ func (s *Server) handleListCampaigns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The list is filtered on the server and read page by page: "the
-	// campaigns this operator ordered since Monday" is a question for an
-	// index, not for a screen holding the newest fifty rows. The offset
-	// is enough here - campaigns are ordered by people, a few a day, and
-	// the list does not move under the reader the way the audit trail does.
+	// The list is filtered on the server and read page by page: "the campaigns
+	// this operator ordered since Monday" is a question for an index, not for a
+	// screen holding the newest fifty rows.
 	query := r.URL.Query()
 	filter := campaigns.ListFilter{
 		State:     strings.TrimSpace(query.Get("state")),
@@ -1232,10 +1089,9 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The targets go page by page in the order of the rollout, filtered on
-	// the server: a campaign on ten thousand hosts must not become ten
-	// thousand rows in the browser, and "the failed ones" is a question the
-	// database answers better than a screen.
+	// The targets go page by page in the order of the rollout, filtered on the
+	// server: a campaign on ten thousand hosts must not become ten thousand rows
+	// in the browser, and "the failed ones" is a question the database answers
 	query := r.URL.Query()
 	filter := campaigns.TargetFilter{State: query.Get("state"), Search: query.Get("q")}
 	if wave, err := strconv.Atoi(query.Get("wave")); err == nil && wave >= 0 {
@@ -1264,13 +1120,8 @@ func (s *Server) handleCampaignTargets(w http.ResponseWriter, r *http.Request) {
 // defaultTargetPage is the page of targets a screen gets without asking.
 const defaultTargetPage = 200
 
-// handleCampaignTimeline returns the durable course of a campaign.
-//
-// The report says how it ended. The course says how it went - and that is
-// what is needed during: when the canary started, which host failed first
-// and at what time the campaign stopped. Notifications will not hold this,
-// because an event sent at the moment of a panel restart exists nowhere any
-// more.
+// handleCampaignTimeline returns the durable course of a campaign. The report
+// says how it ended.
 func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -1294,16 +1145,9 @@ func (s *Server) handleCampaignTimeline(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]any{"items": course, "count": len(course)})
 }
 
-// handleCampaignSteps returns the executable steps of the campaign's
-// targets: plan, change, reboot, verification and compensation, each with
-// its task, its attempts and the reason it did not run.
-//
-// The target row says where a host stands; the steps say how it got there,
-// and that is what a diagnosis needs - which step failed, on which attempt,
-// under which plan. The list goes page by page in the order of the rollout
-// and is cut between hosts, never inside one, so a host's strip is always
-// read whole. A host filter answers the question the screen asks most:
-// "what happened on this one".
+// handleCampaignSteps returns the executable steps of the campaign's targets:
+// plan, change, reboot, verification and compensation, each with its task, its
+// attempts and the reason it did not run.
 func (s *Server) handleCampaignSteps(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -1340,12 +1184,6 @@ func (s *Server) handleCampaignSteps(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCampaignPlans groups the host plans by their fingerprint.
-//
-// The approval covers a set of plans, not one payload, so the operator must
-// see it before deciding. A list of a hundred hosts with an identical diff
-// is not knowledge though - it is a wall of text. Grouping goes by plan
-// fingerprint: one item is one real shape of the change together with the
-// list of hosts that get it.
 func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -1365,10 +1203,8 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 		// The group expires with its oldest plan: past that moment the
 		// hosts are not started on it, digest or no digest.
 		ExpiresAt time.Time `json:"expires_at"`
-		// The header of the plan envelope: the planner that made the plan
-		// and whether the plan is an envelope at all. A plan that is not
-		// one is a plan the panel cannot read as a declaration of its
-		// effects, and the screen says so rather than merging it in.
+		// The header of the plan envelope: the planner that made the plan and
+		// whether the plan is an envelope at all.
 		PlannerVersion string `json:"planner_version,omitempty"`
 		SchemaVersion  uint32 `json:"schema_version,omitempty"`
 		Envelope       bool   `json:"envelope"`
@@ -1408,13 +1244,8 @@ func (s *Server) handleCampaignPlans(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCampaignReport serves the final report: the state totals, the
-// split into waves and the list of hosts that need attention.
-//
-// A finished campaign has its report on record, written with the terminal
-// transition; the answer is that record, marked as stored, and it does not
-// change when a host later leaves the fleet. A campaign under way has no
-// record yet and gets the report computed from its targets now.
+// handleCampaignReport serves the final report: the state totals, the split
+// into waves and the list of hosts that need attention.
 func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
@@ -1435,9 +1266,9 @@ func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusOK, report)
 			return
 		}
-		// A campaign that ended before the panel kept reports has none;
-		// the live computation is the best knowledge there is, and the
-		// answer says it is not the record.
+		// A campaign that ended before the panel kept reports has none; the live
+		// computation is the best knowledge there is, and the answer says it is not
+		// the record.
 		if !errors.Is(err, campaigns.ErrNoReport) {
 			s.fail(w, err)
 			return
@@ -1456,17 +1287,10 @@ func (s *Server) handleCampaignReport(w http.ResponseWriter, r *http.Request) {
 var campaignCSVColumns = []string{"hostname", "host_id", "wave", "position", "state",
 	"error_code", "message", "started_at", "finished_at", "job_id"}
 
-// campaignCSVPage bounds one read of the export. It is the page the store
-// serves at most, so the export costs the database the same as a screen
-// paged to the end, whatever the size of the campaign.
+// campaignCSVPage bounds one read of the export.
 const campaignCSVPage = 1000
 
-// writeCampaignCSV streams the targets of a campaign as a CSV file. The
-// report is meant for a campaign on ten thousand hosts: the rows go page by
-// page from the database straight to the socket, and each page leaves the
-// panel's memory before the next one is read. The file is named after the
-// campaign, not the day: it is the record of one rollout, and two exports
-// of it are the same file.
+// writeCampaignCSV streams the targets of a campaign as a CSV file.
 func (s *Server) writeCampaignCSV(w http.ResponseWriter, r *http.Request, campaign *campaigns.Campaign) {
 	s.writeCSV(w, r, "campaign-"+campaign.ID+".csv", campaignCSVColumns, func(yield func([]string) bool) error {
 		cursor := campaigns.TargetCursor{}
@@ -1511,15 +1335,12 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := authz.FromContext(r.Context())
 
-	// The approval covers what the approver saw: this operation, this
-	// payload, this host list and this rollout policy. The fingerprint is the
-	// only proof they looked at the same thing - without it the approval
-	// would refer to the campaign identifier alone.
+	// The approval covers what the approver saw: this operation, this payload,
+	// this host list and this rollout policy.
 	var request struct {
 		ApprovalFingerprint string `json:"approval_fingerprint"`
-		// The reason is part of the evidence. A critical campaign requires
-		// it, like the same operation on one host; elsewhere it is recorded
-		// when given.
+		// The reason is part of the evidence. A critical campaign requires it, like
+		// the same operation on one host; elsewhere it is recorded when given.
 		Reason       string `json:"reason"`
 		ChangeTicket string `json:"change_ticket"`
 	}
@@ -1554,9 +1375,9 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The consent is what starts the change, so the fresh authentication
-	// belongs here, immediately before it - a session that was fresh at
-	// creation may be hours old by the time the plans are reviewed.
+	// The consent is what starts the change, so the fresh authentication belongs
+	// here, immediately before it - a session that was fresh at creation may be
+	// hours old by the time the plans are reviewed.
 	approval := campaigns.Approval{
 		ApprovedBy:     principal.Subject,
 		Authentication: "api_token",
@@ -1582,9 +1403,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		stepUpEvidence = evidence
 	}
 
-	// A consent covers plans the hosts still compute. A plan envelope past
-	// its expiry is one they do not: the approval is refused with the code
-	// the host would answer with, and the operator plans again.
+	// A consent covers plans the hosts still compute.
 	if code, detail := campaignPlansConflict(r.Context(), s.campaigns, campaign.ID); code != "" {
 		problem(w, http.StatusConflict, code, detail)
 		return
@@ -1609,9 +1428,9 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// The event names everybody behind the change: who ordered the campaign
-	// and who has consented so far, this approval included - the list is
-	// read inside the transaction, so it holds the record just written.
+	// The event names everybody behind the change: who ordered the campaign and
+	// who has consented so far, this approval included - the list is read inside
+	// the transaction, so it holds the record just written.
 	approvals, err := s.campaigns.ApprovalsTx(r.Context(), tx, campaign.ID)
 	if err != nil {
 		s.fail(w, err)
@@ -1643,9 +1462,7 @@ func (s *Server) handleApproveCampaign(w http.ResponseWriter, r *http.Request) {
 }
 
 // campaignPlansConflict says whether the campaign's plans can still be
-// consented to: plan_expired when a plan envelope is past its expiry. A
-// plan of the older shape carries no expiry of its own and is bound in
-// time by the campaign's plan TTL alone.
+// consented to: plan_expired when a plan envelope is past its expiry.
 func campaignPlansConflict(ctx context.Context, store *campaigns.Store, campaignID string) (string, string) {
 	entries, err := store.PlansWithContent(ctx, campaignID)
 	if err != nil {
@@ -1696,9 +1513,8 @@ func (s *Server) handleCancelCampaign(w http.ResponseWriter, r *http.Request) {
 	s.controlCampaign(w, r, "cancel")
 }
 
-// handleAdvanceCampaign lets a campaign standing at the manual gate into
-// the waves. The canary ran; the decision to go on is a person's, and it is
-// recorded with a reason like every other control.
+// handleAdvanceCampaign lets a campaign standing at the manual gate into the
+// waves.
 func (s *Server) handleAdvanceCampaign(w http.ResponseWriter, r *http.Request) {
 	s.controlCampaign(w, r, "advance")
 }
@@ -1741,12 +1557,8 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 		return
 	}
 
-	// A campaign stopped with one write does not close the hosts one by one,
-	// so it has nowhere to return the tokens. They are returned here: the
-	// capacity held by a campaign that does nothing any more stops the next
-	// one. A campaign that is still draining keeps them: its hosts under
-	// way hold real capacity until they settle, and the drain returns the
-	// tokens then.
+	// A campaign stopped with one write does not close the hosts one by one, so
+	// it has nowhere to return the tokens.
 	if operation == "cancel" && s.budgets != nil && updated.State == campaigns.StateCanceled {
 		if err := s.budgets.ReleaseClaimant(r.Context(), "campaign:"+campaign.ID); err != nil {
 			s.log.Error("the capacity of the cancelled campaign was not released",
@@ -1765,10 +1577,7 @@ func (s *Server) controlCampaign(w http.ResponseWriter, r *http.Request, operati
 
 // handleSkipCampaignTarget lets an operator leave a host waiting for its
 // connection out of the campaign, by name and with a reason: the offline
-// canary the document lets the operator skip so that the wave barrier
-// opens. The right is the approver's - opening the waves over a canary
-// that never ran is a decision of the same weight as advancing the gate -
-// and the reason goes on the host's row, its step and the trail.
+// canary the document lets the operator skip so that the wave barrier opens.
 func (s *Server) handleSkipCampaignTarget(w http.ResponseWriter, r *http.Request) {
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignApprove)
 	if !ok {
@@ -1856,9 +1665,7 @@ func (s *Server) campaignFor(w http.ResponseWriter, r *http.Request,
 	return campaign, true
 }
 
-// campaignScope returns the scope covering all the campaign targets. When
-// the targets lie in different scopes, the global permission is required: a
-// campaign is an operation on the whole named part of the fleet.
+// campaignScope returns the scope covering all the campaign targets.
 func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope, error) {
 	targets, err := s.campaigns.Targets(r.Context(), campaignID)
 	if err != nil {
@@ -1880,11 +1687,7 @@ func (s *Server) campaignScope(r *http.Request, campaignID string) (authz.Scope,
 		if scope.Environment != host.Environment {
 			scope.Environment = authz.Wildcard
 		}
-		// A campaign is over one team only while every host of it is in
-		// that team. The moment two teams are in the snapshot there is no
-		// team that covers it, and the scope falls back to the site and
-		// the environment - which for a mixed snapshot is the wildcard
-		// above, that is the global right.
+		// A campaign is over one team only while every host of it is in that team.
 		if scope.Team != host.TeamID {
 			scope.Team = ""
 		}
@@ -1912,12 +1715,8 @@ func (s *Server) campaignNeedsSecondPerson(r *http.Request, campaign *campaigns.
 	return false
 }
 
-// valueOrDefault differs from valueOr in one thing: zero is a decision
-// here, not a missing value. A campaign without a canary makes sense, just
-// like a campaign without a percentage threshold - and that is exactly how
-// the default profiles from the document look. Quietly substituting a value
-// would change the policy the operator asked for, and the approval
-// fingerprint would already cover something else.
+// valueOrDefault differs from valueOr in one thing: zero is a decision here,
+// not a missing value.
 func valueOrDefault(value *int, fallback int) int {
 	if value == nil || *value < 0 {
 		return fallback
@@ -1932,10 +1731,8 @@ func valueOr(value *int, fallback int) int {
 	return *value
 }
 
-// valueAsGiven passes a number through as the request gave it, zero when
-// it was left out. Unlike valueOr it keeps a negative value: the store's
-// validation is to refuse it with a reason rather than the handler quietly
-// turning a mistake into the default.
+// valueAsGiven passes a number through as the request gave it, zero when it
+// was left out.
 func valueAsGiven(value *int) int {
 	if value == nil {
 		return 0
@@ -1964,9 +1761,7 @@ func campaignScopes(principal authz.Principal) []campaigns.Scope {
 
 // campaignRequiresFreshAuth says whether approving the campaign needs the
 // operator to confirm their identity first: the registry's answer for the
-// operation, raised where the content of the order calls for it. A payload
-// that does not decode is treated as the operation's base level - the
-// campaign was validated when it was created.
+// operation, raised where the content of the order calls for it.
 func campaignRequiresFreshAuth(campaign *campaigns.Campaign) bool {
 	action := opspec.ActionType(campaign.ActionType)
 	var payload opspec.Payload

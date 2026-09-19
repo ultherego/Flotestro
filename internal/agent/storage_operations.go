@@ -15,13 +15,6 @@ import (
 
 // ProbeLVM reads the volume manager and the software arrays through the
 // helper.
-//
-// Both need root and both belong to the same picture: a logical volume is a
-// device, a group and a UUID, and an array member is a device the array
-// knows under a slot. They are two calls because they are two reads on the
-// host - a host with LVM and no md driver answers the first and says why
-// there is no answer to the second, and an empty list from either would be
-// a zero nobody measured.
 func (e *TaskExecutor) ProbeLVM(ctx context.Context) (storage.Snapshot, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -40,9 +33,7 @@ func (e *TaskExecutor) ProbeLVM(ctx context.Context) (storage.Snapshot, error) {
 	}
 	arrays, err := e.probeRAID(ctx)
 	if err != nil {
-		// The volume manager was read and the arrays were not. That is a
-		// reason on the arrays, not a failure of the whole read: the panel
-		// shows the groups it has and says why it has no arrays.
+		// The volume manager was read and the arrays were not.
 		snapshot.RAIDUnavailableReason = "helper: " + err.Error()
 		return snapshot, nil
 	}
@@ -74,10 +65,7 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 	timeout := timeoutOf(task, action)
 
 	// Reading the topology needs no root beyond the LVM part, so it is assembled
-	// by the agent: every trip through root has to be justified. A plan with a
-	// target is something else: it computes the difference for one mount and
-	// resolves the source to a UUID - that is done by the helper, because it is
-	// the one that mounts afterwards.
+	// by the agent: every trip through root has to be justified.
 	if action == opspec.ActionStoragePlan && (payload == nil ||
 		(strings.TrimSpace(payload.Target) == "" && payload.Plan == "")) {
 		callCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -163,10 +151,7 @@ func (e *TaskExecutor) applyStorage(ctx context.Context, task *agentv1.TaskEnvel
 				Plan:              payload.Plan,
 				PlanHash:          payload.PlanHash,
 				Label:             payload.Label,
-				// The identities of the layers above a bare disk. Every one
-				// of them travels, because every one of them is compared on
-				// the host right before the change: a name alone would carry
-				// the operator's consent to whatever holds the name now.
+				// The identities of the layers above a bare disk.
 				Array:              payload.Array,
 				ExpectedArrayUuid:  payload.ExpectedArrayUUID,
 				Group:              payload.Group,
@@ -222,11 +207,6 @@ func decodeStorage(data []byte) (storage.Snapshot, error) {
 }
 
 // storageSummary describes the result of the read in one sentence.
-//
-// A degraded array belongs in that sentence: it is the one fact on this
-// page that is worth reading before the disk that is still good goes too,
-// and a job result that said only how many devices there are would bury
-// it.
 func storageSummary(snapshot storage.Snapshot) string {
 	mounted := 0
 	for _, mount := range snapshot.Mounts {
@@ -246,12 +226,8 @@ func storageSummary(snapshot storage.Snapshot) string {
 	return summary
 }
 
-// readSmart asks the helper about the SMART state of one device.
-//
-// The tool needs root to talk to the device, so the read goes through the
-// helper. A device the tool cannot read comes back as unsupported with the
-// tool's own words; the read itself succeeded, and that answer is its
-// content.
+// readSmart asks the helper about the SMART state of one device. The tool
+// needs root to talk to the device, so the read goes through the helper.
 func (e *TaskExecutor) readSmart(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.StoragePayload) *agentv1.TaskResult {
 	if payload == nil {

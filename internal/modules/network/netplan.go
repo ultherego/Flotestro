@@ -10,12 +10,6 @@ import (
 )
 
 // The netplan tool and the panel's own file.
-//
-// The panel writes one file of its own and never edits the distribution's:
-// netplan merges the files in name order and a later file amends an
-// earlier one, so 90-flotestro.yaml overrides exactly the keys the
-// operator changed and nothing else. Removing the file returns the host to
-// the distribution's configuration.
 const (
 	NetplanPath        = "/usr/sbin/netplan"
 	NetplanDir         = "/etc/netplan"
@@ -39,8 +33,7 @@ type NetplanInterface struct {
 	Section string
 	Profile Profile
 	// Gateway4 and Gateway6 say the default route came from the deprecated
-	// gateway4/gateway6 keys. A later file cannot remove a key an earlier
-	// one set, so a gateway change has to go through the same key.
+	// gateway4/gateway6 keys.
 	Gateway4 bool
 	Gateway6 bool
 	// Layer is the layering netplan describes for this interface: a bond,
@@ -48,9 +41,8 @@ type NetplanInterface struct {
 	Layer *LinkState
 }
 
-// ParseNetplan reads one netplan document: the output of "netplan get" or
-// the content of one file. The root "network" key is optional, because
-// "netplan get" prints the tree with it and a subtree without.
+// ParseNetplan reads one netplan document: the output of "netplan get" or the
+// content of one file.
 func ParseNetplan(document string) (NetplanConfig, error) {
 	tree, err := netplanTree(document)
 	if err != nil {
@@ -59,10 +51,9 @@ func ParseNetplan(document string) (NetplanConfig, error) {
 	return netplanConfig(tree), nil
 }
 
-// MergeNetplanDocuments merges files the way netplan does when "netplan
-// get" is not there to do it: in the given order, a later document amends
-// an earlier one key by key and a scalar or a list in a later file replaces
-// the one before.
+// MergeNetplanDocuments merges files the way netplan does when "netplan get"
+// is not there to do it: in the given order, a later document amends an
+// earlier one key by key and a scalar or a list in a later file replaces the
 func MergeNetplanDocuments(documents ...string) (NetplanConfig, error) {
 	merged := map[string]any{}
 	for _, document := range documents {
@@ -137,10 +128,7 @@ func (c NetplanConfig) Profiles() []Profile {
 	return profiles
 }
 
-// Profile returns the profile of one interface. An interface netplan does
-// not describe is a refusal: the panel does not create new definitions,
-// because a definition of its own would have to guess the match rules and
-// the renderer the distribution chose.
+// Profile returns the profile of one interface.
 func (c NetplanConfig) Profile(name string) (Profile, error) {
 	entry, ok := c.Interfaces[name]
 	if !ok {
@@ -185,8 +173,7 @@ func netplanInterface(section, name string, definition map[string]any) NetplanIn
 	}
 	// The second family is read to the same depth as the first: the router
 	// advertisements and the privacy extensions are settings netplan does
-	// express, and a plan that could not see them would offer to set what
-	// the host already has.
+	// express, and a plan that could not see them would offer to set what the
 	if accept, ok := definition["accept-ra"].(bool); ok {
 		profile.AcceptRA = AcceptRAOff
 		if accept {
@@ -310,11 +297,6 @@ func netplanNumber(raw any) (int, bool) {
 }
 
 // NetplanManagedDocument assembles the panel's file after the change.
-//
-// The file starts from what the panel already wrote (other interfaces, other
-// keys of this one) and gets the keys of this change for the touched
-// interface - only those. The distribution's files stay untouched; the
-// merge result is what "netplan get" shows afterwards.
 func NetplanManagedDocument(managed string, config NetplanConfig, iface, kind string,
 	current, desired Profile) (string, error) {
 	if err := ValidateInterfaceName(iface); err != nil {
@@ -343,9 +325,7 @@ func NetplanManagedDocument(managed string, config NetplanConfig, iface, kind st
 			return "", err
 		}
 		if desired.MTU == MTUAuto {
-			// "auto" is the absence of the panel's override. The link keeps
-			// its running value until the next reconfiguration: networkd
-			// leaves an MTU alone when the definition stops naming one.
+			// "auto" is the absence of the panel's override.
 			delete(definition, "mtu")
 		} else {
 			mtu, _ := strconv.Atoi(desired.MTU)
@@ -358,9 +338,9 @@ func NetplanManagedDocument(managed string, config NetplanConfig, iface, kind st
 				return "", err
 			}
 		}
-		// netplan keeps both families in one list, so both have to be
-		// written: a list in a later file replaces the earlier one whole,
-		// and leaving the second family out would drop it.
+		// netplan keeps both families in one list, so both have to be written: a
+		// list in a later file replaces the earlier one whole, and leaving the
+		// second family out would drop it.
 		definition["routes"] = netplanRouteList(entry, current.Gateway, current.Gateway6,
 			desired.Routes, desired.Routes6)
 
@@ -404,8 +384,7 @@ func NetplanManagedDocument(managed string, config NetplanConfig, iface, kind st
 }
 
 // netplanProfileKeys writes the method, the addresses, the gateway and the
-// resolver of the address profile. The routes and the MTU stay: the address
-// profile is a separate operation.
+// resolver of the address profile.
 func netplanProfileKeys(definition map[string]any, entry NetplanInterface, current, desired Profile) error {
 	for _, address := range desired.Addresses {
 		if err := ValidateAddress(address); err != nil {
@@ -470,24 +449,18 @@ func netplanProfileKeys(definition map[string]any, entry NetplanInterface, curre
 	return nil
 }
 
-// netplanRouteList writes the full route list of the interface: the
-// default route of each family when it lives in the routes key, then the
-// static ones of both. A list in a later file replaces the earlier one, so
-// leaving anything out would drop it.
-//
-// The default routes are written with the destination of their own family
-// rather than the word "default": netplan takes "default" from the family
-// of the gateway, and being explicit is what keeps a v6 default route from
-// being read as a v4 one on a host that has both.
+// netplanRouteList writes the full route list of the interface: the default
+// route of each family when it lives in the routes key, then the static ones
+// of both.
 func netplanRouteList(entry NetplanInterface, gateway, gateway6 string, routes, routes6 []string) []any {
 	list := []any{}
 	if gateway != "" && !entry.Gateway4 {
 		list = append(list, map[string]any{"to": defaultRouteIPv4, "via": gateway})
 	}
 	if gateway6 != "" && !entry.Gateway6 {
-		// A link-local gateway needs the interface named: fe80:: addresses
-		// are ambiguous without one, and that is the ordinary way an IPv6
-		// router announces itself.
+		// A link-local gateway needs the interface named: fe80:: addresses are
+		// ambiguous without one, and that is the ordinary way an IPv6 router
+		// announces itself.
 		route := map[string]any{"to": defaultRouteIPv6, "via": gateway6}
 		if strings.HasPrefix(strings.ToLower(gateway6), "fe80:") {
 			route["on-link"] = true
@@ -511,11 +484,6 @@ func netplanRouteList(entry NetplanInterface, gateway, gateway6 string, routes, 
 }
 
 // netplanIPv6Keys writes the second family of the address profile.
-//
-// netplan expresses the router advertisements and the privacy extensions,
-// so both are written where the order names them; what it does not express
-// - the difference between preferring a public and a temporary address - is
-// refused rather than folded into the switch it does have.
 func netplanIPv6Keys(definition map[string]any, current, desired Profile) error {
 	for _, address := range desired.Addresses6 {
 		if err := ValidateIPv6Address(address); err != nil {
@@ -544,10 +512,8 @@ func netplanIPv6Keys(definition map[string]any, current, desired Profile) error 
 	default:
 		return fmt.Errorf("netplan cannot express the IPv6 method %q", desired.Method6)
 	}
-	// The addresses key was written from the first family alone a moment
-	// ago; the second family is appended to it here. Without this an order
-	// that said nothing about IPv6 would take the host's IPv6 addresses
-	// away, because the key netplan keeps them in was replaced whole.
+	// The addresses key was written from the first family alone a moment ago; the
+	// second family is appended to it here.
 	addresses, _ := definition["addresses"].([]any)
 	if desired.Method6 != "disabled" {
 		for _, address := range desired.Addresses6 {
@@ -594,9 +560,9 @@ func NetplanGenerateArguments() []string {
 	return []string{NetplanPath, "generate"}
 }
 
-// NetplanTryArguments applies the configuration under netplan's own
-// revert: without a confirmation on its standard input within the timeout
-// netplan returns the host to the previous running state.
+// NetplanTryArguments applies the configuration under netplan's own revert:
+// without a confirmation on its standard input within the timeout netplan
+// returns the host to the previous running state.
 func NetplanTryArguments(timeoutSeconds int) []string {
 	return []string{NetplanPath, "try", "--timeout", strconv.Itoa(timeoutSeconds)}
 }
@@ -611,27 +577,22 @@ func NetplanGetArguments() []string {
 	return []string{NetplanPath, "get"}
 }
 
-// NetplanPromptSeen says whether "netplan try" has finished applying and
-// is waiting for the confirmation. The prompt is the only sign of it: the
-// change is on the host from that moment, and the connectivity check makes
-// sense only after it.
+// NetplanPromptSeen says whether "netplan try" has finished applying and is
+// waiting for the confirmation.
 func NetplanPromptSeen(output string) bool {
 	lower := strings.ToLower(output)
 	return strings.Contains(lower, "press enter") || strings.Contains(lower, "keep these settings")
 }
 
 // The netplan sections that hold layered interfaces, by the kind the panel
-// names them with. netplan keeps every kind in its own section, so the kind
-// decides where the definition goes.
+// names them with.
 var netplanLayerSections = map[string]string{
 	LinkBond:   "bonds",
 	LinkBridge: "bridges",
 	LinkVLAN:   "vlans",
 }
 
-// netplanLayer reads the layering of one netplan definition. An interface
-// in a section that holds no layers has none, which is an answer and not a
-// missing value.
+// netplanLayer reads the layering of one netplan definition.
 func netplanLayer(section string, definition map[string]any) *LinkState {
 	kind := ""
 	for name, held := range netplanLayerSections {
@@ -673,12 +634,6 @@ func netplanLayer(section string, definition map[string]any) *LinkState {
 
 // NetplanManagedLinkDocument assembles the panel's file after a layered
 // change: a bond, a bridge or a VLAN created, changed or taken away.
-//
-// A removal takes the entry out of the panel's own file and nothing else.
-// An interface the distribution defined is refused rather than shadowed: a
-// later file cannot remove a definition an earlier one made, so a removal
-// that looked like it worked would leave the interface exactly where it
-// was after the next boot.
 func NetplanManagedLinkDocument(managed string, config NetplanConfig, plan Plan) (string, error) {
 	if plan.CurrentLink == nil || plan.DesiredLink == nil {
 		return "", fmt.Errorf("a layered netplan document without the link states")
@@ -716,9 +671,8 @@ func NetplanManagedLinkDocument(managed string, config NetplanConfig, plan Plan)
 	if sectionName == "" {
 		return "", fmt.Errorf("netplan keeps no section for a layer of the kind %q", desired.Kind)
 	}
-	// A definition the distribution already made for this name would be
-	// amended rather than replaced, and the result would be two halves of
-	// two layers. The panel builds its own or refuses.
+	// A definition the distribution already made for this name would be amended
+	// rather than replaced, and the result would be two halves of two layers.
 	if existing, ok := config.Interfaces[name]; ok && existing.Section != sectionName {
 		return "", &LinkRefusal{Code: CodeLinkKindMismatch,
 			Reason: "netplan already describes " + name + " under " + existing.Section +

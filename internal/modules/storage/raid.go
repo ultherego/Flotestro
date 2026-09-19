@@ -7,19 +7,8 @@ import (
 	"strings"
 )
 
-// Software RAID: what the kernel and mdadm say about the arrays of the
-// host.
-//
-// Two sources answer two different questions. /proc/mdstat is the kernel's
-// own view and needs no privilege: it says which arrays are assembled, at
-// which level, which member sits in which slot and how far a rebuild has
-// got. mdadm --detail needs root and adds what the superblock carries: the
-// UUID of the array, which is the only name of an array that survives a
-// reboot, and the state of every member as the metadata records it.
-//
-// A host without the md driver has no /proc/mdstat, and that is an answer:
-// it is not a host with zero arrays, and the module says which of the two
-// it is.
+// Software RAID: what the kernel and mdadm say about the arrays of the host.
+// Two sources answer two different questions.
 
 // The paths of the software RAID sources. Fixed, not looked up in PATH.
 const (
@@ -27,9 +16,7 @@ const (
 	MDAdmPath  = "/usr/sbin/mdadm"
 )
 
-// Member roles as the array reports them. The role decides what an
-// operation may do with the member: a spare can be removed without losing
-// anything, an active member cannot.
+// Member roles as the array reports them.
 const (
 	// MemberActive is a member carrying data in a slot of the array.
 	MemberActive = "active"
@@ -51,18 +38,13 @@ const (
 	MemberJournal = "journal"
 )
 
-// redundantLevels lists the levels that survive the loss of a member. A
-// level outside this set stores no copy of anything: pulling a member out
-// of it is not a repair, it is the end of the array.
+// redundantLevels lists the levels that survive the loss of a member.
 var redundantLevels = map[string]bool{
 	"raid1": true, "raid4": true, "raid5": true, "raid6": true, "raid10": true,
 }
 
-// RAIDMember is one device of an array.
-//
-// The path is what mdadm prints; the identity is what an operation binds
-// to. A member without a by-id link has no identity that survives a
-// reboot, and the panel does not fail or remove it by path alone.
+// RAIDMember is one device of an array. The path is what mdadm prints; the
+// identity is what an operation binds to.
 type RAIDMember struct {
 	Path       string `json:"path"`
 	KernelName string `json:"kernel_name,omitempty"`
@@ -89,9 +71,8 @@ type RAIDMember struct {
 // Failed says whether the array has already written this member off.
 func (m RAIDMember) Failed() bool { return m.Role == MemberFaulty }
 
-// CarriesData says whether the array would lose a copy by losing this
-// member now. A spare carries nothing, a faulty member is already lost,
-// and a slot with nothing in it is not a member at all.
+// CarriesData says whether the array would lose a copy by losing this member
+// now.
 func (m RAIDMember) CarriesData() bool {
 	switch m.Role {
 	case MemberActive, MemberWriteMostly, MemberRebuilding:
@@ -104,10 +85,9 @@ func (m RAIDMember) CarriesData() bool {
 type RAIDArray struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	// UUID is the identity of the array out of its superblock: the one name
-	// that means the same array after a reboot, after a rename and on
-	// another controller. An operation on a member binds to it, and an
-	// array without one is not operated on.
+	// UUID is the identity of the array out of its superblock: the one name that
+	// means the same array after a reboot, after a rename and on another
+	// controller.
 	UUID string `json:"uuid,omitempty"`
 	// Level is raid0, raid1, raid5, raid6, raid10 or linear, as the kernel
 	// names it.
@@ -117,30 +97,25 @@ type RAIDArray struct {
 	State     string `json:"state,omitempty"`
 	Metadata  string `json:"metadata,omitempty"`
 	SizeBytes uint64 `json:"size_bytes,omitempty"`
-	// RaidDevices is how many slots the array has; ActiveDevices how many
-	// are filled with a working member. Degraded is the difference between
-	// them and is the fact an operator is looking for on this page.
+	// RaidDevices is how many slots the array has; ActiveDevices how many are
+	// filled with a working member.
 	RaidDevices    int  `json:"raid_devices"`
 	ActiveDevices  int  `json:"active_devices"`
 	WorkingDevices int  `json:"working_devices"`
 	FailedDevices  int  `json:"failed_devices"`
 	SpareDevices   int  `json:"spare_devices"`
 	Degraded       bool `json:"degraded"`
-	// Redundant says whether the level survives the loss of one member at
-	// all. A raid0 that is "not degraded" is not a healthy array with a
-	// spare to lose; it is an array with nothing to lose it to.
+	// Redundant says whether the level survives the loss of one member at all.
 	Redundant bool `json:"redundant"`
-	// The rebuild in progress, where there is one: recovery, resync,
-	// reshape or check, with how far it has got. No percentage means no
-	// rebuild is running - not a rebuild at zero.
+	// The rebuild in progress, where there is one: recovery, resync, reshape or
+	// check, with how far it has got.
 	SyncAction  string       `json:"sync_action,omitempty"`
 	SyncPercent *float64     `json:"sync_percent,omitempty"`
 	SyncFinish  string       `json:"sync_finish,omitempty"`
 	SyncSpeed   string       `json:"sync_speed,omitempty"`
 	Members     []RAIDMember `json:"members,omitempty"`
 	// DetailUnavailableReason says why the array carries no UUID and no
-	// per-member state: mdadm is not installed, or the read failed. The
-	// array is still listed, because the kernel sees it.
+	// per-member state: mdadm is not installed, or the read failed.
 	DetailUnavailableReason string `json:"detail_unavailable_reason,omitempty"`
 }
 
@@ -165,9 +140,7 @@ func (a RAIDArray) DataMembers() int {
 	return count
 }
 
-// Rebuilding says whether the array is busy putting a member back. A
-// member change during a rebuild interrupts the rebuild, and that is the
-// one moment an array is least able to lose another member.
+// Rebuilding says whether the array is busy putting a member back.
 func (a RAIDArray) Rebuilding() bool {
 	switch a.SyncAction {
 	case "recovery", "resync", "reshape", "repair":
@@ -205,13 +178,6 @@ var (
 )
 
 // ParseMDStat reads /proc/mdstat.
-//
-// The kernel prints one block per array: a header with the level and the
-// members, a line with the size and the slot map, and, while something is
-// being rebuilt, a progress line. The slot map is the thing worth reading
-// twice: "[2/1] [U_]" is an array that still answers every read and has
-// lost its redundancy, and the operator wants to know that before the
-// second disk goes.
 func ParseMDStat(content string) ([]RAIDArray, error) {
 	var arrays []RAIDArray
 	var current *RAIDArray
@@ -329,9 +295,9 @@ func memberFromField(match []string) RAIDMember {
 	return member
 }
 
-// completeArray derives what the two sources do not print directly: how
-// many members carry data, how many stand by, and whether the level has
-// any redundancy to lose.
+// completeArray derives what the two sources do not print directly: how many
+// members carry data, how many stand by, and whether the level has any
+// redundancy to lose.
 func completeArray(array *RAIDArray) {
 	array.Redundant = redundantLevels[array.Level]
 	spares, failed := 0, 0
@@ -370,12 +336,6 @@ var (
 )
 
 // ParseMDAdmDetail reads the output of "mdadm --detail /dev/mdN".
-//
-// The detail is where the UUID lives, and the UUID is the only name of an
-// array that an operation may bind to: /dev/md0 is whichever array the
-// kernel assembled first this boot. The device table at the end says what
-// mdadm thinks of every member, including the slots it has nothing in -
-// "removed" is a fact about the array, not a missing row.
 func ParseMDAdmDetail(output string) (RAIDArray, error) {
 	array := RAIDArray{}
 	inDevices := false
@@ -483,9 +443,7 @@ func memberFromDetailRow(line string) (RAIDMember, bool) {
 	return member, true
 }
 
-// roleFromDetailState reads mdadm's state words. The order matters: a
-// member is faulty before it is anything else, and a slot without a device
-// is removed whatever else the row says.
+// roleFromDetailState reads mdadm's state words.
 func roleFromDetailState(state, path string) string {
 	lowered := strings.ToLower(state)
 	switch {
@@ -534,12 +492,6 @@ func ParseMDAdmScan(output string) map[string]RAIDArray {
 
 // MergeArrayDetail completes the kernel's view with what the superblock
 // carries.
-//
-// The kernel list decides which arrays exist: it is the one that needs no
-// privilege and cannot be out of date. The detail adds the UUID and the
-// per-member state; an array the detail could not be read for keeps its
-// kernel facts and carries the reason, because an array without a UUID is
-// an array no operation binds to, and the panel is to say why.
 func MergeArrayDetail(arrays []RAIDArray, detail map[string]RAIDArray, unavailableReason string) {
 	for i := range arrays {
 		found, ok := detail[arrays[i].Path]
@@ -613,11 +565,6 @@ func mergeMembers(kernel, detail []RAIDMember) []RAIDMember {
 
 // FillMemberIdentity copies the stable identity of every member out of the
 // block device list.
-//
-// mdadm knows nothing about /dev/disk/by-id; the identity a member
-// operation binds to comes from the same place as a disk's. A member whose
-// device the host does not list keeps the reason, so the panel shows why
-// it will not be failed or removed by path.
 func FillMemberIdentity(arrays []RAIDArray, devices []Device) {
 	byPath := map[string]*Device{}
 	for i := range devices {

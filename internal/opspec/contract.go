@@ -7,18 +7,8 @@ import (
 	"strings"
 )
 
-// The second half of the operation contract: what happens to an operation
-// that is already under way.
-//
-// The first half - permission, risk, capability, campaign mode, offline
-// policy - decides whether an order is placed at all. This half decides what
-// the panel may promise once the order is on the host: whether a running
-// operation can be stopped, whether repeating it is safe, whether there is a
-// way back, what the campaign checks afterwards and which host resources the
-// operation takes. Every mutating operation declares all of it explicitly.
-// Missing metadata does not become the most convenient answer: the control
-// plane refuses to start, because a cancel button drawn on a guess would
-// promise the operator something the host cannot do.
+// The second half of the operation contract: what happens to an operation that
+// is already under way.
 
 // CancelMode says what a cancel request does to an operation that is under
 // way. A queued operation is always cancellable: it has not touched the host.
@@ -31,13 +21,10 @@ const (
 	// CancelCheckpointOnly: the cancel is checked only between atomic steps.
 	// The step under way finishes; the next one does not start.
 	CancelCheckpointOnly CancelMode = "checkpoint_only"
-	// CancelImpossibleAfterStart: once the host reported a start, the cancel
-	// is only information. A package transaction or a filesystem resize runs
-	// to its end.
+	// CancelImpossibleAfterStart: once the host reported a start, the cancel is
+	// only information.
 	CancelImpossibleAfterStart CancelMode = "impossible_after_start"
-	// CancelLocalWatchdogOwned: the host's own safety mechanism decides. The
-	// control plane may ask, but it never stops a rollback timer that guards
-	// the management channel.
+	// CancelLocalWatchdogOwned: the host's own safety mechanism decides.
 	CancelLocalWatchdogOwned CancelMode = "local_watchdog_owned"
 )
 
@@ -102,9 +89,7 @@ const (
 	ClaimKernel = "kernel"
 	// ClaimSecurity covers the MAC mode and the audit rules.
 	ClaimSecurity = "security"
-	// ClaimFile is one managed file. The registry declares the class; the
-	// agent binds it to the path from the payload at dispatch, so changes of
-	// different files do not wait for each other.
+	// ClaimFile is one managed file.
 	ClaimFile = "file"
 	// ClaimLogsRead is a shared class for reading the journal and log
 	// files: bytes per second and file descriptors.
@@ -137,14 +122,6 @@ type Contract struct {
 var ErrContractMissing = errors.New("operation contract missing")
 
 // Contract returns the declaration of an operation.
-//
-// A read derives it: it can be cancelled any time, repeating it is free,
-// there is nothing to roll back and nothing to verify, and it takes shared
-// claims with the weight of one. A mutating operation has to be in the
-// table; an undeclared one gets the strictest reading - not cancellable
-// once started, never repeated blind, nothing to roll back - and
-// ValidateContracts keeps such an operation from ever reaching a running
-// control plane.
 func (a ActionType) Contract() Contract {
 	if declared, ok := contracts[a]; ok {
 		return declared.withClaims(a)
@@ -167,9 +144,7 @@ func (a ActionType) Contract() Contract {
 	}
 }
 
-// contract is one row of the table. The claims list only what the agent
-// takes next to the lock class of the registry; the lock class itself is
-// added by withClaims, so the two registries cannot drift apart.
+// contract is one row of the table.
 type contract struct {
 	cancel   CancelMode
 	retry    RetryPolicy
@@ -202,8 +177,8 @@ func (c contract) withClaims(action ActionType) Contract {
 }
 
 // readClaims derives the claims of a read: the lock class it names, shared,
-// and one of the two shared classes of the document for the reads that
-// cost the host something even though they change nothing.
+// and one of the two shared classes of the document for the reads that cost
+// the host something even though they change nothing.
 func readClaims(action ActionType) []ResourceClaim {
 	claims := []ResourceClaim{}
 	if class := action.LockClass(); class != LockNone {
@@ -224,40 +199,23 @@ func exclusive(class string) ResourceClaim {
 	return ResourceClaim{Class: class, Mode: ClaimExclusive, Weight: 1}
 }
 
-// sharedCapacities is how much weight the shared classes of the document
-// carry at once on one host. A shared claim coexists with other shared
-// claims of its class until their weights add up to the capacity; the
-// next one waits, the way an exclusive claim waits. The classes are the
-// two the document bounds - bytes per second and file descriptors for
-// the logs, CPU and subprocesses for the scans - and the numbers are the
-// document's "shared + weight" made concrete: four readers of the logs,
-// two walks of the host. A shared class without a row here is bounded
-// only by the task budget of the host; that is the case of a read that
-// takes a lock class shared, where the point is to stay out of the way of
-// a mutation, not to ration the reads.
+// sharedCapacities is how much weight the shared classes of the document carry
+// at once on one host.
 var sharedCapacities = map[string]int{
 	ClaimLogsRead:       4,
 	ClaimInventoryHeavy: 2,
 }
 
-// SharedCapacity returns the weight a shared class carries at once on a
-// host, or zero for a class without a bound. Zero means no bound, not no
-// room: the agent lets such shared claims coexist without counting.
+// SharedCapacity returns the weight a shared class carries at once on a host,
+// or zero for a class without a bound.
 func SharedCapacity(class string) int {
 	return sharedCapacities[class]
 }
 
 // contracts is the table of declarations for mutating operations.
-//
-// The cancel modes follow the cancellation contract of chapter 15 of the
-// multitasking document, the rollback classes chapter 19. The retry class
-// follows the cancel mode: an operation that runs to its end once started
-// is never repeated blind, a change bound to a per-host plan is repeated
-// only after a new plan.
 var contracts = map[ActionType]contract{
-	// systemd units. One systemctl call is one step: it either happened or
-	// it did not, and the panel reads the unit before deciding anything.
-	// Start and stop undo each other; a restart or a reload has no reverse.
+	// systemd units. One systemctl call is one step: it either happened or it did
+	// not, and the panel reads the unit before deciding anything.
 	ActionUnitStart:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
 	ActionUnitStop:      {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
 	ActionUnitRestart:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyUnitHealth},
@@ -265,32 +223,24 @@ var contracts = map[ActionType]contract{
 	ActionUnitEnableSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
 	ActionUnitMaskSet:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyUnitHealth},
 	// Clearing the failed state changes a record, not a process: it can be
-	// cancelled at any point, repeated freely, and there is nothing to put
-	// back - the failure it clears has already happened.
+	// cancelled at any point, repeated freely, and there is nothing to put back -
+	// the failure it clears has already happened.
 	ActionUnitResetFailed: {cancel: CancelSafe, retry: RetryAutomatic, rollback: RollbackNone, verify: VerifyUnitHealth},
 
-	// Scheduled jobs. A managed entry keeps its previous version; writing
-	// it is a sequence of steps (the unit files, the reload, the enable) and
-	// the cancel is honoured between them. The entry is a declaration, so
-	// repeating it is free. Running an entry now is a run of somebody
-	// else's command: it ends when it ends.
+	// Scheduled jobs.
 	ActionScheduleEnsure:  {cancel: CancelCheckpointOnly, retry: RetryAutomatic, rollback: RollbackExactRestore, verify: VerifyUnitHealth},
 	ActionScheduleDisable: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackExactRestore, verify: VerifyUnitHealth},
 	ActionScheduleRemove:  {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackExactRestore, verify: VerifyUnitHealth},
 	ActionScheduleRunNow:  {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
-	// The network and the resolver. The host arms a rollback timer before
-	// the change and reverts itself when the commit does not come; the
-	// control plane only asks. After a commit the way back is a new plan.
+	// The network and the resolver.
 	ActionNetworkProfileApply: {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkRouteEnsure:  {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkMTUSet:       {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkRollback:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyConnectivity},
-	// A layered change goes under the same watchdog as an address change,
-	// because it is the more dangerous of the two: enslaving a member takes
-	// its addressing away at once. The verification is the connectivity
-	// proof plus the layering read back - a bond that came up with one of
-	// its two members is not the bond that was approved.
+	// A layered change goes under the same watchdog as an address change, because
+	// it is the more dangerous of the two: enslaving a member takes its
+	// addressing away at once.
 	ActionNetworkLinkApply:  {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionNetworkLinkRemove: {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionDNSHostApply:      {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
@@ -303,11 +253,8 @@ var contracts = map[ActionType]contract{
 	ActionFirewallZoneService:    {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionFirewallRulesetRestore: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyConnectivity},
 
-	// Storage. A mount is fstab plus the mount itself, with a checkpoint
-	// between; a removal reverses it. A check, an extension or a resize
-	// runs on the device until it is done, and there is no safe shrink.
-	// Creating a filesystem and wiping a disk have neither a way back nor a
-	// repeat.
+	// Storage. A mount is fstab plus the mount itself, with a checkpoint between;
+	// a removal reverses it.
 	ActionMountEnsure:      {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck, weight: 2},
 	ActionMountRemove:      {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck, weight: 2},
 	ActionFilesystemCheck:  {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
@@ -316,31 +263,19 @@ var contracts = map[ActionType]contract{
 	ActionFilesystemCreate: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 	ActionDiskWipe:         {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 
-	// Software RAID. Marking a member bad and taking it out are undone by
-	// putting a member back and waiting for the rebuild - that is a
-	// compensating change, never an exact restore, because the data on the
-	// member is written again from the others. Adding a member overwrites
-	// the device, so there is nothing to put back and no blind repeat.
+	// Software RAID.
 	ActionRAIDMemberFail:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	ActionRAIDMemberRemove: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	ActionRAIDMemberAdd:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 
-	// LVM. A volume or a snapshot that was created is undone by removing
-	// it, which is a compensating change and a decision of its own; a
-	// removed volume and a disk taken into a group have no way back at all.
-	// None of them is repeated blind: lvcreate run twice makes a second
-	// volume, so the group is read back first and the plan computed again
-	// from what it says - and the check is that read, not the plan, because
-	// the size LVM really gave is rounded up to whole extents.
+	// LVM.
 	ActionLVMVolumeCreate:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	ActionLVMVolumeRemove:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 	ActionLVMGroupExtend:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 	ActionLVMSnapshotCreate: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	ActionLVMSnapshotRemove: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
 
-	// sshd. The configuration goes in as a staged drop-in under a watchdog
-	// that keeps the login path; a host key rotation is a change of
-	// identity with no way back but a new plan.
+	// sshd.
 	ActionSSHConfigApply:   {cancel: CancelLocalWatchdogOwned, retry: RetryAfterReplan, rollback: RollbackAutomaticLocal, verify: VerifyConnectivity},
 	ActionSSHHostKeyRotate: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
@@ -348,43 +283,32 @@ var contracts = map[ActionType]contract{
 	// rules are not unloaded by the panel.
 	ActionSELinuxModeSet:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimSecurity)}},
 	ActionAuditRulesReload: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimSecurity)}},
-	// A fleet remediation is a plan of steps: a cancel is honoured between
-	// them, the step under way finishes. It is repeated only after the
-	// findings are assessed again, the way back depends on the steps and
-	// part of them has no compensation, and the verification is the same
-	// checks computed anew. The claims are the steps' own.
+	// A fleet remediation is a plan of steps: a cancel is honoured between them,
+	// the step under way finishes.
 	ActionSecurityRemediate: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackBestEffort, verify: VerifyCustom},
 
-	// Certificates. Trust changes are steps with a recomputed bundle at
-	// the end; the reverse of adding an anchor is removing it. A deployment
-	// keeps the previous certificate next to the new one; a renewal is
-	// ordered from the host's own daemon and settled by the probe.
+	// Certificates. Trust changes are steps with a recomputed bundle at the end;
+	// the reverse of adding an anchor is removing it.
 	ActionCertificateTrustEnsure: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck},
 	ActionCertificateTrustRemove: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck},
 	ActionCertificateDeploy:      {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyCustom},
 	ActionCertificateRenew:       {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
-	// Time. The sources go in through the panel's own file and the daemon
-	// reload, with a checkpoint between; the previous sources come back as
-	// a new plan. A timezone is one call, set back by setting it again.
+	// Time. The sources go in through the panel's own file and the daemon reload,
+	// with a checkpoint between; the previous sources come back as a new plan.
 	ActionTimeConfigApply: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck},
-	// The timezone has no lock class of its own in the registry, but it
-	// rewrites the clock configuration the time sources change goes
-	// through, and that change holds the units class for its daemon
-	// reload; the timezone joins it rather than opening a class nobody
-	// else takes.
+	// The timezone has no lock class of its own in the registry, but it rewrites
+	// the clock configuration the time sources change goes through, and that
+	// change holds the units class for its daemon reload; the timezone joins it
 	ActionTimezoneSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(LockUnits)}},
 
 	// The kernel. A sysctl value and a module take the network as well: they
-	// change the stack an address change relies on. A blacklist entry is
-	// removed by a new change and may need another reboot to take effect.
+	// change the stack an address change relies on.
 	ActionSysctlEnsure:          {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimKernel), exclusive(LockNetwork)}},
 	ActionKernelModuleLoad:      {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimKernel), exclusive(LockNetwork)}},
 	ActionKernelModuleBlacklist: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyPlanRecheck, extra: []ResourceClaim{exclusive(ClaimKernel), exclusive(LockNetwork)}},
 
-	// Managed files. The write is bound to the digest the plan saw, goes
-	// through validation before the atomic replace, and the previous
-	// version stays in the store - including the one a rollback replaces.
+	// Managed files.
 	ActionFileEnsure:   {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyPlanRecheck, extra: []ResourceClaim{exclusive(ClaimFile)}},
 	ActionFileRemove:   {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyPlanRecheck, extra: []ResourceClaim{exclusive(ClaimFile)}},
 	ActionFileRollback: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyPlanRecheck, extra: []ResourceClaim{exclusive(ClaimFile)}},
@@ -393,13 +317,7 @@ var contracts = map[ActionType]contract{
 	// on the host is held for it.
 	ActionProcessSignal: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone},
 
-	// Packages. A transaction of the package manager runs to its end. The
-	// way back from an upgrade or an install is a downgrade as a new plan,
-	// checked by the plan computed again showing nothing left to do; a
-	// reinstall after a removal brings the files back but not the state
-	// the package had. The changes without a planner - a hold, a source, a
-	// repair - are checked by the module itself. The agent's own upgrade
-	// is settled by the host coming back with the version.
+	// Packages. A transaction of the package manager runs to its end.
 	ActionPackageUpgrade: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyPlanRecheck, weight: 4},
 	ActionPackageInstall: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyPlanRecheck, weight: 4},
 	ActionPackageRemove:  {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackBestEffort, verify: VerifyCustom, weight: 4},
@@ -409,8 +327,7 @@ var contracts = map[ActionType]contract{
 	ActionAgentUpgrade:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackBestEffort, verify: VerifyCustom, weight: 4},
 
 	// Backup. A copy and a verification go chunk by chunk and stop between
-	// chunks; neither changes the host. A restore unpacks old state onto a
-	// running system and has no way back.
+	// chunks; neither changes the host.
 	ActionBackupRun:     {cancel: CancelCheckpointOnly, retry: RetryAfterChange, rollback: RollbackNone, verify: VerifyCustom, weight: 4},
 	ActionBackupVerify:  {cancel: CancelCheckpointOnly, retry: RetryAutomatic, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
 	ActionBackupRestore: {cancel: CancelCheckpointOnly, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, weight: 4},
@@ -419,53 +336,39 @@ var contracts = map[ActionType]contract{
 	// shutdown is not brought back through the panel.
 	ActionSystemReboot:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom, extra: []ResourceClaim{exclusive(ClaimHost)}},
 	ActionSystemShutdown: {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, extra: []ResourceClaim{exclusive(ClaimHost)}},
-	// A rename is one hostnamectl call and is undone by renaming back; the
-	// host lock is the registry's lock class, so the claim comes with it.
-	// The verification is the host's own: the next inventory reports the
-	// new name.
+	// A rename is one hostnamectl call and is undone by renaming back; the host
+	// lock is the registry's lock class, so the claim comes with it.
 	ActionSystemHostnameSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 
 	// Identity. Enrollment is a saga with checkpoints; leaving the domain
 	// is a separate decision, not an automatic reverse.
 	ActionDomainEnroll: {cancel: CancelCheckpointOnly, retry: RetryAfterChange, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
-	// Leaving is one uninstall that runs to its end once started; the way
-	// back is a new join with a new credential, and the host's own
-	// verification - configuration and keytab gone - settles the result.
+	// Leaving is one uninstall that runs to its end once started; the way back is
+	// a new join with a new credential, and the host's own verification -
+	// configuration and keytab gone - settles the result.
 	ActionDomainLeave: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
-	// A keytab renewal is one fetch that replaces the key once it lands:
-	// the old key is already retired in the directory, so there is no way
-	// back, only another renewal; the host's own verification - the
-	// principal's key version number went up - settles the result.
+	// A keytab renewal is one fetch that replaces the key once it lands: the old
+	// key is already retired in the directory, so there is no way back, only
+	// another renewal; the host's own verification - the principal's key version
 	ActionIdentityKeytabRenew: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
 
-	// Local accounts. Each change is one call on the account database and
-	// has a compensating change: lock after create, unlock after lock, the
-	// previous key set after a new one.
+	// Local accounts.
 	ActionLocalUserCreate: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserLock:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserUnlock: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalSSHKeysSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
-	// The keys edited one at a time. An add is undone by removing the
-	// fingerprint it appended, a remove by putting the key back - the
-	// order carries it - and the replace by writing the list the operator
-	// saw. A retry reads the file again: adding a key twice is one key.
+	// The keys edited one at a time.
 	ActionLocalSSHKeysAdd:        {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalSSHKeysRemove:     {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalSSHKeysReplaceAll: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
-	// The previous group list and the previous expiry date are read back
-	// from the account before the change, so each has a compensating
-	// change. A deleted account has none: the UID's ownership of what it
-	// left behind does not come back with a new account of the same name.
+	// The previous group list and the previous expiry date are read back from the
+	// account before the change, so each has a compensating change.
 	ActionLocalUserGroupsSet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserExpirySet: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionLocalUserDelete:    {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom},
 
-	// Containers. Start and stop undo each other; a restart has no
-	// reverse; a removal and a prune free what is gone. A pull can be
-	// dropped at any moment - the engine keeps only complete layers - and
-	// repeating it is free. A deployment keeps the previous manifest and
-	// digests, so the project can be put back as it was where the images
-	// are still there.
+	// Containers. Start and stop undo each other; a restart has no reverse; a
+	// removal and a prune free what is gone.
 	ActionDockerStart:   {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionDockerStop:    {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackCompensating, verify: VerifyCustom},
 	ActionDockerRestart: {cancel: CancelImpossibleAfterStart, retry: RetryReadState, rollback: RollbackNone, verify: VerifyCustom},
@@ -474,13 +377,7 @@ var contracts = map[ActionType]contract{
 	ActionDockerPrune:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyNone, weight: 2},
 	ActionComposeDeploy: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackExactRestore, verify: VerifyCustom, weight: 3},
 
-	// Declared objects. A container that differs is replaced, so there is
-	// no way back to the container that stood there - the way back is the
-	// previous description, declared again, which is a change of its own.
-	// A repeat is safe only after the plan was computed again: the host it
-	// would run on is no longer the host the plan described. A declared
-	// network or volume that was created is undone by removing it, which
-	// is a compensating change; a removal frees what is gone.
+	// Declared objects.
 	ActionDockerContainerEnsure: {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackNone, verify: VerifyCustom, weight: 3},
 	ActionDockerNetworkEnsure:   {cancel: CancelCheckpointOnly, retry: RetryAfterReplan, rollback: RollbackCompensating, verify: VerifyCustom, weight: 2},
 	ActionDockerNetworkRemove:   {cancel: CancelImpossibleAfterStart, retry: RetryNever, rollback: RollbackNone, verify: VerifyCustom, weight: 2},
@@ -524,10 +421,8 @@ func KnownVerification(verification Verification) bool {
 	return false
 }
 
-// CancellableIn says whether a cancel request stops an operation in the
-// given stage. Before the start every operation is cancellable: nothing has
-// touched the host. Once started, only an operation that reads or streams
-// stops on request; the rest finishes, the step or the whole of it.
+// CancellableIn says whether a cancel request stops an operation in the given
+// stage.
 func (c Contract) CancellableIn(started bool) bool {
 	if !started {
 		return true
@@ -537,11 +432,6 @@ func (c Contract) CancellableIn(started bool) bool {
 
 // ValidateContracts checks that every mutating operation declares its whole
 // contract and that the declarations agree with the rest of the registry.
-//
-// The control plane calls it before it listens on anything: an operation
-// without an explicit decision is not an operation with a default, it is a
-// reason not to start. The error lists every offending operation at once,
-// so one restart fixes them all.
 func ValidateContracts() error {
 	var problems []string
 	for _, action := range AllActions() {
@@ -571,11 +461,7 @@ func ValidateContracts() error {
 	return fmt.Errorf("%w: %s", ErrContractMissing, strings.Join(problems, "; "))
 }
 
-// contractProblems names what is missing or contradictory in one
-// declaration. The rules are the ones the interface relies on: a cancel
-// button, a rollback link and a retry hint are drawn from these fields,
-// and a contradiction between them would draw a promise the host cannot
-// keep.
+// contractProblems names what is missing or contradictory in one declaration.
 func contractProblems(action ActionType, c Contract) []string {
 	var problems []string
 	if !KnownCancelMode(c.CancelMode) {
@@ -594,9 +480,9 @@ func contractProblems(action ActionType, c Contract) []string {
 		problems = append(problems, "resource_claims is not declared")
 	}
 
-	// An operation that runs to its end once started is never repeated
-	// blind: the outcome of the first run has to be read first, or the
-	// operation is not repeated at all.
+	// An operation that runs to its end once started is never repeated blind: the
+	// outcome of the first run has to be read first, or the operation is not
+	// repeated at all.
 	if c.CancelMode == CancelImpossibleAfterStart &&
 		c.RetryClass != RetryReadState && c.RetryClass != RetryNever {
 		problems = append(problems, fmt.Sprintf(

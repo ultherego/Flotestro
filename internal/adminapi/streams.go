@@ -15,16 +15,11 @@ import (
 )
 
 // keepaliveInterval keeps the stream alive through proxies that close idle
-// connections. An SSE comment is not an event and does not wake the
-// interface.
+// connections.
 const keepaliveInterval = 25 * time.Second
 
-// handleJobEvents streams the progress of one operation.
-//
-// The stream carries only the signal "the state changed". The content of
-// the result is the database: if the state travelled through the stream,
-// the screen after a dropped connection would show something else than
-// recorded, and the operator would have no way to notice.
+// handleJobEvents streams the progress of one operation. The stream carries
+// only the signal "the state changed".
 func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 	jobID := r.PathValue("id")
 	job, err := s.jobs.Get(r.Context(), jobID)
@@ -49,17 +44,10 @@ func (s *Server) handleJobEvents(w http.ResponseWriter, r *http.Request) {
 
 // handleCampaignEvents streams a campaign: the transient progress of its
 // operations and its durable trail.
-//
-// The trail events carry an identifier, so the browser sends it back as
-// Last-Event-ID after a broken connection and the stream resumes from the
-// row after it - nothing that happened while the connection was down is
-// lost. The content comes from the table, never from the notification: a
-// notification is a wake-up call, and a screen that missed one reads
-// everything after the last identifier it has anyway.
 func (s *Server) handleCampaignEvents(w http.ResponseWriter, r *http.Request) {
 	// The trail of a campaign is read in the scope of its hosts, like the
-	// campaign itself: a right to read campaigns somewhere is not a right
-	// to follow every campaign.
+	// campaign itself: a right to read campaigns somewhere is not a right to
+	// follow every campaign.
 	campaign, ok := s.campaignFor(w, r, authz.PermCampaignRead)
 	if !ok {
 		return
@@ -89,9 +77,8 @@ func lastEventID(r *http.Request) int64 {
 // trail follows the durable events of one campaign inside a stream.
 type trail struct {
 	campaignID string
-	// last is the identifier of the last event sent; nothing at or before
-	// it goes out again, so a replay and a live notification cannot
-	// duplicate an event.
+	// last is the identifier of the last event sent; nothing at or before it goes
+	// out again, so a replay and a live notification cannot duplicate an event.
 	last int64
 	read func(ctx context.Context, campaignID string, after int64, limit int) ([]campaigns.Event, error)
 }
@@ -121,13 +108,8 @@ func (t *trail) emit(ctx context.Context, w http.ResponseWriter, flusher http.Fl
 // trailPage bounds one read of the trail inside a stream.
 const trailPage = 200
 
-// handleFleetEvents streams the events of all the operations the operator
-// may see.
-//
-// A separate stream per operation would be unmaintainable: the panel goes
-// over HTTP/1.1, where the browser keeps six connections per domain, and a
-// stream takes one permanently. One stream per tab leaves the rest for
-// ordinary requests.
+// handleFleetEvents streams the events of all the operations the operator may
+// see.
 func (s *Server) handleFleetEvents(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermJobRead, "job")
 	if !ok {
@@ -136,11 +118,9 @@ func (s *Server) handleFleetEvents(w http.ResponseWriter, r *http.Request) {
 	s.stream(w, r, func(events.Event) bool { return true }, s.scopeGate(principal), nil)
 }
 
-// scopeGate lets through only the events of operations from hosts visible
-// to this principal, and the turns of the installation orders placed where
-// the principal may read them. The check runs in the connection goroutine,
-// not in the bus: querying the database while broadcasting would stall all
-// receivers.
+// scopeGate lets through only the events of operations from hosts visible to
+// this principal, and the turns of the installation orders placed where the
+// principal may read them.
 func (s *Server) scopeGate(principal authz.Principal) func(context.Context, events.Event) bool {
 	visible := map[string]bool{}
 	return func(ctx context.Context, event events.Event) bool {
@@ -220,9 +200,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 			flusher.Flush()
 		case event := <-incoming:
 			if event.Outbox != nil {
-				// A published row of the trail: read from the cursor on,
-				// because the notification is only a signal that there is
-				// something to read.
+				// A published row of the trail: read from the cursor on, because the
+				// notification is only a signal that there is something to read.
 				if durable != nil && event.Outbox.ID > durable.last {
 					durable.emit(r.Context(), w, flusher)
 				}
@@ -235,10 +214,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 			if err != nil {
 				continue
 			}
-			// Progress and a state change are two different events. The
-			// screen refreshes its data after a state change, and draws the
-			// bar from the progress - merging them into one would make it
-			// query the API several times a second.
+			// Progress and a state change are two different events.
 			name := "job"
 			switch {
 			case event.Log != nil:
@@ -254,11 +230,8 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request,
 	}
 }
 
-// publishEnrollment tells the open screens that an installation order
-// turned: it was placed, or revoked. A panel without a bus has nobody to
-// tell, and a notification that fails to leave is a log line, not an error
-// of the order - the screen polls the order anyway and misses nothing but
-// a moment.
+// publishEnrollment tells the open screens that an installation order turned:
+// it was placed, or revoked.
 func (s *Server) publishEnrollment(ctx context.Context, change events.EnrollmentChange) {
 	if s.events == nil {
 		return

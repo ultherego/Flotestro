@@ -19,9 +19,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// confirmationMargin is the time left for the rollback timer. A confirmation
-// sent in the last second could pass the timer, and the host would go back to
-// the old configuration despite a successful change.
+// confirmationMargin is the time left for the rollback timer.
 const confirmationMargin = 20 * time.Second
 
 // connectivityProbeInterval says how often the agent checks the route to the
@@ -30,12 +28,6 @@ const connectivityProbeInterval = 3 * time.Second
 
 // applyNetwork changes the network configuration and proves that the host
 // still talks to the panel.
-//
-// The order is the whole content of the operation: the helper arms the
-// rollback, changes the configuration, and only then does the host prove the
-// management channel - as itself, with a control call the panel acknowledges.
-// A confirmation sent without that proof would disarm the rescue timer
-// exactly when it is needed.
 func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.NetworkPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -49,9 +41,8 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 	operation := helperv1.NetworkRequest_OPERATION_APPLY_PROFILE
 	switch action {
 	case opspec.ActionNetworkPlan:
-		// A plan without a description of the change is a read of the profiles;
-		// with one it computes the difference against it, without touching the
-		// host.
+		// A plan without a description of the change is a read of the profiles; with
+		// one it computes the difference against it, without touching the host.
 		operation = helperv1.NetworkRequest_OPERATION_READ
 		if payload.DescribesChange() {
 			operation = helperv1.NetworkRequest_OPERATION_PLAN
@@ -92,11 +83,7 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 				Privacy:         payload.Privacy,
 				Link:            networkLinkRequest(payload.Link),
 				LinkRemove:      payload.LinkRemove,
-				// The address the host reaches the panel from. The helper
-				// has no way to know it and must not guess: it is what
-				// marks the management interface, and a layer built over
-				// that interface takes the host off the network before it
-				// is finished.
+				// The address the host reaches the panel from.
 				ManagementAddress: panelAddress(panelAddressOf),
 			},
 		},
@@ -135,9 +122,7 @@ func (e *TaskExecutor) applyNetwork(ctx context.Context, task *agentv1.TaskEnvel
 	deadline := rollbackDeadline(result.GetRollbackDeadline())
 	proof := proveManagementChannel(ctx, panelAddressOf, deadline.Add(-confirmationMargin))
 	if !proof.Proved {
-		// No confirmation is sent. The host goes back on its own to the
-		// configuration from before the change, and the operator is to learn
-		// about it right away rather than from silence.
+		// No confirmation is sent.
 		details.Confirmed = false
 		return &agentv1.TaskResult{
 			TaskId:        task.GetTaskId(),
@@ -191,22 +176,15 @@ var panelAddressOf string
 // SetGatewayURL remembers the address of the control plane.
 func SetGatewayURL(gatewayURL string) { panelAddressOf = gatewayURL }
 
-// RejectManagementUnproved marks a change after which the host could not
-// prove it still talks to the panel as itself. The code lives next to the
-// proof rather than with the other refusals of the executor, because it is
-// the proof that decides whether it is given.
+// RejectManagementUnproved marks a change after which the host could not prove
+// it still talks to the panel as itself.
 const RejectManagementUnproved = "management_channel_unproved"
 
-// managementProofTimeout bounds one attempt at the proof. It is the limit the
-// connectivity check has always had: a call to the panel that takes longer
-// than this is not a channel an operator could work through either.
+// managementProofTimeout bounds one attempt at the proof.
 const managementProofTimeout = 5 * time.Second
 
-// panelAck is what the panel answered the proof with.
-//
-// An empty answer is not an acknowledgement. A channel that opens and says
-// nothing is exactly the state the proof exists to catch, so the fields are
-// read rather than assumed from the absence of an error.
+// panelAck is what the panel answered the proof with. An empty answer is not
+// an acknowledgement.
 type panelAck struct {
 	GatewayID  string
 	ServerTime time.Time
@@ -221,18 +199,14 @@ type managementProof struct {
 	Proved     bool
 	GatewayID  string
 	ServerTime time.Time
-	// Attempts counts the calls made. A proof that took several tries is not
-	// the same fact as one that went through at once, and the operator reading
-	// the result is to see the difference.
+	// Attempts counts the calls made.
 	Attempts int
 	// Reason names why the proof was not produced. It is never empty on a
 	// proof that failed: an unknown reason is not "the channel works".
 	Reason string
 }
 
-// summary renders the proof for the message of the result. The operator reads
-// the result of the task rather than the journal of the host, so the proof
-// has to travel in it.
+// summary renders the proof for the message of the result.
 func (p managementProof) summary() string {
 	if !p.Proved {
 		return "the management channel was not proved: " + p.Reason
@@ -250,22 +224,11 @@ func (p managementProof) summary() string {
 }
 
 // askPanel makes one acknowledged control call to the panel.
-//
-// It is a variable so that the proof can be held against a channel that
-// refuses, one that acknowledges, and one that opens but never answers - the
-// last being the case a bare TCP handshake used to call a success.
 var askPanel = pingPanel
 
 // pingPanel proves the channel the way the session uses it: a new mTLS
-// connection with the host's own certificate, a control call, and the
-// panel's answer read back.
-//
-// The new connection is the whole point. The session of the agent may live on
-// for minutes on a socket the kernel keeps outside the new rules, and a rule
-// that admits a handshake but kills the session - one that drops long-lived
-// connections, or blocks the protocol they run on - leaves the host reachable
-// for exactly as long as nobody reconnects. A TCP handshake to the gateway
-// proved none of that.
+// connection with the host's own certificate, a control call, and the panel's
+// answer read back.
 func pingPanel(ctx context.Context, gatewayURL string) (panelAck, error) {
 	identity, err := managementIdentity()
 	if err != nil {
@@ -332,29 +295,22 @@ func waitForPanel(ctx context.Context, gatewayURL string, until time.Time) bool 
 	return proveManagementChannel(ctx, gatewayURL, until).Proved
 }
 
-// The identity the proof goes out with. It is shared with the session, which
-// replaces it in place when the certificate is renewed, so the proof always
-// goes out with the certificate the host holds now.
+// The identity the proof goes out with.
 var (
 	managementIdentityMu    sync.RWMutex
 	managementIdentityValue *Identity
 )
 
 // SetManagementIdentity hands the proof the identity the host talks to the
-// panel with. The proof is made as the host itself: a call anybody could make
-// would say nothing about this host's place in the fleet.
+// panel with.
 func SetManagementIdentity(identity *Identity) {
 	managementIdentityMu.Lock()
 	defer managementIdentityMu.Unlock()
 	managementIdentityValue = identity
 }
 
-// managementIdentity returns the identity the proof goes out with.
-//
-// The daemon hands it over at start. A process that did not - a tool run by
-// hand on the host - reads the same files the daemon connects with. A host
-// that has no identity at all cannot prove anything and says so: the rescue
-// plan then stays armed, which is the point of it.
+// managementIdentity returns the identity the proof goes out with. The daemon
+// hands it over at start.
 func managementIdentity() (*Identity, error) {
 	managementIdentityMu.RLock()
 	identity := managementIdentityValue
@@ -402,10 +358,7 @@ func (e *TaskExecutor) NetworkProfiles(ctx context.Context) (json.RawMessage, er
 	return response.GetNetworkResult().GetProfiles(), nil
 }
 
-// networkLinkRequest carries the layered order to the helper. A layer is
-// described field by field rather than as an opaque blob, because the
-// helper checks the shape again before it writes anything and an
-// unrecognised field would be a setting nobody verified.
+// networkLinkRequest carries the layered order to the helper.
 func networkLinkRequest(spec *network.LinkSpec) *helperv1.NetworkLink {
 	if spec == nil {
 		return nil
@@ -420,11 +373,8 @@ func networkLinkRequest(spec *network.LinkSpec) *helperv1.NetworkLink {
 	}
 }
 
-// networkLinkPayload reads the layered order back out of the envelope.
-//
-// It is the exact mirror of what the panel put in. A field read back as
-// something else would give a payload digest the panel never signed, and
-// the host would refuse a change nobody had altered.
+// networkLinkPayload reads the layered order back out of the envelope. It is
+// the exact mirror of what the panel put in.
 func networkLinkPayload(link *agentv1.NetworkLink) *network.LinkSpec {
 	if link == nil {
 		return nil

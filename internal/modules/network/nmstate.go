@@ -33,10 +33,7 @@ const (
 )
 
 // NmstateState is the part of "nmstatectl show" the panel reads: the
-// interfaces with their IPv4 settings, the configured routes and the
-// resolver. nmstate describes a desired state, so the read and the write
-// speak the same language - only the write carries just the touched
-// interface.
+// interfaces with their IPv4 settings, the configured routes and the resolver.
 type NmstateState struct {
 	Interfaces []NmstateInterface `yaml:"interfaces" json:"interfaces"`
 	Routes     struct {
@@ -55,14 +52,12 @@ type NmstateInterface struct {
 	MTU   int              `yaml:"mtu" json:"mtu"`
 	IPv4  *NmstateIPFamily `yaml:"ipv4" json:"ipv4"`
 	// IPv6 is read exactly like IPv4: a host with a static IPv6 address and
-	// nothing read about it looks like a host without one, and the plan
-	// would then offer to "add" an address the host already has.
+	// nothing read about it looks like a host without one, and the plan would
+	// then offer to "add" an address the host already has.
 	IPv6 *NmstateIPFamily `yaml:"ipv6" json:"ipv6"`
 }
 
-// NmstateIPFamily is one address family of an nmstate interface. Autoconf
-// is nmstate's name for listening to router advertisements and has no
-// meaning for IPv4.
+// NmstateIPFamily is one address family of an nmstate interface.
 type NmstateIPFamily struct {
 	Enabled  bool  `yaml:"enabled" json:"enabled"`
 	DHCP     *bool `yaml:"dhcp" json:"dhcp"`
@@ -89,8 +84,7 @@ type NmstateDNS struct {
 }
 
 // ParseNmstateState reads the output of "nmstatectl show" in either of its
-// forms: YAML or, with --json, JSON. JSON is a YAML document too, so one
-// reader covers both.
+// forms: YAML or, with --json, JSON.
 func ParseNmstateState(output []byte) (NmstateState, error) {
 	var state NmstateState
 	if err := yaml.Unmarshal(output, &state); err != nil {
@@ -100,8 +94,7 @@ func ParseNmstateState(output []byte) (NmstateState, error) {
 }
 
 // Profiles turns the nmstate state into the profiles the panel compares
-// against. The loopback is left out: nothing about it is the operator's
-// decision.
+// against.
 func (s NmstateState) Profiles() []Profile {
 	var profiles []Profile
 	for _, iface := range s.Interfaces {
@@ -145,9 +138,9 @@ func (s NmstateState) profileOf(iface NmstateInterface) Profile {
 			profile.Addresses = append(profile.Addresses,
 				address.IP+"/"+strconv.Itoa(address.PrefixLength))
 		}
-		// An enabled IPv4 without DHCP and without an address is not manual
-		// in any useful sense; it stays "manual" so the difference is
-		// visible rather than papered over.
+		// An enabled IPv4 without DHCP and without an address is not manual in any
+		// useful sense; it stays "manual" so the difference is visible rather than
+		// papered over.
 	}
 	if ipv6 := iface.IPv6; ipv6 != nil {
 		profile.Method6 = "disabled"
@@ -208,9 +201,7 @@ func isIPv6Route(route NmstateRoute) bool {
 	return strings.Contains(route.Destination, ":") || strings.Contains(route.NextHopAddress, ":")
 }
 
-// The nmstate document the panel writes. Only the touched interface and
-// only the sections the change concerns: nmstate merges a partial document
-// into the running state, so everything left out stays as it is.
+// The nmstate document the panel writes.
 type nmstateDocument struct {
 	Interfaces []nmstateInterfaceDoc `yaml:"interfaces,omitempty"`
 	Routes     *nmstateRoutesDoc     `yaml:"routes,omitempty"`
@@ -220,9 +211,8 @@ type nmstateDocument struct {
 type nmstateInterfaceDoc struct {
 	Name string `yaml:"name"`
 	Type string `yaml:"type,omitempty"`
-	// State carries "up" for an interface being built and "absent" for one
-	// being taken away. It is left out of an ordinary change: nmstate then
-	// leaves the state as the host has it.
+	// State carries "up" for an interface being built and "absent" for one being
+	// taken away.
 	State string        `yaml:"state,omitempty"`
 	MTU   int           `yaml:"mtu,omitempty"`
 	IPv4  *nmstateIPDoc `yaml:"ipv4,omitempty"`
@@ -234,9 +224,7 @@ type nmstateInterfaceDoc struct {
 	VLAN            *nmstateVLANDoc   `yaml:"vlan,omitempty"`
 }
 
-// nmstateIPDoc is one address family. Autoconf is nmstate's name for
-// listening to router advertisements; it is written only for IPv6, because
-// IPv4 has nothing of the kind.
+// nmstateIPDoc is one address family.
 type nmstateIPDoc struct {
 	Enabled  bool                `yaml:"enabled"`
 	DHCP     *bool               `yaml:"dhcp,omitempty"`
@@ -311,11 +299,6 @@ type nmstateDNSConfigDoc struct {
 
 // NmstateDocument assembles the minimal nmstate document that carries the
 // interface from the current profile to the desired one.
-//
-// The kind says which sections go in: an MTU change carries the MTU alone,
-// a route change the routes alone. The rollback document is the same
-// function called the other way round - the same code assembles both, so
-// the plan cannot express a state this module does not know.
 func NmstateDocument(kind string, current, desired Profile) (string, error) {
 	if current.Connection == "" {
 		return "", fmt.Errorf("nmstate document without an interface name")
@@ -340,10 +323,9 @@ func NmstateDocument(kind string, current, desired Profile) (string, error) {
 				return "", err
 			}
 		}
-		// Both families in one document: nmstate takes the destination as
-		// it is written, so the only thing that has to be right is that the
-		// routes of the family the order did not touch are carried over
-		// unchanged rather than left out and removed.
+		// Both families in one document: nmstate takes the destination as it is
+		// written, so the only thing that has to be right is that the routes of the
+		// family the order did not touch are carried over unchanged rather than left
 		entries := routeEntries(current.Connection, current.Routes, desired.Routes)
 		entries = append(entries, routeEntries(current.Connection, current.Routes6, desired.Routes6)...)
 		document.Routes = &nmstateRoutesDoc{Config: entries}
@@ -420,9 +402,7 @@ func NmstateDocument(kind string, current, desired Profile) (string, error) {
 	return string(encoded), nil
 }
 
-// nmstateMTU turns the MTU text into a number. "auto" is a NetworkManager
-// value: nmstate knows only numbers, and the driver default is not a
-// state it can describe.
+// nmstateMTU turns the MTU text into a number.
 func nmstateMTU(mtu string) (int, error) {
 	if err := ValidateMTU(mtu); err != nil {
 		return 0, err
@@ -433,9 +413,8 @@ func nmstateMTU(mtu string) (int, error) {
 	return strconv.Atoi(mtu)
 }
 
-// nmstateIPv4 turns the method and the addresses of a profile into the
-// IPv4 section. The methods are the NetworkManager ones the operator knows;
-// the ones nmstate cannot express are refused rather than approximated.
+// nmstateIPv4 turns the method and the addresses of a profile into the IPv4
+// section.
 func nmstateIPv4(profile Profile) (*nmstateIPDoc, error) {
 	for _, address := range profile.Addresses {
 		if err := ValidateAddress(address); err != nil {
@@ -467,9 +446,7 @@ func nmstateIPv4(profile Profile) (*nmstateIPDoc, error) {
 	return nil, fmt.Errorf("nmstate cannot express the method %q", profile.Method)
 }
 
-// routeEntries removes the routes the interface has and adds the desired
-// ones. nmstate handles the absent entries before the additions, so a
-// route present in both lists ends up present once.
+// routeEntries removes the routes the interface has and adds the desired ones.
 func routeEntries(iface string, current, desired []string) []nmstateRouteDoc {
 	entries := []nmstateRouteDoc{}
 	for _, route := range current {
@@ -491,10 +468,7 @@ func routeEntries(iface string, current, desired []string) []nmstateRouteDoc {
 	return entries
 }
 
-// gatewayEntries replaces the default route of the interface in one
-// family. The destination is passed in, because the two families have two
-// of them and a v6 gateway written under 0.0.0.0/0 is a route nmstate would
-// refuse - or, worse, accept and never use.
+// gatewayEntries replaces the default route of the interface in one family.
 func gatewayEntries(iface, destination, current, desired string) []nmstateRouteDoc {
 	entries := []nmstateRouteDoc{}
 	if current != "" {
@@ -509,12 +483,6 @@ func gatewayEntries(iface, destination, current, desired string) []nmstateRouteD
 }
 
 // nmstateIPv6 turns the second family of a profile into the ipv6 section.
-//
-// The privacy extensions are refused rather than approximated: nmstate
-// describes what an interface has, and the temporary-address setting is not
-// part of what it describes. An operator who asked for it is to learn that
-// this host cannot be told so through nmstate, not to get a document that
-// quietly leaves it out.
 func nmstateIPv6(profile Profile) (*nmstateIPDoc, error) {
 	if profile.Method6 == "" && profile.AcceptRA == "" && profile.Privacy == "" {
 		return nil, nil
@@ -572,14 +540,8 @@ func nmstateIPv6(profile Profile) (*nmstateIPDoc, error) {
 	return nil, fmt.Errorf("nmstate cannot express the IPv6 method %q", profile.Method6)
 }
 
-// NmstateLinkDocument assembles the document that carries a layered
-// interface from the state the host has to the one ordered.
-//
-// A state that is not present is written as "absent": that is how the same
-// function assembles the creation, the change and the removal - and how the
-// rollback document is the same call with the two states swapped. The
-// members are named on the layer, because that is where nmstate keeps them;
-// it detaches a member the new list no longer has.
+// NmstateLinkDocument assembles the document that carries a layered interface
+// from the state the host has to the one ordered.
 func NmstateLinkDocument(current, desired LinkState) (string, error) {
 	target := desired
 	if !desired.Present {
@@ -657,10 +619,6 @@ func nonNil(items []string) []string {
 }
 
 // NmstateApplyArguments applies a document under nmstate's own checkpoint.
-//
-// Without a commit within the timeout nmstate returns the host to the
-// state from before the change on its own - also when the helper that
-// started the change is no longer there.
 func NmstateApplyArguments(binary, file string, timeoutSeconds int) []string {
 	return []string{binary, "apply", "--no-commit", "--timeout", strconv.Itoa(timeoutSeconds), file}
 }

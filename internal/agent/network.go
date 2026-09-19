@@ -12,10 +12,8 @@ import (
 // not looked up in PATH: the agent runs only known binaries.
 var ipPaths = []string{"/usr/sbin/ip", "/sbin/ip", "/usr/bin/ip"}
 
-// CollectNetwork reads the interfaces and the routes of the host.
-//
-// The read needs no root: the kernel tables are readable by everyone. Writing
-// the configuration is a separate matter and goes through the helper.
+// CollectNetwork reads the interfaces and the routes of the host. The read
+// needs no root: the kernel tables are readable by everyone.
 func CollectNetwork(ctx context.Context, managementAddress string) network.Snapshot {
 	snapshot := network.Snapshot{ObservedAt: time.Now().UTC()}
 
@@ -25,9 +23,7 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 		return snapshot
 	}
 
-	// The -d flag adds linkinfo, and with it the kind of the interface. Without
-	// it the docker bridge and veth look like ordinary network cards, and a host
-	// with a dozen virtual interfaces becomes unreadable.
+	// The -d flag adds linkinfo, and with it the kind of the interface.
 	output, err := ipOutput(ctx, path, "-j", "-d", "addr", "show")
 	if err != nil {
 		snapshot.UnavailableReason = "ip addr: " + err.Error()
@@ -41,20 +37,16 @@ func CollectNetwork(ctx context.Context, managementAddress string) network.Snaps
 	network.SupplementFromSys("/sys/class/net", interfaces)
 	snapshot.Interfaces = interfaces
 
-	// The layering is read on top of the addresses: "ip addr" names an
-	// interface a bond and says nothing about what it is made of, and the
-	// operator asking about a bond is asking exactly that. The second
-	// family is read from the kernel's own switches next to it, because an
-	// interface without an IPv6 address and an interface with IPv6 switched
-	// off are not the same host.
+	// The layering is read on top of the addresses: "ip addr" names an interface
+	// a bond and says nothing about what it is made of, and the operator asking
+	// about a bond is asking exactly that.
 	network.ReadLayering(&snapshot, func(arguments []string) (string, error) {
 		return ipOutput(ctx, arguments[0], arguments[1:]...)
 	})
 	network.ReadIPv6(&snapshot)
 
-	// Both families are read separately, because "ip route show" shows only
-	// IPv4 by default. Silence about the IPv6 routes would look like their
-	// absence.
+	// Both families are read separately, because "ip route show" shows only IPv4
+	// by default.
 	for _, family := range []struct {
 		flag   string
 		family string

@@ -57,9 +57,7 @@ func (s *Server) applySSH(ctx context.Context, request *helperv1.HelperRequest,
 	return reject(ErrorUnknownAction, "unknown sshd operation")
 }
 
-// sshGuard names the guard of an sshd operation. Both changes end with a
-// reload of the sshd unit, so they share the guard of the units; a read and a
-// plan take none.
+// sshGuard names the guard of an sshd operation.
 func sshGuard(operation helperv1.SshRequest_Operation) string {
 	switch operation {
 	case helperv1.SshRequest_OPERATION_APPLY, helperv1.SshRequest_OPERATION_ROTATE_HOSTKEY:
@@ -69,18 +67,12 @@ func sshGuard(operation helperv1.SshRequest_Operation) string {
 }
 
 // writeSSHConfiguration writes the panel file and reloads the server.
-//
-// The order is the whole content of the operation: the write, the syntax check
-// by sshd itself, and only then the reload. A server reloaded with a broken
-// configuration does not come up, and then there is nothing left to repair it
-// with remotely.
 func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
 	settings := settingsFromRequest(action)
 	state := s.readSSH(ctx)
 
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at. A different digest means the server or the panel file
-	// changed since the planning - and that is a refusal, not a warning.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at.
 	if expected := action.GetPlanHash(); expected != "" {
 		if now := sshmodule.Compute(state, settings, action.GetAllowLockout()); now.PlanHash != expected {
 			return reject(ErrorPreconditionFailed,
@@ -128,16 +120,12 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 
 	after := s.readSSH(ctx)
 	// In sshd the first value wins, and the included files are read in
-	// alphabetical order: an earlier file of the host administrator shadows
-	// ours. Silence in this place would be a false success.
+	// alphabetical order: an earlier file of the host administrator shadows ours.
 	mismatches := sshmodule.DivergentSettings(settings, after)
 	message := "the configuration was written and reloaded"
 	if len(mismatches) > 0 {
-		// The message names them: "some settings" sends the operator to
-		// read the server's configuration by hand, and the host has just
-		// read it. The list itself travels in the result as well, so the
-		// panel shows every one of them; the sentence carries the first few
-		// for the places that show a line rather than a table.
+		// The message names them: "some settings" sends the operator to read the
+		// server's configuration by hand, and the host has just read it.
 		named := mismatches
 		if len(named) > 3 {
 			named = named[:3]
@@ -152,11 +140,6 @@ func (s *Server) writeSSHConfiguration(ctx context.Context, action *helperv1.Ssh
 }
 
 // rotateHostKey generates a new host key of the given type.
-//
-// Rotating the key changes the identity of the host as every client sees it:
-// each of them will get a warning about a changed known_hosts, and automation
-// based on the fingerprint will stop working. That is why the old key stays
-// next to it, with a date in its name - so that it can be restored by hand.
 func (s *Server) rotateHostKey(ctx context.Context, action *helperv1.SshRequest) *helperv1.HelperResponse {
 	keyType := action.GetKeyType()
 	if keyType != "ed25519" && keyType != "rsa" && keyType != "ecdsa" {
@@ -243,11 +226,8 @@ func keyFingerprints(ctx context.Context) []sshmodule.HostKey {
 	return keys
 }
 
-// sshUnit names the systemd unit of the server.
-//
-// Debian has ssh.service, Fedora sshd.service. Reloading the wrong one does
-// nothing and reports no error, so the name must not be guessed once and for
-// all.
+// sshUnit names the systemd unit of the server. Debian has ssh. service,
+// Fedora sshd.
 func sshUnit() string {
 	for _, name := range []string{"sshd.service", "ssh.service"} {
 		if exists("/usr/lib/systemd/system/"+name) || exists("/lib/systemd/system/"+name) {

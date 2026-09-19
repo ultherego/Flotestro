@@ -6,38 +6,25 @@ import (
 	"strings"
 )
 
-// The verifier of an operation: how the host confirms, after the change,
-// that the state the operator asked for is the state the host is in.
-//
-// An exit code says that a tool ran; it does not say that the unit is
-// active, that the file has the digest of the plan or that the mount is
-// there. The verifier is a read of the host after the apply, compared with
-// what the payload or the plan promised, and only it may turn a change
-// into a success: an apply whose verifier fails settles as
-// applied_unverified - the change was made, the state was not observed -
-// and, where the contract says so, the host puts the previous state back
-// first. The contract declares one verifier per mutating family and
-// declares none only where the result of the operation is the observation
-// itself: a read, a plan, a signal delivered, a one-shot run.
+// The verifier of an operation: how the host confirms, after the change, that
+// the state the operator asked for is the state the host is in.
 
 // Verifier names the read that confirms an operation.
 type Verifier string
 
 const (
-	// VerifierNone: the result is the observation. Reads, plans, a signal,
-	// a one-shot run of somebody else's command, a prune whose result is
-	// what it freed.
+	// VerifierNone: the result is the observation.
 	VerifierNone Verifier = "none"
-	// VerifierUnitState: the unit is in the state the verb asked for -
-	// active after a start, inactive after a stop, enabled or masked as
-	// the toggle says, no failed state after a reset.
+	// VerifierUnitState: the unit is in the state the verb asked for - active
+	// after a start, inactive after a stop, enabled or masked as the toggle says,
+	// no failed state after a reset.
 	VerifierUnitState Verifier = "unit_state"
 	// VerifierScheduleEntry: the managed entry is on the host, enabled or
 	// disabled as ordered, or gone after a removal.
 	VerifierScheduleEntry Verifier = "schedule_entry"
-	// VerifierPackageVersions: every package of the plan is installed at
-	// the candidate version, or absent after a removal, read from the
-	// package database and not from the transaction's output.
+	// VerifierPackageVersions: every package of the plan is installed at the
+	// candidate version, or absent after a removal, read from the package
+	// database and not from the transaction's output.
 	VerifierPackageVersions Verifier = "package_versions"
 	// VerifierPackageHold: the hold list of the manager names the package,
 	// or no longer does.
@@ -51,13 +38,13 @@ const (
 	// VerifierFileContent: the file has the digest of the content written,
 	// with the mode and the owner ordered, or is absent after a removal.
 	VerifierFileContent Verifier = "file_content"
-	// VerifierMountState: the mount point is mounted from the source with
-	// the filesystem ordered, and in fstab when the order persists it; or
-	// unmounted and out of fstab after a removal.
+	// VerifierMountState: the mount point is mounted from the source with the
+	// filesystem ordered, and in fstab when the order persists it; or unmounted
+	// and out of fstab after a removal.
 	VerifierMountState Verifier = "mount_state"
-	// VerifierStorageLayout: the volume or the filesystem has at least the
-	// size ordered, the device carries the filesystem ordered, or carries
-	// no signature after a wipe.
+	// VerifierStorageLayout: the volume or the filesystem has at least the size
+	// ordered, the device carries the filesystem ordered, or carries no signature
+	// after a wipe.
 	VerifierStorageLayout Verifier = "storage_layout"
 	// VerifierHostname: the kernel's host name is the one ordered.
 	VerifierHostname Verifier = "hostname"
@@ -82,9 +69,9 @@ const (
 	// VerifierNetworkState: the interface carries the MTU or the addresses
 	// ordered and the routes ordered are in the table.
 	VerifierNetworkState Verifier = "network_state"
-	// VerifierFirewallRuleset: the rule or the zone entry is in the live
-	// ruleset, or gone after a removal; a restore reads the ruleset
-	// digest of the plan restored.
+	// VerifierFirewallRuleset: the rule or the zone entry is in the live ruleset,
+	// or gone after a removal; a restore reads the ruleset digest of the plan
+	// restored.
 	VerifierFirewallRuleset Verifier = "firewall_ruleset"
 	// VerifierMACMode: the mandatory access control reports the mode
 	// ordered.
@@ -98,9 +85,8 @@ const (
 	// VerifierCertificate: the certificate at the path has the fingerprint
 	// deployed, or a later expiry than before a renewal.
 	VerifierCertificate Verifier = "certificate"
-	// VerifierLocalAccount: the account exists with the shell, the groups,
-	// the expiry, the lock state or the keys ordered, or is gone after a
-	// deletion.
+	// VerifierLocalAccount: the account exists with the shell, the groups, the
+	// expiry, the lock state or the keys ordered, or is gone after a deletion.
 	VerifierLocalAccount Verifier = "local_account"
 	// VerifierContainerState: the container is running, stopped or gone as
 	// the verb asked.
@@ -110,17 +96,12 @@ const (
 	// VerifierComposeServices: every service of the project runs from the
 	// image digest the plan bound.
 	VerifierComposeServices Verifier = "compose_services"
-	// VerifierContainerSpec: the container of the declaration stands on the
-	// host, carries the digest of the description it was created from and
-	// runs, or stands and does not run where the description asked for
-	// that. It is not VerifierContainerState: that one is about a
-	// container an operator started or stopped by identifier, and here the
-	// identity is the name and the question is whether what stands there
-	// is what was declared.
+	// VerifierContainerSpec: the container of the declaration stands on the host,
+	// carries the digest of the description it was created from and runs, or
+	// stands and does not run where the description asked for that.
 	VerifierContainerSpec Verifier = "container_spec"
-	// VerifierDockerNetwork: the engine lists the network with the driver
-	// and the address range declared, or no longer lists it after a
-	// removal.
+	// VerifierDockerNetwork: the engine lists the network with the driver and the
+	// address range declared, or no longer lists it after a removal.
 	VerifierDockerNetwork Verifier = "docker_network"
 	// VerifierDockerVolume: the engine lists the volume with the driver
 	// declared, or no longer lists it after a removal.
@@ -135,11 +116,8 @@ const (
 	VerifierDomainMembership Verifier = "domain_membership"
 	// VerifierKeytab: the key version number of the principal went up.
 	VerifierKeytab Verifier = "keytab"
-	// VerifierReboot: the host comes back with a boot identifier other than
-	// the one it had when the reboot was ordered. The agent cannot observe
-	// it - the process that would is gone with the host - so the panel
-	// settles it on the next Hello, and a host that does not come back
-	// within the wait ends reboot_not_observed.
+	// VerifierReboot: the host comes back with a boot identifier other than the
+	// one it had when the reboot was ordered.
 	VerifierReboot Verifier = "reboot"
 	// VerifierAgentVersion: the agent comes back with the version ordered.
 	// Settled by the panel on the next Hello, like a reboot.
@@ -154,16 +132,15 @@ const (
 	// UnverifiedReport: the change stays; the result says the state was
 	// not observed and what was found instead.
 	UnverifiedReport UnverifiedPolicy = "report"
-	// UnverifiedRollback: the host puts the state from before the change
-	// back - the previous content of the file, the previous value of the
-	// key - and the result says both that the change did not verify and
-	// that it was undone. A rollback that itself fails is reported.
+	// UnverifiedRollback: the host puts the state from before the change back -
+	// the previous content of the file, the previous value of the key - and the
+	// result says both that the change did not verify and that it was undone.
 	UnverifiedRollback UnverifiedPolicy = "rollback"
 )
 
 // PanelSettled says whether the verifier is run by the panel on the host's
-// return rather than by the agent after the apply: the observation is the
-// host coming back, and no process on the host survives to make it.
+// return rather than by the agent after the apply: the observation is the host
+// coming back, and no process on the host survives to make it.
 func (v Verifier) PanelSettled() bool {
 	return v == VerifierReboot || v == VerifierAgentVersion
 }
@@ -186,10 +163,8 @@ func KnownVerifier(verifier Verifier) bool {
 	return false
 }
 
-// Verifier returns the verifier of an operation. A read has none: its
-// result is the observation. An unknown operation has none either, and
-// ValidateVerifiers keeps a mutating operation without one from ever
-// reaching a running control plane.
+// Verifier returns the verifier of an operation. A read has none: its result
+// is the observation.
 func (a ActionType) Verifier() Verifier {
 	spec, ok := actionSpecs[a]
 	if !ok || !spec.mutating || spec.verifier == "" {
@@ -199,8 +174,7 @@ func (a ActionType) Verifier() Verifier {
 }
 
 // OnUnverified returns what the host does with a change of this operation
-// whose verifier failed. Report is the default: a rollback is declared
-// only where the host keeps what it takes to put the previous state back.
+// whose verifier failed.
 func (a ActionType) OnUnverified() UnverifiedPolicy {
 	if actionSpecs[a].onUnverified == UnverifiedRollback {
 		return UnverifiedRollback
@@ -209,21 +183,17 @@ func (a ActionType) OnUnverified() UnverifiedPolicy {
 }
 
 // ErrorAppliedUnverified is the code of a change that was made and whose
-// verifier did not observe the state the operator asked for. It is a
-// failure of the job - the operator has to look at the host - and never a
-// success with a footnote.
+// verifier did not observe the state the operator asked for.
 const ErrorAppliedUnverified = "applied_unverified"
 
-// ErrorRebootNotObserved is the code of a reboot the host never came back
-// from within the wait: the reboot was ordered and accepted, and no session
-// with a new boot identifier followed.
+// ErrorRebootNotObserved is the code of a reboot the host never came back from
+// within the wait: the reboot was ordered and accepted, and no session with a
+// new boot identifier followed.
 const ErrorRebootNotObserved = "reboot_not_observed"
 
 // ValidateVerifiers checks that every mutating operation declares a known
-// verifier and that a rollback policy sits only on an operation with a
-// way back. Like ValidateContracts it is called before the control plane
-// listens: an operation that could end succeeded on an exit code alone is
-// a reason not to start.
+// verifier and that a rollback policy sits only on an operation with a way
+// back.
 func ValidateVerifiers() error {
 	var problems []string
 	for _, action := range AllActions() {

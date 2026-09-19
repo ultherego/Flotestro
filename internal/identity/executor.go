@@ -15,28 +15,21 @@ import (
 	"github.com/ultherego/flotestro/internal/plan"
 )
 
-// The typed refusals of a directory change. A phase carries no field of its
-// own for a code, so the code stands at the front of its message: a refusal
-// an operator cannot look up is half a refusal.
+// The typed refusals of a directory change.
 const (
-	// RefusalModDNUnsupported: the preflight proved the directory cannot
-	// carry the operation out - the connector's service account may not move
-	// an entry, or the container of preserved accounts is not there. Nothing
-	// was ordered and nothing was changed locally.
+	// RefusalModDNUnsupported: the preflight proved the directory cannot carry
+	// the operation out - the connector's service account may not move an entry,
+	// or the container of preserved accounts is not there.
 	RefusalModDNUnsupported = "directory_moddn_unsupported"
 	// RefusalPlanIncomplete: the plan of the change does not name the entry
 	// it would move, so there is nothing to bind the execution to.
 	RefusalPlanIncomplete = "directory_plan_incomplete"
-	// RefusalDirectoryRefused: the directory refused the change itself. The
-	// message carries the directory's own reason, and the local account was
-	// not touched.
+	// RefusalDirectoryRefused: the directory refused the change itself.
 	RefusalDirectoryRefused = "directory_refused"
 	// RefusalDirectoryUnreachable: the directory did not answer, so nothing
 	// about it is known and nothing was done.
 	RefusalDirectoryUnreachable = "directory_unreachable"
-	// RefusalStalePlan is the shared refusal of a plan the world moved
-	// under. The spelling is the one the package and storage plans use, so
-	// an operator looks up one code whatever it was that moved.
+	// RefusalStalePlan is the shared refusal of a plan the world moved under.
 	RefusalStalePlan = plan.ErrorStalePlan
 )
 
@@ -47,9 +40,6 @@ type SessionRevoker interface {
 }
 
 // ProviderLogout ends the sessions a user holds at the identity provider.
-// The panel's own sessions end locally; without this the provider would go
-// on logging the user into every other application behind it until its
-// session ran out - the lag the architecture document warns about.
 type ProviderLogout interface {
 	LogoutSubject(ctx context.Context, subject string) error
 }
@@ -69,11 +59,8 @@ type Executor struct {
 	// retire is the test seam for the directory half of a rotation; nil
 	// means the connector's own call.
 	retire func(ctx context.Context, principal string) error
-	// The halves of a preserve, each replaceable on its own: what the
-	// directory can do, which entry it holds, the move itself, and the
-	// local denial marker. Nil means the real connector and the real
-	// change store. They stand apart because the order between them is
-	// what this operation is about, and a test has to be able to watch it.
+	// The halves of a preserve, each replaceable on its own: what the directory
+	// can do, which entry it holds, the move itself, and the local denial marker.
 	capabilities func(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error)
 	entryOf      func(ctx context.Context, uid string) (freeipa.EntryReference, error)
 	preserve     func(ctx context.Context, uid string, planned freeipa.EntryReference) error
@@ -202,8 +189,6 @@ func (e *Executor) execute(ctx context.Context, change Change) {
 }
 
 // createUser creates the account, adds it to the groups and sets the keys.
-// Every step is a separate phase, because the directory carries them out
-// separately and they can drift apart.
 func (e *Executor) createUser(ctx context.Context, spec *UserPayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 
@@ -232,21 +217,14 @@ func (e *Executor) createUser(ctx context.Context, spec *UserPayload) ([]Phase, 
 	if !joined {
 		return phases, nil
 	}
-	// The account did not exist a moment ago, so as a rule there is no
-	// session to end. A reused name is the exception: a principal left by
-	// an earlier account of that name may still hold a session, and it
-	// would carry the old groups into the new membership.
+	// The account did not exist a moment ago, so as a rule there is no session to
+	// end.
 	phase, revoked := e.revokeChangedMembers(ctx, []string{spec.UID},
 		"the group membership changed: "+strings.Join(spec.Groups, ", "))
 	return append(phases, phase), &revoked
 }
 
 // setUserAccess locks or unlocks an account.
-//
-// When locking, the order matters: first the local denial marker and the
-// revocation of the panel sessions, and only then the directory. The reverse
-// order would leave a working session for the time the change takes to
-// propagate.
 func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, enable bool) ([]Phase, *sessionRevocation) {
 	var phases []Phase
 	var revoked *sessionRevocation
@@ -261,12 +239,9 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 		result, err := e.revokeSessions(ctx, ref.UID, firstNonEmpty(ref.Reason, "the account was locked"))
 		phases = append(phases, finishPhase(phase, err, result.String()))
 
-		// The provider's sessions go after the panel's own: the local denial
-		// is what cuts the user off, and this closes the window in which
-		// the provider would still log them into other applications. It
-		// never fails the change - a provider that is off, unreachable or
-		// does not know the user is recorded as such, and the disable
-		// stands on the local marker and the directory.
+		// The provider's sessions go after the panel's own: the local denial is what
+		// cuts the user off, and this closes the window in which the provider would
+		// still log them into other applications.
 		phase, ended := e.endProviderSessions(ctx, ref.UID)
 		phases = append(phases, phase)
 		result.ProviderSessionsEnded = &ended.Ended
@@ -288,17 +263,14 @@ func (e *Executor) setUserAccess(ctx context.Context, ref *ReferencePayload, ena
 }
 
 // sessionRevocation is the outcome of ending the panel sessions of the
-// directory users a change touched. A user without a panel identity has
-// nothing to end; that is a fact of the result, not a failure.
+// directory users a change touched.
 type sessionRevocation struct {
 	// Sessions is the number of sessions ended.
 	Sessions int64 `json:"sessions_revoked"`
 	// WithoutPrincipal names the users who never logged into the panel.
 	WithoutPrincipal []string `json:"without_principal"`
-	// ProviderSessionsEnded says whether the identity provider ended the
-	// user's sessions too; nil for a change that does not ask it to. False
-	// comes with ProviderReason, because "not ended" has several causes
-	// and only one of them is a fault.
+	// ProviderSessionsEnded says whether the identity provider ended the user's
+	// sessions too; nil for a change that does not ask it to.
 	ProviderSessionsEnded *bool  `json:"provider_sessions_ended,omitempty"`
 	ProviderReason        string `json:"provider_reason,omitempty"`
 }
@@ -312,12 +284,6 @@ type providerLogout struct {
 
 // endProviderSessions asks the identity provider to end the user's sessions,
 // as one phase that cannot fail the change.
-//
-// The phase is skipped rather than failed when the sessions were not ended:
-// the disable already holds on the local marker and the directory, and a
-// provider that is not configured for it, does not know the user, or is
-// unreachable is a fact recorded in the result - not a reason to call the
-// disable partially applied. The reason names which of those it was.
 func (e *Executor) endProviderSessions(ctx context.Context, uid string) (Phase, providerLogout) {
 	phase := startPhase("ending the sessions at the identity provider")
 	if e.provider == nil {
@@ -340,14 +306,8 @@ func (r sessionRevocation) String() string {
 	return message
 }
 
-// MatchesDirectoryUser says whether a panel principal is the given
-// directory account. The login names the principal after the provider's
-// preferred_username, which for a directory-backed provider is the uid;
-// when that name was already taken by a local principal, the login named
-// it "uid@issuer-host" instead. Both belong to the same person in the
-// directory, so both are matched. A local principal of the same name is
-// matched as well: it holds no provider session, so nothing is ended
-// there, and it is not worth telling the two apart here.
+// MatchesDirectoryUser says whether a panel principal is the given directory
+// account.
 func MatchesDirectoryUser(subject, uid string) bool {
 	if uid == "" {
 		return false
@@ -356,9 +316,6 @@ func MatchesDirectoryUser(subject, uid string) bool {
 }
 
 // revokeSessions ends the panel sessions belonging to a directory account.
-// The listing is read once for every account; a change touches a handful
-// of them and the executor runs alone, so the repeated read is cheaper
-// than a query shape of its own.
 func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sessionRevocation, error) {
 	result := sessionRevocation{WithoutPrincipal: []string{}}
 	principals, err := e.sessions.ListPrincipals(ctx)
@@ -383,12 +340,8 @@ func (e *Executor) revokeSessions(ctx context.Context, uid, reason string) (sess
 	return result, nil
 }
 
-// revokeChangedMembers ends the sessions of the users whose groups changed,
-// as one phase. A session carries the groups of the moment of login; the
-// membership the directory holds now is a different scope, and the only
-// honest thing to do with the old one is to end it and let the next login
-// take a fresh snapshot. Whether there was anything to end is part of the
-// message: a user who never logged into the panel is not an error.
+// revokeChangedMembers ends the sessions of the users whose groups changed, as
+// one phase.
 func (e *Executor) revokeChangedMembers(ctx context.Context, uids []string, reason string) (Phase, sessionRevocation) {
 	phase := startPhase("revoking the panel sessions of the changed members")
 	total := sessionRevocation{WithoutPrincipal: []string{}}
@@ -438,9 +391,7 @@ func (e *Executor) setSSHKeys(ctx context.Context, spec *SSHKeysPayload) []Phase
 	return []Phase{finishPhase(phase, err, "")}
 }
 
-// changeHostGroupMembers moves hosts in and out of a host group. No panel
-// session ends here: a host's group changes which rules reach it, and the
-// host's own SSSD picks that up; the users keep their panel scope.
+// changeHostGroupMembers moves hosts in and out of a host group.
 func (e *Executor) changeHostGroupMembers(ctx context.Context, spec *HostGroupPayload) []Phase {
 	var phases []Phase
 	if len(spec.Add) > 0 {
@@ -485,29 +436,8 @@ func (e *Executor) setUserPOSIX(ctx context.Context, spec *POSIXPayload) []Phase
 	return []Phase{finishPhase(phase, nil, describeUser(user)+", shell "+user.Shell+", home "+user.HomeDir)}
 }
 
-// preserveUser removes an account while keeping its entry.
-//
-// The order is the reverse of a disable, and deliberately so. A disable locks
-// locally first, because a local lock that arrives late leaves a session
-// working for as long as the directory takes. A preserve cannot afford that
-// order: the directory may refuse the move - a service account without the
-// right to it, a container that is not there, an ACI that does not allow it -
-// and a host that has already denied the user while the directory still holds
-// the account is the worst of both. The user is locked out of the panel and
-// out of the hosts, and no record of the account was removed anywhere. So the
-// directory goes first, the local half follows only on its confirmation, and
-// a refusal changes nothing locally and carries the directory's own reason.
-//
-// The window the reversed order opens - a panel session that outlives the
-// directory entry by the moment between the two - is the smaller harm and is
-// closed immediately: the account no longer exists to authenticate with, and
-// the revocation is the next step rather than a later one.
-//
-// Before either half, two things are settled. The directory is asked what it
-// can do, so an operation it would refuse is refused here instead of after
-// the local account was changed. And the plan is bound to the entry it was
-// made for: two operators preserving the same user, or an entry somebody
-// changed between the plan and the approval, are refused as a stale plan.
+// preserveUser removes an account while keeping its entry. The order is the
+// reverse of a disable, and deliberately so.
 func (e *Executor) preserveUser(ctx context.Context, change Change,
 	ref *ReferencePayload) ([]Phase, *sessionRevocation) {
 	var phases []Phase
@@ -522,9 +452,7 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 			"the directory cannot preserve an account: "+reason+"; "+capabilities.Instruction)), nil
 	}
 	// The reads that come before the change are recorded for what they are:
-	// carried out, and no part of the change. A read that succeeded must not
-	// make a refused operation look like one half applied, so it counts
-	// towards neither the success nor the failure of the change.
+	// carried out, and no part of the change.
 	phases = append(phases, skipPhase(phase, describeCapabilities(capabilities)))
 
 	phase = startPhase("binding the plan to the entry")
@@ -534,9 +462,9 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 	}
 	current, err := e.directoryEntry(ctx, ref.UID)
 	if err != nil {
-		// An entry the directory no longer holds under that name is not an
-		// outage: somebody preserved or removed the account between the plan
-		// and now, which is exactly what the binding exists to catch.
+		// An entry the directory no longer holds under that name is not an outage:
+		// somebody preserved or removed the account between the plan and now, which
+		// is exactly what the binding exists to catch.
 		code := RefusalDirectoryUnreachable
 		if errors.Is(err, freeipa.ErrEntryNotFound) {
 			code = RefusalStalePlan
@@ -575,8 +503,7 @@ func (e *Executor) preserveUser(ctx context.Context, change Change,
 }
 
 // directoryCapabilities, directoryEntry, preserveInDirectory and denyLocally
-// are the four halves of a preserve behind their seams. Each falls back to
-// the real connector or the real change store when no seam was set.
+// are the four halves of a preserve behind their seams.
 func (e *Executor) directoryCapabilities(ctx context.Context, uid string) (freeipa.DirectoryCapabilities, error) {
 	if e.capabilities != nil {
 		return e.capabilities(ctx, uid)
@@ -596,9 +523,9 @@ func (e *Executor) preserveInDirectory(ctx context.Context, uid string,
 	if e.preserve != nil {
 		return e.preserve(ctx, uid, planned)
 	}
-	// The adapter binds the move to the entry a second time, immediately
-	// before ordering it: this check and the one above are the same
-	// question asked at the two ends of the window between them.
+	// The adapter binds the move to the entry a second time, immediately before
+	// ordering it: this check and the one above are the same question asked at
+	// the two ends of the window between them.
 	return e.directory.PreserveUserAt(ctx, uid, planned)
 }
 
@@ -611,10 +538,6 @@ func (e *Executor) denyLocally(ctx context.Context, subject, reason string,
 }
 
 // preservePlan reads the entry the approved plan would move.
-//
-// A plan that does not name it is refused rather than filled in here: the
-// whole point of the binding is that the entry was read when the operator
-// looked at the plan, not when the execution started.
 func preservePlan(change Change) (freeipa.EntryReference, error) {
 	var planned struct {
 		PreserveEntry *freeipa.EntryReference `json:"preserve_entry"`
@@ -631,9 +554,9 @@ func preservePlan(change Change) (freeipa.EntryReference, error) {
 	return *planned.PreserveEntry, nil
 }
 
-// describeCapabilities says what the preflight established, including what
-// it could not: a directory that does not report the rights on an entry is
-// not a directory that granted them.
+// describeCapabilities says what the preflight established, including what it
+// could not: a directory that does not report the rights on an entry is not a
+// directory that granted them.
 func describeCapabilities(capabilities freeipa.DirectoryCapabilities) string {
 	verdict := "the directory does not report the rights on an entry"
 	if capabilities.UserModDN {
@@ -645,10 +568,8 @@ func describeCapabilities(capabilities freeipa.DirectoryCapabilities) string {
 	return verdict + " (" + strings.Join(capabilities.ReasonCodes, ", ") + ")"
 }
 
-// resetPassword asks the directory for a new password and keeps it for
-// the requester alone, in memory. The phase message, the audit entry and
-// the log never carry the value: a secret in a job output is what the
-// document forbids.
+// resetPassword asks the directory for a new password and keeps it for the
+// requester alone, in memory.
 func (e *Executor) resetPassword(ctx context.Context, change Change, ref *ReferencePayload) []Phase {
 	phase := startPhase("resetting the password of the account " + ref.UID)
 	password, err := e.directory.ResetUserPassword(ctx, ref.UID)
@@ -683,14 +604,13 @@ func (e *Executor) finish(ctx context.Context, change Change, state State,
 		"failed_phases": failedPhases, "message": message,
 	}
 	if revoked != nil {
-		// The count is what an auditor looks for after a membership change:
-		// whether the old scope really ended. Zero with a name under
-		// without_principal means there was nothing to end.
+		// The count is what an auditor looks for after a membership change: whether
+		// the old scope really ended.
 		detail["sessions_revoked"] = revoked.Sessions
 		detail["without_principal"] = revoked.WithoutPrincipal
-		// Whether the provider ended its sessions too, and if not, why: an
-		// auditor reading a disable wants to know how long the user could
-		// still reach the other applications.
+		// Whether the provider ended its sessions too, and if not, why: an auditor
+		// reading a disable wants to know how long the user could still reach the
+		// other applications.
 		if revoked.ProviderSessionsEnded != nil {
 			detail["provider_sessions_ended"] = *revoked.ProviderSessionsEnded
 			if revoked.ProviderReason != "" {
@@ -718,11 +638,7 @@ func startPhase(name string) Phase {
 	return Phase{Name: name, StartedAt: time.Now().UTC()}
 }
 
-// skipPhase closes a phase that changed nothing, with what it found. A
-// phase that was not carried out and a read that was both belong here: a
-// skipped phase counts for neither the success nor the failure of the
-// change, which is what keeps a refusal after a successful read from
-// reading as a change half applied.
+// skipPhase closes a phase that changed nothing, with what it found.
 func skipPhase(phase Phase, message string) Phase {
 	phase.FinishedAt = time.Now().UTC()
 	phase.Status = "skipped"
@@ -730,9 +646,7 @@ func skipPhase(phase Phase, message string) Phase {
 	return phase
 }
 
-// refusedPhase closes a phase with a typed refusal. The code stands at the
-// front of the message, because a phase has no field of its own for it and a
-// refusal the panel cannot act on is only half a refusal.
+// refusedPhase closes a phase with a typed refusal.
 func refusedPhase(phase Phase, code, message string) Phase {
 	phase.FinishedAt = time.Now().UTC()
 	phase.Status = "failed"
@@ -788,9 +702,7 @@ func firstNonEmpty(values ...string) string {
 }
 
 // writeRecord adds or removes a record and - where needed - its reverse
-// counterpart. Each is a separate phase, because the directory carries them
-// out separately and they can drift apart: a forward record without a reverse
-// one is a common, silent mistake.
+// counterpart.
 func (e *Executor) writeRecord(ctx context.Context, spec *DNSRecordPayload, adding bool) []Phase {
 	var phases []Phase
 	if spec == nil {
@@ -814,9 +726,8 @@ func (e *Executor) writeRecord(ctx context.Context, spec *DNSRecordPayload, addi
 		return phases
 	}
 
-	// A zone named explicitly must not leave the name computed for a /24:
-	// the PTR would then be created for a different address than the one in
-	// the request.
+	// A zone named explicitly must not leave the name computed for a /24: the PTR
+	// would then be created for a different address than the one in the request.
 	zone, name, err := freeipa.ReverseZone(spec.Value)
 	if spec.ReverseZone != "" {
 		zone = strings.TrimSuffix(spec.ReverseZone, ".")
@@ -841,9 +752,6 @@ func (e *Executor) writeRecord(ctx context.Context, spec *DNSRecordPayload, addi
 }
 
 // writeHBACRule brings an access rule to the declared state or removes it.
-// The adapter carries the member changes out one kind at a time, so the
-// phase reports the rule as the directory holds it afterwards; a failure
-// half-way leaves the message saying which command refused.
 func (e *Executor) writeHBACRule(ctx context.Context, spec *HBACRulePayload, ensure bool) []Phase {
 	if spec == nil {
 		return nil

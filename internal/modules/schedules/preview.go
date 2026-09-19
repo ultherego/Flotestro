@@ -5,17 +5,12 @@ import (
 	"time"
 )
 
-// PreviewRuns is how many coming runs the host reports for an entry and
-// for a preview. Three show the rhythm; a single date does not say whether
-// "03:00 tomorrow" is daily or once a month.
+// PreviewRuns is how many coming runs the host reports for an entry and for a
+// preview.
 const PreviewRuns = 3
 
-// Preview is the answer of schedule.preview: the next runs of an
-// expression computed on the host, in the host's time zone.
-//
-// The panel could compute the dates itself, but it knows neither the
-// host's zone nor its clock. A preview from the host shows the same
-// numbers the entry will run by.
+// Preview is the answer of schedule. preview: the next runs of an expression
+// computed on the host, in the host's time zone.
 type Preview struct {
 	Expression string `json:"expression"`
 	// Timezone is the name of the host zone, so "03:00" means a specific
@@ -28,10 +23,8 @@ type Preview struct {
 	// Kind names the mechanism the preview was asked for. Empty means the
 	// runs alone were asked for, as before timers could be written.
 	Kind string `json:"kind,omitempty"`
-	// Calendar is the OnCalendar expression a timer would run by, and
-	// Units are the files that would be written. Together they are the
-	// plan of a timer: what would land on the host, readable before
-	// anything is written.
+	// Calendar is the OnCalendar expression a timer would run by, and Units are
+	// the files that would be written.
 	Calendar string     `json:"calendar,omitempty"`
 	Units    []UnitFile `json:"units,omitempty"`
 }
@@ -52,37 +45,21 @@ func PreviewExpression(expression string, now time.Time, timezone string) Previe
 	return preview
 }
 
-// The layouts systemd prints dates in with LC_ALL=C. The first is the local
-// form ("Tue 2026-09-15 03:00:00 CEST"), read in the host's own zone; the
-// second is the UTC form systemd adds under it when the host zone is not
-// UTC.
+// The layouts systemd prints dates in with LC_ALL=C.
 const (
 	systemdLocalLayout = "Mon 2006-01-02 15:04:05 MST"
 	systemdUTCLayout   = "Mon 2006-01-02 15:04:05 UTC"
 )
 
 // ParseCalendarPreview reads the output of "systemd-analyze calendar
-// --iterations N spec...".
-//
-// The output is one block per specification: the original form (only when
-// it differs from the normalized one), the normalized form, then "Next
-// elapse:" and "Iteration #n:" lines ("Iter. #n:" on older systemd), each
-// followed by an "(in UTC):" line when the host zone is not UTC. The dates
-// are keyed by both forms, so the text the timer was asked with finds them.
-// The UTC line is preferred when it exists: the local one carries a zone
-// abbreviation, and an abbreviation is unambiguous only inside the zone it
-// belongs to. Every date comes back in the given zone.
+// --iterations N spec.
 func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.Time {
 	if zone == nil {
 		zone = time.Local
 	}
 	result := map[string][]time.Time{}
 	lines := strings.Split(output, "\n")
-	// A block is keyed by both forms of its specification. The tool prints
-	// the original form only when it differs from the normalized one - a
-	// timer's expression as systemd reports it is already normalized and
-	// has no "Original form" line at all - so a date is filed under every
-	// name the block gives it.
+	// A block is keyed by both forms of its specification.
 	var keys []string
 	file := func(date time.Time) {
 		for _, key := range keys {
@@ -119,10 +96,8 @@ func ParseCalendarPreview(output string, zone *time.Location) map[string][]time.
 			} else {
 				date, err = time.ParseInLocation(systemdLocalLayout, value, zone)
 			}
-			// "never" and a date the layout does not read leave the list as
-			// it is: a missing run is more honest than a guessed one. So
-			// does the zero date, which the layout reads out of a year-one
-			// stamp that no timer ever prints.
+			// "never" and a date the layout does not read leave the list as it is: a
+			// missing run is more honest than a guessed one.
 			if err == nil && !date.IsZero() {
 				file(date.In(zone))
 			}

@@ -13,9 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// dockerProbe reads the state of the container engine through the helper. The
-// agent has no access to the Docker socket and must not have one: membership in
-// the docker group is equivalent to root.
+// dockerProbe reads the state of the container engine through the helper.
 var dockerProbe func(context.Context, bool) (docker.Snapshot, error)
 
 // SetDockerProbe points at the function that reads the state of the containers.
@@ -60,11 +58,6 @@ func (e *TaskExecutor) ProbeDocker(ctx context.Context, full bool) (docker.Snaps
 }
 
 // readDocker performs the read of the state of the containers.
-//
-// The read is complete: the operator opened the tab and wants to see the
-// containers, the images, the networks and the volumes. The inventory cycle
-// fetches only the summary, so these two paths do not load the host with the
-// same thing.
 func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	snapshot, err := e.ProbeDocker(ctx, true)
 	if err != nil {
@@ -88,10 +81,6 @@ func (e *TaskExecutor) readDocker(ctx context.Context, task *agentv1.TaskEnvelop
 
 // readDockerEvents reads the event journal of the engine within a closed
 // window.
-//
-// The task ends on its own, because the window is closed on both sides. A read
-// without an end would stay on the host forever - also when the panel stopped
-// listening to it long ago.
 func (e *TaskExecutor) readDockerEvents(ctx context.Context,
 	task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 	order := task.GetReadDockerEvents()
@@ -183,15 +172,8 @@ func (e *TaskExecutor) applyDocker(ctx context.Context, task *agentv1.TaskEnvelo
 	}
 }
 
-// applyDockerEnsure computes the plan of a declared object, or carries it
-// out, through the helper.
-//
-// The description is handed on as the module's own JSON: the agent does
-// not disassemble what the operator approved. The values of the variables
-// the description names as secrets are fetched right here, right before the
-// call - they live for the moment of the request in the memory of the agent
-// and of the helper, and they are in neither the task envelope, nor the
-// journal, nor the result.
+// applyDockerEnsure computes the plan of a declared object, or carries it out,
+// through the helper.
 func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload *opspec.DockerEnsurePayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -209,9 +191,9 @@ func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.Task
 		PlanDigest: payload.PlanDigest,
 		Force:      payload.Force,
 	}
-	// The description is written out of the payload the payload hash was
-	// checked against, not copied out of the envelope: what the helper
-	// reads is then exactly what this agent accepted, field for field.
+	// The description is written out of the payload the payload hash was checked
+	// against, not copied out of the envelope: what the helper reads is then
+	// exactly what this agent accepted, field for field.
 	spec, err := declaredObject(payload)
 	if err != nil {
 		return rejected(agentv1.TaskResult_STATUS_REJECTED, RejectInvalidRequest, err.Error())
@@ -238,9 +220,9 @@ func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.Task
 		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
 	}
 
-	// The plan or the outcome travels back on a refusal as well: a
-	// replacement that was refused because the plan moved is worth nothing
-	// to the operator without the plan the host computed instead.
+	// The plan or the outcome travels back on a refusal as well: a replacement
+	// that was refused because the plan moved is worth nothing to the operator
+	// without the plan the host computed instead.
 	details := &agentv1.DockerEnsureResult{
 		Payload:           response.GetDockerEnsureResult().GetPayload(),
 		UnavailableReason: response.GetDockerEnsureResult().GetUnavailableReason(),
@@ -259,17 +241,14 @@ func (e *TaskExecutor) applyDockerEnsure(ctx context.Context, task *agentv1.Task
 	}
 }
 
-// declaredObject writes the description out of the payload. A removal
-// describes nothing and gets nothing: an object that is to be gone has a
-// name and no description.
+// declaredObject writes the description out of the payload.
 func declaredObject(payload *opspec.DockerEnsurePayload) ([]byte, error) {
 	var described any
 	switch {
 	case payload.Container != nil:
-		// The references are written into the description here, on the way
-		// to the host: the order keeps them typed beside it, and the host
-		// needs them inside, because the digest of the description is what
-		// turns a rotated secret into a replacement.
+		// The references are written into the description here, on the way to the
+		// host: the order keeps them typed beside it, and the host needs them
+		// inside, because the digest of the description is what turns a rotated
 		order := *payload.Container
 		order.EnvSecrets = nil
 		if len(payload.EnvSecrets) > 0 {
@@ -343,11 +322,6 @@ func dockerResultToProto(result *helperv1.DockerActionResult) *agentv1.DockerAct
 }
 
 // readDockerLogs reads the tail of one container's log through the helper.
-//
-// The read is bounded twice: by the line count of the order and by the byte
-// limit of the task. An unavailable engine is not an error of the operation:
-// the read succeeded, and its content is the information that the engine
-// does not answer.
 func (e *TaskExecutor) readDockerLogs(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.DockerLogsPayload) *agentv1.TaskResult {
 	if payload == nil {

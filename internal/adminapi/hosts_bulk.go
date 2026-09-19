@@ -16,18 +16,8 @@ import (
 )
 
 // The bulk edit of what the panel records about hosts by hand: tags, the
-// owner, the failure domain, the placement and the maintenance window,
-// applied to a selection of hosts at once.
-//
-// The route is the single routes in a loop, not a new kind of write: every
-// host is judged the way its own route would judge it - the same
-// permission in the host's own scope, the same checks on the values - and
-// answered one by one. A selection of fifty hosts where three are out of
-// the operator's scope is not refused as a whole and not applied
-// silently on forty-seven: the forty-seven are changed, the three are
-// answered with the code their own route would have given, and the caller
-// reads the list. The values are checked once, before the first host,
-// because a tag the tag editor would refuse is refused for every host.
+// owner, the failure domain, the placement and the maintenance window, applied
+// to a selection of hosts at once.
 
 // maxBulkHosts bounds one bulk edit. The fleet list selects a page, not
 // the fleet; a larger selection is a campaign's job or several calls.
@@ -39,13 +29,11 @@ type hostsBulkMetadataRequest struct {
 	Set     hostsBulkMetadataSet `json:"set"`
 }
 
-// hostsBulkMetadataSet is what changes on every host. A field left out
-// leaves that fact alone; the pointer fields tell an empty value, which
-// clears the fact, from an absent one.
+// hostsBulkMetadataSet is what changes on every host.
 type hostsBulkMetadataSet struct {
-	// TagsAdd and TagsRemove are applied to what each host carries: a bulk
-	// edit adds "patched=2026-09" to fifty hosts with fifty different tag
-	// lists, so unlike the single route it cannot send whole lists.
+	// TagsAdd and TagsRemove are applied to what each host carries: a bulk edit
+	// adds "patched=2026-09" to fifty hosts with fifty different tag lists, so
+	// unlike the single route it cannot send whole lists.
 	TagsAdd    []string `json:"tags_add,omitempty"`
 	TagsRemove []string `json:"tags_remove,omitempty"`
 	// Owner and FailureDomain replace the fact; an empty string clears it.
@@ -55,9 +43,8 @@ type hostsBulkMetadataSet struct {
 	// keeps each host's current value of the other.
 	Site        *string `json:"site,omitempty"`
 	Environment *string `json:"environment,omitempty"`
-	// Maintenance is a window to open on every host, or the JSON null to
-	// close the windows. It is kept raw so that null can be told from
-	// absent: absent leaves the windows alone.
+	// Maintenance is a window to open on every host, or the JSON null to close
+	// the windows.
 	Maintenance json.RawMessage `json:"maintenance,omitempty"`
 }
 
@@ -69,9 +56,7 @@ type bulkMaintenance struct {
 	Reason          string `json:"reason,omitempty"`
 }
 
-// bulkHostOutcome is the answer for one host. Code is the reason code the
-// single route would have given on refusal, or "applied" on success, so a
-// caller reads one list and not a mix of a list and errors.
+// bulkHostOutcome is the answer for one host.
 type bulkHostOutcome struct {
 	HostID string `json:"host_id"`
 	OK     bool   `json:"ok"`
@@ -128,9 +113,8 @@ func (s *Server) handleBulkHostMetadata(w http.ResponseWriter, r *http.Request) 
 			"a bulk edit covers at most 1000 hosts; split the selection")
 		return
 	}
-	// The call as a whole needs the permission somewhere; each host then
-	// needs it in its own scope. A principal with the right nowhere gets
-	// the refusal once, not a thousand times in a list.
+	// The call as a whole needs the permission somewhere; each host then needs it
+	// in its own scope.
 	permission := authz.PermHostTagWrite
 	if !change.touchesFacts() {
 		permission = authz.PermHostMaintenanceWrite
@@ -156,9 +140,8 @@ func (s *Server) handleBulkHostMetadata(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, response)
 }
 
-// parseBulkChange checks the values of the request the way the single
-// routes check them, once for all the hosts. A code names the first
-// problem; an empty code means a change ready to apply.
+// parseBulkChange checks the values of the request the way the single routes
+// check them, once for all the hosts.
 func parseBulkChange(request hostsBulkMetadataRequest) (bulkChange, string, string) {
 	var change bulkChange
 	change.reason = strings.TrimSpace(request.Reason)
@@ -188,9 +171,9 @@ func parseBulkChange(request hostsBulkMetadataRequest) (bulkChange, string, stri
 		}
 		change.failureDomain = &domain
 	}
-	// The placement is checked against a stand-in for the field left out,
-	// so that a site alone is checked as a site; each host fills in its
-	// own other half at application time.
+	// The placement is checked against a stand-in for the field left out, so that
+	// a site alone is checked as a site; each host fills in its own other half at
+	// application time.
 	if set.Site != nil || set.Environment != nil {
 		site, environment := "default", "unassigned"
 		if set.Site != nil {
@@ -237,11 +220,7 @@ func parseBulkChange(request hostsBulkMetadataRequest) (bulkChange, string, stri
 	return change, "", ""
 }
 
-// applyBulkChange applies the change to one host and answers for it. The
-// permission is judged in the host's own scope, exactly as the single
-// route would; a refusal goes to the trail like any other refusal, with
-// the host as its target, so the trail of a bulk edit reads as the trail
-// of its single edits would.
+// applyBulkChange applies the change to one host and answers for it.
 func (s *Server) applyBulkChange(r *http.Request, principal authz.Principal, hostID string,
 	change bulkChange) bulkHostOutcome {
 	ctx := r.Context()
@@ -305,9 +284,9 @@ func (s *Server) applyBulkChange(r *http.Request, principal authz.Principal, hos
 	return bulkHostOutcome{HostID: hostID, OK: true, Code: "applied"}
 }
 
-// writeBulkChange writes the facts of the change on one host, in the
-// order the single routes would: the tags, the owner, the domain, the
-// placement, the window. The last view of the host is returned.
+// writeBulkChange writes the facts of the change on one host, in the order the
+// single routes would: the tags, the owner, the domain, the placement, the
+// window.
 func (s *Server) writeBulkChange(ctx context.Context, host *hosts.Host, change bulkChange,
 	actor string) (*hosts.Host, error) {
 	updated := host
@@ -359,9 +338,8 @@ func (s *Server) writeBulkChange(ctx context.Context, host *hosts.Host, change b
 	return updated, nil
 }
 
-// bulkFacts renders the facts a bulk edit may touch, for one side of the
-// audit event. All of them are kept, changed or not: the question asked
-// of the trail is what the host carried, not what the edit named.
+// bulkFacts renders the facts a bulk edit may touch, for one side of the audit
+// event.
 func bulkFacts(host *hosts.Host) map[string]any {
 	return map[string]any{
 		"tags": tagList(host.Tags), "owner": host.Owner, "failure_domain": host.FailureDomain,

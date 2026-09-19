@@ -12,13 +12,6 @@ import (
 
 // The plan of a declared object: what stands on the host, what is to stand
 // there, and what the change between the two would be.
-//
-// The plan is a read. It changes nothing, it names every difference it
-// found, and it refuses what the engine would refuse - before the operator
-// approves anything. Its digest binds the change that follows: the host
-// computes the plan again right before the change and refuses when the
-// digest moved, so a container somebody else replaced in the meantime does
-// not get the change that was approved for another base.
 
 // The kinds of object a plan can be about.
 const (
@@ -33,9 +26,8 @@ const (
 	PlanNoChange = "no_change"
 	// PlanCreate: the object is not there and would be created.
 	PlanCreate = "create"
-	// PlanReplace: the object is there and differs in something that
-	// cannot be changed in place, so it would be removed and created
-	// again.
+	// PlanReplace: the object is there and differs in something that cannot be
+	// changed in place, so it would be removed and created again.
 	PlanReplace = "replace"
 	// PlanStart: the object matches its description and is not running.
 	PlanStart = "start"
@@ -48,10 +40,9 @@ const (
 	PlanAbsent = "absent"
 )
 
-// ErrObjectConflict means an object that exists and differs in something
-// that can only be changed by destroying it - a volume's driver, a
-// network's address range while containers are attached. The order decides
-// whether that is allowed, and it says so by asking for it.
+// ErrObjectConflict means an object that exists and differs in something that
+// can only be changed by destroying it - a volume's driver, a network's
+// address range while containers are attached.
 var ErrObjectConflict = errors.New("the object on the host differs in a setting that cannot be changed in place")
 
 // ErrDigestUnresolved means a reference by tag the host could resolve
@@ -63,10 +54,6 @@ var ErrDigestUnresolved = errors.New("the image digest could not be resolved")
 var ErrPlanMismatch = errors.New("the plan changed since it was approved")
 
 // Change is one difference between the host and the description.
-//
-// Current and Desired are short renderings, never the values themselves
-// where a value could be a credential: the change list travels to the
-// panel, into the job record and into the campaign report.
 type Change struct {
 	Field   string `json:"field"`
 	Current string `json:"current"`
@@ -86,9 +73,9 @@ type Plan struct {
 	// Warnings are things that do not stop the change and that the
 	// operator is meant to know before approving it.
 	Warnings []string `json:"warnings,omitempty"`
-	// ImageDigest is what the container would really run, DigestSource
-	// where that answer came from and PinnedImage the reference the
-	// container is created from.
+	// ImageDigest is what the container would really run, DigestSource where that
+	// answer came from and PinnedImage the reference the container is created
+	// from.
 	ImageDigest  string `json:"image_digest,omitempty"`
 	DigestSource string `json:"digest_source,omitempty"`
 	PinnedImage  string `json:"pinned_image,omitempty"`
@@ -119,9 +106,7 @@ func PlanContainer(ctx context.Context, client *Client, spec ContainerSpec) (Pla
 	if err := spec.Validate(); err != nil {
 		return Plan{Kind: KindContainer, Name: spec.Name, ComputedAt: time.Now().UTC()}, err
 	}
-	// Every tag is bound to a digest before the plan exists. The plan is
-	// what the operator approves, and it has to name what will run rather
-	// than what the tag pointed at while they were reading.
+	// Every tag is bound to a digest before the plan exists.
 	digest, source, err := client.ResolveImageDigest(ctx, spec.Image)
 	if err != nil {
 		return Plan{Kind: KindContainer, Name: spec.Name, ComputedAt: time.Now().UTC()},
@@ -139,9 +124,9 @@ func PlanContainer(ctx context.Context, client *Client, spec ContainerSpec) (Pla
 	return planContainerFrom(spec, digest, source, current), nil
 }
 
-// planContainerFrom is the plan itself, separated from the reads so that
-// it can be checked against a state written down in a test rather than
-// against a container engine.
+// planContainerFrom is the plan itself, separated from the reads so that it
+// can be checked against a state written down in a test rather than against a
+// container engine.
 func planContainerFrom(spec ContainerSpec, digest, source string, current *ContainerDetail) Plan {
 	plan := Plan{
 		Kind: KindContainer, Name: spec.Name, ComputedAt: time.Now().UTC(),
@@ -177,17 +162,8 @@ func planContainerFrom(spec ContainerSpec, digest, source string, current *Conta
 	return plan
 }
 
-// containerChanges lists what differs between the container on the host
-// and the description.
-//
-// Only what a replacement would fix is listed here. Whether the container
-// runs is not a difference of description - it is settled by starting or
-// stopping it, which is why the state has its own plan actions.
-//
-// Labels and environment variables are compared over the keys the
-// description names: the engine adds labels of the image and variables of
-// its own, and a container that carries more than the description says is
-// not a container that contradicts it.
+// containerChanges lists what differs between the container on the host and
+// the description.
 func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 	current := detail.Spec
 	var changes []Change
@@ -197,15 +173,8 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 		}
 	}
 	// A declaration is a statement about what it names, and some of what a
-	// container has comes from the image or from the engine rather than
-	// from anybody's order: the command baked into the image, the network
-	// the engine attaches when none is asked for. Comparing those against
-	// a description that says nothing would make the second run of the
-	// same declaration plan a replacement - the one thing a declaration
-	// must never do. They are compared only when the description states
-	// them. What the description is really about - the ports it publishes,
-	// the volumes it mounts, the limits it sets - stays compared as
-	// written, so an empty list there means none.
+	// container has comes from the image or from the engine rather than from
+	// anybody's order: the command baked into the image, the network the engine
 	stated := func(field, was, wanted string) {
 		if wanted == "" {
 			return
@@ -243,10 +212,8 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 		add("env "+name, current.Env[name], desired.Env[name])
 	}
 	for _, name := range desired.SecretVariables() {
-		// The value of a secret variable is never compared: it is not in
-		// the description and must not be read out of the container. What
-		// changes when a secret is rotated is the reference, and that is
-		// covered by the specification digest below.
+		// The value of a secret variable is never compared: it is not in the
+		// description and must not be read out of the container.
 		if _, set := current.Env[name]; !set {
 			changes = append(changes, Change{Field: "env " + name, Current: "not set", Desired: "from the secret store"})
 		}
@@ -255,11 +222,9 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 		add("label "+key, current.Labels[key], desired.Labels[key])
 	}
 
-	// The specification digest catches what the engine's own state cannot
-	// show: a secret rotated to another version, a variable moved from the
-	// order into the store. A container without the label was not created
-	// from a specification of this panel at all, and an unknown
-	// description is never a matching one.
+	// The specification digest catches what the engine's own state cannot show: a
+	// secret rotated to another version, a variable moved from the order into the
+	// store.
 	wanted := SpecDigest(desired)
 	switch recorded := detail.Labels[LabelSpecDigest]; {
 	case recorded == "":
@@ -268,8 +233,6 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 		})
 	case recorded != wanted && len(changes) == 0:
 		// The field list already explains a difference the engine shows.
-		// This entry is for the rest: it is added only when nothing else
-		// would tell the operator why the container is being replaced.
 		changes = append(changes, Change{
 			Field: "specification", Current: shortID(recorded), Desired: shortID(wanted),
 		})
@@ -277,11 +240,7 @@ func containerChanges(detail ContainerDetail, desired ContainerSpec) []Change {
 	return changes
 }
 
-// sameImage says whether the container runs the image the description
-// names. The engine records the image identifier, which for an image
-// pulled from a registry is the config digest and not the manifest digest
-// the registry answers with - so the reference the container was created
-// from counts too.
+// sameImage says whether the container runs the image the description names.
 func sameImage(imageID, reference, digest string) bool {
 	if imageID == digest {
 		return true
@@ -290,11 +249,6 @@ func sameImage(imageID, reference, digest string) bool {
 }
 
 // PlanNetwork computes the plan of one declared network.
-//
-// A network that exists with another address range, driver or scope cannot
-// be changed: the engine has no such operation. The plan says replace, and
-// a replacement disconnects every attached container - which is why it
-// needs the order to allow it.
 func PlanNetwork(ctx context.Context, client *Client, spec NetworkSpec, force bool) (Plan, error) {
 	if err := spec.Validate(); err != nil {
 		return Plan{Kind: KindNetwork, Name: spec.Name, ComputedAt: time.Now().UTC()}, err
@@ -340,10 +294,8 @@ func planNetworkFrom(state Snapshot, spec NetworkSpec, force bool) (Plan, error)
 	return plan, nil
 }
 
-// networkChanges lists what differs between the network on the host and
-// the description. Only settings the description names are compared: an
-// engine that chose a subnet for a description that asked for none has not
-// contradicted it.
+// networkChanges lists what differs between the network on the host and the
+// description.
 func networkChanges(current Network, desired NetworkSpec) []Change {
 	var changes []Change
 	add := func(field, was, wanted string) {
@@ -391,9 +343,8 @@ func planNetworkRemovalFrom(state Snapshot, name string, force bool) (Plan, erro
 	plan := Plan{Kind: KindNetwork, Name: name, ComputedAt: time.Now().UTC()}
 	current := networkByNetworkName(state.Networks, name)
 	if current == nil {
-		// A removal with nothing to remove is not a failure and not a
-		// success either: the operator gets to see that the host never had
-		// the object.
+		// A removal with nothing to remove is not a failure and not a success
+		// either: the operator gets to see that the host never had the object.
 		plan.Action = PlanAbsent
 		plan.Digest = planDigest(KindNetwork, PlanAbsent, name, "none")
 		return plan, nil
@@ -415,11 +366,6 @@ func planNetworkRemovalFrom(state Snapshot, name string, force bool) (Plan, erro
 }
 
 // PlanVolume computes the plan of one declared volume.
-//
-// A volume that exists with another driver or another driver option cannot
-// be changed: the engine has no such operation, and recreating it destroys
-// what is stored in it. The plan refuses unless the order says it accepts
-// that.
 func PlanVolume(ctx context.Context, client *Client, spec VolumeSpec, force bool) (Plan, error) {
 	if err := spec.Validate(); err != nil {
 		return Plan{Kind: KindVolume, Name: spec.Name, ComputedAt: time.Now().UTC()}, err
@@ -513,10 +459,8 @@ func planVolumeRemovalFrom(state Snapshot, name string, force bool) (Plan, error
 		if !force {
 			return plan, fmt.Errorf("the volume %s is mounted by %s: %w", name, names, ErrInUse)
 		}
-		// The engine refuses a volume a container still references,
-		// whether that container runs or not. force says the panel's own
-		// refusal is waived; the engine has the last word and its answer
-		// is what the operator gets.
+		// The engine refuses a volume a container still references, whether that
+		// container runs or not.
 		plan.Warnings = append(plan.Warnings, "the volume is mounted by "+names+
 			"; the engine refuses to remove a volume a container references, whatever the order says")
 	}
@@ -524,9 +468,7 @@ func planVolumeRemovalFrom(state Snapshot, name string, force bool) (Plan, error
 	return plan, nil
 }
 
-// networkByNetworkName finds a network by the name the operator uses. The
-// identifier is what the lifecycle operations take, but a declaration is
-// about the name: the identifier changes with every replacement.
+// networkByNetworkName finds a network by the name the operator uses.
 func networkByNetworkName(list []Network, name string) *Network {
 	for i := range list {
 		if list[i].Name == name {
@@ -624,9 +566,7 @@ func resourcesText(resources ResourceSpec) string {
 		resources.NanoCPUs, resources.PidsLimit)
 }
 
-// healthText renders a health check for the change list. A container with
-// no check of its own and one whose check was turned off read differently:
-// the first inherits whatever the image declares.
+// healthText renders a health check for the change list.
 func healthText(health *HealthSpec) string {
 	if health == nil {
 		return "from the image"

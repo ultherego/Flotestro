@@ -56,9 +56,9 @@ const (
 	remoteAddrKey contextKey = "flotestro.remote-addr"
 )
 
-// WithClientCertificate carries the client certificate from the TLS layer
-// into the context, so that the handler does not have to know the details of
-// the HTTP server.
+// WithClientCertificate carries the client certificate from the TLS layer into
+// the context, so that the handler does not have to know the details of the
+// HTTP server.
 func WithClientCertificate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
@@ -81,8 +81,7 @@ func remoteAddr(ctx context.Context) string {
 }
 
 // inventoryNormalEvery says every which periodic cycle the agent reads the
-// normal modules - packages, network, storage, security. The fast modules go
-// every cycle and the static ones once a day.
+// normal modules - packages, network, storage, security.
 const inventoryNormalEvery = 4
 
 // AgentService serves the long-lived stream of an agent. The stream is the
@@ -94,10 +93,7 @@ type AgentService struct {
 	jobs      *jobs.Store
 	audit     *audit.Recorder
 	registry  *Registry
-	// certIssuer signs the renewals and describes whom the panel trusts. An
-	// interface rather than an authority: an exchange of the CA changes the
-	// trust set while the panel works, and moving the key into an HSM is not
-	// to touch this service.
+	// certIssuer signs the renewals and describes whom the panel trusts.
 	certIssuer issuer.Issuer
 	// relays recognises the relays of the sites. Empty disables the
 	// mediation.
@@ -108,26 +104,15 @@ type AgentService struct {
 	// refreshAssessment asks the correlator to recompute a host out of turn.
 	// Empty when the correlator is disabled.
 	refreshAssessment func(hostID string)
-	// files keeps the desired state of the configuration files. We write it
-	// only after a successful operation: the panel must not claim it manages
-	// a file the host did not accept.
+	// files keeps the desired state of the configuration files.
 	files *managedfiles.Store
-	// certificates keeps the history of the deployed certificates. We write it
-	// only after a successful operation, and on the basis of the fingerprint
-	// the host sent back - not the one the panel sent.
+	// certificates keeps the history of the deployed certificates.
 	certificates *certstore.Store
-	// backups keeps the history of the backup runs. The panel does not know
-	// when a copy succeeded unless it records it: the host does not remember
-	// that between operations, and the repository answers only once a
-	// password is given.
+	// backups keeps the history of the backup runs.
 	backups *backupstore.Store
-	// packages keep the full package lists of the hosts. Without them nothing
-	// can be said about vulnerabilities - and a missing list has to be visible
-	// as missing knowledge rather than as a host without findings.
+	// packages keep the full package lists of the hosts.
 	pkgs *vuln.PackageStore
-	// secrets releases the values of the secrets against a lease. Empty means
-	// a panel without a store: the operations that name a secret are then not
-	// delivered.
+	// secrets releases the values of the secrets against a lease.
 	secrets SecretIssuing
 	// leases makes it possible to check which version of a secret the panel
 	// really released.
@@ -135,9 +120,8 @@ type AgentService struct {
 	// samples keeps the resource samples of the hosts. Empty means a panel
 	// without the built-in monitoring: the samples are then dropped.
 	samples *monitoring.Store
-	// attempts translates the identifier of an attempt into the identifier of
-	// an operation. The agent reports progress for an attempt, and the
-	// operator looks at an operation.
+	// attempts translates the identifier of an attempt into the identifier of an
+	// operation.
 	attemptsMu sync.RWMutex
 	attempts   map[string]attemptContextEntry
 	log        *slog.Logger
@@ -145,19 +129,15 @@ type AgentService struct {
 	// clonePolicy says what the gateway does with a copied identity: the
 	// empty value is the packaged default, quarantine.
 	clonePolicy ClonePolicy
-	// relayIdentity says what the gateway does with a session through a
-	// relay that names the host without the certificate it presented: the
-	// empty value is the packaged default, prefer.
+	// relayIdentity says what the gateway does with a session through a relay
+	// that names the host without the certificate it presented: the empty value
+	// is the packaged default, prefer.
 	relayIdentity RelayIdentityMode
-	// helperSigner signs the capabilities the root helper verifies and the
-	// trust bundle every session and renewal carries down to it. Nil is a
-	// panel without a signing key: the hosts get no bundle and the tasks no
-	// capability, and the helpers under prefer treat every task as a
-	// legacy one.
+	// helperSigner signs the capabilities the root helper verifies and the trust
+	// bundle every session and renewal carries down to it.
 	helperSigner *helpercap.Signer
-	// envelopes verifies the host's own signature on a relayed message,
-	// and challenges keeps the one-time challenges of a renewal through a
-	// relay. Both read the same stores as the rest of the service.
+	// envelopes verifies the host's own signature on a relayed message, and
+	// challenges keeps the one-time challenges of a renewal through a relay.
 	envelopes  *RelayVerifier
 	challenges identityChallenges
 
@@ -199,16 +179,12 @@ func (s *AgentService) helperTrustFor(hostID string) *helperv1.HelperTrustBundle
 
 // SetAssessmentRefresh connects the request to recompute the vulnerability
 // assessment.
-//
-// Optional: without the correlator the gateway works the same, only nobody
-// waits for these data.
 func (s *AgentService) SetAssessmentRefresh(refresh func(hostID string)) {
 	s.refreshAssessment = refresh
 }
 
 // SetEvents connects the event bus. Without it the agent works the same, only
-// the progress of a long operation does not reach the screen of the
-// operator.
+// the progress of a long operation does not reach the screen of the operator.
 func (s *AgentService) SetEvents(bus *events.Bus) { s.events = bus }
 
 // SetMetrics connects the store the resource samples of the hosts go to.
@@ -218,23 +194,6 @@ func (s *AgentService) SetMetrics(store *monitoring.Store) { s.samples = store }
 func (s *AgentService) SetClonePolicy(policy ClonePolicy) { s.clonePolicy = policy }
 
 // sampleFromProto translates a sample of the agent into the stored shape.
-//
-// The moment of the sample is the host's clock, not the gateway's: a sample
-// delayed on the wire still describes the moment it was taken, and a
-// sample that waited hours in a spool describes the moment it was taken
-// just as well. Lateness is not skew, and the two used to be confused
-// here: a single limit around the gateway's clock restamped every late
-// reading to now, which is exactly how a relay's backlog came back as a
-// wall of identical points instead of the night it described.
-//
-// So only the impossible direction is corrected. A sample from the future
-// by more than the skew limit is a host whose clock is wrong - nothing
-// waits in a spool to arrive before it was taken - and it gets the
-// gateway's time, because a point a year ahead would sit outside every
-// chart for ever. A sample from the past is believed, however old; how old
-// it may be at all is the maximum lateness, decided before this is called.
-// The moment it arrived is kept next to the moment it describes, and
-// freshness is judged by the first.
 func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
 	skewLimit time.Duration) monitoring.Sample {
 	at := time.Unix(sample.GetSampledAtUnix(), 0).UTC()
@@ -242,9 +201,7 @@ func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
 		at = now.Truncate(time.Second)
 	}
 	stored := monitoring.Sample{
-		// The identity of the reading, which its clock is not. Empty from
-		// an agent of the release before this one; the store then falls
-		// back to the host and the moment, as it did.
+		// The identity of the reading, which its clock is not.
 		BootID:          sample.GetBootId(),
 		Sequence:        sample.GetSequence(),
 		At:              at,
@@ -284,27 +241,20 @@ func sampleFromProto(sample *agentv1.MetricsSample, now time.Time,
 	return stored
 }
 
-// Connect serves the session of an agent. The identity of the host comes from
-// the client certificate alone; the content of a message must never overwrite
-// it.
+// Connect serves the session of an agent.
 func (s *AgentService) Connect(ctx context.Context,
 	stream *connect.BidiStream[agentv1.AgentMessage, agentv1.ServerMessage]) error {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
 		return connect.NewError(connect.CodeUnauthenticated, errors.New("missing client certificate"))
 	}
-	// The handshake refuses a certificate outside its validity before the
-	// request exists; this is the second lock on the same door. The
-	// listener is configured elsewhere, and a listener that let such a
-	// certificate through must still not get a session out of it.
+	// The handshake refuses a certificate outside its validity before the request
+	// exists; this is the second lock on the same door.
 	if problem := s.rejectStaleCertificate(ctx, cert); problem != nil {
 		return problem
 	}
 
-	// A session can come straight from an agent or through the relay of a
-	// site. In the second case the identity of the host does not come from the
-	// TLS handshake but from the attestation of the relay, and that is exactly
-	// why it is checked separately.
+	// A session can come straight from an agent or through the relay of a site.
 	who, err := s.identifyPeer(ctx, cert, stream.RequestHeader())
 	if err != nil {
 		return err
@@ -315,9 +265,7 @@ func (s *AgentService) Connect(ctx context.Context,
 	}
 
 	// The certificate of a relay does not describe a host, so the state of the
-	// certificate of a host is checked here only for a direct connection. A
-	// host attested by a relay went through the same checks above, on the
-	// certificate the relay named.
+	// certificate of a host is checked here only for a direct connection.
 	if relayID == "" {
 		status, err := s.hosts.LookupCertificate(ctx, pki.Fingerprint(cert))
 		if err != nil {
@@ -338,11 +286,9 @@ func (s *AgentService) Connect(ctx context.Context,
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("the first message has to be Hello"))
 	}
 
-	// The host's own proof on a relayed session: the envelope on Hello,
-	// signed with the host key, settles whether the session is end_to_end
-	// or rests on the relay alone - and whether it opens at all under the
-	// mode of the installation. A direct session carries the proof in its
-	// handshake; an envelope on it is ignored.
+	// The host's own proof on a relayed session: the envelope on Hello, signed
+	// with the host key, settles whether the session is end_to_end or rests on
+	// the relay alone - and whether it opens at all under the mode of the
 	var relayed *relayedSession
 	if relayID != "" {
 		strength, err := s.admitRelayedHello(ctx, who, first)
@@ -354,12 +300,8 @@ func (s *AgentService) Connect(ctx context.Context,
 		relayed = &relayedSession{peer: who.Relay, endToEnd: strength == hosts.RelayIdentityEndToEnd}
 	}
 
-	// The protocol is judged by what the agent says it speaks, and by the
-	// table of releases for an agent that says nothing. Only a definite
-	// incompatibility closes the door: a version the panel cannot read is
-	// an unknown, and an unknown agent is let in rather than cut off over
-	// a spelling. A refused host keeps the reason on its record, so the
-	// operator sees an agent to upgrade rather than a host that went quiet.
+	// The protocol is judged by what the agent says it speaks, and by the table
+	// of releases for an agent that says nothing.
 	if err := buildinfo.CheckProtocolRange(hello.GetAgentVersion(),
 		int(hello.GetProtocolMin()), int(hello.GetProtocolMax())); errors.Is(err, buildinfo.ErrProtocolIncompatible) {
 		s.refused(ctx, hostID, opspec.RefusalProtocolIncompatible, err.Error())
@@ -370,9 +312,7 @@ func (s *AgentService) Connect(ctx context.Context,
 	if err := s.hosts.ApplyHello(ctx, hostID, hello.GetAgentVersion(), hello.GetBootId(), caps); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	// What the agent says about its build and its configuration. An agent
-	// that announces no protocol range predates the report, and the record
-	// is cleared rather than left with what an earlier agent said.
+	// What the agent says about its build and its configuration.
 	var report *hosts.AgentReport
 	if hello.GetProtocolMax() > 0 {
 		report = &hosts.AgentReport{
@@ -392,22 +332,20 @@ func (s *AgentService) Connect(ctx context.Context,
 		hello.GetBootId(), remoteAddr(ctx), 32)
 	session.RelayID = relayID
 	session.RelayIdentity = who.Identity
-	// What the host does with a signed capability decides whether the
-	// scheduler mints one for it. An agent from before the field says
-	// nothing, and nothing is what it gets.
+	// What the host does with a signed capability decides whether the scheduler
+	// mints one for it.
 	session.HelperCapabilitySupported = hello.GetHelperCapabilitySupported()
 	session.HelperCapabilityMode = hello.GetHelperCapabilityMode()
 	if err := s.openSession(ctx, session, pki.Fingerprint(cert), relayID); err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	// The return of the agent settles its replacement rather than the exit code
-	// of the package manager: the process that carried the job out was
-	// replaced halfway. The settlement is a result and is fenced with the
-	// session that has just claimed the host.
+	// of the package manager: the process that carried the job out was replaced
+	// halfway.
 	s.settleAgentUpgrade(ctx, hostID, hello.GetAgentVersion(), session.Fence())
-	// A restart is settled the same way and for the same reason: the host
-	// carries out its own verification by coming back on another boot, and
-	// no process on it survives to report that.
+	// A restart is settled the same way and for the same reason: the host carries
+	// out its own verification by coming back on another boot, and no process on
+	// it survives to report that.
 	s.settleReboot(ctx, hostID, hello.GetBootId(), session.Fence())
 	// The management address is refreshed at every connection: a host can
 	// change its address, move behind a relay or come back from behind one.
@@ -432,9 +370,7 @@ func (s *AgentService) Connect(ctx context.Context,
 		s.closeSession(cleanupCtx, session, hostID)
 	}()
 
-	// One goroutine writes to the stream, because Send is not safe
-	// concurrently. The scheduler queues the jobs over the channel of the
-	// session rather than over the stream directly.
+	// One goroutine writes to the stream, because Send is not safe concurrently.
 	sendCtx, stopSender := context.WithCancel(ctx)
 	defer stopSender()
 	// The claim on the host is renewed while the stream lives; a session
@@ -455,26 +391,21 @@ func (s *AgentService) Connect(ctx context.Context,
 		}
 	}()
 
-	// The server sends the parameters of the session back at once. A full
-	// inventory is ordered when the agent reports a revision other than the
-	// recorded one.
+	// The server sends the parameters of the session back at once.
 	if err := stream.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_SessionConfig{
 			SessionConfig: &agentv1.SessionConfig{
 				HeartbeatSeconds:       int32(s.heartbeatSeconds),
 				HeartbeatJitterSeconds: int32(s.heartbeatJitter),
 				FullInventoryRequested: true,
-				// The cycle itself stays the agent's: the interval comes
-				// from its configuration and the hour of the full report
-				// from its identifier. The panel names only the ratio, so a
-				// change of the ratio is a change of one number here rather
-				// than a package on every host.
+				// The cycle itself stays the agent's: the interval comes from its
+				// configuration and the hour of the full report from its identifier.
 				InventoryCadence: &agentv1.InventoryCadence{
 					NormalEvery: inventoryNormalEvery,
 				},
-				// The panel's capability keys, signed, for the helper's
-				// keyring: every session refreshes them, so a rotated key
-				// reaches the host at its next connection at the latest.
+				// The panel's capability keys, signed, for the helper's keyring: every
+				// session refreshes them, so a rotated key reaches the host at its next
+				// connection at the latest.
 				HelperTrust: s.helperTrustFor(hostID),
 			},
 		},
@@ -506,9 +437,7 @@ func (s *AgentService) Connect(ctx context.Context,
 			return nil
 
 		case <-session.Closed():
-			// The panel ended the session: a quarantine or a withdrawal of the
-			// host. A check at the next connection would not cut off a machine
-			// that is carrying out somebody's commands right now.
+			// The panel ended the session: a quarantine or a withdrawal of the host.
 			s.log.Info("the session of the agent was closed by the panel",
 				"host_id", hostID, "session_id", session.ID,
 				"reason", session.CloseReason())
@@ -546,32 +475,19 @@ func (s *AgentService) Connect(ctx context.Context,
 }
 
 // relayedSession is what the stream keeps of a relayed session for the
-// messages after Hello: the relay and the host as identified, and whether
-// the host signed its Hello - a session that did signs everything.
+// messages after Hello: the relay and the host as identified, and whether the
+// host signed its Hello - a session that did signs everything.
 type relayedSession struct {
 	peer     RelayPeer
 	endToEnd bool
 }
 
-// errMessageDropped says a relayed message was put aside on its own
-// without ending the session: a message the panel consumed already and
-// the relay carried again, a sequence the session never spent, or a
-// message without an envelope on a session that signs. A relay that lost
-// the connection halfway through sending its spool sends the message
-// again, and the host must not lose its session over the relay's honest
-// retry; the message itself is not handled twice, and an unsigned one is
-// not handled at all.
+// errMessageDropped says a relayed message was put aside on its own without
+// ending the session: a message the panel consumed already and the relay
+// carried again, a sequence the session never spent, or a message without an
 var errMessageDropped = errors.New("the message was dropped")
 
-// admitRelayedHello settles the strength of a relayed session from its
-// Hello. An envelope is verified under every mode, and a bad one refuses
-// the session with its code: a host that signs and does not verify is not
-// a host to take on the relay's word instead. No envelope is the relay's
-// attestation or word alone, let in and counted under observe and prefer;
-// under enforce the session is refused - as relay_identity_missing when
-// the relay itself is from before the attestation, or as
-// blocked_upgrade_required when the relay did its part and it is the
-// agent that predates the envelope.
+// admitRelayedHello settles the strength of a relayed session from its Hello.
 func (s *AgentService) admitRelayedHello(ctx context.Context, who peer, first *agentv1.AgentMessage) (string, error) {
 	if first.GetEnvelope() == nil {
 		if s.relayIdentity == RelayIdentityEnforce {
@@ -595,22 +511,6 @@ func (s *AgentService) admitRelayedHello(ctx context.Context, who peer, first *a
 }
 
 // checkRelayedMessage verifies a message after Hello on a relayed session.
-// A session that signed its Hello has to sign every message: one without
-// an envelope is not the host's word and is dropped, named on the host and
-// counted - dropped rather than ending the session, because the relay's
-// buffer may still hold unsigned results of the agent from before its
-// upgrade, and a session that dies on each of them would drain that
-// buffer one reconnect at a time. Nothing unsigned is handled either
-// way. A session that did not sign its Hello is checked whenever a
-// message carries an envelope all the same - the spool may hold messages
-// of an earlier, signing session of the host, and a bad envelope is
-// refused under every mode.
-//
-// A number the same session spent already is the one case that is no
-// refusal at all: the relay holds a record until the panel acknowledges
-// it, so a link that broke in between means the record comes back. It is
-// dropped, acknowledged once more and counted, and the host's record is
-// left alone.
 func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, session *Session,
 	relayed *relayedSession, msg *agentv1.AgentMessage) error {
 	if msg.GetEnvelope() == nil {
@@ -628,13 +528,9 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 	if err != nil {
 		if refusal := RelayRefusalOf(err); refusal != nil && refusal.Code == hosts.RefusalRelaySequenceReplayed {
 			if refusal.Redelivery {
-				// The panel consumed this message already and the relay
-				// carried it again because the acknowledgement never
-				// reached it - a link that broke while the spool was
-				// draining. The message is not handled twice, the
-				// acknowledgement goes out once more so the record leaves
-				// the spool, and nothing is written on the host: the relay
-				// did what the spool is for.
+				// The panel consumed this message already and the relay carried it again
+				// because the acknowledgement never reached it - a link that broke while
+				// the spool was draining.
 				metrics.RelayEnvelopeRedelivery.Inc()
 				s.acknowledge(hostID, session, msg.GetEnvelope())
 				s.log.Debug("a relayed message the panel had consumed was carried again and acknowledged",
@@ -653,10 +549,9 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 	return nil
 }
 
-// refuseEnvelope turns a failed verification into the session's refusal:
-// the code on the host and the trail, the counter, and the error the
-// stream ends with. An error of the database is an internal error, not a
-// refusal of the host.
+// refuseEnvelope turns a failed verification into the session's refusal: the
+// code on the host and the trail, the counter, and the error the stream ends
+// with.
 func (s *AgentService) refuseEnvelope(ctx context.Context, hostID string, err error) error {
 	refusal := RelayRefusalOf(err)
 	if refusal == nil {
@@ -671,9 +566,8 @@ func (s *AgentService) refuseEnvelope(ctx context.Context, hostID string, err er
 	return connect.NewError(code, errors.New(refusal.Detail))
 }
 
-// learnPublicKey writes the key of an older certificate on its record once
-// the relay's certificate supplied it. Best effort: the session is worth
-// more than the record, and the next session brings the key again.
+// learnPublicKey writes the key of an older certificate on its record once the
+// relay's certificate supplied it.
 func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verified *Verified) {
 	if verified == nil || len(verified.LearnedKeyDER) == 0 {
 		return
@@ -686,14 +580,6 @@ func (s *AgentService) learnPublicKey(ctx context.Context, hostID string, verifi
 
 // handle consumes a message of the agent and, once it is consumed,
 // acknowledges it to the relay that carried it.
-//
-// The order is the whole point of the durable spool of chapter 13: the
-// relay keeps a message until the panel says it has it, and the panel
-// says so only after the transaction behind the message committed. A
-// handler that returned an error is a message the panel refused - the
-// result was not written, the heartbeat not applied - and it is left
-// unacknowledged, so the relay carries it again after the reconnect
-// rather than losing it on the panel's word.
 func (s *AgentService) handle(ctx context.Context, hostID string, session *Session,
 	msg *agentv1.AgentMessage) error {
 	if err := s.consume(ctx, hostID, session, msg); err != nil {
@@ -703,17 +589,8 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	return nil
 }
 
-// acknowledge tells the relay that the message of the envelope is the
-// panel's now and its record may leave the spool. A message without an
-// envelope came from a direct session: there is no spool behind it and
-// nothing to free, so nothing is sent. The acknowledgement travels the
-// session it arrived on, because the relay reads it off the stream of
-// that very host and answers for no other.
-//
-// A send that does not fit into the outbound buffer is noted and nothing
-// more: an unacknowledged record stays in the spool and comes back, which
-// is exactly what the spool is for, while a session torn down over a
-// missing acknowledgement would cost the host its link.
+// acknowledge tells the relay that the message of the envelope is the panel's
+// now and its record may leave the spool.
 func (s *AgentService) acknowledge(hostID string, session *Session, envelope *agentv1.RelayedEnvelope) {
 	if envelope == nil || session == nil {
 		return
@@ -733,34 +610,15 @@ func (s *AgentService) acknowledge(hostID string, session *Session, envelope *ag
 }
 
 // ackSendTimeout bounds the wait for a slot in the outbound buffer of the
-// session. Short on purpose: the acknowledgement is a courtesy to the
-// relay, and the receive loop of a host must not stand still for it.
+// session.
 const ackSendTimeout = 2 * time.Second
 
 // recordSample stores one resource sample and answers the host with what
 // became of it.
-//
-// The answer is what frees the copy the agent kept. An agent writes every
-// reading to a small spool on disk before it sends it and deletes it only
-// on this acknowledgement, so a stream that broke, a panel that restarted
-// between the receive and the commit, or a relay whose link went down cost
-// a second delivery and never a reading. That only works if the panel
-// answers after the transaction committed and answers every outcome the
-// agent can act on - including the two that are not success: a sample the
-// panel already holds, which the agent may drop because it changed
-// nothing, and a sample too old to be stored at all, which the agent must
-// drop because carrying it would push out readings the panel would take.
-//
-// A failure of the write is the one case with no answer. The sample then
-// stays in the agent's spool and in the relay's, and comes again.
 func (s *AgentService) recordSample(ctx context.Context, hostID string, session *Session,
 	sample *agentv1.MetricsSample) error {
 	if s.samples == nil {
 		// A gateway without a monitoring store keeps no samples at all.
-		// The host is told so terminally rather than left waiting for an
-		// acknowledgement that is never coming: a spool full of readings
-		// for a panel that was never going to take them is a spool with no
-		// room for the ones it would.
 		s.ackSample(hostID, session, sample,
 			agentv1.MetricsAck_STATUS_REJECTED_INVALID, monitoring.ErrorSampleNotKept)
 		return nil
@@ -768,11 +626,7 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 	now := time.Now().UTC()
 	stored := sampleFromProto(sample, now, s.samples.ClockSkewLimit())
 	if age := now.Sub(stored.At); age > s.samples.MaxLateness() {
-		// Older than the panel keeps raw samples for. Writing it would put
-		// a reading into a window the retention drops in the same pass, so
-		// it is refused with a reason instead: the chart keeps a gap, and
-		// the gap has a cause somebody can look up rather than passing for
-		// a host that had nothing to say.
+		// Older than the panel keeps raw samples for.
 		s.log.Warn("a resource sample reached the panel too late to be stored",
 			"host_id", hostID, "age", age.String(),
 			"max_lateness", s.samples.MaxLateness().String(),
@@ -794,20 +648,6 @@ func (s *AgentService) recordSample(ctx context.Context, hostID string, session 
 }
 
 // ackSample tells the agent what became of one sample.
-//
-// It is a message of its own and not the acknowledgement of a relayed
-// message: that one names the envelope of a relayed message, is consumed
-// by the relay and never reaches the host, and a direct session has no
-// envelope at all - so neither could free anything on the host, which is
-// what this has to do. It names the sample by what the agent's spool is
-// keyed by, the boot and the sequence, and travels the whole way down.
-//
-// A sample without an identity comes from an agent of the release before
-// this one: it has no spool, so there is nothing to free and nothing is
-// sent. A send that does not fit into the outbound buffer is noted and no
-// more - the sample stays in the host's spool and comes again, which is
-// what the spool is for, while a session torn down over an acknowledgement
-// would cost the host its link.
 func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv1.MetricsSample,
 	status agentv1.MetricsAck_Status, reason string) {
 	if session == nil || sample.GetBootId() == "" || sample.GetSequence() == 0 {
@@ -828,18 +668,15 @@ func (s *AgentService) ackSample(hostID string, session *Session, sample *agentv
 	}
 }
 
-// consume applies a message of the agent to the records of the panel. Its
-// error is the panel's refusal of the message, which keeps it in the
-// spool of the relay.
+// consume applies a message of the agent to the records of the panel.
 func (s *AgentService) consume(ctx context.Context, hostID string, session *Session,
 	msg *agentv1.AgentMessage) error {
 	switch payload := msg.GetPayload().(type) {
 	case *agentv1.AgentMessage_Heartbeat:
 		health := payload.Heartbeat.GetHealth()
-		// The fields absent from a message mean an undetermined state and go on
-		// as a missing value rather than as zero - and a heartbeat without
-		// any health at all says nothing about the host rather than
-		// something about the panel.
+		// The fields absent from a message mean an undetermined state and go on as a
+		// missing value rather than as zero - and a heartbeat without any health at
+		// all says nothing about the host rather than something about the panel.
 		if health == nil {
 			health = &agentv1.HealthSignals{}
 		}
@@ -906,9 +743,9 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 		}
 		s.followHostname(ctx, hostID, report)
 		if stored || report.GetFull() {
-			// The platform history is written from the system module: a
-			// revision seen before names a pair the history already has,
-			// so only a new revision or a full report is worth the write.
+			// The platform history is written from the system module: a revision seen
+			// before names a pair the history already has, so only a new revision or a
+			// full report is worth the write.
 			s.followPlatform(ctx, hostID, report)
 		}
 		return nil
@@ -923,9 +760,8 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 		return s.recordCancelAck(ctx, session, payload.CancelAck)
 
 	case *agentv1.AgentMessage_TaskLogLines:
-		// The live view of a log goes straight to the screen of the operator
-		// and is not recorded. An error of the broadcast must not tear down the
-		// session of the agent.
+		// The live view of a log goes straight to the screen of the operator and is
+		// not recorded.
 		lines := payload.TaskLogLines
 		jobID, campaignID := s.attemptContext(ctx, lines.GetTaskId(), hostID)
 		if jobID == "" {
@@ -949,22 +785,15 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 
 	case *agentv1.AgentMessage_TaskProgress:
 		// The progress goes straight to the screen of the operator and is not
-		// recorded: it is transient by design, and what lasts is the result. An
-		// error of the broadcast must not tear down the session of the agent -
-		// a lost view is a smaller harm than an interrupted operation.
+		// recorded: it is transient by design, and what lasts is the result.
 		progress := payload.TaskProgress
-		// The agent knows the identifier of the attempt, and the operator
-		// looks at the operation. The translation is remembered, because
-		// progress reports several times a second while the assignment of
-		// an attempt to an operation does not change.
+		// The agent knows the identifier of the attempt, and the operator looks at
+		// the operation.
 		jobID, campaignID := s.attemptContext(ctx, progress.GetTaskId(), hostID)
 		if jobID == "" {
 			return nil
 		}
-		// An attempt that reports is alive. Its lease is what the scheduler
-		// gives up on when nothing arrives, so the report moves the lease
-		// forward - otherwise a package transaction longer than the lease
-		// is reclaimed and redelivered while the host is still carrying it.
+		// An attempt that reports is alive.
 		s.keepAttemptAlive(ctx, progress.GetTaskId(), hostID)
 		switch progress.GetStage() {
 		case stageAccepted:
@@ -972,9 +801,7 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 			// work, and the attempt gets the execution lease from here.
 			s.acceptAttempt(ctx, progress.GetTaskId(), hostID)
 		case stageAwaitingLock:
-			// The task waits on the host for a resource another task
-			// holds. The reason goes on the job, so that the panel shows
-			// why the host has not started rather than a silent attempt.
+			// The task waits on the host for a resource another task holds.
 			if err := s.jobs.SetLockWait(ctx, progress.GetTaskId(), hostID, progress.GetMessage()); err != nil {
 				s.log.Warn("the wait for the lock was not recorded",
 					"host_id", hostID, "attempt_id", progress.GetTaskId(), "err", err)
@@ -984,10 +811,8 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 			// running from here, and whatever it waited on is behind it.
 			s.startAttempt(ctx, progress.GetTaskId(), hostID, progress.GetClaims())
 		case stageInProgress:
-			// The agent answered a redelivery: the panel gave the attempt
-			// before this one up, and the host is still on the operation.
-			// The result will come under both identifiers; nothing to do
-			// but note it, so that the two attempts read as one execution.
+			// The agent answered a redelivery: the panel gave the attempt before this
+			// one up, and the host is still on the operation.
 			s.log.Info("the host is still carrying the operation the redelivered attempt asks for",
 				"host_id", hostID, "job_id", jobID, "attempt_id", progress.GetTaskId(),
 				"previous_attempt_id", progress.GetPreviousTaskId())
@@ -1014,8 +839,7 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 
 	case *agentv1.AgentMessage_FinalReady:
 		// The answer to the final task goes to the handshake waiting on this
-		// session. An answer nobody asked for is noted: it means an agent that
-		// stopped working on somebody else's word.
+		// session.
 		if !session.AcceptFinalReady(payload.FinalReady) {
 			s.log.Warn("an unsolicited FinalReady from the agent",
 				"host_id", hostID, "session_id", session.ID)
@@ -1033,8 +857,7 @@ func (s *AgentService) consume(ctx context.Context, hostID string, session *Sess
 }
 
 // attemptContext translates the identifier of an attempt into the operation
-// and its campaign. An unknown attempt returns nothing: progress without an
-// operation has nobody to reach.
+// and its campaign.
 func (s *AgentService) attemptContext(ctx context.Context, attemptID, hostID string) (string, string) {
 	if attemptID == "" {
 		return "", ""
@@ -1052,8 +875,7 @@ func (s *AgentService) attemptContext(ctx context.Context, attemptID, hostID str
 	}
 	s.attemptsMu.Lock()
 	// The map is cleared at the result of an attempt, but an operation can end
-	// without a result - a broken session, an expired lease. A hard limit
-	// keeps the memory in check regardless of what went wrong.
+	// without a result - a broken session, an expired lease.
 	if len(s.attempts) >= maxRememberedAttempts {
 		s.attempts = map[string]attemptContextEntry{}
 	}
@@ -1077,11 +899,8 @@ type attemptContextEntry struct {
 // translations.
 const maxRememberedAttempts = 4096
 
-// The stages of the acknowledgement of a task (TaskProgress.stage in
-// agent.proto). stageInProgress is the answer to a redelivery: the attempt
-// before this one is still running on the host, and this attempt waits on
-// it. The other three are the ordinary course of an attempt: the agent
-// holds the task, it waits for a resource of the host, it started.
+// The stages of the acknowledgement of a task (TaskProgress. stage in agent.
+// proto).
 const (
 	stageAccepted     = "accepted"
 	stageAwaitingLock = "awaiting_lock"
@@ -1090,23 +909,15 @@ const (
 )
 
 // progressLeaseExtension is how far a sign of life moves the lease of an
-// attempt: as far as the delivery did (the scheduler's lease is five
-// minutes, cmd/control-plane/main.go). The lease is never shortened by it.
-// The acceptance of a task moves the lease out by the same length: the
-// delivery cut it down to the dispatch lease (internal/jobs DispatchLease),
-// which the acceptance is the answer to.
+// attempt: as far as the delivery did (the scheduler's lease is five minutes,
+// cmd/control-plane/main.
 const progressLeaseExtension = 5 * time.Minute
 
-// leaseRenewalInterval spaces the renewals of one attempt. A package
-// transaction reports several times a second, and the lease is minutes
-// long: one write every half minute keeps it alive with room to spare
-// against the housekeeping pass that reclaims it, which runs as often.
+// leaseRenewalInterval spaces the renewals of one attempt.
 const leaseRenewalInterval = 30 * time.Second
 
-// keepAttemptAlive moves the lease of an attempt forward on a report from
-// the host, at most once per leaseRenewalInterval. The attempt has to be
-// known to attemptContext already: an unknown one belongs to nobody and
-// nothing of it is kept alive.
+// keepAttemptAlive moves the lease of an attempt forward on a report from the
+// host, at most once per leaseRenewalInterval.
 func (s *AgentService) keepAttemptAlive(ctx context.Context, attemptID, hostID string) {
 	if !s.leaseRenewalDue(attemptID, hostID, time.Now()) {
 		return
@@ -1118,9 +929,9 @@ func (s *AgentService) keepAttemptAlive(ctx context.Context, attemptID, hostID s
 		return
 	}
 	if !renewed {
-		// A closed attempt keeps reporting for a moment after the panel
-		// gave up on it or settled it; that is the case the renewal
-		// exists to prevent, not one to be alarmed by.
+		// A closed attempt keeps reporting for a moment after the panel gave up on
+		// it or settled it; that is the case the renewal exists to prevent, not one
+		// to be alarmed by.
 		s.log.Debug("a report for an attempt without an open lease",
 			"host_id", hostID, "attempt_id", attemptID)
 	}
@@ -1128,9 +939,7 @@ func (s *AgentService) keepAttemptAlive(ctx context.Context, attemptID, hostID s
 
 // acceptAttempt records the agent's word that it holds the task: the
 // acceptance time on the attempt and the execution lease in place of the
-// dispatch lease. The pacing of keepAttemptAlive does not apply - the
-// acceptance comes once, and it is the one report the short lease waits
-// for.
+// dispatch lease.
 func (s *AgentService) acceptAttempt(ctx context.Context, attemptID, hostID string) {
 	accepted, err := s.jobs.AcceptAttempt(ctx, attemptID, hostID, progressLeaseExtension)
 	if err != nil {
@@ -1140,8 +949,7 @@ func (s *AgentService) acceptAttempt(ctx context.Context, attemptID, hostID stri
 	}
 	if !accepted {
 		// The panel gave the attempt up before the acceptance arrived: the
-		// redelivery is on its way, and the agent will answer it as in
-		// progress. Nothing to reopen.
+		// redelivery is on its way, and the agent will answer it as in progress.
 		s.log.Info("an acceptance for an attempt without an open lease",
 			"host_id", hostID, "attempt_id", attemptID)
 	}
@@ -1168,8 +976,8 @@ func (s *AgentService) startAttempt(ctx context.Context, attemptID, hostID strin
 }
 
 // leaseRenewalDue says whether the attempt's lease is to be renewed now and,
-// when it is, stamps the time so that the next report within the interval
-// does not write again.
+// when it is, stamps the time so that the next report within the interval does
+// not write again.
 func (s *AgentService) leaseRenewalDue(attemptID, hostID string, now time.Time) bool {
 	s.attemptsMu.Lock()
 	defer s.attemptsMu.Unlock()
@@ -1186,8 +994,7 @@ func (s *AgentService) leaseRenewalDue(attemptID, hostID string, now time.Time) 
 }
 
 // recordTaskResult writes the result reported by the agent and moves the job
-// into a final state. The result always reaches the attempt; whether it
-// changes the state of the job is decided by the state machine.
+// into a final state.
 func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	result *agentv1.TaskResult) error {
 	hostID := session.HostID
@@ -1211,12 +1018,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	delete(s.attempts, attemptID)
 	s.attemptsMu.Unlock()
 
-	// The agent delivers the result of an operation the panel redelivered
-	// under both attempts, the one that did the work first. By the time the
-	// copy arrives the job is settled from the original and this attempt is
-	// closed as superseded; the copy carries the same result, and writing
-	// it again would repeat everything a result writes - a backup run, a
-	// package list - for one execution.
+	// The agent delivers the result of an operation the panel redelivered under
+	// both attempts, the one that did the work first.
 	if attemptStatus == jobs.AttemptStatusSuperseded {
 		s.log.Info("the copy of the result for the superseded attempt changes nothing",
 			"job_id", jobID, "attempt_id", attemptID, "status", result.GetStatus().String())
@@ -1224,8 +1027,6 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	}
 
 	// A job that has finished has no reason to keep an open right to a secret.
-	// The lease will expire on its own anyway, but the window is to be as
-	// short as it can be - not as long as the clock allows.
 	if s.leases != nil {
 		if err := s.leases.Revoke(ctx, jobID); err != nil {
 			s.log.Debug("the leases of the secrets were not closed", "job_id", jobID, "err", err)
@@ -1235,11 +1036,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	state, statusName := jobStateFor(result.GetStatus())
 
 	// A refresh of the inventory is settled by the appearance of a revision
-	// rather than by the report of the agent. The agent sends the image over
-	// the same stream right before the result, so by the time we get here the
-	// revision is already recorded. When it is not there, the image did not
-	// arrive - and a job that says "refreshed" over a state from a quarter of
-	// an hour ago is worse than a failed job.
+	// rather than by the report of the agent.
 	errorCode, errorMessage := result.GetErrorCode(), result.GetMessage()
 	if state == jobs.StateSucceeded && action == string(opspec.ActionInventoryRefresh) {
 		if code, message := s.checkRefresh(ctx, hostID, result); code != "" {
@@ -1260,18 +1057,14 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		UnitStateBefore: unitStateJSON(result.GetUnitStateBefore()),
 		UnitStateAfter:  unitStateJSON(result.GetUnitStateAfter()),
 		Detail:          resultDetailJSON(result),
-		// The host's reading of itself after the change goes onto the
-		// attempt as it came: without it the operator sees
-		// applied_unverified with no way to learn which verifier looked,
-		// what it expected and what it found.
+		// The host's reading of itself after the change goes onto the attempt as it
+		// came: without it the operator sees applied_unverified with no way to learn
+		// which verifier looked, what it expected and what it found.
 		Verification: verificationJSON(result.GetVerification()),
 	}, state, session.Fence())
 	if errors.Is(err, jobs.ErrStaleFence) {
-		// The database refused the settlement: the host was claimed by a
-		// newer session and this one no longer owns it. Nothing was
-		// written, the owner settles the job from the host's replay, and
-		// this stream closes as superseded - the notification that should
-		// have closed it was late or lost.
+		// The database refused the settlement: the host was claimed by a newer
+		// session and this one no longer owns it.
 		metrics.SessionFence.Inc("result_refused")
 		s.audit.Record(ctx, audit.Event{
 			ActorType: audit.ActorAgent, ActorID: hostID,
@@ -1290,29 +1083,21 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	if err != nil {
 		return err
 	}
-	// Everything a result changes on the host's record - the desired state
-	// of a file, a deployed certificate, a package list, a backup run, the
-	// inventory fragments the agent sent back with it - follows the
-	// settlement rather than precedes it. A result the store did not
-	// accept is a result for a job that was settled, canceled or given up
-	// on before it arrived; the audit trail keeps it, with applied=false,
-	// and the host's record stays as the settlement left it: a late copy
-	// of an old result must not move the observed state of the host
-	// forward or re-run a backup's bookkeeping.
+	// Everything a result changes on the host's record - the desired state of a
+	// file, a deployed certificate, a package list, a backup run, the inventory
+	// fragments the agent sent back with it - follows the settlement rather than
 	if !accepted {
 		s.recordUnappliedResult(ctx, hostID, jobID, attemptID, statusName, result, attemptStatus)
 		return nil
 	}
 
-	// The desired state of a file is written after a successful operation
-	// rather than at the ordering: the panel must not claim it manages a file
-	// the host rejected.
+	// The desired state of a file is written after a successful operation rather
+	// than at the ordering: the panel must not claim it manages a file the host
+	// rejected.
 	if result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
-		// The content the host reported goes into the store of versions
-		// first: without it there is no getting back to the state from
-		// before the panel managed the file, and the desired state written
-		// below names a version that has to exist by then - a host that
-		// restored a copy only it kept is exactly that case.
+		// The content the host reported goes into the store of versions first:
+		// without it there is no getting back to the state from before the panel
+		// managed the file, and the desired state written below names a version that
 		var restored []byte
 		if file := result.GetFileResult(); file != nil && len(file.GetContent()) > 0 &&
 			!file.GetTruncated() {
@@ -1340,25 +1125,22 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	}
 
 	// The full package list goes into a table of its own: the vulnerability
-	// assessment is computed from it, so rows for joins are needed rather than
-	// a blob in the inventory.
+	// assessment is computed from it, so rows for joins are needed rather than a
+	// blob in the inventory.
 	if list := result.GetInstalledPackagesResult(); list != nil &&
 		result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED {
 		s.savePackageList(ctx, hostID, jobID, list)
 	}
 
-	// A backup run is recorded also when it failed: "the backup did not work"
-	// is a more important message than "the backup worked", and without an
-	// entry in the history there would be nowhere to see it.
+	// A backup run is recorded also when it failed: "the backup did not work" is
+	// a more important message than "the backup worked", and without an entry in
+	// the history there would be nowhere to see it.
 	if backup := result.GetBackupResult(); backup != nil {
 		s.saveBackupRun(ctx, hostID, jobID, backup,
 			result.GetStatus() == agentv1.TaskResult_STATUS_SUCCEEDED)
 	}
 
-	// The package sources go into the inventory after every change. The
-	// package fragment also carries the counters, so only the sources in it
-	// are replaced - overwriting the whole thing would erase what this
-	// operation did not concern.
+	// The package sources go into the inventory after every change.
 	if sources := result.GetRepositoryResult(); sources != nil && len(sources.GetSnapshot()) > 0 {
 		if err := s.mergeRepositories(ctx, hostID, sources.GetSnapshot()); err != nil {
 			s.log.Error("the package sources were not written", "host_id", hostID, "err", err)
@@ -1394,9 +1176,9 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The protective state goes into the inventory after every operation: a
-	// scan exists exactly to refresh it on demand, and a switch of MAC is to
-	// be visible in the findings at once rather than after the next cycle.
+	// The protective state goes into the inventory after every operation: a scan
+	// exists exactly to refresh it on demand, and a switch of MAC is to be
+	// visible in the findings at once rather than after the next cycle.
 	if protection := result.GetSecurityResult(); protection != nil && len(protection.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "security",
@@ -1423,10 +1205,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The state of time goes into the inventory after every operation. The
-	// clock changes on its own between cycles, so a fresh read right after a
-	// change is the only one that says anything about the effect of that
-	// change.
+	// The state of time goes into the inventory after every operation.
 	if clock := result.GetTimeResult(); clock != nil && len(clock.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "time",
@@ -1454,9 +1233,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The image of the disk space goes into the inventory: every operation
-	// sends the state back after itself, so the tab does not wait for the next
-	// cycle.
+	// The image of the disk space goes into the inventory: every operation sends
+	// the state back after itself, so the tab does not wait for the next cycle.
 	if storage := result.GetStorageResult(); storage != nil && len(storage.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "storage",
@@ -1484,8 +1262,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The schedules go into the inventory module: the tab asks about the state
-	// of the host, and every operation sends the full image back after a change
+	// The schedules go into the inventory module: the tab asks about the state of
+	// the host, and every operation sends the full image back after a change
 	// anyway.
 	if schedule := result.GetScheduleResult(); schedule != nil && len(schedule.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
@@ -1499,9 +1277,9 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The snapshot of the processes goes into an inventory module, like the
-	// state of the containers and the list of the units: the tab asks about the
-	// state of the host rather than about the history of the jobs.
+	// The snapshot of the processes goes into an inventory module, like the state
+	// of the containers and the list of the units: the tab asks about the state
+	// of the host rather than about the history of the jobs.
 	if list := result.GetProcessListResult(); list != nil && len(list.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:     "processes",
@@ -1515,8 +1293,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	}
 
 	// The full list of the units goes into an inventory module for the same
-	// reason as the state of the containers: the tab asks about the state of
-	// the host rather than about the history of the jobs.
+	// reason as the state of the containers: the tab asks about the state of the
+	// host rather than about the history of the jobs.
 	if status := result.GetUnitStatus(); status != nil && len(status.GetUnits()) > 0 {
 		if encoded, err := json.Marshal(map[string]any{
 			"units":     unitStatesJSON(status.GetUnits()),
@@ -1535,9 +1313,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	}
 
 	// The full state of the containers is written as an inventory module rather
-	// than only as the result of an operation. A result is a record of what
-	// happened; the tab asks about the state of the host and is to get it
-	// without browsing the history of the jobs.
+	// than only as the result of an operation.
 	if docker := result.GetDockerResult(); docker != nil && len(docker.GetSnapshot()) > 0 {
 		if err := s.inventory.SaveFragment(ctx, hostID, inventory.Fragment{
 			Module:            "containers.full",
@@ -1551,11 +1327,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// An operation on an account changes the state of the host at once, while
-	// the full inventory report comes only in a dozen or so minutes. The agent
-	// reads the account after the change, so we record the actual state of the
-	// host instead of waiting; without that the panel would show the state from
-	// before the operation.
+	// An operation on an account changes the state of the host at once, while the
+	// full inventory report comes only in a dozen or so minutes.
 	if user, ok := result.GetDetail().(*agentv1.TaskResult_LocalUser); ok &&
 		state == jobs.StateSucceeded && user.LocalUser.GetAccount() != nil {
 		accounts := localAccountsFromReport(&agentv1.InventoryReport{
@@ -1567,9 +1340,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 				"host_id", hostID, "account", user.LocalUser.GetName(), "err", err)
 		}
 	}
-	// A deleted account has no state to read back: the row goes, so the
-	// panel does not show an account the host no longer has until the next
-	// full report.
+	// A deleted account has no state to read back: the row goes, so the panel
+	// does not show an account the host no longer has until the next full report.
 	if user, ok := result.GetDetail().(*agentv1.TaskResult_LocalUser); ok &&
 		state == jobs.StateSucceeded && action == string(opspec.ActionLocalUserDelete) &&
 		user.LocalUser.GetAccount() == nil && user.LocalUser.GetName() != "" {
@@ -1579,13 +1351,8 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 		}
 	}
 
-	// The state of the package database is updated by every result that knows
-	// it: a transaction, a plan and a repair.
-	//
-	// Earlier only a transaction did it, and because a damaged database blocks
-	// transactions, the host had no way back to a working state from the panel
-	// - not even after a successful repair. A plan is just as credible here: it
-	// reads the state of the packages and changes nothing.
+	// The state of the package database is updated by every result that knows it:
+	// a transaction, a plan and a repair.
 	if broken, known := packageDatabaseState(result); known {
 		if err := s.hosts.SetPackageDatabaseBroken(ctx, hostID, broken); err != nil {
 			s.log.Error("the state of the package database was not written", "host_id", hostID, "err", err)
@@ -1600,9 +1367,9 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	if state != jobs.StateSucceeded {
 		outcome = audit.OutcomeFailure
 	}
-	// A result on an attempt the scheduler had given up on is the host
-	// finishing what it was carrying all along; the trail says so, because
-	// the attempt rows alone read as a lease that ran out.
+	// A result on an attempt the scheduler had given up on is the host finishing
+	// what it was carrying all along; the trail says so, because the attempt rows
+	// alone read as a lease that ran out.
 	afterLeaseExpiry := attemptStatus == jobs.AttemptStatusLeaseExpired
 	s.audit.Record(ctx, audit.Event{
 		ActorType: audit.ActorAgent, ActorID: hostID,
@@ -1621,14 +1388,7 @@ func (s *AgentService) recordTaskResult(ctx context.Context, session *Session,
 	return nil
 }
 
-// recordUnappliedResult puts a result the store did not accept on the
-// trail. A result after a settlement, a cancellation or an expiry does not
-// take back the decision and changes nothing on the host's record; the
-// trail is where it is kept. A result on an attempt whose lease ran out is
-// not that case: the job was still open, and the store settled it from
-// the result and closed the redelivered attempt as superseded - unless the
-// job had only just gone back to the queue, in which case the redelivery
-// answers from the agent's journal.
+// recordUnappliedResult puts a result the store did not accept on the trail.
 func (s *AgentService) recordUnappliedResult(ctx context.Context, hostID, jobID, attemptID,
 	statusName string, result *agentv1.TaskResult, attemptStatus string) {
 	afterLeaseExpiry := attemptStatus == jobs.AttemptStatusLeaseExpired
@@ -1668,18 +1428,15 @@ func jobStateFor(status agentv1.TaskResult_Status) (jobs.State, string) {
 	}
 }
 
-// resultDetailJSON writes the result proper for the type of the operation. An
-// upgrade plan and a transaction report have different shapes, so they go into
-// JSONB.
+// resultDetailJSON writes the result proper for the type of the operation.
 func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// The event log is the answer to a question from one moment rather than the
-	// state of the host: it stays in the result of the job and does not reach
-	// the inventory.
+	// state of the host: it stays in the result of the job and does not reach the
+	// inventory.
 	if dockerEvents := result.GetDockerEventsResult(); dockerEvents != nil &&
 		(len(dockerEvents.GetEvents()) > 0 || dockerEvents.GetUnavailableReason() != "") {
-		// An unavailable engine carries no log at all, and the result is to
-		// come into being anyway: it is what tells the operator why they see
-		// nothing.
+		// An unavailable engine carries no log at all, and the result is to come
+		// into being anyway: it is what tells the operator why they see nothing.
 		eventsJSON := json.RawMessage(dockerEvents.GetEvents())
 		if len(eventsJSON) == 0 {
 			eventsJSON = json.RawMessage("{}")
@@ -1696,10 +1453,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The tail of a container log is the answer to a question from one
-	// moment, like the event log: it stays in the result of the job. An
-	// unavailable engine carries no lines, and the result is to come into
-	// being anyway - it is what tells the operator why they see nothing.
+	// The tail of a container log is the answer to a question from one moment,
+	// like the event log: it stays in the result of the job.
 	if logs := result.GetDockerLogsResult(); logs != nil &&
 		(logs.GetContainerId() != "" || logs.GetUnavailableReason() != "") {
 		lines := logs.GetLines()
@@ -1753,9 +1508,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// A SMART report is a reading from one moment, and a device the tool
-	// cannot read reports unsupported with the tool's own words: the panel
-	// shows that reason, never an invented healthy disk.
+	// A SMART report is a reading from one moment, and a device the tool cannot
+	// read reports unsupported with the tool's own words: the panel shows that
+	// reason, never an invented healthy disk.
 	if smart := result.GetSmartResult(); smart != nil && smart.GetDevice() != "" {
 		encoded, err := json.Marshal(smartResultJSON(smart))
 		if err == nil {
@@ -1764,8 +1519,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// A refresh of the inventory carries proof: the revision of the image that
-	// came out of it. Without it the result would only say that the job did not
-	// topple.
+	// came out of it.
 	if refresh := result.GetInventoryRefreshResult(); refresh != nil &&
 		refresh.GetRevision() != "" {
 		encoded, err := json.Marshal(map[string]any{
@@ -1782,9 +1536,6 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// The result of a container operation is a field of its own rather than a
 	// variant of a sum: it carries the state before and after, which concerns a
 	// failed operation as well.
-	// The result of a Compose project is a field of its own: it carries the plan
-	// or the state of the deployment, which concerns a failed operation as
-	// well.
 	if compose := result.GetComposeResult(); compose != nil && len(compose.GetPayload()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":               "compose",
@@ -1796,10 +1547,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The plan of a declared object, or what the change did to it. It is a
-	// field of its own for the same reason: a refused change carries the
-	// plan the host computed instead, and that is what the operator needs
-	// in order to see why their approval no longer fits.
+	// The plan of a declared object, or what the change did to it.
 	if declared := result.GetDockerEnsureResult(); declared != nil && len(declared.GetPayload()) > 0 {
 		encoded, err := json.Marshal(map[string]any{
 			"kind":               "docker_declaration",
@@ -1811,12 +1559,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The result of a name resolution test belongs to the job rather than to
-	// the inventory: it is the answer to one question asked at one moment
-	// rather than the state of the host.
-	// The plan of the resolver is a result of the job rather than the state of
-	// the host: it describes a change that has not happened yet, against the
-	// profile the host has now.
+	// The result of a name resolution test belongs to the job rather than to the
+	// inventory: it is the answer to one question asked at one moment rather than
+	// the state of the host.
 	if resolver := result.GetDnsResult(); resolver != nil && len(resolver.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -1848,9 +1593,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// A network plan is a result of the job rather than the state of the host:
-	// it describes a change that has not happened yet, against the profile the
-	// host has now.
+	// A network plan is a result of the job rather than the state of the host: it
+	// describes a change that has not happened yet, against the profile the host
+	// has now.
 	if network := result.GetNetworkResult(); network != nil && len(network.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -1868,9 +1613,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// A network change carries the rollback identifier and whether the
-	// connectivity confirmation managed to disarm it. Without that the
-	// operator does not know whether the host is about to return to its
-	// previous configuration.
+	// connectivity confirmation managed to disarm it.
 	if network := result.GetNetworkResult(); network != nil &&
 		(len(network.GetProfiles()) > 0 || network.GetRollbackId() != "") {
 		encoded, err := json.Marshal(map[string]any{
@@ -1886,8 +1629,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// A rule plan is a result of the job rather than the state of the host: it
-	// describes a change that has not happened yet, against the set of rules
-	// the host has now.
+	// describes a change that has not happened yet, against the set of rules the
+	// host has now.
 	if firewall := result.GetFirewallResult(); firewall != nil && len(firewall.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -1918,8 +1661,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// A mount plan is a result of the job rather than the state of the host: it
-	// describes a change that has not happened yet, and a source resolved to
-	// the UUID of this host.
+	// describes a change that has not happened yet, and a source resolved to the
+	// UUID of this host.
 	if storage := result.GetStorageResult(); storage != nil && len(storage.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash  string `json:"plan_hash"`
@@ -1955,13 +1698,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The settings that did not come into effect are the content of the
-	// result: a change written and shadowed looks from the outside exactly
-	// like a successful one.
-	// An sshd plan is a result of the job rather than the state of the host: it
-	// describes a change that has not happened yet, against the configuration
-	// the server
-	// stosuje now.
+	// The settings that did not come into effect are the content of the result: a
+	// change written and shadowed looks from the outside exactly like a
+	// successful one.
 	if server := result.GetSshResult(); server != nil && len(server.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -2038,8 +1777,6 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	// The measurements of the time sources belong to the job rather than to the
 	// state of the host: they are the answer to a question asked at one moment,
 	// against servers the host may not be using yet.
-	// A plan of the time sources is a result of the job rather than the state
-	// of the host.
 	if clock := result.GetTimeResult(); clock != nil && len(clock.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -2079,14 +1816,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The repository state and the backup result belong to the job: they are
-	// the answer to a question asked at one moment rather than the state of
-	// the host. The
-	// list of the copies is also the only place the operator can pick the one
-	// to restore from.
-	// A backup plan is a result of the job rather than the state of the
-	// repository: it describes a copy that has not happened yet, and the scope
-	// of this host.
+	// The repository state and the backup result belong to the job: they are the
+	// answer to a question asked at one moment rather than the state of the host.
 	if backup := result.GetBackupResult(); backup != nil && len(backup.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -2115,9 +1846,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The fingerprint of a source's key belongs to the job: it is the only
-	// moment in which a human can compare it with the fingerprint given by
-	// the vendor.
+	// The fingerprint of a source's key belongs to the job: it is the only moment
+	// in which a human can compare it with the fingerprint given by the vendor.
 	if sources := result.GetRepositoryResult(); sources != nil &&
 		(sources.GetGpgKeyFingerprint() != "" || sources.GetRolledBack()) {
 		encoded, err := json.Marshal(map[string]any{
@@ -2131,21 +1861,19 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// A certificate deployment plan is a result of the job rather than the
-	// state of the host: it describes a change that has not happened yet. The
-	// private key is not in the plan, so it is not here either.
+	// A certificate deployment plan is a result of the job rather than the state
+	// of the host: it describes a change that has not happened yet.
 	if certificate := result.GetCertificateResult(); certificate != nil && len(certificate.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
-			// The module names the kind of the plan. Guessing it from empty
-			// fields would confuse a refused plan with a plan of another
-			// kind.
+			// The module names the kind of the plan. Guessing it from empty fields
+			// would confuse a refused plan with a plan of another kind.
 			Kind string `json:"kind"`
 		}
 		_ = json.Unmarshal(certificate.GetPlan(), &plan)
 		// An anchor plan and a deployment plan are two shapes; the kind of the
-		// result is to name that, because the operator looks at them in the
-		// same place.
+		// result is to name that, because the operator looks at them in the same
+		// place.
 		kind := "certificate_plan"
 		switch plan.Kind {
 		case "trust":
@@ -2164,10 +1892,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The answer of a service after a deployment belongs to the job rather
-	// than to the state of the host: it is a measurement from one moment,
-	// right after the swap. With it goes the digest of what really landed,
-	// and the information whether the host rolled back.
+	// The answer of a service after a deployment belongs to the job rather than
+	// to the state of the host: it is a measurement from one moment, right after
+	// the swap.
 	if certificate := result.GetCertificateResult(); certificate != nil &&
 		(len(certificate.GetProbe()) > 0 || certificate.GetFingerprintSha256() != "" ||
 			certificate.GetRolledBack()) {
@@ -2185,9 +1912,7 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 	}
 
 	// A file plan is a result of the job rather than the state of the host: it
-	// describes a change that has not happened yet. The digest of the plan is
-	// lifted to the surface, because it is what a campaign binds the approval
-	// to this specific diff by.
+	// describes a change that has not happened yet.
 	if file := result.GetFileResult(); file != nil && len(file.GetPlan()) > 0 {
 		var plan struct {
 			PlanHash string `json:"plan_hash"`
@@ -2217,10 +1942,8 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		}
 	}
 
-	// The preview of a schedule is the answer to one question - when would
-	// this expression run here - computed in the host's own zone. It is not
-	// a snapshot of the schedules, so it belongs to the job, not to the
-	// inventory.
+	// The preview of a schedule is the answer to one question - when would this
+	// expression run here - computed in the host's own zone.
 	if schedule := result.GetScheduleResult(); schedule != nil && len(schedule.GetPreview()) > 0 {
 		encoded, err := json.Marshal(schedulePreviewJSON(schedule.GetPreview()))
 		if err == nil {
@@ -2345,10 +2068,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 		return encoded
 
 	case *agentv1.TaskResult_UnitStatus:
-		// The detail of a few units and the listing of the host are two
-		// shapes under one result: the detail is the answer to an opened row,
-		// so it gets a kind of its own and the panel reads it typed rather
-		// than parsing stdout.
+		// The detail of a few units and the listing of the host are two shapes under
+		// one result: the detail is the answer to an opened row, so it gets a kind
+		// of its own and the panel reads it typed rather than parsing stdout.
 		if details := detail.UnitStatus.GetDetails(); len(details) > 0 {
 			encoded, err := json.Marshal(map[string]any{
 				"kind":  "unit_detail",
@@ -2371,9 +2093,9 @@ func resultDetailJSON(result *agentv1.TaskResult) json.RawMessage {
 
 	case *agentv1.TaskResult_PackageApply:
 		apply := detail.PackageApply
-		// The settled effects of an approved plan travel among the applied
-		// changes; the record keeps them apart, achieved and missed with
-		// the version observed after the transaction.
+		// The settled effects of an approved plan travel among the applied changes;
+		// the record keeps them apart, achieved and missed with the version observed
+		// after the transaction.
 		var applied, effects []*agentv1.PackageChange
 		for _, change := range apply.GetApplied() {
 			if change.GetEffect() != "" {
@@ -2420,11 +2142,9 @@ func unitStateFields(unit *agentv1.UnitState) map[string]any {
 	}
 }
 
-// unitDetailsJSON writes the full picture of the units a detail read
-// returned: the dependencies, the drop-ins with their content, the last
-// journal lines and the cursor to continue from. Lists stay lists rather
-// than null, so the panel iterates them without a guard; an empty journal
-// error means the journal was read, not that nobody asked.
+// unitDetailsJSON writes the full picture of the units a detail read returned:
+// the dependencies, the drop-ins with their content, the last journal lines
+// and the cursor to continue from.
 func unitDetailsJSON(details []*agentv1.UnitDetail) []map[string]any {
 	items := make([]map[string]any, 0, len(details))
 	for _, detail := range details {
@@ -2469,12 +2189,8 @@ func stringList(items []string) []string {
 	return items
 }
 
-// schedulePreviewJSON lifts the preview the agent computed into the shape
-// of an attempt detail. The expression travels along, because a preview of
-// another expression than the one in the field is stale, and the panel
-// tells that by comparing them. A preview the gateway cannot read stays a
-// preview of no runs with the raw document attached, rather than nothing:
-// the host did answer.
+// schedulePreviewJSON lifts the preview the agent computed into the shape of
+// an attempt detail.
 func schedulePreviewJSON(preview []byte) map[string]any {
 	var parsed struct {
 		Expression string   `json:"expression"`
@@ -2604,13 +2320,6 @@ func unitStateJSON(state *agentv1.UnitState) json.RawMessage {
 
 // managementAddress picks the management address of a host and says where it
 // comes from.
-//
-// With a direct connection the panel sees the address of the host at its own
-// end of the connection, and that is the strongest fact it has. Behind a relay
-// it sees the address of the relay - giving it as the address of the host
-// would be a falsehood, so the only source left is what the host declares
-// about itself. When there is neither, the address stays undetermined; a
-// previously known one is not erased.
 func managementAddress(remoteAddr, declared, relayID string) (address, source string) {
 	if relayID == "" {
 		if host, _, err := net.SplitHostPort(remoteAddr); err == nil && host != "" {
@@ -2623,13 +2332,7 @@ func managementAddress(remoteAddr, declared, relayID string) (address, source st
 	return "", ""
 }
 
-// openSession records the session. relayID is empty for a direct connection;
-// filled in it says which relay attested the identity of the host - without it
-// the audit trail does not tell two different grounds of trust apart.
-// countReconnect counts a session that follows the host's previous one
-// closely: a link that dropped and came back, a restart of the agent, a
-// panel that went away. A host that was away for longer is a return, not a
-// reconnect - the difference is what the counter is for.
+// openSession records the session.
 func (s *AgentService) countReconnect(ctx context.Context, session *Session) {
 	var family string
 	err := s.pool.QueryRow(ctx, `
@@ -2649,17 +2352,6 @@ func (s *AgentService) countReconnect(ctx context.Context, session *Session) {
 func (s *AgentService) openSession(ctx context.Context, session *Session,
 	fingerprint []byte, relayID string) error {
 	// The epoch number and the session row come into being in one statement.
-	// Two gateways opening a session for the same host at the same moment have
-	// to get different numbers, because it is the number that settles which of
-	// them is the right one. Each computes max + 1 on its own, and the unique
-	// index on (host_id, epoch) is what makes the two differ: the second
-	// insert is refused and tried again over the number the first one took.
-	// The retries are bounded, because a host reconnecting in a storm on
-	// several gateways must not keep a request spinning on the database.
-	// The strength of the session goes on the row: end_to_end for a host
-	// that signed its envelope, relay_only for a session on the relay's
-	// attestation or word, null for a direct connection. The operator
-	// reads the fleet's readiness for enforce from it.
 	const query = `
 		insert into agent_sessions
 			(id, host_id, gateway_id, cert_fingerprint, remote_addr, agent_version, boot_id, relay_id, epoch,
@@ -2686,11 +2378,9 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	if err != nil {
 		return fmt.Errorf("opening the session after %d attempts at an epoch: %w", sessionEpochAttempts, err)
 	}
-	// The session claims the host: the token it gets is what every
-	// delivery and every result on this session carries, and the claim
-	// always takes the host - it does not guess whether the previous
-	// instance is really gone. A session that cannot claim is not opened;
-	// nothing would ever be delivered over it.
+	// The session claims the host: the token it gets is what every delivery and
+	// every result on this session carries, and the claim always takes the host -
+	// it does not guess whether the previous instance is really gone.
 	token, err := s.jobs.ClaimSession(ctx, session.HostID, session.ID, jobs.InstanceID(), jobs.OwnerLeaseTTL)
 	if err != nil {
 		return fmt.Errorf("claiming the host for the session: %w", err)
@@ -2700,12 +2390,8 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	s.detectDuplicateIdentity(ctx, session, fingerprint)
 	s.countReconnect(ctx, session)
 
-	// The certificate that opened this session is the identity of the host
-	// from now on. The older ones still valid - the one a recovery replaced,
-	// the one a renewal came from - are revoked here rather than at the
-	// issue: until the new key has proven it works, cutting the old one off
-	// could leave a host with no way back. A relay attests the host with a
-	// certificate of its own, so only a direct session settles this.
+	// The certificate that opened this session is the identity of the host from
+	// now on.
 	if relayID == "" {
 		revoked, err := s.hosts.RevokeSupersededCertificates(ctx, session.HostID, fingerprint, "replaced")
 		if err != nil {
@@ -2723,10 +2409,8 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 				},
 			})
 		}
-		// A recovery ends when the new key has proven it works - that is,
-		// here, with the first session it opened. The store checks that the
-		// certificate is one issued after the order: the old key connecting
-		// during the overlap closes nothing.
+		// A recovery ends when the new key has proven it works - that is, here, with
+		// the first session it opened.
 		recovered, err := s.hosts.LeaveRecovery(ctx, session.HostID, fingerprint)
 		if err != nil {
 			s.log.Error("the recovery state was not left", "host_id", session.HostID, "err", err)
@@ -2747,7 +2431,6 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 	// The older sessions of this host are closed in the database at once: a row
 	// left open on a gateway that no longer serves the host inflates every
 	// measurement that counts connections and has the scheduler send jobs into
-	// the void.
 	if _, err := s.pool.Exec(ctx, `
 		update agent_sessions set ended_at = now(), end_reason = 'superseded'
 		where host_id = $1 and epoch < $2 and ended_at is null`,
@@ -2767,9 +2450,9 @@ func (s *AgentService) openSession(ctx context.Context, session *Session,
 		s.log.Error("the epoch of the session was not announced",
 			"host_id", session.HostID, "epoch", session.Epoch, "err", err)
 	}
-	// How the host was identified is a fact of the newest session and is
-	// written on the host: a session on the relay's word alone is the
-	// operator's business, and the host page is where they look.
+	// How the host was identified is a fact of the newest session and is written
+	// on the host: a session on the relay's word alone is the operator's
+	// business, and the host page is where they look.
 	if err := s.hosts.RecordRelayIdentity(ctx, session.HostID, session.RelayIdentity); err != nil {
 		s.log.Error("the identity strength of the session was not recorded on the host",
 			"host_id", session.HostID, "err", err)
@@ -2807,24 +2490,15 @@ func epochTaken(err error) bool {
 type ClonePolicy string
 
 const (
-	// CloneReport records the incident and counts it, and lets the newer
-	// session stand: the epoch rule has closed the older one already. For
-	// an installation that assesses every clone by hand - a lab that
-	// clones on purpose, a fleet where a replay is likelier than a copy.
+	// CloneReport records the incident and counts it, and lets the newer session
+	// stand: the epoch rule has closed the older one already.
 	CloneReport ClonePolicy = "report"
-	// CloneQuarantine cuts the host off: both sessions end, the host goes
-	// into quarantine, and its queued tasks are canceled. Neither machine
-	// may act under the identity until an operator has decided which of
-	// them is the host - an identity recovery gives the right one a key of
-	// its own, or a release lets it back once the copy is gone. The
-	// packaged default: a copied key is a compromised key, and a session
-	// under it is somebody's commands running on a machine nobody vetted.
+	// CloneQuarantine cuts the host off: both sessions end, the host goes into
+	// quarantine, and its queued tasks are canceled.
 	CloneQuarantine ClonePolicy = "quarantine"
 )
 
-// ParseClonePolicy reads the policy out of the configuration. Empty is
-// the default; a word the gateway does not know is refused rather than
-// taken for one of the two, because the two are not close.
+// ParseClonePolicy reads the policy out of the configuration.
 func ParseClonePolicy(value string) (ClonePolicy, error) {
 	switch ClonePolicy(strings.ToLower(strings.TrimSpace(value))) {
 	case "":
@@ -2854,22 +2528,12 @@ type cloneReaction struct {
 type cloneSighting struct {
 	// Detected says the same certificate was alive on another boot.
 	Detected bool
-	// SameAddress says the older session came from the address the new
-	// one comes from. A copy on another machine speaks from another
-	// address; the machine itself, back from a crash the gateway has not
-	// yet noticed, speaks from its own.
+	// SameAddress says the older session came from the address the new one comes
+	// from.
 	SameAddress bool
 }
 
 // reactToClone decides the reaction from the policy and the sighting.
-// Pure, so the decision is checked without a database: no detection is no
-// reaction whatever the policy, and an unset policy is the default one.
-//
-// A sighting from the host's own address is reported, never quarantined:
-// a session the gateway still holds open after a power cut looks exactly
-// like a clone for two heartbeat intervals, and a host cut off for
-// crashing would be the panel's fault, not the operator's finding. A copy
-// hiding behind the same address is the price; the report still names it.
 func reactToClone(policy ClonePolicy, sighting cloneSighting) cloneReaction {
 	if policy == "" {
 		policy = CloneQuarantine
@@ -2900,16 +2564,8 @@ func sameAddress(a, b string) bool {
 // CloneEndReason is the reason both sessions of a copied identity end with.
 const CloneEndReason = "duplicate_identity"
 
-// detectDuplicateIdentity looks for a clone: the same certificate alive on
-// a different boot at the same time. A reconnect after a reboot also
-// brings a new boot ID, but then the old session is dead; a session that
-// sent a heartbeat a moment ago is another machine with a copied
-// identity or a replay. The incident is recorded where the operator will
-// find it and counted where the alert fires, whatever the policy; the
-// policy then says whether the host stays in the fleet - the epoch rule
-// has closed the older session already, and under the report policy the
-// newer one stands - or is cut off with both sessions until an operator
-// has decided which machine is the host.
+// detectDuplicateIdentity looks for a clone: the same certificate alive on a
+// different boot at the same time.
 func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Session, fingerprint []byte) {
 	// Two heartbeat intervals with the jitter: a session silent for longer
 	// is a session that died without saying so.
@@ -2972,16 +2628,8 @@ func (s *AgentService) detectDuplicateIdentity(ctx context.Context, session *Ses
 	})
 }
 
-// quarantineClone cuts the host off the way the quarantine API does, in
-// one transaction: the lifecycle state, the queued tasks and the trail. It
-// says whether the state changed - a host already in quarantine or on its
-// way out stays where it is, and the sessions still end.
-//
-// The certificates are not revoked here. A copied key is suspect, but
-// which machine holds the original is the operator's finding, and a
-// revocation would take the way back from both: the assessment ends in
-// an identity recovery for the right machine, with the revocation the
-// recovery order carries, or in a release once the copy is gone.
+// quarantineClone cuts the host off the way the quarantine API does, in one
+// transaction: the lifecycle state, the queued tasks and the trail.
 func (s *AgentService) quarantineClone(ctx context.Context, session *Session, previousID string) bool {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -3026,11 +2674,7 @@ func (s *AgentService) quarantineClone(ctx context.Context, session *Session, pr
 	return true
 }
 
-// endCloneSessions ends both sessions of the identity. The session that has
-// just opened is ended before it is registered, so its stream closes as
-// soon as it starts listening; the older one is ended in the registry when
-// it is on this gateway, and in the database for every gateway - another
-// instance learns of the epoch through the database and closes it there.
+// endCloneSessions ends both sessions of the identity.
 func (s *AgentService) endCloneSessions(ctx context.Context, session *Session, previousID string) {
 	session.End(CloneEndReason)
 	if previous, running := s.registry.Get(session.HostID); running && previous.ID != session.ID {
@@ -3043,10 +2687,8 @@ func (s *AgentService) endCloneSessions(ctx context.Context, session *Session, p
 	}
 }
 
-// newerSessionOpen says whether the host has a session of a higher epoch
-// that is still open. A failed read counts as "no": marking a connected
-// host offline for a heartbeat is the smaller mistake than leaving a gone
-// host online.
+// newerSessionOpen says whether the host has a session of a higher epoch that
+// is still open.
 func (s *AgentService) newerSessionOpen(ctx context.Context, session *Session) bool {
 	var open bool
 	err := s.pool.QueryRow(ctx, `
@@ -3060,12 +2702,8 @@ func (s *AgentService) newerSessionOpen(ctx context.Context, session *Session) b
 	return open
 }
 
-// keepOwnership renews the session's claim on its host every
-// jobs.OwnerRenewEvery until the stream ends. A renewal the database
-// refuses means the row names another session: the host was claimed on
-// another instance and this stream is closed as superseded, the way the
-// epoch notification closes it - only this signal cannot be lost, because
-// it is the write itself that fails.
+// keepOwnership renews the session's claim on its host every jobs.
+// OwnerRenewEvery until the stream ends.
 func (s *AgentService) keepOwnership(ctx context.Context, session *Session) {
 	ticker := time.NewTicker(jobs.OwnerRenewEvery)
 	defer ticker.Stop()
@@ -3114,10 +2752,6 @@ func (s *AgentService) closeSession(ctx context.Context, session *Session, hostI
 		}
 	}
 	// A host is offline only when it has not managed to open a newer session.
-	// The registry alone does not settle that: a superseding session ends
-	// this one before it registers itself, so for a moment the registry is
-	// empty although the host is connected - the row of the newer session,
-	// written before this one was ended, is what says the host stayed.
 	if _, active := s.registry.Get(hostID); !active && !s.newerSessionOpen(ctx, session) {
 		if err := s.hosts.MarkDisconnected(ctx, hostID); err != nil {
 			s.log.Error("the host was not marked as offline", "host_id", hostID, "err", err)
@@ -3136,9 +2770,7 @@ func (s *AgentService) closeSession(ctx context.Context, session *Session, hostI
 		"host_id", hostID, "session_id", session.ID, "sessions", s.registry.Count())
 }
 
-// refuseInventory records a report the panel would not take. The session
-// goes on: the host is not at fault for the size of what it saw, and the
-// refusal is what the operator needs to see on the trail.
+// refuseInventory records a report the panel would not take.
 func (s *AgentService) refuseInventory(ctx context.Context, hostID, revision string, size int) {
 	s.log.Warn("an inventory report was refused for its size",
 		"host_id", hostID, "revision", revision, "size_bytes", size,
@@ -3163,12 +2795,9 @@ func (s *AgentService) denied(ctx context.Context, hostID, reason string) {
 	s.log.Warn("the session of the agent was rejected", "host_id", hostID, "reason", reason)
 }
 
-// refused is a denial the host page is to show: the trail entry as always,
-// and the reason written on the host, so an operator looking at an offline
-// machine sees why the gateway would not have it rather than a silence.
-// Only a host named by a certificate the fleet signed gets here; a
-// refusal the store cannot place - a name that is not a host - stays on
-// the trail alone.
+// refused is a denial the host page is to show: the trail entry as always, and
+// the reason written on the host, so an operator looking at an offline machine
+// sees why the gateway would not have it rather than a silence.
 func (s *AgentService) refused(ctx context.Context, hostID, code, detail string) {
 	s.denied(ctx, hostID, code)
 	if _, err := s.hosts.RecordConnectionRefusal(ctx, hostID, code, detail); err != nil {
@@ -3177,10 +2806,7 @@ func (s *AgentService) refused(ctx context.Context, hostID, code, detail string)
 }
 
 // rejectStaleCertificate refuses a certificate outside its validity at the
-// session layer, whatever the listener did with it. The refusal is
-// attributed to the host the certificate names: the listener vouches for
-// the chain by the time a request exists, as it does for every identity
-// read from a certificate here.
+// session layer, whatever the listener did with it.
 func (s *AgentService) rejectStaleCertificate(ctx context.Context, cert *x509.Certificate) error {
 	now := time.Now()
 	var code, message string
@@ -3205,11 +2831,7 @@ func (s *AgentService) rejectStaleCertificate(ctx context.Context, cert *x509.Ce
 	return connect.NewError(connect.CodeUnauthenticated, fmt.Errorf("%s: %s", code, message))
 }
 
-// capabilitiesFromProto reads the registry of the adapters. An agent of an
-// older version does not send the registry at all, and a fleet upgrades
-// gradually - the registry is then reconstructed from the boolean fields from
-// before it was introduced. Treating such a host as one without any adapters
-// would cut it off from management.
+// capabilitiesFromProto reads the registry of the adapters.
 func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 	if reported := caps.GetRegistry(); len(reported) > 0 {
 		registry := make(hosts.Capabilities, 0, len(reported))
@@ -3227,8 +2849,7 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 	}
 
 	// The boolean fields carried neither a reason nor features, so the
-	// reconstructed registry has none either. A made-up reason would be worse
-	// than none.
+	// reconstructed registry has none either.
 	beforeTheRegistry := []struct {
 		name      string
 		available bool
@@ -3250,10 +2871,6 @@ func capabilitiesFromProto(caps *agentv1.Capabilities) hosts.Capabilities {
 
 // localAccountsFromReport moves the accounts from a report into the inventory
 // model.
-//
-// An incremental report without a section of accounts returns nil rather than
-// an empty list: missing data must not erase the last known list of the
-// accounts of a host.
 func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalAccount {
 	if !report.GetFull() && len(report.GetLocalAccounts()) == 0 {
 		return nil
@@ -3283,9 +2900,8 @@ func localAccountsFromReport(report *agentv1.InventoryReport) []inventory.LocalA
 	return accounts
 }
 
-// accountSourceName maps the account source to the name used in the
-// database and the API. An undetermined value stays undetermined: "local"
-// would be a guess.
+// accountSourceName maps the account source to the name used in the database
+// and the API.
 func accountSourceName(source agentv1.LocalAccount_Source) string {
 	switch source {
 	case agentv1.LocalAccount_SOURCE_LOCAL:
@@ -3313,8 +2929,6 @@ func sshKeysJSON(keys []*agentv1.SSHKey) []map[string]any {
 }
 
 // localAccountResultJSON describes the state of an account after an operation.
-// A missing account gives nil, because an account that was removed or never
-// created has no state to show.
 func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 	if account == nil {
 		return nil
@@ -3333,49 +2947,33 @@ func localAccountResultJSON(account *agentv1.LocalAccount) map[string]any {
 	}
 }
 
-// The headers a relay attests a host's session with. The host is named by
-// its identifier; the certificate it presented to the relay by its SHA-256
-// fingerprint in hex and its serial, so the gateway can check that
-// certificate against the record as it would in a direct handshake. The
-// names have to match the relay: they are the only place where the panel
-// learns whose traffic goes through it.
+// The headers a relay attests a host's session with.
 const (
 	relayHostHeader            = "Flotestro-Relay-Host"
 	relayHostFingerprintHeader = "Flotestro-Relay-Host-Fingerprint"
 	relayHostSerialHeader      = "Flotestro-Relay-Host-Serial"
 	// relayHostCertificateHeader carries the certificate itself, as DER in
-	// base64. The gateway needs its public key for the host's envelope
-	// when the record of an older certificate has none; the fingerprint on
-	// record is what confirms the certificate is the issued one.
+	// base64.
 	relayHostCertificateHeader = "Flotestro-Relay-Host-Certificate"
 )
 
-// RelayIdentityMode says what the gateway does with a session through a
-// relay in which the host did not sign its own envelope: one the relay
-// attests with the certificate it saw, or one the relay names the host
-// alone in. A signed envelope is verified under every mode, and a bad one
-// is refused under every mode; the mode decides only what an absent proof
-// is worth.
+// RelayIdentityMode says what the gateway does with a session through a relay
+// in which the host did not sign its own envelope: one the relay attests with
+// the certificate it saw, or one the relay names the host alone in.
 type RelayIdentityMode string
 
 const (
-	// RelayIdentityObserve lets a session without the host's envelope in,
-	// counts it and marks the host as attested or weak: for an
-	// installation taking stock of its relays and agents before asking
-	// anything. It is the same as prefer today and kept apart so a later
-	// step can tighten prefer without touching an installation that only
-	// watches.
+	// RelayIdentityObserve lets a session without the host's envelope in, counts
+	// it and marks the host as attested or weak: for an installation taking stock
+	// of its relays and agents before asking anything.
 	RelayIdentityObserve RelayIdentityMode = "observe"
-	// RelayIdentityPrefer lets a session without the host's envelope in,
-	// counts it, and marks the host as attested or weak so the operator
-	// sees which relays and agents are due for an upgrade. The packaged
-	// default.
+	// RelayIdentityPrefer lets a session without the host's envelope in, counts
+	// it, and marks the host as attested or weak so the operator sees which
+	// relays and agents are due for an upgrade.
 	RelayIdentityPrefer RelayIdentityMode = "prefer"
-	// RelayIdentityEnforce requires the host's envelope on a relayed
-	// session: a relay that names the host alone is refused as
-	// relay_identity_missing, and an agent that does not sign behind a
-	// relay that attests as blocked_upgrade_required. A relayed renewal
-	// and a relayed secret fetch require the envelope under every mode.
+	// RelayIdentityEnforce requires the host's envelope on a relayed session: a
+	// relay that names the host alone is refused as relay_identity_missing, and
+	// an agent that does not sign behind a relay that attests as
 	RelayIdentityEnforce RelayIdentityMode = "enforce"
 )
 
@@ -3404,9 +3002,8 @@ func (s *AgentService) SetRelayIdentityMode(mode RelayIdentityMode) { s.relayIde
 type hostAttestation struct {
 	Fingerprint []byte
 	Serial      string
-	// Certificate is the certificate itself when the relay sent it, nil
-	// for a relay from before it did. Its fingerprint is the one above:
-	// the header is refused otherwise.
+	// Certificate is the certificate itself when the relay sent it, nil for a
+	// relay from before it did.
 	Certificate *x509.Certificate
 }
 
@@ -3414,9 +3011,9 @@ type hostAttestation struct {
 type peer struct {
 	HostID  string
 	RelayID string
-	// Identity is how the host was identified through a relay - attested
-	// or weak from the headers, end_to_end once the envelope verified -
-	// and empty for a direct connection.
+	// Identity is how the host was identified through a relay - attested or weak
+	// from the headers, end_to_end once the envelope verified - and empty for a
+	// direct connection.
 	Identity string
 	// Relay is the relay and the host as the envelope verifier needs
 	// them; zero for a direct connection.
@@ -3424,28 +3021,13 @@ type peer struct {
 }
 
 // identifyPeer establishes whose session it is and who vouches for it.
-//
-// A direct connection: the identity comes from the client certificate and is
-// proof of holding the private key of the host.
-//
-// A connection through a relay: the certificate belongs to the relay, and the
-// identity of the host is an attestation of the relay. The panel checks
-// what it can: whether the relay is known and not revoked, whether the host
-// belongs to its site and environment, and - when the relay names the
-// certificate the host presented - whether that certificate is on record,
-// not revoked, within its validity and the host's own, the same checks a
-// direct handshake goes through. A relay that names the host alone is
-// taken at its word or refused, by the mode of the installation. That is
-// exactly the trust boundary the document speaks about - and that is why
-// it is recorded in the session and on the host.
 func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 	headers http.Header) (peer, error) {
 	asserted := headers.Get(relayHostHeader)
 	if hostID, hostErr := pki.HostIDFromCert(cert); hostErr == nil {
 		if asserted != "" {
-			// An agent must not impersonate a relay: attesting somebody
-			// else's identity is a permission of a relay rather than a header
-			// to be added.
+			// An agent must not impersonate a relay: attesting somebody else's identity
+			// is a permission of a relay rather than a header to be added.
 			return peer{}, connect.NewError(connect.CodePermissionDenied,
 				errors.New("the certificate of a host does not allow attesting other hosts"))
 		}
@@ -3486,9 +3068,8 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		s.denied(ctx, asserted, "relay_unknown_host")
 		return peer{}, connect.NewError(connect.CodeUnauthenticated, errors.New("the host is unknown"))
 	}
-	// A relay mediates for its own site alone, and for its own environment
-	// when it has one. Without that one compromised relay would serve the
-	// whole fleet.
+	// A relay mediates for its own site alone, and for its own environment when
+	// it has one.
 	if host.Site != status.Site {
 		s.refused(ctx, asserted, hosts.RefusalRelayScopeMismatch,
 			"relay "+status.Name+" serves site "+status.Site+", the host is in site "+host.Site)
@@ -3517,9 +3098,8 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 		Revoked: status.Revoked, HostID: asserted,
 	}
 	if attestation == nil {
-		// The relay named the host alone. Whether its word is enough is
-		// the installation's decision; what it is not is invisible. The
-		// session is counted once its strength is settled, in Connect.
+		// The relay named the host alone. Whether its word is enough is the
+		// installation's decision; what it is not is invisible.
 		if s.relayIdentity == RelayIdentityEnforce {
 			s.refused(ctx, asserted, hosts.RefusalRelayIdentityMissing,
 				"relay "+status.Name+" did not attest the certificate of the host; upgrade the relay")
@@ -3533,11 +3113,9 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 	}
 	relayPeer.HostCertificate = attestation.Certificate
 
-	// The certificate the host presented to the relay goes through the
-	// same checks as one in a direct handshake: on record, not revoked,
-	// within its validity, and the host's own. The record is the only
-	// source for the validity here - the certificate itself never reaches
-	// the gateway.
+	// The certificate the host presented to the relay goes through the same
+	// checks as one in a direct handshake: on record, not revoked, within its
+	// validity, and the host's own.
 	certificate, err := s.hosts.LookupCertificate(ctx, attestation.Fingerprint)
 	if err != nil {
 		return peer{}, connect.NewError(connect.CodeInternal, err)
@@ -3555,10 +3133,7 @@ func (s *AgentService) identifyPeer(ctx context.Context, cert *x509.Certificate,
 }
 
 // identifyCaller establishes whose unary call it is - a renewal, a secret
-// fetch, a challenge - the way Connect establishes whose session it is. A
-// direct caller is checked against the record of the certificate it
-// presented; a relayed caller has only the relay's attestation here, and
-// the certificate the envelope names is checked when the envelope is.
+// fetch, a challenge - the way Connect establishes whose session it is.
 func (s *AgentService) identifyCaller(ctx context.Context, headers http.Header) (peer, *x509.Certificate, error) {
 	cert, ok := clientCertificate(ctx)
 	if !ok {
@@ -3583,11 +3158,8 @@ func (s *AgentService) identifyCaller(ctx context.Context, headers http.Header) 
 	return who, cert, nil
 }
 
-// readRelayAttestation decodes what the relay said about the certificate
-// of the host. Nil without an error is a relay that said nothing - one
-// from before the attestation. A fingerprint that does not read as one is
-// an error: a relay that sends the header sends it whole. A certificate,
-// when the relay sends one, has to be the certificate of that fingerprint.
+// readRelayAttestation decodes what the relay said about the certificate of
+// the host.
 func readRelayAttestation(headers http.Header) (*hostAttestation, error) {
 	encoded := strings.TrimSpace(headers.Get(relayHostFingerprintHeader))
 	serial := strings.TrimSpace(headers.Get(relayHostSerialHeader))
@@ -3630,9 +3202,7 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 	}
 	if code == "lifecycle_"+hosts.StateRetired {
 		// A retired host decommissioned while offline may have kept a valid
-		// certificate when the operator chose not to revoke blind. The first
-		// contact is where the certificate is revoked: the host has shown it
-		// is alive and holds a key that is no longer its.
+		// certificate when the operator chose not to revoke blind.
 		s.revokeOnContact(ctx, hostID)
 	}
 	s.refused(ctx, hostID, code, detail)
@@ -3650,10 +3220,7 @@ func (s *AgentService) rejectCertificate(ctx context.Context,
 }
 
 // certificateStatusRefusal names the refusal of a certificate the handshake
-// let through, from what the record says about it. Revocation and the
-// lifecycle are facts of the database rather than of the certificate, so
-// the handshake cannot see them; this is where they are read. An empty
-// code is a certificate with nothing against it.
+// let through, from what the record says about it.
 func certificateStatusRefusal(status hosts.CertificateStatus, hostID string, now time.Time) (code, detail string) {
 	switch {
 	case !status.Known:
@@ -3663,28 +3230,23 @@ func certificateStatusRefusal(status hosts.CertificateStatus, hostID string, now
 	case status.HostID != hostID:
 		return hosts.RefusalIdentityMismatch, "serial " + status.Serial + " is on record for host " + status.HostID
 	case !status.NotBefore.IsZero() && now.Before(status.NotBefore):
-		// The validity from the record. A direct handshake refused such a
-		// certificate before this point; a session attested by a relay has
-		// only the record to read it from.
+		// The validity from the record.
 		return hosts.RefusalCertificateNotYetValid, "serial " + status.Serial + " is not valid before " +
 			status.NotBefore.UTC().Format(time.RFC3339)
 	case !status.NotAfter.IsZero() && now.After(status.NotAfter):
 		return hosts.RefusalCertificateExpired, "serial " + status.Serial + " expired at " +
 			status.NotAfter.UTC().Format(time.RFC3339)
 	case !hosts.Connectable(status.LifecycleState, status.LifecycleChangedAt, now):
-		// A quarantine, a withdrawal in progress and a withdrawal differ for
-		// the operator, but for a connection they mean the same: this host has
-		// no right to work. A recovery is the exception for the length of the
-		// overlap: the old key still reads, so that the operator does not
-		// lose the host before the new key works.
+		// A quarantine, a withdrawal in progress and a withdrawal differ for the
+		// operator, but for a connection they mean the same: this host has no right
+		// to work.
 		return "lifecycle_" + status.LifecycleState, "the host is " + status.LifecycleState
 	}
 	return "", ""
 }
 
 // revokeOnContact revokes the live certificates of a retired host that has
-// just tried to connect. Nothing to do is the usual case - the decommission
-// revoked them - and is not reported.
+// just tried to connect.
 func (s *AgentService) revokeOnContact(ctx context.Context, hostID string) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -3716,9 +3278,7 @@ func (s *AgentService) revokeOnContact(ctx context.Context, hostID string) {
 	}
 }
 
-// nullableRelay returns nil for a direct connection. An empty string in the
-// audit trail would look like a relay without a name rather than like its
-// absence.
+// nullableRelay returns nil for a direct connection.
 func nullableRelay(relayID string) any {
 	if relayID == "" {
 		return nil
@@ -3727,14 +3287,6 @@ func nullableRelay(relayID string) any {
 }
 
 // CloseOrphanSessions closes the session rows this instance no longer keeps.
-//
-// A session ends with a write at the disconnect, but when the process crashes
-// that write has no way of happening and the row stays open for good. Every
-// measurement counting the active sessions from the database would then see a
-// fictional fleet, and the audit trail - connections that do not exist.
-//
-// Only the sessions of one's own gateway may be closed: the sessions of
-// another instance are alive, and only it knows their state.
 func (s *AgentService) CloseOrphanSessions(ctx context.Context) (int64, error) {
 	const query = `
 		update agent_sessions set ended_at = now(), end_reason = 'orphaned'
@@ -3747,8 +3299,7 @@ func (s *AgentService) CloseOrphanSessions(ctx context.Context) (int64, error) {
 }
 
 // ReapOrphanSessions closes the orphaned rows at the start and periodically
-// while working. A single stream can die without a write of its end also when
-// the process lives on.
+// while working.
 func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Duration) {
 	if closed, err := s.CloseOrphanSessions(ctx); err != nil {
 		s.log.Error("the orphaned sessions were not closed", "err", err)
@@ -3773,11 +3324,7 @@ func (s *AgentService) ReapOrphanSessions(ctx context.Context, interval time.Dur
 }
 
 // blockedJSON describes the packages that block the package operations
-// together with their configuration questions. The panel shows them to the
-// operator, because it is the operator who makes the decision.
-// spaceJSON renders the space facts of a plan with the field names the
-// panel reads; an empty list is a list, not null, so the page can tell
-// "nothing measured" from "an old agent".
+// together with their configuration questions.
 func spaceJSON(facts []*agentv1.SpaceFact) []map[string]any {
 	out := make([]map[string]any, 0, len(facts))
 	for _, fact := range facts {
@@ -3812,10 +3359,6 @@ func blockedJSON(blocked []*agentv1.BlockedPackage) []map[string]any {
 
 // packageDatabaseState reads the state of the package database out of the
 // result of a job.
-//
-// The second returned value says whether the result knows anything about that
-// state at all. A non-package job must not lift or place this flag: missing
-// knowledge is not the same as stating that the database is sound.
 func packageDatabaseState(result *agentv1.TaskResult) (broken bool, known bool) {
 	switch detail := result.GetDetail().(type) {
 	case *agentv1.TaskResult_PackageApply:
@@ -3828,14 +3371,8 @@ func packageDatabaseState(result *agentv1.TaskResult) (broken bool, known bool) 
 	return false, false
 }
 
-// followHostname keeps the name of the host in step with what the host
-// reports for itself.
-//
-// The panel knows the host by identifier; the name is a fact of the host,
-// read from the system module of the inventory, and it changes when the
-// host is renamed - through the panel or by hand. The change is recorded as
-// its own audit event, so a host that shows up under a new name has a trail
-// leading back to the old one.
+// followHostname keeps the name of the host in step with what the host reports
+// for itself.
 func (s *AgentService) followHostname(ctx context.Context, hostID string, report *agentv1.InventoryReport) {
 	hostname := reportedHostname(report)
 	if hostname == "" {
@@ -3858,13 +3395,8 @@ func (s *AgentService) followHostname(ctx context.Context, hostID string, report
 	})
 }
 
-// followPlatform keeps the history of the kernels and releases a host was
-// seen on.
-//
-// The pair comes from the basic facts of the system module, which every
-// agent sends: the kernel release and the distribution with its version.
-// A pair the panel has not seen on this host gets a row and a line in the
-// log; one it has seen only moves its last-seen mark.
+// followPlatform keeps the history of the kernels and releases a host was seen
+// on.
 func (s *AgentService) followPlatform(ctx context.Context, hostID string, report *agentv1.InventoryReport) {
 	entry, ok := reportedPlatform(report)
 	if !ok {
@@ -3882,9 +3414,8 @@ func (s *AgentService) followPlatform(ctx context.Context, hostID string, report
 	}
 }
 
-// reportedPlatform reads the kernel and the release from the system module
-// of a report. A report without the module, or one whose module was not
-// read, says nothing about the platform and writes nothing.
+// reportedPlatform reads the kernel and the release from the system module of
+// a report.
 func reportedPlatform(report *agentv1.InventoryReport) (hosts.SystemHistoryEntry, bool) {
 	var facts struct {
 		OS struct {
@@ -3918,9 +3449,7 @@ func reportedPlatform(report *agentv1.InventoryReport) (hosts.SystemHistoryEntry
 	return hosts.SystemHistoryEntry{}, false
 }
 
-// reportedHostname reads the name from the system module of a report. An
-// agent from before the split carries it at the top of the raw report; a
-// report without either says nothing about the name and changes nothing.
+// reportedHostname reads the name from the system module of a report.
 func reportedHostname(report *agentv1.InventoryReport) string {
 	var facts struct {
 		Hostname string `json:"hostname"`
@@ -3940,8 +3469,6 @@ func reportedHostname(report *agentv1.InventoryReport) string {
 }
 
 // smartResultJSON turns a SMART report into the form the interface reads.
-// Every counter is optional: a device that does not report its temperature
-// has none in the result, rather than a zero.
 func smartResultJSON(smart *agentv1.SmartResult) map[string]any {
 	attributes := make([]map[string]any, 0, len(smart.GetAttributes()))
 	for _, attribute := range smart.GetAttributes() {
@@ -3986,9 +3513,7 @@ func smartResultJSON(smart *agentv1.SmartResult) map[string]any {
 	return encoded
 }
 
-// fragmentsFromReport reads the modules of a report. An agent from before the
-// split does not send them; an empty list does not erase what is already known
-// about the modules of a host.
+// fragmentsFromReport reads the modules of a report.
 func fragmentsFromReport(report *agentv1.InventoryReport) []inventory.Fragment {
 	reported := report.GetFragments()
 	if len(reported) == 0 {
@@ -4027,10 +3552,6 @@ func unitStatesJSON(states []*agentv1.UnitState) []map[string]any {
 }
 
 // versionFromLease reads the version of a secret the panel really released.
-//
-// An order may name "the current version"; that one is settled only when the
-// job is delivered, so the desired state is recorded from the lease rather
-// than from the payload.
 func versionFromLease(ctx context.Context, s *AgentService, jobID, name string) int {
 	if s.leases == nil {
 		return 0
@@ -4076,9 +3597,7 @@ func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string, 
 		Validator: payload.File.Validator, UpdatedBy: job.CreatedBy,
 	}
 	// A file from a secret leaves neither the content nor its digest in the
-	// panel: the desired state is the name of the secret and its version. The
-	// cost is that the panel will not detect a replacement of the content on
-	// the host - and that is to be said outright.
+	// panel: the desired state is the name of the secret and its version.
 	if !payload.File.ContentSecret.Empty() {
 		state.SecretName = payload.File.ContentSecret.Name
 		state.SecretVersion = payload.File.ContentSecret.Version
@@ -4088,9 +3607,8 @@ func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string, 
 	} else {
 		content := []byte(payload.File.Content)
 		if len(content) == 0 && payload.File.VersionSHA256 != "" {
-			// A return to a version only the host kept: the panel had no
-			// copy to send, so what it records is the content the host
-			// put back.
+			// A return to a version only the host kept: the panel had no copy to send,
+			// so what it records is the content the host put back.
 			content = restored
 		}
 		digest, err := s.files.SaveVersion(ctx, s.pool, content)
@@ -4107,11 +3625,6 @@ func (s *AgentService) saveFileState(ctx context.Context, hostID, jobID string, 
 
 // saveCertificateDeployment adds a deployment to the history after a
 // successful operation.
-//
-// The fingerprint is taken from the result of the host rather than from the
-// payload: the panel is to record what really landed on the disk. The key is
-// in the history as the name of the secret and its version alone - the value
-// is neither here nor anywhere else outside the store.
 func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jobID string,
 	result *agentv1.CertificateResult) {
 	if result == nil || result.GetFingerprintSha256() == "" {
@@ -4141,10 +3654,9 @@ func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jo
 	if notAfter, err := time.Parse(time.RFC3339, result.GetNotAfter()); err == nil {
 		deployment.NotAfter = &notAfter
 	}
-	// The content is recorded only for a deployment from the panel: a renewal
-	// is done by a daemon of the host and the panel does not know the
-	// certificate that came out of it. What is left is the digest and the date
-	// alone - that is, what the host sent back.
+	// The content is recorded only for a deployment from the panel: a renewal is
+	// done by a daemon of the host and the panel does not know the certificate
+	// that came out of it.
 	if payload.Certificate.Certificate != "" {
 		deployment.Certificate = payload.Certificate.Certificate
 		if certs, err := certmodule.ParsePEM([]byte(payload.Certificate.Certificate)); err == nil {
@@ -4165,10 +3677,6 @@ func (s *AgentService) saveCertificateDeployment(ctx context.Context, hostID, jo
 }
 
 // mergeRepositories puts a new list of sources into the package fragment.
-//
-// The fragment also carries the package counters this operation did not
-// concern: overwriting it as a whole would turn a change of the sources into a
-// loss of the knowledge of how many packages wait for an upgrade.
 func (s *AgentService) mergeRepositories(ctx context.Context, hostID string, sources []byte) error {
 	fragment, err := s.inventory.Fragment(ctx, hostID, "packages")
 	if err != nil {
@@ -4211,10 +3719,6 @@ var backupKinds = map[opspec.ActionType]string{
 }
 
 // saveBackupRun adds the result of a backup operation to the history.
-//
-// We record metadata rather than data: the identifier of the copy, the
-// counters and when the last copy in the repository was made. The panel
-// neither sees the data themselves nor is it to see them.
 func (s *AgentService) saveBackupRun(ctx context.Context, hostID, jobID string,
 	result *agentv1.BackupResult, succeeded bool) {
 	job, err := s.jobs.Get(ctx, jobID)
@@ -4296,12 +3800,6 @@ func countFromBytes(value *uint64) *int64 {
 }
 
 // savePackageList writes the full package list of a host.
-//
-// A partial list is worse than a missing one, because it looks like the whole
-// thing, so it is written in one transaction together with its digest. A list
-// that was not read leaves the reason alone - and it is the reason that later
-// reaches the vulnerability assessment as an undetermined state rather than as
-// a host without findings.
 func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string,
 	result *agentv1.InstalledPackagesResult) {
 	state := vuln.PackageListState{
@@ -4321,16 +3819,13 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 	}
 	if state.UnavailableReason != "" {
 		// A host whose list could not be read is not left with an old list
-		// pretending to be current: we delete the rows and record the
-		// reason.
+		// pretending to be current: we delete the rows and record the reason.
 		pkgs = nil
 		state.PackageCount = 0
 	}
 
-	// The vendor findings known to the host are written together with the
-	// list: they come from the same read and describe the same moment. An
-	// error of reading them must not look like a host without findings - which
-	// is why it carries a reason of its own.
+	// The vendor findings known to the host are written together with the list:
+	// they come from the same read and describe the same moment.
 	advisories, reason := advisoriesFromResult(result, now)
 	advisoryState := vuln.AdvisoryState{
 		HostID: hostID, JobID: jobID, CollectedAt: &now,
@@ -4350,9 +3845,7 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 	s.log.Info("the package list was written", "host_id", hostID,
 		"packages", len(pkgs), "findings", len(advisories), "digest", state.Digest)
 
-	// The assessment is to keep up with what settles it. A host that has just
-	// answered a request for a read must not show up until the next cycle as a
-	// host without a list or with findings from half a day ago.
+	// The assessment is to keep up with what settles it.
 	if s.refreshAssessment != nil {
 		s.refreshAssessment(hostID)
 	}
@@ -4360,9 +3853,6 @@ func (s *AgentService) savePackageList(ctx context.Context, hostID, jobID string
 
 // advisoriesFromResult unpacks the vendor findings out of the result of a
 // read.
-//
-// One finding usually concerns several packages; the panel keeps them per
-// package, because that is how the correlation runs.
 func advisoriesFromResult(result *agentv1.InstalledPackagesResult,
 	now time.Time) ([]vuln.HostAdvisory, string) {
 	if reason := result.GetAdvisoriesUnavailableReason(); reason != "" {
@@ -4373,16 +3863,13 @@ func advisoriesFromResult(result *agentv1.InstalledPackagesResult,
 	}
 	var gathered []packagestore.Advisory
 	if err := json.Unmarshal(result.GetAdvisories(), &gathered); err != nil {
-		// The metadata could not be recognised. An empty list would mean here
-		// "the host has no vendor findings at all" - that is, something nobody
-		// checked.
+		// The metadata could not be recognised. An empty list would mean here "the
+		// host has no vendor findings at all" - that is, something nobody checked.
 		return nil, vuln.ReasonHostAdvisoriesUnreadable
 	}
 	var advisories []vuln.HostAdvisory
 	for _, advisory := range gathered {
-		// A finding without a CVE is normal: the vendor does not always assign
-		// one. The column does not take a null, though, and a missing list and
-		// an empty list mean the same thing here.
+		// A finding without a CVE is normal: the vendor does not always assign one.
 		cve := advisory.CVEIDs
 		if cve == nil {
 			cve = []string{}
@@ -4399,13 +3886,8 @@ func advisoriesFromResult(result *agentv1.InstalledPackagesResult,
 	return advisories, ""
 }
 
-// checkRefresh confirms that the revision reported by the agent is the one
-// the panel really has. Called only for the operation of refreshing the
-// inventory.
-//
-// It returns an empty code when everything matches. A divergence is a failure
-// of the job rather than of the host: the host collected the image, only the
-// panel did not get it.
+// checkRefresh confirms that the revision reported by the agent is the one the
+// panel really has.
 func (s *AgentService) checkRefresh(ctx context.Context, hostID string,
 	result *agentv1.TaskResult) (code, message string) {
 	refresh := result.GetInventoryRefreshResult()

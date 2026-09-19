@@ -32,12 +32,6 @@ func (b *Borg) path() string {
 }
 
 // environment adds the variables without which borg stops at a question.
-//
-// Borg asks a human for consent when the repository is unknown or changed
-// its identity. A process without a terminal would wait for the answer
-// until the time limit, so the answer is given up front: relocation is not
-// accepted, because a change of repository identity is an event the
-// operator is meant to learn about.
 func (b *Borg) environment(order Order) []string {
 	return append(toolEnvironment(order, BorgPasswordVariable),
 		"BORG_RELOCATED_REPO_ACCESS_IS_OK=no",
@@ -137,9 +131,8 @@ func (b *Borg) Run(ctx context.Context, order Order, progress ProgressFunc) (Res
 		return result, err
 	}
 
-	// The archive name must be unique in the repository; a timestamp is the
-	// only sensible distinguisher here and information for a human at the
-	// same time.
+	// The archive name must be unique in the repository; a timestamp is the only
+	// sensible distinguisher here and information for a human at the same time.
 	name := order.ID + "-" + time.Now().UTC().Format("20060102T150405Z")
 	arguments := []string{"create", "--json", "--stats",
 		order.Repository + "::" + name}
@@ -270,9 +263,8 @@ func (b *Borg) RestoreData(ctx context.Context, order Order) (Result, error) {
 	arguments := []string{"extract",
 		order.Repository + "::" + order.Restore.SnapshotID}
 	for _, pattern := range order.Restore.Include {
-		// Borg matches the paths inside the archive, that is without the
-		// leading slash. The conversion is here, not in the panel: it is a
-		// tool detail.
+		// Borg matches the paths inside the archive, that is without the leading
+		// slash.
 		arguments = append(arguments, strings.TrimPrefix(pattern, "/"))
 	}
 	execution := runInDir(ctx, order.Restore.Target, b.path(), arguments,

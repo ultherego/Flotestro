@@ -1,6 +1,5 @@
-// Package adminapi exposes the public REST API of the control plane.
-// The handlers map a request onto domain operations and hold no business
-// logic.
+// Package adminapi exposes the public REST API of the control plane. The
+// handlers map a request onto domain operations and hold no business logic.
 package adminapi
 
 import (
@@ -66,27 +65,20 @@ type Server struct {
 	changes        *identity.Store
 	// files holds the desired state of configuration files and their history.
 	files *managedfiles.Store
-	// certificates hold the watch scope and the deployment history. The
-	// panel must know them, because the host will not say itself which file
-	// is a service certificate.
+	// certificates hold the watch scope and the deployment history.
 	certificates *certificatestore.Store
-	// monitoring holds the resource samples of the hosts, the alert rules,
-	// the alerts and the silences. Nil means an installation without the
-	// built-in monitoring - a valid state, not a failure.
+	// monitoring holds the resource samples of the hosts, the alert rules, the
+	// alerts and the silences.
 	monitoring *monitoring.Store
-	// vulnerabilities hold the correlator findings, and hostPackages - the
-	// list those findings were based on. A nil correlator means an
-	// installation without vulnerability assessment.
+	// vulnerabilities hold the correlator findings, and hostPackages - the list
+	// those findings were based on.
 	vulnerabilities *vuln.Store
 	hostPackages    *vuln.PackageStore
 	feedAge         time.Duration
-	// backups hold the backup definitions and the run history. The panel
-	// does not see the backup data: it flows from the host straight to the
-	// repository.
+	// backups hold the backup definitions and the run history. The panel does not
+	// see the backup data: it flows from the host straight to the repository.
 	backups *backupstore.Store
-	// directoryWrite enables the directory changes module. Disabled by
-	// default: a customer may want the view alone, and make the changes with
-	// their own tools.
+	// directoryWrite enables the directory changes module.
 	directoryWrite bool
 	log            *slog.Logger
 
@@ -121,9 +113,8 @@ type Server struct {
 	// notificationQueue is the worker of this instance, woken when an
 	// operator puts a dead letter back in the queue.
 	notificationQueue *notify.Worker
-	// relays is the registry of the site relays; the installation of a host
-	// in an isolated site goes through one of them. Nil means an
-	// installation without relays.
+	// relays is the registry of the site relays; the installation of a host in an
+	// isolated site goes through one of them.
 	relays *relays.Store
 	// installation is what the panel knows about how the hosts reach it.
 	installation Installation
@@ -134,8 +125,8 @@ type Server struct {
 	// settings screen. Nil means a panel started without one.
 	settings *config.Effective
 	// process is what the running process resolved that the effective
-	// configuration does not carry: the retention sweeper and the switches
-	// of the gateway and the scheduler. Nil means a panel started without.
+	// configuration does not carry: the retention sweeper and the switches of the
+	// gateway and the scheduler.
 	process *Process
 }
 
@@ -175,9 +166,8 @@ type Options struct {
 	// tokens; by default they are allowed and recorded as such.
 	StepUpRefuseTokens bool
 	// CampaignPreview is the stage of the preview-binding rollout: observe
-	// records what the binding would have decided, prefer refuses an order
-	// that does not match the preview it names, and enforce additionally
-	// refuses an order placed without a preview. Empty means prefer.
+	// records what the binding would have decided, prefer refuses an order that
+	// does not match the preview it names, and enforce additionally refuses an
 	CampaignPreview campaigns.PreviewMode
 	// Metrics exposes the panel state; nil disables the endpoint.
 	Metrics *metrics.Collector
@@ -277,9 +267,8 @@ func (s *Server) Routes() http.Handler {
 	// Everything a host needs before it holds a token: the addresses, the
 	// trust, the repository and the commands for its family.
 	s.route(mux, "GET /api/v1/installation-profiles", s.handleInstallationProfile)
-	// The relays of the sites: the route of an installation for the wizard,
-	// the state of a site for the relay page. Revoking one cuts a whole site
-	// off, so it has a right of its own.
+	// The relays of the sites: the route of an installation for the wizard, the
+	// state of a site for the relay page.
 	s.route(mux, "GET /api/v1/relays", s.handleListRelays)
 	s.route(mux, "GET /api/v1/relays/{id}", s.handleGetRelay)
 	s.route(mux, "GET /api/v1/relays/{id}/buffer-history", s.handleRelayBufferHistory)
@@ -294,9 +283,9 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/actions", s.handleListActions)
 	s.route(mux, "GET /api/v1/errors", s.handleListErrors)
 	s.route(mux, "POST /api/v1/hosts/{id}/operations", s.handleCreateOperation)
-	// A maintenance window changes what the panel thinks about the host, not
-	// the host state, so it has its own entry point instead of a place in
-	// the task queue.
+	// A maintenance window changes what the panel thinks about the host, not the
+	// host state, so it has its own entry point instead of a place in the task
+	// queue.
 	s.route(mux, "POST /api/v1/hosts/{id}/maintenance", s.handleSetMaintenance)
 	// Tags describe a host in the panel; the host itself is not asked. The
 	// list is replaced whole, so the trail shows every change as one write.
@@ -304,9 +293,9 @@ func (s *Server) Routes() http.Handler {
 	// The release channel is a policy like a tag: which agent releases the
 	// host sees first.
 	s.route(mux, "PUT /api/v1/hosts/{id}/channel", s.handleSetHostChannel)
-	// The owner and the manual management address are facts the operator
-	// records about the host, like a tag; they share its permission and
-	// carry an entity tag, because two people correct the same host.
+	// The owner and the manual management address are facts the operator records
+	// about the host, like a tag; they share its permission and carry an entity
+	// tag, because two people correct the same host.
 	s.route(mux, "PUT /api/v1/hosts/{id}/owner", s.handleSetHostOwner)
 	s.route(mux, "PUT /api/v1/hosts/{id}/management-address", s.handleSetHostManagementAddress)
 	s.route(mux, "PUT /api/v1/hosts/{id}/failure-domain", s.handleSetHostFailureDomain)
@@ -322,9 +311,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/me/tokens", s.handleMyTokens)
 	// One order for the facts of many hosts, answered host by host.
 	s.route(mux, "POST /api/v1/hosts/bulk-metadata", s.handleBulkHostMetadata)
-	// Host groups: a saved answer to "which hosts", either a fixed member
-	// list or a selector resolved when read. A campaign names a group in
-	// its selector instead of repeating the list.
+	// Host groups: a saved answer to "which hosts", either a fixed member list or
+	// a selector resolved when read.
 	s.route(mux, "GET /api/v1/host-groups", s.handleListGroups)
 	// The selector preview: what a selector under construction resolves
 	// to now, for the group form; the same evaluation as the group page.
@@ -335,26 +323,22 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "DELETE /api/v1/host-groups/{id}", s.handleDeleteGroup)
 	s.route(mux, "PUT /api/v1/host-groups/{id}/members", s.handleSetGroupMembers)
 	s.route(mux, "GET /api/v1/host-groups/{id}/hosts", s.handleGroupHosts)
-	// The fleet view: one bad setting on a hundred hosts is one problem, not
-	// a hundred - and that is visible only when the findings stand side by
-	// side.
+	// The fleet view: one bad setting on a hundred hosts is one problem, not a
+	// hundred - and that is visible only when the findings stand side by side.
 	s.route(mux, "GET /api/v1/security", s.handleFleetSecurity)
-	// A fleet remediation: chosen checks on chosen hosts, every host with
-	// its own plan of steps, one approval over the whole set, carried out
-	// as a campaign. The preview shows the plans grouped; the order creates
-	// the campaign.
+	// A fleet remediation: chosen checks on chosen hosts, every host with its own
+	// plan of steps, one approval over the whole set, carried out as a campaign.
 	s.route(mux, "POST /api/v1/security/remediation/preview", s.handleFleetRemediationPreview)
 	s.route(mux, "POST /api/v1/security/remediation", s.handleFleetRemediation)
-	// Compliance with the hardening profile is computed by the panel from
-	// the facts the host reports anyway; the remediation is a plan and
-	// separate module tasks.
+	// Compliance with the hardening profile is computed by the panel from the
+	// facts the host reports anyway; the remediation is a plan and separate
+	// module tasks.
 	s.route(mux, "GET /api/v1/hosts/{id}/security", s.handleHostSecurity)
 	s.route(mux, "GET /api/v1/hosts/{id}/security/remediation", s.handleListRemediation)
 	s.route(mux, "POST /api/v1/hosts/{id}/security/remediation", s.handleHostRemediation)
 	s.route(mux, "POST /api/v1/hosts/{id}/security/remediation/{plan}/stop", s.handleStopRemediation)
-	// The secret store: a value goes in and does not come out. The only way
-	// out leads through a lease issued to a host for the duration of one
-	// task.
+	// The secret store: a value goes in and does not come out. The only way out
+	// leads through a lease issued to a host for the duration of one task.
 	s.route(mux, "GET /api/v1/budgets", s.handleListBudgets)
 	s.route(mux, "GET /api/v1/budgets/{key...}", s.handleGetBudget)
 	s.route(mux, "PUT /api/v1/budgets/{key...}", s.handleSetBudget)
@@ -424,9 +408,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/campaigns/{id}/retry", s.handleRetryCampaign)
 	s.route(mux, "POST /api/v1/campaigns/{id}/targets/{host}/skip", s.handleSkipCampaignTarget)
 	// Scheduled campaigns: an order kept for a moment or a rule of moments,
-	// placed through the door above under its author's rights; each
-	// campaign it places waits for its approval. The calendar lines up the
-	// host windows, the campaign windows and the moments of the schedules.
+	// placed through the door above under its author's rights; each campaign it
+	// places waits for its approval.
 	s.route(mux, "GET /api/v1/campaign-schedules", s.handleListCampaignSchedules)
 	s.route(mux, "POST /api/v1/campaign-schedules", s.handleCreateCampaignSchedule)
 	s.route(mux, "GET /api/v1/campaign-schedules/{id}", s.handleGetCampaignSchedule)
@@ -436,12 +419,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/maintenance/calendar", s.handleMaintenanceCalendar)
 	s.route(mux, "POST /api/v1/campaigns/{id}/advance", s.handleAdvanceCampaign)
 
-	// Desired-state policies: a draft, its publications, the verdicts the
-	// loop writes, and one evaluation on demand. The only change a policy
-	// sets in motion is a remediation campaign, which waits for its
-	// approval on the campaign routes above.
-	// The management reports: the patch status, the campaigns of a period
-	// and the compliance, as a document to print or a file to open.
+	// Desired-state policies: a draft, its publications, the verdicts the loop
+	// writes, and one evaluation on demand.
 	s.route(mux, "GET /api/v1/reports/{name}", s.handleReport)
 	s.route(mux, "GET /api/v1/policies", s.handleListPolicies)
 	s.route(mux, "POST /api/v1/policies", s.handleCreatePolicy)
@@ -455,9 +434,8 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "GET /api/v1/policies/{id}/campaigns", s.handlePolicyCampaigns)
 	s.route(mux, "GET /api/v1/hosts/{id}/policies", s.handleHostPolicies)
 
-	// Diagnostic read fan-outs: the same read on a handful of hosts at once,
-	// one ordinary job per host, merged into one answer. Not a campaign -
-	// nothing changes, nothing is approved.
+	// Diagnostic read fan-outs: the same read on a handful of hosts at once, one
+	// ordinary job per host, merged into one answer.
 	s.route(mux, "GET /api/v1/reads", s.handleListReads)
 	s.route(mux, "POST /api/v1/reads", s.handleCreateRead)
 	s.route(mux, "GET /api/v1/reads/{id}", s.handleGetRead)
@@ -525,9 +503,7 @@ func (s *Server) Routes() http.Handler {
 	s.route(mux, "POST /api/v1/identity/access/simulate", s.handleSimulateAccess)
 	s.route(mux, "GET /api/v1/hosts/{id}/access", s.handleHostAccess)
 
-	// The directory DNS: zones and records. Reading goes with the same
-	// permission as the rest of the directory; writing is a central change
-	// with its own permission and its own plan.
+	// The directory DNS: zones and records.
 	s.route(mux, "GET /api/v1/identity/dns/zones", directoryHandler(s, "dns-zones",
 		func(s *Server, r *http.Request) ([]freeipa.Zone, error) {
 			return s.directory.Zones(r.Context())
@@ -543,12 +519,9 @@ func (s *Server) Routes() http.Handler {
 
 	// Directory changes: plan, approval and execution phase by phase.
 	s.route(mux, "GET /api/v1/identity/changes", s.handleListDirectoryChanges)
-	// The one route that changes the directory's own configuration: it
-	// gives the connector the right to preserve an account and nothing
-	// else, and it is run on purpose rather than by an operation.
-	// Teams: the register of the groups a role binding may name. A team is
-	// what a tag is not - a boundary of authority with an identifier of its
-	// own, which an operator cannot edit their way across.
+	// The one route that changes the directory's own configuration: it gives the
+	// connector the right to preserve an account and nothing else, and it is run
+	// on purpose rather than by an operation.
 	s.route(mux, "GET /api/v1/teams", s.handleListTeams)
 	s.route(mux, "POST /api/v1/teams", s.handleCreateTeam)
 	s.route(mux, "GET /api/v1/teams/{id}", s.handleGetTeam)
@@ -583,12 +556,9 @@ func (s *Server) Routes() http.Handler {
 	return securityHeaders(authenticator.Middleware(mux), inlineScriptHashes(s.webRoot))
 }
 
-// securityHeaders sets what every browser is told about this origin: the
-// panel is never framed, content types are not guessed, the referrer stays
-// home, and scripts, styles and connections come only from the panel
-// itself. The one inline script in index.html applies the remembered
-// theme before the first paint; its hash is the only exception. A page
-// that needs an image from a host would have to say so here first.
+// securityHeaders sets what every browser is told about this origin: the panel
+// is never framed, content types are not guessed, the referrer stays home, and
+// scripts, styles and connections come only from the panel itself.
 func securityHeaders(next http.Handler, scriptHashes []string) http.Handler {
 	policy := "default-src 'self'; script-src 'self' " + strings.Join(scriptHashes, " ") + "; " +
 		"style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; " +
@@ -616,11 +586,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 // FleetSummary holds only the numbers that require an operator decision.
-//
-// The attention counters are computed in the database over the hosts the
-// principal may see: the dashboard must not fetch the fleet into the browser
-// to count it. A nil counter is one the database cannot answer honestly for
-// this view and is left out of the answer rather than shown as zero.
 type FleetSummary struct {
 	Hosts            int `json:"hosts"`
 	Online           int `json:"online"`
@@ -641,52 +606,39 @@ type FleetSummary struct {
 	// PendingEnrollmentRequests counts the installations ordered in the
 	// visible scopes that nobody has completed yet.
 	PendingEnrollmentRequests *int `json:"pending_enrollment_requests,omitempty"`
-	// AgentsBehindLatest counts the hosts running an agent older than the
-	// newest version seen in the visible fleet; LatestAgentVersion names
-	// that version. Both are missing when no host reports a version the
-	// panel can order.
+	// AgentsBehindLatest counts the hosts running an agent older than the newest
+	// version seen in the visible fleet; LatestAgentVersion names that version.
 	AgentsBehindLatest *int   `json:"agents_behind_latest,omitempty"`
 	LatestAgentVersion string `json:"latest_agent_version,omitempty"`
 	// AgentCertificatesExpiring counts the hosts whose newest live agent
-	// certificate runs out within CertificateWarningDays and is still
-	// valid: the agent should have renewed it by now and has not.
+	// certificate runs out within CertificateWarningDays and is still valid: the
+	// agent should have renewed it by now and has not.
 	AgentCertificatesExpiring *int `json:"agent_certificates_expiring,omitempty"`
-	// AgentCertificatesExpired counts the hosts with no valid agent
-	// certificate left, or that the gateway last turned away for an
-	// expired one. Such a host does not come back on its own: it needs an
-	// identity recovery.
+	// AgentCertificatesExpired counts the hosts with no valid agent certificate
+	// left, or that the gateway last turned away for an expired one.
 	AgentCertificatesExpired *int `json:"agent_certificates_expired,omitempty"`
 	// DegradedRelays counts the relays in trouble: those that missed their
-	// renewal - a relay certificate lives seven days and renews at a third
-	// left, so one with less than a day is a site about to be cut off - and
-	// those silent for ten minutes, which report themselves every minute
-	// while they reach the centre. A relay serves a site rather than an
-	// environment, so the counter exists only for the global view - a
-	// narrowed scope cannot say which relays are its own.
+	// renewal - a relay certificate lives seven days and renews at a third left,
+	// so one with less than a day is a site about to be cut off - and those
 	DegradedRelays *int `json:"degraded_relays,omitempty"`
-	// RelaysBufferHigh counts the relays whose buffer of results waiting
-	// for the centre is at least RelayBufferHighPercent full, by their
-	// latest heartbeat: a site about to lose results. Global view only,
-	// like DegradedRelays, and missing while no relay has reported since
-	// the panel started - a relay that said nothing has an unknown buffer,
-	// not an empty one.
+	// RelaysBufferHigh counts the relays whose buffer of results waiting for the
+	// centre is at least RelayBufferHighPercent full, by their latest heartbeat:
+	// a site about to lose results.
 	RelaysBufferHigh *int `json:"relays_buffer_high,omitempty"`
-	// DuplicateIdentities24h counts the sessions the gateway opened in the
-	// last day while the same identity was alive on a different boot - a
-	// cloned machine or a golden image with the identity left in.
+	// DuplicateIdentities24h counts the sessions the gateway opened in the last
+	// day while the same identity was alive on a different boot - a cloned
+	// machine or a golden image with the identity left in.
 	DuplicateIdentities24h *int `json:"duplicate_identities_24h,omitempty"`
-	// EnrollmentRefusals1h counts the enrollments the gateway turned away
-	// in the last hour: a burst is a token leaked or an installer pointed
-	// at the wrong panel, not a normal rate of typos.
+	// EnrollmentRefusals1h counts the enrollments the gateway turned away in the
+	// last hour: a burst is a token leaked or an installer pointed at the wrong
+	// panel, not a normal rate of typos.
 	EnrollmentRefusals1h *int `json:"enrollment_refusals_1h,omitempty"`
-	// AgentsUnsupported counts the visible hosts whose reported agent
-	// version speaks a protocol this panel does not: newer than the panel,
-	// or older than any release with a known protocol. A host that reports
-	// no version, or one that is not a version, is unknown and stays out.
+	// AgentsUnsupported counts the visible hosts whose reported agent version
+	// speaks a protocol this panel does not: newer than the panel, or older than
+	// any release with a known protocol.
 	AgentsUnsupported *int `json:"agents_unsupported,omitempty"`
-	// AlertsFiring counts the firing alerts on the visible hosts that no
-	// silence covers, and AlertsCritical those of them that are critical.
-	// A silenced alert already has an operator's decision behind it.
+	// AlertsFiring counts the firing alerts on the visible hosts that no silence
+	// covers, and AlertsCritical those of them that are critical.
 	AlertsFiring   int `json:"alerts_firing"`
 	AlertsCritical int `json:"alerts_critical"`
 	// The counters of what waits for a person, missing for a reader
@@ -694,21 +646,11 @@ type FleetSummary struct {
 	PendingDecisions
 }
 
-// RelayBufferHighPercent is the fill of a relay's buffer the dashboard
-// counts as high. The lifecycle document alerts at seventy percent: the
-// buffer still holds, and the operator still has time to find out why the
-// link to the centre is not draining it.
+// RelayBufferHighPercent is the fill of a relay's buffer the dashboard counts
+// as high.
 const RelayBufferHighPercent = 70
 
 // CertificateWarningDays is the window of the expiring-certificates tile.
-//
-// An agent certificate lives thirty days and the agent starts renewing it
-// with a third of that left - at ten days - so a window as long as the
-// lifetime would count every host the day its certificate was issued. Seven
-// days is inside the renewal window with margin: a host counted here had
-// three days of chances to renew and took none of them, which is a fault
-// worth a look rather than the normal course of rotation. The agent's
-// threshold lives with the agent; this number must stay under it.
 const CertificateWarningDays = 7
 
 func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
@@ -782,11 +724,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 	summary.PendingEnrollmentRequests = &pendingEnrollments
 
-	// The newest version is the newest the fleet reports, not a release the
-	// panel knows of: the panel has no release feed, and a made-up "latest"
-	// would tell every operator their whole fleet is behind. A version is
-	// ordered numerically part by part; a host whose version does not
-	// parse is neither behind nor current and stays out of the count.
+	// The newest version is the newest the fleet reports, not a release the panel
+	// knows of: the panel has no release feed, and a made-up "latest" would tell
+	// every operator their whole fleet is behind.
 	var behind, ordered int
 	var latest []int32
 	err = s.pool.QueryRow(ctx, `
@@ -809,12 +749,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		summary.LatestAgentVersion = joinVersion(latest)
 	}
 
-	// The certificate that counts is the host's newest live one: after a
-	// renewal the old certificate stays valid for a while and must not
-	// raise an alarm the new one has already answered. A certificate that
-	// has already run out is the other counter's: the two tiles do not
-	// count the same host twice, and one says "look soon" while the other
-	// says "act now".
+	// The certificate that counts is the host's newest live one: after a renewal
+	// the old certificate stays valid for a while and must not raise an alarm the
+	// new one has already answered.
 	var expiring, expired int
 	err = s.pool.QueryRow(ctx, `
 		with newest as (
@@ -851,10 +788,8 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		}
 		summary.DegradedRelays = &degraded
 
-		// The buffer figures live in the heartbeats the registry keeps in
-		// memory, so the relays are listed and each is asked for its latest
-		// report. Zero here is a measured zero: at least one relay reported
-		// and none is high. No relay reporting at all leaves the counter out.
+		// The buffer figures live in the heartbeats the registry keeps in memory, so
+		// the relays are listed and each is asked for its latest report.
 		if s.relays != nil {
 			listed, err := s.relays.List(ctx)
 			if err != nil {
@@ -881,13 +816,9 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The security events of the lifecycle document that the built-in
-	// monitoring cannot watch, because they are not a sample of any host:
-	// a duplicate identity is the gateway's finding, and an enrollment
-	// refusal has no host yet. Both are read from the audit trail, where
-	// the gateway writes them, over the whole fleet: neither has a scope an
-	// operator's view could be narrowed to, so they are shown to whoever
-	// may read the trail and left out for the rest.
+	// The security events of the lifecycle document that the built-in monitoring
+	// cannot watch, because they are not a sample of any host: a duplicate
+	// identity is the gateway's finding, and an enrollment refusal has no host
 	if principal.Can(authz.PermAuditRead, authz.GlobalScope) {
 		var duplicates, refusals int
 		err = s.pool.QueryRow(ctx, `
@@ -908,12 +839,7 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The protocol table lives in the binary, not in the database, so the
-	// versions are grouped in the database and judged here. An agent that
-	// announced the protocols it speaks is judged by that range, whatever
-	// its version reads; one that announced nothing by its version and the
-	// table, and only when the version parses: an agent that reports no
-	// version, or a word in its place, and no range is unknown rather than
-	// unsupported.
+	// versions are grouped in the database and judged here.
 	unsupported := 0
 	versions, err := s.pool.Query(ctx, `
 		select h.agent_version, h.agent_protocol_min, h.agent_protocol_max, count(*)
@@ -957,8 +883,8 @@ func (s *Server) handleFleetSummary(w http.ResponseWriter, r *http.Request) {
 	summary.AgentsUnsupported = &unsupported
 
 	// The firing alerts of the visible hosts, without the silenced ones: a
-	// silence is a decision already taken, and the dashboard counts what
-	// still waits for one.
+	// silence is a decision already taken, and the dashboard counts what still
+	// waits for one.
 	err = s.pool.QueryRow(ctx, `
 		select count(*), count(*) filter (where a.severity = 'critical')
 		from alerts a join hosts h on h.id = a.host_id
@@ -991,11 +917,7 @@ func joinVersion(parts []int32) string {
 
 func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	// The list is narrowed to the scope the principal may read, so that a
-	// single-environment operator does not see the whole fleet. The
-	// narrowing is part of the query rather than a filter over the fetched
-	// page: a page filtered afterwards would report a count and a cursor
-	// for rows the caller never sees, and a narrow operator could get an
-	// empty page with more to come.
+	// single-environment operator does not see the whole fleet.
 	principal, ok := s.authorizeCollection(w, r, authz.PermHostRead, "fleet")
 	if !ok {
 		return
@@ -1011,9 +933,8 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 		Owner:           query.Get("owner"),
 		IdentityDomain:  query.Get("identity_domain"),
 		Capability:      query.Get("capability"),
-		// The refusal code narrows to the hosts the gateway last turned
-		// away for that reason - the dashboard's expired-certificates
-		// tile leads here.
+		// The refusal code narrows to the hosts the gateway last turned away for
+		// that reason - the dashboard's expired-certificates tile leads here.
 		ConnectionRefusal: query.Get("connection_refusal"),
 		Scopes:            principal.ScopesFor(authz.PermHostRead),
 	}
@@ -1066,10 +987,8 @@ func (s *Server) handleListHosts(w http.ResponseWriter, r *http.Request) {
 	if !attentionFilters(w, query, &filter) {
 		return
 	}
-	// The order of the list: one of the columns the store whitelists,
-	// ascending unless the value says :desc. A column that is not one is
-	// the request's fault, named as such rather than met with the default
-	// order, which would leave a sheet sorted by nothing it asked for.
+	// The order of the list: one of the columns the store whitelists, ascending
+	// unless the value says :desc.
 	order, err := hosts.ParseSort(query.Get("sort"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_sort", err.Error())
@@ -1118,11 +1037,8 @@ var hostsCSVColumns = []string{
 	"maintenance_until", "identity_domain", "last_connection_refusal", "enrolled_at",
 }
 
-// writeHostsCSV streams the fleet list as a file: the same filter and the
-// same scope as the JSON list, every page of it, in the order of the list.
-// The rows come a page at a time from the store, so a fleet of ten
-// thousand hosts costs the panel one page of memory; the file ends with a
-// truncation row past exportRowLimit hosts.
+// writeHostsCSV streams the fleet list as a file: the same filter and the same
+// scope as the JSON list, every page of it, in the order of the list.
 func (s *Server) writeHostsCSV(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter) {
 	s.writeCSV(w, r, exportFileName("hosts", time.Now()), hostsCSVColumns, func(yield func([]string) bool) error {
 		cursor := hosts.Cursor{}
@@ -1209,10 +1125,6 @@ func (s *Server) handleHostInventory(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleHostInventoryModule returns the state of one host module.
-//
-// A tab fetches exactly what it shows, together with its own revision and
-// its own observation timestamp. Until now all the tabs shared one date, so
-// an operator looking at packages saw the freshness of something else.
 func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -1238,9 +1150,7 @@ func (s *Server) handleHostInventoryModule(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, fragment)
 }
 
-// parseTimeParam reads an optional RFC 3339 query parameter. An empty value
-// is no bound; a value that is not a timestamp is the caller's mistake and
-// must not quietly turn into "no bound".
+// parseTimeParam reads an optional RFC 3339 query parameter.
 func parseTimeParam(value string) (*time.Time, error) {
 	if value == "" {
 		return nil, nil

@@ -19,16 +19,6 @@ import (
 )
 
 // plan runs the planning phase of a campaign.
-//
-// Every host computes its own plan, because two hosts picked by the same
-// request almost never have the same diff. The phase ends with the digest of
-// the whole set of plans: that digest enters the approval fingerprint, so the
-// consent concerns those plans rather than the request alone.
-//
-// A plan is a read and changes nothing, so the phase has neither waves nor a
-// campaign concurrency limit: the hosts compute in parallel, and the resource
-// locks on the agent's side will not let a plan enter a package transaction
-// that is under way anyway.
 func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Target) error {
 	change := opspec.ActionType(campaign.ActionType)
 	// A plan that comes with the order needs no host: the panel splits the
@@ -38,9 +28,9 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 	}
 	action := opspec.PlanningAction(change)
 	if action == "" {
-		// The campaign should never have come into being; ending it is the
-		// only honest answer, because there is nothing to compute the plan
-		// with, and nothing a resume could start.
+		// The campaign should never have come into being; ending it is the only
+		// honest answer, because there is nothing to compute the plan with, and
+		// nothing a resume could start.
 		return o.failPlanning(ctx, campaign, targets,
 			"the operation cannot be planned on the hosts")
 	}
@@ -74,9 +64,8 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 				settled++
 			}
 		case TargetQueuedOffline:
-			// A host that was offline when its plan was ordered: back to the
-			// queue when it returns, closed when the deadline passes. The
-			// planning phase must not wait without end either.
+			// A host that was offline when its plan was ordered: back to the queue when
+			// it returns, closed when the deadline passes.
 			returned, err := o.recheckOfflinePlanning(ctx, campaign, target)
 			if err != nil {
 				return err
@@ -97,16 +86,8 @@ func (o *Orchestrator) plan(ctx context.Context, campaign Campaign, targets []Ta
 }
 
 // planFromOrder runs the planning phase of a campaign whose per-host plans
-// come with the order: a rename carries a mapping of host to new name, and
-// the plan of a host is its own entry.
-//
-// No task reaches a host here, and an offline host is planned all the same:
-// its name is in the order, not on the machine, and the offline policy
-// takes over at execution. A host the mapping does not name ends here as
-// ineligible with a reason - silence in the mapping is not consent to a
-// default. Every plan is recorded with its own digest and enters the plan
-// set, so the consent covers the split the operator will read, host by
-// host, rather than the mapping as one blob.
+// come with the order: a rename carries a mapping of host to new name, and the
+// plan of a host is its own entry.
 func (o *Orchestrator) planFromOrder(ctx context.Context, campaign Campaign, targets []Target) error {
 	mapping, err := opspec.ParseHostnameMapping(campaign.Payload)
 	if err != nil {
@@ -183,9 +164,8 @@ func (o *Orchestrator) orderPlan(ctx context.Context, campaign Campaign, target 
 	}
 
 	// The plan task and the host's transition commit together under the
-	// campaign's lock: a cancel that closed the planning phase a moment
-	// earlier is seen, and no plan task is left queued for a campaign
-	// that is gone.
+	// campaign's lock: a cancel that closed the planning phase a moment earlier
+	// is seen, and no plan task is left queued for a campaign that is gone.
 	jobID, err := o.launch(ctx, &campaign, target,
 		func(tx pgx.Tx) (string, error) {
 			return o.submitJobTx(ctx, tx, campaign, host, action, planPayload(action, change, payload),
@@ -231,9 +211,7 @@ func (o *Orchestrator) recheckOfflinePlanning(ctx context.Context, campaign Camp
 	return true, nil
 }
 
-// collectPlan records the result of planning on a host. It returns true once
-// the host's plan is settled - either its own or an absence that ends its
-// participation.
+// collectPlan records the result of planning on a host.
 func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 	target *Target) (bool, error) {
 	if target.PlanJobID == nil {
@@ -270,24 +248,14 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 		return true, nil
 	}
 	if reason := planRefusal(plan); reason != "" {
-		// A plan that says "this change will not enter this host" is an
-		// answer rather than a failure of the read. The host ends its
-		// participation here, before anyone approves anything - and not
-		// halfway through the fleet, when the change bounces off a host
-		// during execution.
+		// A plan that says "this change will not enter this host" is an answer
+		// rather than a failure of the read.
 		o.finishTarget(ctx, campaign, target, TargetIneligible, "plan_refused", reason)
 		return true, nil
 	}
 	if planNoChange(plan) {
-		// A plan that found nothing to do is the host's report that it
-		// already has the desired state. Nothing is approved for it and
-		// nothing runs on it: a change ordered on such a host would write
-		// the same file again for the sake of a step record. The plan is
-		// kept all the same, so the screen of plans shows what the host
-		// found, and the host ends here as a success without a mutation.
-		// The plan is written first and on its own: a pass repeated after
-		// a crash between the two finds the host still planning with its
-		// task ended, and writes the same plan again.
+		// A plan that found nothing to do is the host's report that it already has
+		// the desired state.
 		if err := o.store.SavePlan(ctx, campaign.ID, target.HostID, hash, plan); err != nil {
 			return false, err
 		}
@@ -302,10 +270,9 @@ func (o *Orchestrator) collectPlan(ctx context.Context, campaign Campaign,
 	return true, nil
 }
 
-// settleNoChange ends a host whose plan found nothing to do as no_change:
-// the plan step succeeded with that answer, and the change step is
-// recorded skipped so the strip says why the host never ran rather than
-// showing a change it never reached.
+// settleNoChange ends a host whose plan found nothing to do as no_change: the
+// plan step succeeded with that answer, and the change step is recorded
+// skipped so the strip says why the host never ran rather than showing a
 func (o *Orchestrator) settleNoChange(ctx context.Context, campaign Campaign, target *Target, hash string) {
 	why := "the host already has the desired state; the plan found nothing to change"
 	o.finishTargetSteps(ctx, campaign, target, TargetNoChange, "", why,
@@ -314,14 +281,6 @@ func (o *Orchestrator) settleNoChange(ctx context.Context, campaign Campaign, ta
 }
 
 // planNoChange reads off a plan whether it found nothing to do.
-//
-// Every planner says it in its own way: a file, a rule, a module or a
-// clock plan names its action, and no_change - or remove_absent, the
-// removal of a file that is not there - is nothing to do; a package plan
-// lists its changes, and an empty list with nothing blocked is nothing to
-// do. A plan of a shape the campaign does not know is taken as a change:
-// a host started for nothing is a wasted step, a host settled as done
-// while a change waited is a lie in the report.
 func planNoChange(plan json.RawMessage) bool {
 	if len(plan) == 0 {
 		return false
@@ -347,9 +306,9 @@ func planNoChange(plan json.RawMessage) bool {
 		return true
 	}
 	if parsed.Kind == "docker_declaration" {
-		// A host that already matches the description, and one that has
-		// nothing to remove, are both done: ordering the change there
-		// would be a step record and no change.
+		// A host that already matches the description, and one that has nothing to
+		// remove, are both done: ordering the change there would be a step record
+		// and no change.
 		switch parsed.Payload.Action {
 		case "no_change", "absent":
 			return true
@@ -375,10 +334,9 @@ func jsonListEmpty(raw json.RawMessage) bool {
 	return len(list) == 0
 }
 
-// acceptPlan records a host's plan, closes its plan step and returns the
-// host to the queue - in one transaction, because a plan on record with
-// the host still planning, or a host queued without its plan, is a state
-// the next pass cannot read.
+// acceptPlan records a host's plan, closes its plan step and returns the host
+// to the queue - in one transaction, because a plan on record with the host
+// still planning, or a host queued without its plan, is a state the next pass
 func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target *Target,
 	hash string, plan json.RawMessage, message string) error {
 	tx, err := o.store.Pool().Begin(ctx)
@@ -408,16 +366,6 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, campaign Campaign, target
 
 // planFingerprint takes the plan digest out of the result of the planning
 // task.
-//
-// The digest can come from two places, and those are not the same thing. A
-// digest computed by the host also binds the execution: a package transaction
-// and a Compose deployment carry it back, and the host refuses once it stops
-// matching the state it has now. A digest computed in the panel binds the
-// consent only: it says the operator approved exactly the diff the host
-// reported.
-//
-// We prefer the host's digest wherever it exists. A silent substitute on the
-// panel's side would promise more than it really guards.
 func (o *Orchestrator) planFingerprint(ctx context.Context, jobID string) (string, json.RawMessage, error) {
 	attempts, err := o.jobs.Attempts(ctx, jobID)
 	if err != nil {
@@ -431,10 +379,8 @@ func (o *Orchestrator) planFingerprint(ctx context.Context, jobID string) (strin
 		if fingerprint := hostFingerprint(detail); fingerprint != "" {
 			return fingerprint, detail, nil
 		}
-		// A plan without a digest of its own is still a plan: it is the
-		// description of the diff the host has just computed. We compute the
-		// digest from its content, so that the consent concerns that
-		// description rather than the mere fact that a plan came into being.
+		// A plan without a digest of its own is still a plan: it is the description
+		// of the diff the host has just computed.
 		if fingerprint := ContentFingerprint(detail); fingerprint != "" {
 			return fingerprint, detail, nil
 		}
@@ -443,10 +389,6 @@ func (o *Orchestrator) planFingerprint(ctx context.Context, jobID string) (strin
 }
 
 // hostFingerprint reads the digest computed on the host.
-//
-// Every family names it differently, because every one computes it from
-// something else: a package plan from the list of changes, a Compose plan
-// from the manifest and the image digests.
 func hostFingerprint(detail json.RawMessage) string {
 	var parsed struct {
 		PlanHash string `json:"plan_hash"`
@@ -467,12 +409,9 @@ func hostFingerprint(detail json.RawMessage) string {
 	return ""
 }
 
-// planReference reads off a package plan the header of its envelope and
-// the elements the operator approved, so the change carries them back to
-// the host: the host rebuilds the envelope with the same header, and a
-// refusal names the element that moved. A plan without a planner version
-// comes from an agent before the envelope; it binds by its digest alone,
-// as before.
+// planReference reads off a package plan the header of its envelope and the
+// elements the operator approved, so the change carries them back to the host:
+// the host rebuilds the envelope with the same header, and a refusal names the
 func planReference(plan json.RawMessage) *opspec.PlanReference {
 	if len(plan) == 0 {
 		return nil
@@ -499,10 +438,8 @@ func planReference(plan json.RawMessage) *opspec.PlanReference {
 	}
 }
 
-// PlanEnvelopeHeader is what the screen of plans and the approval record
-// read off a plan beyond its digest: who made it and until when it holds.
-// A plan without a planner version is a plan of the older shape - known,
-// but not an envelope.
+// PlanEnvelopeHeader is what the screen of plans and the approval record read
+// off a plan beyond its digest: who made it and until when it holds.
 type PlanEnvelopeHeader struct {
 	PlannerVersion string `json:"planner_version,omitempty"`
 	SchemaVersion  uint32 `json:"schema_version,omitempty"`
@@ -549,10 +486,8 @@ func ContentFingerprint(detail json.RawMessage) string {
 // campaign to the operator's decision.
 func (o *Orchestrator) finishPlanning(ctx context.Context, campaign Campaign,
 	targets []Target) error {
-	// Every host settled while planning - already in the desired state,
-	// refused by its plan, failed to plan - leaves nothing to approve and
-	// nothing to run. The campaign ends here: completed when hosts were
-	// found in the desired state, plan_failed when no host got that far.
+	// Every host settled while planning - already in the desired state, refused
+	// by its plan, failed to plan - leaves nothing to approve and nothing to run.
 	if allFinished(targets) {
 		if tallyTargets(targets).Succeeded == 0 {
 			return o.failPlanning(ctx, campaign, targets,
@@ -565,9 +500,8 @@ func (o *Orchestrator) finishPlanning(ctx context.Context, campaign Campaign,
 		return err
 	}
 	if len(plans) == 0 {
-		// Hosts still in the queue without a plan on record: a plan set
-		// nobody can approve. The guard is for a row somebody changed by
-		// hand; the engine queues no host without its plan.
+		// Hosts still in the queue without a plan on record: a plan set nobody can
+		// approve.
 		return o.failPlanning(ctx, campaign, targets,
 			"no host computed a plan of the change")
 	}
@@ -589,19 +523,12 @@ func (o *Orchestrator) finishPlanning(ctx context.Context, campaign Campaign,
 	return nil
 }
 
-// planPayload trims the payload of a change down to what the plan needs.
-//
-// A plan asks about the same target state but with a different operation
-// type. For most families the payload is the same - the plan of a file or of
-// a Compose manifest needs exactly what the change needs - and only a package
-// transaction has a separate shape: an upgrade carries the digest of the
-// approved plan, and the plan is what computes it.
+// planPayload trims the payload of a change down to what the plan needs. A
+// plan asks about the same target state but with a different operation type.
 func planPayload(action opspec.ActionType, change opspec.ActionType,
 	payload opspec.Payload) opspec.Payload {
-	// A device plan is given the name of its kind: the path /dev/... alone
-	// does not say whether the operator is checking or extending.
-	// A copy plan is given the name of its kind too: the same order serves
-	// reading the repository and planning a copy.
+	// A device plan is given the name of its kind: the path /dev/. . . alone does
+	// not say whether the operator is checking or extending.
 	if change == opspec.ActionBackupRun || change == opspec.ActionBackupVerify {
 		if payload.Backup != nil {
 			copyPayload := *payload.Backup
@@ -660,9 +587,6 @@ func planMode(change opspec.ActionType) string {
 
 // withPlan adds to the payload of a change the digest of the plan computed on
 // this host.
-//
-// Without it the campaign would send a change without a plan, and the host
-// would have nothing to compare with the state it has now.
 func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 	plan json.RawMessage) opspec.Payload {
 	switch action {
@@ -674,10 +598,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		payload.PackageChange = install
 
 	case opspec.ActionPackageRemove:
-		// A removal binds to its plan like an installation: the set the
-		// host computes again right before the transaction has to hash to
-		// the approved one. The approved set of the order stays as the
-		// second, older guard.
+		// A removal binds to its plan like an installation: the set the host
+		// computes again right before the transaction has to hash to the approved
+		// one.
 		removal := &opspec.PackageChangePayload{PlanHash: hash, Plan: planReference(plan)}
 		if payload.PackageChange != nil {
 			removal.Packages = payload.PackageChange.Packages
@@ -694,11 +617,8 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		payload.PackageUpgrade = upgrade
 
 	case opspec.ActionFileEnsure, opspec.ActionFileRemove, opspec.ActionFileRollback:
-		// A file binds to its plan differently from packages: the host does
-		// not compare the plan digest but the digest of the content it found.
-		// That is the same mechanism that protects a single write from
-		// overwriting somebody else's change - and here it gives every host
-		// its own precondition.
+		// A file binds to its plan differently from packages: the host does not
+		// compare the plan digest but the digest of the content it found.
 		if fingerprint := foundContentFingerprint(plan); fingerprint != "" && payload.File != nil {
 			file := *payload.File
 			file.ExpectedSHA256 = fingerprint
@@ -707,9 +627,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 
 	case opspec.ActionFirewallRuleEnsure, opspec.ActionFirewallRuleRemove,
 		opspec.ActionFirewallZonePort, opspec.ActionFirewallZoneService:
-		// The firewall binds by the digest of the whole ruleset the host had
-		// while planning: the change is to enter the neighbourhood the
-		// operator reviewed rather than another one.
+		// The firewall binds by the digest of the whole ruleset the host had while
+		// planning: the change is to enter the neighbourhood the operator reviewed
+		// rather than another one.
 		if fingerprint := rulesetFingerprint(plan); fingerprint != "" && payload.Firewall != nil {
 			rule := *payload.Firewall
 			rule.ExpectedHash = fingerprint
@@ -718,9 +638,8 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 
 	case opspec.ActionNetworkProfileApply, opspec.ActionNetworkRouteEnsure,
 		opspec.ActionNetworkMTUSet:
-		// The network binds by the plan digest: the host computes the plan
-		// once more before the change, and a profile changed since planning
-		// stops it.
+		// The network binds by the plan digest: the host computes the plan once more
+		// before the change, and a profile changed since planning stops it.
 		if payload.Network != nil {
 			network := *payload.Network
 			network.PlanHash = hash
@@ -755,9 +674,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionCertificateDeploy:
-		// A certificate binds by the plan digest: a file at that path changed
-		// since planning stops the deployment instead of overwriting somebody
-		// else's material.
+		// A certificate binds by the plan digest: a file at that path changed since
+		// planning stops the deployment instead of overwriting somebody else's
+		// material.
 		if payload.Certificate != nil {
 			certificate := *payload.Certificate
 			certificate.PlanHash = hash
@@ -783,9 +702,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionSSHConfigApply:
-		// sshd binds by the plan digest: the host computes the plan once more
-		// before writing, and the server or the panel's file changed since
-		// planning stops the change.
+		// sshd binds by the plan digest: the host computes the plan once more before
+		// writing, and the server or the panel's file changed since planning stops
+		// the change.
 		if payload.SSH != nil {
 			server := *payload.SSH
 			server.PlanHash = hash
@@ -812,11 +731,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionMountEnsure:
-		// A mount binds by the source resolved to a UUID on this host: mount
-		// by UUID finds the same filesystem or none, and never somebody
-		// else's disk that got the same path after a reboot. The plan
-		// digest goes with it: the fstab or the mount point moving since
-		// planning stops the operation.
+		// A mount binds by the source resolved to a UUID on this host: mount by UUID
+		// finds the same filesystem or none, and never somebody else's disk that got
+		// the same path after a reboot.
 		if payload.Storage != nil {
 			mount := *payload.Storage
 			if source := resolvedSource(plan); source != "" {
@@ -827,11 +744,8 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionComposeDeploy:
-		// The digest of a Compose plan comes from the manifest and from the
-		// image digests. A deployment without it has no basis, and one with
-		// somebody else's would reach a host that never saw that plan. The
-		// digests themselves travel too: the host binds the images it runs
-		// to what was approved, tag or no tag.
+		// The digest of a Compose plan comes from the manifest and from the image
+		// digests.
 		if payload.Compose != nil {
 			manifest := *payload.Compose
 			manifest.PlanDigest = hash
@@ -841,11 +755,7 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 
 	case opspec.ActionDockerContainerEnsure, opspec.ActionDockerNetworkEnsure,
 		opspec.ActionDockerVolumeEnsure:
-		// A declared object binds by the digest of the plan computed on
-		// this host. The description is the same everywhere; what it means
-		// is not, and the digest is what says so - a host that already
-		// runs the description and one that runs an older image get
-		// different digests for the same order.
+		// A declared object binds by the digest of the plan computed on this host.
 		if payload.DockerEnsure != nil {
 			declaration := *payload.DockerEnsure
 			declaration.PlanDigest = hash
@@ -853,11 +763,9 @@ func withPlan(action opspec.ActionType, payload opspec.Payload, hash string,
 		}
 
 	case opspec.ActionSystemHostnameSet:
-		// A rename binds to the name recorded in this host's plan: the
-		// shared payload carries no name, and the one the approver read for
-		// this host is the only one that may reach it. A plan without a
-		// name gives the host no name at all, and the host refuses the
-		// empty order rather than keeping a placeholder.
+		// A rename binds to the name recorded in this host's plan: the shared
+		// payload carries no name, and the one the approver read for this host is
+		// the only one that may reach it.
 		own := opspec.HostnamePayload{Hostname: orderedHostname(plan)}
 		if payload.Hostname != nil {
 			own.Pretty = payload.Hostname.Pretty
@@ -914,10 +822,6 @@ func orderedHostname(plan json.RawMessage) string {
 
 // foundContentFingerprint takes from the plan the digest of the file the host
 // had at the moment of planning.
-//
-// An empty result is a valid answer here: the file may not exist, and then
-// the write has nothing to expect and the host checks for itself that it is
-// still not there.
 func foundContentFingerprint(plan json.RawMessage) string {
 	if len(plan) == 0 {
 		return ""
@@ -939,10 +843,6 @@ func foundContentFingerprint(plan json.RawMessage) string {
 
 // planRefusal reads from the plan the reason the change will not enter the
 // host.
-//
-// Every planner may give one: a rule cutting off the management channel, a
-// validator rejecting the content of a file. An empty result means a workable
-// plan.
 func planRefusal(plan json.RawMessage) string {
 	if len(plan) == 0 {
 		return ""
@@ -1000,9 +900,6 @@ func rulesetFingerprint(plan json.RawMessage) string {
 }
 
 // PlanSetFingerprint computes the digest of the whole set of plans.
-//
-// The host:plan pairs are sorted, because the order they are read from the
-// database in is not a decision.
 func PlanSetFingerprint(plans map[string]string) string {
 	pairs := make([]string, 0, len(plans))
 	for host, hash := range plans {
@@ -1019,11 +916,7 @@ func orDefault(value, fallback string) string {
 	return value
 }
 
-// failPlanning ends a campaign whose planning phase left no host to run
-// on. Until now such a campaign stood paused with the reason, and a
-// resume would have started nothing: there was no plan to start. The
-// hosts still open are closed - their plan never came - and the campaign
-// ends plan_failed, with its report.
+// failPlanning ends a campaign whose planning phase left no host to run on.
 func (o *Orchestrator) failPlanning(ctx context.Context, campaign Campaign,
 	targets []Target, reason string) error {
 	counts := tallyTargets(targets)
@@ -1055,9 +948,9 @@ func (o *Orchestrator) failPlanning(ctx context.Context, campaign Campaign,
 	return nil
 }
 
-// ineligibleCount counts the hosts that answered the plan with a refusal
-// or never qualified; they are the usual reason a planning phase leaves
-// nothing to run.
+// ineligibleCount counts the hosts that answered the plan with a refusal or
+// never qualified; they are the usual reason a planning phase leaves nothing
+// to run.
 func ineligibleCount(targets []Target) int {
 	count := 0
 	for _, target := range targets {

@@ -18,51 +18,18 @@ import (
 )
 
 // The orders that travel between the instances of the control plane.
-//
-// An installation may run several control-plane instances over one
-// database, and a host is connected to exactly one of them. A request from
-// the operator lands on whichever instance the load balancer picked, and
-// most of what the panel does needs no more than that: the decision is a
-// row, and the instance holding the host reads it. The work that needs the
-// host's open stream is what does not travel - the final task of a
-// decommission, the end of a session - and until now the instance that
-// took the request looked in its own registry, found no session and
-// treated a connected host as offline.
-//
-// A command carries such an order to the instance that holds the session.
-// It is addressed to the session itself: the session host_session_owners
-// named at the moment of the decision, with the fencing token of that
-// claim. The claim is conditional on both, the way every other write on a
-// session is, so an instance that has since lost the host carries nothing
-// out, and a command whose session is gone is never carried out at all -
-// it expires, and the caller falls back to what the panel does for a host
-// nobody holds.
-//
-// The cancel of a task does not travel this way and is left as it is
-// (internal/gateway/cancel_ack.go): a cancel is not a single act but a
-// request repeated until the host answers or the operation's timeout
-// passes, and the relay that does that reads the job's own row. Folding it
-// onto a command, which is claimed once, would lose the resend and the
-// deadline sweep.
 
 // The kinds of command an instance may be asked to carry out.
 const (
-	// CommandDecommissionFinal asks for the final task, the wait for the
-	// host's readiness, the revocation and the commit - the part of the
-	// decommission that needs the session. The decision itself is already
-	// recorded: the host stands in retiring when the command is written.
+	// CommandDecommissionFinal asks for the final task, the wait for the host's
+	// readiness, the revocation and the commit - the part of the decommission
+	// that needs the session.
 	CommandDecommissionFinal = "decommission_final"
-	// CommandSessionClose asks for the host's session to be ended. A
-	// quarantine and an identity recovery end it; on the instance that
-	// holds the host that is one call, and this is the same call made from
-	// somewhere else.
+	// CommandSessionClose asks for the host's session to be ended.
 	CommandSessionClose = "session_close"
 )
 
-// KnownCommandKind says whether the word is a kind this release carries
-// out. An unknown kind is refused when it is written rather than when it
-// is read: a panel of the next release must not be able to leave an order
-// this one would silently drop.
+// KnownCommandKind says whether the word is a kind this release carries out.
 func KnownCommandKind(kind string) bool {
 	switch kind {
 	case CommandDecommissionFinal, CommandSessionClose:
@@ -89,9 +56,7 @@ const (
 )
 
 // EventCommandEnqueued is the type of the trail event a written command
-// leaves. Every instance listens for it, so an order reaches the owner
-// within a round trip; the tick of the loop carries it anyway when the
-// notification is lost.
+// leaves.
 const EventCommandEnqueued = "gateway.command_enqueued"
 
 // The timing of the queue.
@@ -99,26 +64,12 @@ const (
 	// DefaultCommandPoll is the tick of the loop: how long an order waits
 	// at most when the trail's notification did not reach its owner.
 	DefaultCommandPoll = 5 * time.Second
-	// DefaultCommandExpiry is how long an unclaimed order stands. Longer
-	// than the lease of an ownership claim, so an instance that is merely
-	// slow still takes it, and short enough that an order is never carried
-	// out long after the operator gave it.
+	// DefaultCommandExpiry is how long an unclaimed order stands.
 	DefaultCommandExpiry = 5 * time.Minute
-	// CommandWaitTimeout bounds the wait of the request that gave the
-	// order. The owner answers within a round trip when the host answers;
-	// past this the answer says the order is with the owner and has not
-	// come back, which is the truth rather than a guess either way.
-	//
-	// It is deliberately shorter than any client's patience. A minute of
-	// silence on an HTTP request is a timeout at the browser, at a proxy
-	// and in every script anybody writes against this API - and the answer
-	// that would have come is "it is with the other instance", which the
-	// caller can read from the host a second later. The order itself
-	// stands for as long as DefaultCommandExpiry whatever this is.
+	// CommandWaitTimeout bounds the wait of the request that gave the order.
 	CommandWaitTimeout = 10 * time.Second
-	// sessionCloseWait is the shorter wait of a session close: ending a
-	// session is one call on the owner, with nothing to wait for on the
-	// host.
+	// sessionCloseWait is the shorter wait of a session close: ending a session
+	// is one call on the owner, with nothing to wait for on the host.
 	sessionCloseWait = 20 * time.Second
 	// awaitPoll is how often the waiting request reads the row.
 	awaitPoll = 250 * time.Millisecond
@@ -139,9 +90,7 @@ type Command struct {
 	FencingToken uint64
 	Kind         string
 	// Payload is what the kind needs: the reason and the decisions of a
-	// decommission, the reason of a session close. It carries no secret -
-	// it is read by another instance of the same panel out of the same
-	// database, and what goes in is what the audit trail already keeps.
+	// decommission, the reason of a session close.
 	Payload   json.RawMessage
 	CreatedBy string
 	CreatedAt time.Time
@@ -158,17 +107,12 @@ type CommandResult struct {
 // Settled says whether the command has ended, whichever way.
 func (r CommandResult) Settled() bool { return r.Outcome != "" }
 
-// CommandOptions are what an instance needs to carry commands out. An
-// instance only writing commands and waiting for them needs none of it:
-// the queue is the database.
+// CommandOptions are what an instance needs to carry commands out.
 type CommandOptions struct {
 	// Registry is the sessions this instance holds. Without it the loop
 	// carries nothing out.
 	Registry *Registry
-	// Decommissioner drives the handshake of a decommission_final. Without
-	// it a command of that kind is answered as failed rather than dropped:
-	// the instance that gave the order learns at once instead of waiting
-	// out the expiry.
+	// Decommissioner drives the handshake of a decommission_final.
 	Decommissioner *Decommissioner
 	Audit          *audit.Recorder
 	Events         *events.Bus
@@ -201,11 +145,6 @@ func NewCommands(pool *pgxpool.Pool, log *slog.Logger, options CommandOptions) *
 
 // Enqueue writes a command in the caller's transaction and returns its
 // identifier.
-//
-// In the caller's transaction on purpose: the order exists because a
-// decision was taken, and a decision that does not commit must leave no
-// order behind. The trail event goes into the same transaction, so the
-// owner is woken by the same commit that made the order real.
 func (c *Commands) Enqueue(ctx context.Context, tx pgx.Tx, command Command) (string, error) {
 	if command.ExpiresAt.IsZero() {
 		command.ExpiresAt = time.Now().Add(c.options.Expiry)
@@ -213,10 +152,7 @@ func (c *Commands) Enqueue(ctx context.Context, tx pgx.Tx, command Command) (str
 	return enqueueCommand(ctx, tx, command)
 }
 
-// enqueueCommand writes the row and the trail event. It is a function
-// rather than a method so that the callers that hold a transaction and no
-// queue - the lifecycle handlers of the API - can write an order without
-// carrying the queue around.
+// enqueueCommand writes the row and the trail event.
 func enqueueCommand(ctx context.Context, tx pgx.Tx, command Command) (string, error) {
 	if command.HostID == "" || command.SessionID == "" || command.FencingToken == 0 {
 		return "", errors.New("a command names the host, the session it is for and that session's token")
@@ -252,12 +188,6 @@ func enqueueCommand(ctx context.Context, tx pgx.Tx, command Command) (string, er
 }
 
 // Await waits for the outcome of a command, or for the wait to run out.
-//
-// An unsettled answer is not an error: it says the owner has the order and
-// has not come back with it, and the caller decides what to tell the
-// operator. Nothing here assumes the order failed - assuming that, and
-// acting on it, is how two instances would end up doing the same thing to
-// one host.
 func (c *Commands) Await(ctx context.Context, id string, wait time.Duration) (CommandResult, error) {
 	deadline := time.Now().Add(wait)
 	ticker := time.NewTicker(awaitPoll)
@@ -343,23 +273,15 @@ func (c *Commands) round(ctx context.Context) {
 		return
 	}
 	for _, command := range claimed {
-		// Each order on its own goroutine: a decommission handshake waits
-		// up to two minutes for the host, and the session close of a
-		// quarantine behind it in the queue must not wait for that. The
-		// row is claimed already, so nothing claims it twice, and the
-		// number of them in flight is the number of lifecycle decisions
-		// taken at once.
+		// Each order on its own goroutine: a decommission handshake waits up to two
+		// minutes for the host, and the session close of a quarantine behind it in
+		// the queue must not wait for that.
 		go c.carry(ctx, command)
 	}
 }
 
-// claim takes the open commands whose host this instance owns under the
-// very session and token the command names.
-//
-// The condition is the whole point of the table: the ownership row is the
-// one place that says who holds the host, the token says which claim, and
-// an instance that has lost the host meanwhile matches neither. A row that
-// matches nobody stays where it is and expires.
+// claim takes the open commands whose host this instance owns under the very
+// session and token the command names.
 func (c *Commands) claim(ctx context.Context, instanceID string, limit int) ([]Command, error) {
 	rows, err := c.pool.Query(ctx, `
 		with claimable as (
@@ -407,9 +329,8 @@ func (c *Commands) claim(ctx context.Context, instanceID string, limit int) ([]C
 func (c *Commands) carry(ctx context.Context, command Command) {
 	session, held := c.options.Registry.Get(command.HostID)
 	if ok, reason := command.carriedBy(session, held, time.Now()); !ok {
-		// The claim matched the ownership row and the registry does not:
-		// the session ended between the two reads. Nothing was done to the
-		// host, and the instance that gave the order learns it as such.
+		// The claim matched the ownership row and the registry does not: the session
+		// ended between the two reads.
 		c.settle(ctx, command, CommandNoSession, map[string]any{"reason": reason})
 		return
 	}
@@ -429,9 +350,9 @@ func (c *Commands) run(ctx context.Context, command Command, session *Session) (
 		if payload.Reason == "" {
 			payload.Reason = "lifecycle"
 		}
-		// The session named by the order, not whatever the registry holds
-		// now: the two were compared a moment ago, and ending the one in
-		// hand cannot end a session that replaced it meanwhile.
+		// The session named by the order, not whatever the registry holds now: the
+		// two were compared a moment ago, and ending the one in hand cannot end a
+		// session that replaced it meanwhile.
 		session.End(payload.Reason)
 		return CommandDone, map[string]any{"session_closed": true, "reason": payload.Reason}
 	case CommandDecommissionFinal:
@@ -469,9 +390,7 @@ func (c *Commands) run(ctx context.Context, command Command, session *Session) (
 	}
 }
 
-// decommissionCommand is what a decommission_final carries. It is the
-// operator's decision, not the state of the handshake: the state lives on
-// the host's row, which the owner reads for itself.
+// decommissionCommand is what a decommission_final carries.
 type decommissionCommand struct {
 	Reason                     string         `json:"reason"`
 	Actor                      string         `json:"actor"`
@@ -480,15 +399,8 @@ type decommissionCommand struct {
 	StepUp                     map[string]any `json:"step_up,omitempty"`
 }
 
-// carriedBy says whether a claimed command may be carried out on the
-// session this instance holds for its host, and names the reason when it
-// may not.
-//
-// The claim already asked the ownership row; this asks the registry, which
-// is what the work actually runs on. Both have to agree: a session that
-// ended a moment ago still has its ownership row until the release or the
-// lease sweep, and acting on it would mean sending a final task into a
-// stream nobody reads and calling the handshake done.
+// carriedBy says whether a claimed command may be carried out on the session
+// this instance holds for its host, and names the reason when it may not.
 func (c Command) carriedBy(session *Session, held bool, now time.Time) (bool, string) {
 	switch {
 	case !now.Before(c.ExpiresAt):
@@ -541,16 +453,6 @@ func (c *Commands) settle(ctx context.Context, command Command, outcome string, 
 }
 
 // expire ends the orders that ran out of time.
-//
-// An order nobody claimed was never carried out: no instance touched the
-// host, and the answer says expired. The operator repeats the order, and
-// the panel then finds the host wherever it is - or nowhere, which is the
-// answer for a host that has left the fleet.
-//
-// An order that was claimed and never finished is a different thing: the
-// instance holding the host took it and died in the middle, and what it
-// did to the host before that is not known here. It ends as failed, which
-// is what the panel says of work whose outcome it cannot state.
 func (c *Commands) expire(ctx context.Context) {
 	unclaimed, err := c.pool.Exec(ctx, `
 		update gateway_commands
@@ -584,14 +486,12 @@ func (c *Commands) expire(ctx context.Context) {
 
 // SessionClose says where a host's session was ended.
 type SessionClose struct {
-	// Where is local for a session this instance held, remote for one
-	// ended by the instance that held it, none for a host with no live
-	// session anywhere, and unconfirmed when the owner was asked and has
-	// not answered within the wait.
+	// Where is local for a session this instance held, remote for one ended by
+	// the instance that held it, none for a host with no live session anywhere,
+	// and unconfirmed when the owner was asked and has not answered within the
 	Where string `json:"session_close"`
-	// Closed says whether a session was really ended. False under none,
-	// and false under unconfirmed: the panel does not claim what it has
-	// not been told.
+	// Closed says whether a session was really ended. False under none, and false
+	// under unconfirmed: the panel does not claim what it has not been told.
 	Closed          bool   `json:"session_closed"`
 	CommandID       string `json:"command_id,omitempty"`
 	OwnerInstanceID string `json:"owner_instance_id,omitempty"`
@@ -608,11 +508,6 @@ const (
 // PlanSessionClose decides, inside the caller's transaction, how a host's
 // session is to be ended, and writes the order when it belongs to another
 // instance.
-//
-// The order goes into the transaction of the decision - the quarantine,
-// the recovery - so that a decision that does not commit ends no session.
-// The session of this instance is not ended here: ending it before the
-// write would cut a host off for a change the panel then failed to record.
 func PlanSessionClose(ctx context.Context, tx pgx.Tx, registry *Registry, owners *jobs.Store,
 	hostID, reason, actor string) (SessionClose, error) {
 	if registry == nil {
@@ -629,9 +524,9 @@ func PlanSessionClose(ctx context.Context, tx pgx.Tx, registry *Registry, owners
 		return SessionClose{}, err
 	}
 	if !owner.Live(time.Now()) || owner.InstanceID == jobs.InstanceID() {
-		// Nobody holds the host: an unheld host is refused at its next
-		// connection by the state the decision wrote, which is what the
-		// panel has always relied on here.
+		// Nobody holds the host: an unheld host is refused at its next connection by
+		// the state the decision wrote, which is what the panel has always relied on
+		// here.
 		return SessionClose{Where: SessionCloseNone}, nil
 	}
 	commandID, err := enqueueCommand(ctx, tx, Command{
@@ -687,10 +582,8 @@ func FinishSessionClose(ctx context.Context, pool *pgxpool.Pool, registry *Regis
 	}
 }
 
-// CloseHostSession ends the session of a host wherever the installation
-// holds it, in a transaction of its own. The callers whose decision is
-// already recorded - the identity recovery, which revokes in a
-// transaction of its own - use it.
+// CloseHostSession ends the session of a host wherever the installation holds
+// it, in a transaction of its own.
 func CloseHostSession(ctx context.Context, pool *pgxpool.Pool, registry *Registry,
 	owners *jobs.Store, log *slog.Logger, hostID, reason, actor string) (SessionClose, error) {
 	if registry == nil {
@@ -715,10 +608,7 @@ func CloseHostSession(ctx context.Context, pool *pgxpool.Pool, registry *Registr
 	return FinishSessionClose(ctx, pool, registry, log, plan, hostID, reason), nil
 }
 
-// mustPayload encodes what a command carries. The payloads here are maps
-// of strings and flags built in this package, so an encoding error is not
-// a case to carry through the signatures; an empty payload is still a
-// valid order, and the kind alone says what to do.
+// mustPayload encodes what a command carries.
 func mustPayload(value map[string]any) json.RawMessage {
 	body, err := json.Marshal(value)
 	if err != nil {

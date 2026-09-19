@@ -12,16 +12,12 @@ import (
 )
 
 // The placement of a host: the site it stands in and the environment it
-// serves. Both come with the enrollment order and are corrected here when
-// the order was wrong or the machine moved. Like the owner and the tags,
-// the placement is the panel's knowledge about the host - nothing runs on
-// the machine - so it shares their permission and goes straight to the
-// row. Unlike them it is load-bearing: see handleSetHostPlacement.
+// serves.
 
 type hostPlacementRequest struct {
-	// Site and Environment are the whole placement: both are sent, the
-	// one that stays the same repeated, so the request reads as "this
-	// host stands here" rather than as a patch.
+	// Site and Environment are the whole placement: both are sent, the one that
+	// stays the same repeated, so the request reads as "this host stands here"
+	// rather than as a patch.
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
 	// Reason is why the host moves; a move is rare enough and consequential
@@ -29,32 +25,8 @@ type hostPlacementRequest struct {
 	Reason string `json:"reason"`
 }
 
-// handleSetHostPlacement moves a host to a site and an environment.
-//
-// The placement is not a label. Three things key on it and none of them
-// is re-evaluated when it changes, so the trail and the host page must
-// say when the host moved, and this comment must say what the mover is
-// expected to know:
-//
-//   - the budgets: an operation on the host loads the site:<site>:<family>
-//     tokens of the site the host is in at admission time; a transaction
-//     admitted under the old site releases its token there, and a campaign
-//     already in flight keeps the capacity it was planned with;
-//   - the group selectors: a dynamic group with a site or an environment
-//     leaf is evaluated when it is read, so the host joins and leaves such
-//     groups at the next read, not at the move - a campaign that resolved
-//     its targets before the move keeps them;
-//   - the scoping: every role binding matches on the host's site and
-//     environment, so the operators who can see and change the host
-//     change with the move; the mover must hold the permission in both
-//     the old and the new scope, so a host cannot be carried out of the
-//     scope of the person moving it, nor into a scope the mover does not
-//     hold;
-//   - the second person: the environment decides whether a change on the
-//     host requires fresh authentication and a second approval, from the
-//     next order on.
-//
-// The moment of the move is kept on the host as placement_changed_at.
+// handleSetHostPlacement moves a host to a site and an environment. The
+// placement is not a label.
 func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -89,21 +61,15 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 		s.fail(w, err)
 		return
 	}
-	// The destination is authorised like the origin: the same permission,
-	// in the scope the host is about to enter. The team travels with the
-	// host - carrying a machine to another rack does not hand it to other
-	// people - so the destination scope repeats it, and a mover authorised
-	// through the host's team is not asked again for nothing.
+	// The destination is authorised like the origin: the same permission, in the
+	// scope the host is about to enter.
 	target := authz.Scope{Site: site, Environment: environment, Team: host.TeamID}
 	if target != scope {
 		if _, ok := s.authorize(w, r, authz.PermHostTagWrite, target, "host", hostID); !ok {
 			return
 		}
 	}
-	// The trail describes the move in the vocabulary the move is in. The
-	// scope of a host in a team reads as its team, which is right for an
-	// authorisation check and says nothing about a change of site, so the
-	// two sides are rendered from the placement alone.
+	// The trail describes the move in the vocabulary the move is in.
 	placedBefore := authz.Scope{Site: host.Site, Environment: host.Environment}
 	placedAfter := authz.Scope{Site: site, Environment: environment}
 
@@ -131,9 +97,7 @@ func (s *Server) handleSetHostPlacement(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, updated)
 }
 
-// hostTeamRequest names the team a host is to belong to. An empty team
-// takes the host out of the one it is in; the field is always sent, so
-// the request reads as "this host belongs here" rather than as a patch.
+// hostTeamRequest names the team a host is to belong to.
 type hostTeamRequest struct {
 	Team string `json:"team"`
 	// Reason is why the host changes hands. A move between teams moves
@@ -142,40 +106,15 @@ type hostTeamRequest struct {
 }
 
 // handleSetHostTeam puts a host into a team or takes it out.
-//
-// This is a decision of its own and never a side effect of editing tags
-// or metadata, which is the point of the security document's chapter 8.3.
-// A tag may not be an authorisation boundary precisely because operators
-// edit tags; if a host could change hands by having a tag rewritten, the
-// boundary would be back where the document refused to put it. So the
-// team has its own route, its own permission - host.scope.write, which
-// only the platform administrator holds out of the box - its own reason
-// and its own line in the trail.
-//
-// Both sides are authorised, as a move between sites is:
-//
-//   - in the scope the host is in now, so that nobody can take a machine
-//     out of a team they have no rights over; without this check a person
-//     holding one team could pull any host in the fleet into it and so
-//     grant themselves everything;
-//   - in the scope the host is about to enter, so that nobody can hand a
-//     machine to a group they hold nothing over and lose sight of it.
-//
-// What the move changes is the same list a move between sites changes,
-// read through the team instead of the site: who may see and change the
-// host from the next request on. It re-evaluates nothing that is already
-// under way - a campaign that resolved its targets keeps them, and a task
-// already admitted runs - because a boundary moved under a running
-// operation would be a different operation.
 func (s *Server) handleSetHostTeam(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, _, ok := s.hostScope(w, r, hostID)
 	if !ok {
 		return
 	}
-	// The scope is read from the host here rather than taken from
-	// hostScope, because this route is the one that moves it: it has to
-	// see the team the host is in now whatever else a caller sends.
+	// The scope is read from the host here rather than taken from hostScope,
+	// because this route is the one that moves it: it has to see the team the
+	// host is in now whatever else a caller sends.
 	scope := hosts.ScopeOf(host)
 	actor, ok := s.authorize(w, r, authz.PermHostScopeWrite, scope, "host", hostID)
 	if !ok {
@@ -189,9 +128,9 @@ func (s *Server) handleSetHostTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	request.Team = strings.TrimSpace(request.Team)
 
-	// The destination team has to exist before it is authorised: a scope
-	// nobody can name is not a scope, and the refusal should say the team
-	// is unknown rather than that the permission is missing.
+	// The destination team has to exist before it is authorised: a scope nobody
+	// can name is not a scope, and the refusal should say the team is unknown
+	// rather than that the permission is missing.
 	var destination *hosts.Team
 	if request.Team != "" {
 		if !hosts.ValidTeamID(request.Team) {

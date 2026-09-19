@@ -19,15 +19,12 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/schedules"
 )
 
-// The places a managed entry lives in. They are variables so a test can
-// point them at a temporary directory; the helper never changes them while
-// it runs.
+// The places a managed entry lives in. They are variables so a test can point
+// them at a temporary directory; the helper never changes them while it runs.
 var (
 	cronDir = schedules.CronDDir
 	unitDir = schedules.SystemdUnitDir
-	// systemdMarker exists only under a running systemd. It is the same
-	// fact the agent's capability detection reports, so the host writes
-	// timers exactly where it announced it could.
+	// systemdMarker exists only under a running systemd.
 	systemdMarker = "/run/systemd/system"
 )
 
@@ -43,9 +40,8 @@ const (
 	// ErrorRootGrantRequired means an entry for root ordered without the
 	// grant that allows it.
 	ErrorRootGrantRequired = "root_grant_required"
-	// ErrorUnitNotManaged means a unit file under the name of a managed
-	// timer that does not carry the panel's marker. It belongs to the host
-	// administrator and the panel neither rewrites nor removes it.
+	// ErrorUnitNotManaged means a unit file under the name of a managed timer
+	// that does not carry the panel's marker.
 	ErrorUnitNotManaged = "unit_not_managed"
 	// ErrorCalendarUnsupported means an expression that cannot become a
 	// timer, because cron and systemd disagree on what it means.
@@ -53,16 +49,11 @@ const (
 )
 
 // PermissionScheduleRootExec is the grant a root entry needs on top of the
-// right to write schedules. The name repeats the panel's permission: the
-// grant travels in the capability under the same name it has in the role.
+// right to write schedules.
 const PermissionScheduleRootExec = "schedule.root.exec"
 
-// grantsOf returns the grants the capability of a request carries, or nil
-// when the request has no capability. A capability without grants is an
-// empty list, not nil: it is present and it grants nothing, and a request
-// with a capability is judged by what the capability says. The grants are
-// under the panel's signature, which the server verified before any
-// handler ran, so they are the panel's word and not the agent's.
+// grantsOf returns the grants the capability of a request carries, or nil when
+// the request has no capability.
 func grantsOf(request *helperv1.HelperRequest) []string {
 	capability := request.GetCapability()
 	if capability == nil {
@@ -86,13 +77,6 @@ func hasGrant(grants []string, wanted string) bool {
 }
 
 // checkScheduleUser judges the account an entry is to run as.
-//
-// This is the ValidateSchedule of the remediation document: the name has to
-// fit the user field of a cron line, the account has to exist on this host
-// under exactly that name, and root needs its grant. The lookup result is
-// compared with the name asked for, because a resolver may answer a lookup
-// of one spelling with an account of another - and the line would carry
-// the spelling, not the account.
 func checkScheduleUser(name string, grants []string) *helperv1.HelperResponse {
 	if name == "" {
 		return reject(ErrorUserRequired, "the entry names no user; the account it runs as has to be named, root is not a default")
@@ -129,18 +113,12 @@ func checkScheduleCommand(command []string) *helperv1.HelperResponse {
 	return nil
 }
 
-// applySchedule handles recurring jobs.
-//
-// Managed entries have their own files in /etc/cron.d and stable identifiers.
-// An entry found on the host belongs to the host administrator: the panel sees
-// it but does not overwrite it without an explicit adoption - otherwise the
-// first operation from the panel would erase work nobody entered into the
-// panel.
+// applySchedule handles recurring jobs. Managed entries have their own files
+// in /etc/cron.
 func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
 	// Cron entries and systemd units share the same host resource: a concurrent
-	// write of two entries can leave the directory in an intermediate state. A
-	// read takes no guard.
+	// write of two entries can leave the directory in an intermediate state.
 	guard := GuardUnits
 	if action.GetOperation() == helperv1.ScheduleRequest_OPERATION_READ {
 		guard = ""
@@ -174,17 +152,11 @@ func (s *Server) applySchedule(ctx context.Context, request *helperv1.HelperRequ
 }
 
 // ensureEntry creates or updates a managed entry.
-//
-// The mechanism is decided first, because the rest of the work differs: a
-// cron entry is one file in a directory cron reads, a timer is a pair of
-// unit files and a word with systemd. Everything before that decision -
-// the account, the command - is judged the same way for both, because the
-// operator writes the same order either way.
 func (s *Server) ensureEntry(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
-	// The account and the command are judged before anything on the host is
-	// read: an order the line composer would turn into something else is
-	// refused with its own code, not with a write error.
+	// The account and the command are judged before anything on the host is read:
+	// an order the line composer would turn into something else is refused with
+	// its own code, not with a write error.
 	if refusal := checkScheduleUser(action.GetUser(), grantsOf(request)); refusal != nil {
 		return refusal
 	}
@@ -214,15 +186,6 @@ func (s *Server) ensureEntry(ctx context.Context, request *helperv1.HelperReques
 }
 
 // chooseMechanism decides which mechanism a managed entry is written with.
-//
-// The decision is the one the agent already announces: the module is
-// available where the host has /etc/cron.d or systemd, and each of the two
-// carries its own kind of entry. An order that names a kind gets that kind
-// or a refusal - never the other one quietly - and an order that leaves the
-// choice to the host takes cron first, because there one entry is one file
-// and nothing has to be reloaded. The chosen mechanism travels back in the
-// message, so the operator reads what was written and not merely that
-// something was.
 func chooseMechanism(kind string) (string, *helperv1.HelperResponse) {
 	cron := isDirectory(cronDir)
 	timers := isDirectory(systemdMarker)
@@ -234,9 +197,8 @@ func chooseMechanism(kind string) (string, *helperv1.HelperResponse) {
 		}
 		return schedules.KindTimer, nil
 	case "", schedules.KindCron:
-		// An order without a kind is a cron entry, which is what every
-		// order meant before timers could be written. A host without the
-		// directory is told what it does have.
+		// An order without a kind is a cron entry, which is what every order meant
+		// before timers could be written.
 		if !cron {
 			message := "this host has no " + cronDir + " directory, so a managed entry has nowhere to be written"
 			if timers {
@@ -266,16 +228,8 @@ func isDirectory(path string) bool {
 
 // ensureTimer writes the pair of unit files of a managed timer and tells
 // systemd about them.
-//
-// A timer the panel did not write is never changed: the marker in the file
-// decides, exactly as the file name in /etc/cron.d decides there. An order
-// that would change nothing changes nothing - the units are not rewritten
-// and systemd is not reloaded - so ordering the same entry twice is one
-// entry and one reload.
 func (s *Server) ensureTimer(ctx context.Context, entry schedules.Schedule) *helperv1.HelperResponse {
-	// One entry is one job. An identifier already held by the other
-	// mechanism is not quietly moved: the two files would both run the
-	// command, and the operator ordered it once.
+	// One entry is one job.
 	if _, err := os.Stat(schedules.EntryPath(cronDir, entry.ID)); err == nil {
 		return reject(ErrorUnsupported, "the entry "+entry.ID+" exists on this host as a cron entry ("+
 			schedules.EntryPath(cronDir, entry.ID)+"); remove it before writing it as a timer")
@@ -299,9 +253,8 @@ func (s *Server) ensureTimer(ctx context.Context, entry schedules.Schedule) *hel
 	if err := writeUnitPair(plan); err != nil {
 		return reject(ErrorExecFailed, err.Error())
 	}
-	// systemd reads unit files when it is told to, not when they change: a
-	// timer enabled before the reload would be the previous content of the
-	// file.
+	// systemd reads unit files when it is told to, not when they change: a timer
+	// enabled before the reload would be the previous content of the file.
 	if output, err := toolOutput(ctx, systemctlPath, "daemon-reload"); err != nil {
 		return reject(ErrorExecFailed, "reloading systemd: "+toolFailure(err, output))
 	}
@@ -315,9 +268,9 @@ func (s *Server) ensureTimer(ctx context.Context, entry schedules.Schedule) *hel
 // ensureCron writes a managed entry as a file in /etc/cron.d.
 func (s *Server) ensureCron(ctx context.Context, action *helperv1.ScheduleRequest,
 	entry schedules.Schedule) *helperv1.HelperResponse {
-	// The same rule as the other way round: an identifier already held by
-	// a timer of ours is not quietly turned into a cron entry, because for
-	// a while both would run the command.
+	// The same rule as the other way round: an identifier already held by a timer
+	// of ours is not quietly turned into a cron entry, because for a while both
+	// would run the command.
 	if present, owned, path := schedules.TimerOwnership(unitDir, entry.ID); present && owned {
 		return reject(ErrorUnsupported, "the entry "+entry.ID+" exists on this host as a timer ("+path+
 			"); remove it before writing it as a cron entry")
@@ -365,9 +318,9 @@ func (s *Server) toggleEntry(ctx context.Context, action *helperv1.ScheduleReque
 		state = "enabled"
 	}
 	if current.Kind == schedules.KindTimer {
-		// A timer is switched off with systemd and not by rewriting its
-		// file: the units stay exactly as they are, which is what makes
-		// switching it back on the same entry and not a new one.
+		// A timer is switched off with systemd and not by rewriting its file: the
+		// units stay exactly as they are, which is what makes switching it back on
+		// the same entry and not a new one.
 		unit := schedules.TimerUnitName(current.ID)
 		verb := "disable"
 		if current.Enabled {
@@ -384,14 +337,8 @@ func (s *Server) toggleEntry(ctx context.Context, action *helperv1.ScheduleReque
 	return scheduleResponse(s.readSchedules(ctx), "the entry "+current.ID+" was "+state)
 }
 
-// removeEntry takes a managed entry off the host, whichever mechanism it
-// was written with.
-//
-// The order names the entry, not the way it was written, so both places
-// are handled: the cron file is deleted, and a unit pair of ours is
-// stopped, deleted and forgotten by systemd. A unit without our marker is
-// left alone and named in the refusal - the panel removes only what it
-// wrote.
+// removeEntry takes a managed entry off the host, whichever mechanism it was
+// written with.
 func (s *Server) removeEntry(ctx context.Context, id string) *helperv1.HelperResponse {
 	if !schedules.ValidIdentifier(id) {
 		return reject(ErrorMalformed, fmt.Sprintf("invalid entry identifier %q", id))
@@ -427,12 +374,6 @@ func (s *Server) removeEntry(ctx context.Context, id string) *helperv1.HelperRes
 }
 
 // writeUnitPair puts the two unit files of a managed timer in place.
-//
-// The write goes the way the files module writes a managed file: into an
-// already-opened directory, under a name that cannot be a symlink somebody
-// planted in advance, and into place with a rename that either happened or
-// did not. systemd reads the directory whenever it is told to, so a file
-// written in place could be read half-way - with a timer nobody ordered.
 func writeUnitPair(plan schedules.TimerPlan) error {
 	dir := filepath.Dir(plan.Timer.Path)
 	dirfd, err := unix.Open(dir, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
@@ -445,9 +386,8 @@ func writeUnitPair(plan schedules.TimerPlan) error {
 			return err
 		}
 	}
-	// The directory entries themselves have to survive a power cut: a unit
-	// file that is empty after a reboot is a job that quietly stopped
-	// running.
+	// The directory entries themselves have to survive a power cut: a unit file
+	// that is empty after a reboot is a job that quietly stopped running.
 	_ = unix.Fsync(dirfd)
 	return nil
 }
@@ -486,10 +426,6 @@ func toolFailure(err error, output string) string {
 }
 
 // runNow executes the command of an entry outside its schedule.
-//
-// Only the command of a managed entry is run: an entry found on the host is
-// sometimes a shell line the panel does not split into arguments, and running
-// it through a shell would be exactly what this module avoids.
 func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *helperv1.HelperResponse {
 	entry := s.managedEntry(ctx, action.GetId())
 	if entry == nil {
@@ -514,14 +450,8 @@ func (s *Server) runNow(ctx context.Context, action *helperv1.ScheduleRequest) *
 		"the entry "+entry.ID+" was run; "+message)
 }
 
-// entryCommand assembles the execution of the entry's command.
-//
-// Running it by hand is to give the same result as running it from the
-// schedule. The helper runs with PrivateTmp=yes, so a command started as its
-// child process sees a different /tmp than the same command started by cron -
-// and then "Run now" would check something other than what happens at night. A
-// transient systemd unit goes back to the host namespaces and, on the way,
-// gives the execution its own control group and a trace in the journal.
+// entryCommand assembles the execution of the entry's command. Running it by
+// hand is to give the same result as running it from the schedule.
 func entryCommand(ctx context.Context, entry *schedules.Schedule) *exec.Cmd {
 	environment := []string{"LC_ALL=C", "LANG=C", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root"}
 	systemdRunPath, err := exec.LookPath("systemd-run")
@@ -550,19 +480,16 @@ func (s *Server) readSchedules(ctx context.Context) schedules.Snapshot {
 	now := time.Now()
 	snapshot := schedules.Snapshot{
 		Schedules: schedules.ReadCron(schedules.CrontabPath, cronDir, now),
-		// The zone comes from the host configuration and not from the name
-		// time.Local: the latter is always "Local" and tells the operator
-		// nothing.
+		// The zone comes from the host configuration and not from the name time.
+		// Local: the latter is always "Local" and tells the operator nothing.
 		Timezone: schedules.HostTimezone(),
 	}
 	timers := schedules.ReadTimers(
 		systemctlOutput(ctx, "list-timers", "--all", "--no-pager", "--no-legend"),
 		systemctlOutput(ctx, "list-units", "--type=timer", "--all", "--no-pager", "--no-legend", "--plain"),
 		systemctlOutput(ctx, "show", "--property=Id", "--property=TimersCalendar", "*.timer"))
-	// The timers the panel wrote are read from their files: they say which
-	// entry a unit is, what it runs and as whom, which systemd's lists do
-	// not. systemd is still asked whether they are installed, because that
-	// is its answer to give.
+	// The timers the panel wrote are read from their files: they say which entry
+	// a unit is, what it runs and as whom, which systemd's lists do not.
 	managed := schedules.ReadManagedTimers(unitDir)
 	timers = schedules.MergeManagedTimers(timers, managed, s.unitFileStates(ctx, managed))
 	attachTimerRuns(ctx, timers)
@@ -570,13 +497,7 @@ func (s *Server) readSchedules(ctx context.Context) schedules.Snapshot {
 	return snapshot
 }
 
-// unitFileStates asks systemd whether the timers of the panel are
-// installed.
-//
-// The units are named one by one rather than by a pattern: a pattern
-// matches what systemd has loaded, and a disabled timer usually is not
-// loaded - it would disappear from the list exactly when the operator
-// wants to switch it back on.
+// unitFileStates asks systemd whether the timers of the panel are installed.
 func (s *Server) unitFileStates(ctx context.Context, entries []schedules.Schedule) map[string]string {
 	if len(entries) == 0 {
 		return nil
@@ -588,18 +509,13 @@ func (s *Server) unitFileStates(ctx context.Context, entries []schedules.Schedul
 	return parseUnitFileStates(systemctlOutput(ctx, arguments...))
 }
 
-// unitFileState asks about one unit. An unknown state is an empty string:
-// a unit systemd could not answer for is not an enabled one, and it is not
-// a disabled one either.
+// unitFileState asks about one unit.
 func (s *Server) unitFileState(ctx context.Context, unit string) string {
 	return parseUnitFileStates(systemctlOutput(ctx,
 		"show", "--property=Id", "--property=UnitFileState", unit))[unit]
 }
 
-// parseUnitFileStates reads the records of "systemctl show". Records are
-// separated by an empty line and the order of the properties inside a
-// record is not the order they were asked in, so a record is read whole
-// before it is filed.
+// parseUnitFileStates reads the records of "systemctl show".
 func parseUnitFileStates(output string) map[string]string {
 	states := map[string]string{}
 	for _, record := range strings.Split(output, "\n\n") {
@@ -622,12 +538,6 @@ func parseUnitFileStates(output string) map[string]string {
 
 // attachTimerRuns adds the coming runs of the timers with a calendar
 // expression.
-//
-// systemd computes them itself: its calendar language is richer than
-// cron's and the module does not reimplement it. One call covers every
-// expression, so a host with many timers does not start a process for
-// each; a timer whose expression the tool refuses simply keeps the single
-// date the timer list gave it.
 func attachTimerRuns(ctx context.Context, timers []schedules.Schedule) {
 	var specs []string
 	seen := map[string]bool{}
@@ -644,9 +554,8 @@ func attachTimerRuns(ctx context.Context, timers []schedules.Schedule) {
 	}
 	runs := calendarRuns(ctx, specs)
 	if len(runs) < len(specs) {
-		// The tool stops at the first specification it refuses and the ones
-		// after it go unanswered. They are asked one by one, so a single
-		// odd timer does not hide the runs of every timer listed behind it.
+		// The tool stops at the first specification it refuses and the ones after it
+		// go unanswered.
 		for _, spec := range specs {
 			if _, answered := runs[spec]; answered {
 				continue
@@ -668,18 +577,15 @@ func attachTimerRuns(ctx context.Context, timers []schedules.Schedule) {
 		}
 		timers[i].NextRuns = dates
 		if timers[i].NextRun == nil {
-			// A timer systemd has not loaded is missing from the timer
-			// list and so has no elapse time there; its calendar still
-			// says when it fires.
+			// A timer systemd has not loaded is missing from the timer list and so has
+			// no elapse time there; its calendar still says when it fires.
 			first := dates[0]
 			timers[i].NextRun = &first
 		}
 	}
 }
 
-// timerCalendar is the expression systemd computes the runs from. A timer
-// the panel wrote carries the cron expression it was ordered with as well,
-// and systemd knows nothing of that language.
+// timerCalendar is the expression systemd computes the runs from.
 func timerCalendar(entry schedules.Schedule) string {
 	if entry.Calendar != "" {
 		return entry.Calendar
@@ -687,9 +593,7 @@ func timerCalendar(entry schedules.Schedule) string {
 	return entry.Expression
 }
 
-// calendarRuns asks systemd for the coming runs of the given
-// specifications. A bad specification makes the tool exit non-zero after
-// printing the good ones before it; the output is read either way.
+// calendarRuns asks systemd for the coming runs of the given specifications.
 func calendarRuns(ctx context.Context, specs []string) map[string][]time.Time {
 	arguments := append([]string{"calendar", "--iterations=" + strconv.Itoa(schedules.PreviewRuns)}, specs...)
 	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-analyze", arguments...)
@@ -710,9 +614,8 @@ func (s *Server) managedEntry(ctx context.Context, id string) *schedules.Schedul
 
 func (s *Server) foundEntry(ctx context.Context, id string) *schedules.Schedule {
 	for _, entry := range s.readSchedules(ctx).Schedules {
-		// A collision is a file with exactly this name in /etc/cron.d or an
-		// entry in /etc/crontab with the same name. A comparison by a fragment
-		// of the path would take "backup" for a collision with "db-backup-old".
+		// A collision is a file with exactly this name in /etc/cron. d or an entry
+		// in /etc/crontab with the same name.
 		if entry.Source != schedules.SourceManaged && entry.Kind == schedules.KindCron &&
 			filepath.Base(entry.Path) == id {
 			found := entry

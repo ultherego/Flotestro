@@ -1,9 +1,5 @@
-// Package opspec defines the typed operations shared by the control plane,
-// the agent and the helper. Outside the standard library it reaches only for
-// the module packages, and only for their validation: thanks to that an order
-// rejected on the host is rejected already when it is placed, by the same code
-// and with the same reason. The plan hash is computed by one implementation on
-// both sides.
+// Package opspec defines the typed operations shared by the control plane, the
+// agent and the helper.
 package opspec
 
 import (
@@ -50,9 +46,9 @@ const (
 	ActionUnitStop    ActionType = "unit.stop"
 	ActionUnitRestart ActionType = "unit.restart"
 	ActionUnitReload  ActionType = "unit.reload"
-	// Clearing the failed state of a unit touches no process: it changes what
-	// the host says about the unit, so the next failure is told from the one
-	// the operator has already seen.
+	// Clearing the failed state of a unit touches no process: it changes what the
+	// host says about the unit, so the next failure is told from the one the
+	// operator has already seen.
 	ActionUnitResetFailed ActionType = "unit.reset_failed"
 	ActionReadJournal     ActionType = "journal.read"
 	// Reading a log file is limited by the host administrator's allowlist.
@@ -61,9 +57,8 @@ const (
 	// above: by time, by rate and by the number of lines.
 	ActionFollowJournal ActionType = "journal.follow"
 
-	// Process diagnostics. A snapshot is taken on request and has an upper
-	// bound; a continuous stream of metrics belongs to Prometheus, not to the
-	// panel.
+	// Process diagnostics. A snapshot is taken on request and has an upper bound;
+	// a continuous stream of metrics belongs to Prometheus, not to the panel.
 	ActionProcessList   ActionType = "process.list"
 	ActionProcessSignal ActionType = "process.signal"
 
@@ -74,12 +69,7 @@ const (
 	ActionNetworkRouteEnsure  ActionType = "network.route.ensure"
 	ActionNetworkMTUSet       ActionType = "network.mtu.set"
 	ActionNetworkRollback     ActionType = "network.rollback"
-	// A layered interface: a bond, a bridge or a VLAN. It is a different
-	// change from an address - it says what an interface is made of, not
-	// what it carries - and it has refusals of its own: a member another
-	// layer owns, a bond of one member, a VLAN on a parent that is not
-	// there, a bridge that would swallow the interface the panel talks
-	// over.
+	// A layered interface: a bond, a bridge or a VLAN.
 	ActionNetworkLinkApply  ActionType = "network.link.apply"
 	ActionNetworkLinkRemove ActionType = "network.link.remove"
 
@@ -102,23 +92,18 @@ const (
 	ActionFilesystemResize ActionType = "filesystem.resize"
 	ActionFilesystemCreate ActionType = "filesystem.create"
 	ActionDiskWipe         ActionType = "disk.wipe"
-	// ActionStorageSmartRead reads the SMART health and attributes of one
-	// device. A virtual disk reports unsupported with the tool's own
-	// message; no number is invented.
+	// ActionStorageSmartRead reads the SMART health and attributes of one device.
 	ActionStorageSmartRead ActionType = "storage.smart.read"
 
 	// Software RAID. The panel manages the members of an array that exists:
-	// marking one bad, taking it out and putting a new one in. Creating an
-	// array and destroying one are deliberately absent - that is a decision
-	// about a machine's whole disk layout, taken when the machine is built,
-	// not an operation run over a running fleet.
+	// marking one bad, taking it out and putting a new one in.
 	ActionRAIDMemberFail   ActionType = "raid.member.fail"
 	ActionRAIDMemberRemove ActionType = "raid.member.remove"
 	ActionRAIDMemberAdd    ActionType = "raid.member.add"
 
-	// LVM beyond growing a volume: a new volume in an existing group, a new
-	// disk under a group, a snapshot and its removal, and the removal of a
-	// volume, which deletes what was on it.
+	// LVM beyond growing a volume: a new volume in an existing group, a new disk
+	// under a group, a snapshot and its removal, and the removal of a volume,
+	// which deletes what was on it.
 	ActionLVMVolumeCreate   ActionType = "lvm.volume.create"
 	ActionLVMVolumeRemove   ActionType = "lvm.volume.remove"
 	ActionLVMGroupExtend    ActionType = "lvm.group.extend"
@@ -129,47 +114,34 @@ const (
 	ActionSSHConfigApply   ActionType = "ssh.config.apply"
 	ActionSSHHostKeyRotate ActionType = "ssh.hostkey.rotate"
 
-	// Security. A scan collects facts from the host; the compliance verdict
-	// is formed in the panel, because that is where the checks are
-	// versioned. Remediation is not a separate host operation - each one maps
-	// onto a typed operation of the module responsible for that thing.
+	// Security. A scan collects facts from the host; the compliance verdict is
+	// formed in the panel, because that is where the checks are versioned.
 	ActionSecurityScan   ActionType = "security.scan"
 	ActionSELinuxModeSet ActionType = "selinux.mode.set"
-	// A fleet remediation is the composite of the module operations that
-	// remove the chosen findings, run host by host as a campaign. It is
-	// never delivered to a host as one task: the campaign records a plan of
-	// typed steps per host, and every step goes out as the task of its own
-	// module, with that module's permission, risk and lock.
+	// A fleet remediation is the composite of the module operations that remove
+	// the chosen findings, run host by host as a campaign.
 	ActionSecurityRemediate ActionType = "security.remediate"
-	// Reloading the audit rules is a separate operation, because a rule that
-	// is written and not loaded records nothing, and the auditd unit on some
+	// Reloading the audit rules is a separate operation, because a rule that is
+	// written and not loaded records nothing, and the auditd unit on some
 	// distributions refuses a manual restart.
 	ActionAuditRulesReload ActionType = "security.audit.reload"
 
-	// Certificates. The scan looks only at the files it is pointed at: a
-	// panel that walks the whole filesystem finds the trust store instead of
-	// service certificates. The private key does not travel in the order -
-	// the payload carries a reference to the store, and the host reaches for
-	// the value only at execution time.
+	// Certificates.
 	ActionCertificateScan ActionType = "certificate.scan"
 	ActionCertificatePlan ActionType = "certificate.plan"
-	// Rotating the authority is a sequence of states, not one change: the
-	// host first trusts the old and the new authority at once, then gets a
-	// new certificate, and the old authority disappears at the end - and only
-	// where nothing is signed by it any more.
+	// Rotating the authority is a sequence of states, not one change: the host
+	// first trusts the old and the new authority at once, then gets a new
+	// certificate, and the old authority disappears at the end - and only where
 	ActionCertificateTrustPlan   ActionType = "certificate.trust.plan"
 	ActionCertificateTrustEnsure ActionType = "certificate.trust.ensure"
 	ActionCertificateTrustRemove ActionType = "certificate.trust.remove"
 	ActionCertificateDeploy      ActionType = "certificate.deploy"
-	// A renewal is a separate operation, because the host does it with its
-	// own daemon: the panel asks certmonger for a new certificate instead of
-	// handing it the content.
+	// A renewal is a separate operation, because the host does it with its own
+	// daemon: the panel asks certmonger for a new certificate instead of handing
+	// it the content.
 	ActionCertificateRenew ActionType = "certificate.renew"
 
-	// Time and synchronisation. The test changes nothing on the host, but it
-	// leaves it with a query to the time server - and it is the server that
-	// answers whether the new source works at all, before the panel takes a
-	// working one away from the host.
+	// Time and synchronisation.
 	ActionTimeSyncTest    ActionType = "time.sync.test"
 	ActionTimePlan        ActionType = "time.plan"
 	ActionTimeConfigApply ActionType = "time.config.apply"
@@ -193,17 +165,14 @@ const (
 	ActionScheduleRunNow  ActionType = "schedule.run_now"
 	ActionSchedulePreview ActionType = "schedule.preview"
 
-	// The full package list is fetched on request rather than in every
-	// inventory cycle: it is a few hundred kilobytes per host and changes
-	// rarely. The inventory carries the digest of the list itself, so the
-	// panel knows when its copy stopped describing the host.
+	// The full package list is fetched on request rather than in every inventory
+	// cycle: it is a few hundred kilobytes per host and changes rarely.
 	ActionPackageList ActionType = "packages.list"
 
 	ActionPackagePlan    ActionType = "packages.plan"
 	ActionPackageUpgrade ActionType = "packages.upgrade"
-	// A repair unblocks package operations on the host: it sets the
-	// operator's answers to configuration questions and finishes configuring
-	// the packages.
+	// A repair unblocks package operations on the host: it sets the operator's
+	// answers to configuration questions and finishes configuring the packages.
 	ActionPackageRepair ActionType = "packages.repair"
 
 	// The full package lifecycle. An install adds software, a removal takes
@@ -211,28 +180,12 @@ const (
 	ActionPackageInstall ActionType = "packages.install"
 	ActionPackageRemove  ActionType = "packages.remove"
 	ActionPackageHoldSet ActionType = "packages.hold.set"
-	// Package sources. Adding a source installs nothing today, but it decides
-	// whose packages the host will accept tomorrow - together with their
-	// scripts, which run as root. Hence the critical risk and its own
-	// permission.
+	// Package sources.
 	ActionRepositorySet ActionType = "packages.repository.set"
-	// ActionAgentUpgrade replaces the agent itself. An ordinary package
-	// upgrade deliberately skips flotestro-agent - otherwise the host would
-	// cut itself off from management in the middle of a transaction it is
-	// running. This operation does it knowingly and is settled differently:
-	// success is the host coming back with the expected version, not the exit
-	// code of the package manager.
+	// ActionAgentUpgrade replaces the agent itself.
 	ActionAgentUpgrade ActionType = "agent.upgrade"
 
-	// Backup. The data does not flow through the panel: the host talks to the
-	// repository directly, and the panel sees metadata - when a copy
-	// succeeded, how much room it takes and what it covers. A restore is a
-	// separate operation of the highest risk, because it unpacks old state
-	// onto a running system.
-	// A probe answers the question central monitoring cannot ask: what does
-	// this host see. Silencing an alert is not an operation on the host and
-	// does not go this way - it changes what the alerting system thinks about
-	// the host, not the host itself.
+	// Backup.
 	ActionMonitoringProbe ActionType = "monitoring.probe.run"
 
 	ActionBackupPlan    ActionType = "backup.plan"
@@ -241,21 +194,16 @@ const (
 	ActionBackupRestore ActionType = "backup.restore"
 
 	ActionSystemReboot ActionType = "system.reboot"
-	// Shutting a host down is an operation the panel cannot bring it back
-	// from: powering it on needs out-of-band access. That is why it is a
-	// separate operation with its own permission rather than a mode of
-	// reboot.
+	// Shutting a host down is an operation the panel cannot bring it back from:
+	// powering it on needs out-of-band access.
 	ActionSystemShutdown ActionType = "system.shutdown"
-	// Renaming a host changes its identity towards everything that knows it
-	// by name: DNS, Kerberos, the certificates of its services, the entries
-	// of other hosts. The panel knows it by identifier, so the agent's own
-	// certificate survives; everything else is checked before the change and
-	// reported, never guessed.
+	// Renaming a host changes its identity towards everything that knows it by
+	// name: DNS, Kerberos, the certificates of its services, the entries of other
+	// hosts.
 	ActionSystemHostnameSet ActionType = "system.hostname.set"
 	ActionUnitStatus        ActionType = "unit.status"
-	// Enabling and masking change what the host will do after a reboot, not
-	// its state now. A unit that is enabled and a unit that is running are
-	// two different things, so there are two operations.
+	// Enabling and masking change what the host will do after a reboot, not its
+	// state now.
 	ActionUnitEnableSet ActionType = "unit.enable.set"
 	ActionUnitMaskSet   ActionType = "unit.mask.set"
 
@@ -264,28 +212,23 @@ const (
 	// Leaving the domain is a decision of its own, not the join undone: it
 	// cuts every directory user off the host at once.
 	ActionDomainLeave ActionType = "identity.host.leave"
-	// Renewing a service keytab is the host's half of a rotation: the
-	// directory has retired the old keytab of the principal, and the host
-	// fetches a new one into its own keytab file with the credentials it
-	// already holds. No key material travels through the panel.
+	// Renewing a service keytab is the host's half of a rotation: the directory
+	// has retired the old keytab of the principal, and the host fetches a new one
+	// into its own keytab file with the credentials it already holds.
 	ActionIdentityKeytabRenew ActionType = "identity.keytab.renew"
 
 	ActionLocalUserCreate ActionType = "localuser.create"
 	ActionLocalUserLock   ActionType = "localuser.lock"
 	ActionLocalUserUnlock ActionType = "localuser.unlock"
-	// The keys of an account are edited one at a time (security
-	// remediation, chapter 14.1): an add appends what is not there yet, a
-	// remove takes named fingerprints away, and a replace writes the whole
-	// list anew and is bound to the list the operator saw. The old set
-	// operation is the replace under its previous name, kept for one
-	// release so an order placed before the upgrade still runs.
+	// The keys of an account are edited one at a time (security remediation,
+	// chapter 14.
 	ActionLocalSSHKeysAdd        ActionType = "localuser.sshkeys.add"
 	ActionLocalSSHKeysRemove     ActionType = "localuser.sshkeys.remove"
 	ActionLocalSSHKeysReplaceAll ActionType = "localuser.sshkeys.replace_all"
 	ActionLocalSSHKeysSet        ActionType = "localuser.sshkeys.set"
-	// The groups of an account decide what it may do on the host: a
-	// membership in sudo or docker is root by another name, so the set
-	// operation ranks critical when such a group is in the list.
+	// The groups of an account decide what it may do on the host: a membership in
+	// sudo or docker is root by another name, so the set operation ranks critical
+	// when such a group is in the list.
 	ActionLocalUserGroupsSet ActionType = "localuser.groups.set"
 	// An expiry date is a change of access with a date attached; clearing it
 	// restores access.
@@ -295,12 +238,6 @@ const (
 	ActionLocalUserDelete ActionType = "localuser.delete"
 
 	// ActionInventoryRefresh orders the inventory to be read again.
-	//
-	// The panel sees the picture from the last cycle, and a decision taken
-	// before a campaign or after a manual change on the host has to rest on
-	// the state of this moment. The operation changes nothing and is
-	// therefore cheap - but not free: the read starts subprocesses on the
-	// host, so it has its own permission and its own time limit.
 	ActionInventoryRefresh ActionType = "inventory.refresh"
 
 	// Reading the state of the container engine. Full lists are fetched at
@@ -315,30 +252,18 @@ const (
 	// Pruning removes the objects it is pointed at, not everything matching a
 	// filter.
 	ActionDockerPrune ActionType = "docker.prune"
-	// ActionDockerEvents reads the engine's event journal. A separate
-	// operation, because it answers a different question from a state read:
-	// not "how are things", but "what happened here".
+	// ActionDockerEvents reads the engine's event journal.
 	ActionDockerEvents ActionType = "docker.events"
-	// ActionDockerLogs reads the tail of one container's log. A read bounded
-	// by a line count and by the same byte limit as a log file: a container
-	// that writes in a loop must not hand the panel its whole history.
+	// ActionDockerLogs reads the tail of one container's log.
 	ActionDockerLogs ActionType = "docker.container.logs"
 
-	// ActionDockerPlan computes the difference between what stands on the
-	// host and the description of a container, a network or a volume. It
-	// is one operation for all three, the way storage.plan is one for
-	// every kind of storage plan: the payload says what it is about, and a
-	// plan is a read whatever object it is about.
+	// ActionDockerPlan computes the difference between what stands on the host
+	// and the description of a container, a network or a volume.
 	ActionDockerPlan ActionType = "docker.plan"
-	// ActionDockerContainerEnsure declares a container: the description of
-	// what is to run rather than the steps that would put it there. A
-	// container that differs is replaced and not mutated - the engine can
-	// change a handful of a running container's settings and refuses the
-	// rest - and the plan says so before anybody approves it.
+	// ActionDockerContainerEnsure declares a container: the description of what
+	// is to run rather than the steps that would put it there.
 	ActionDockerContainerEnsure ActionType = "docker.container.ensure"
-	// Networks and volumes are declared the same way. Their removal is a
-	// separate operation, because removing the volume of a service is data
-	// loss and declaring one is not.
+	// Networks and volumes are declared the same way.
 	ActionDockerNetworkEnsure ActionType = "docker.network.ensure"
 	ActionDockerNetworkRemove ActionType = "docker.network.remove"
 	ActionDockerVolumeEnsure  ActionType = "docker.volume.ensure"
@@ -355,9 +280,7 @@ const (
 // of a field requires raising the version, not a silent reinterpretation.
 const ActionVersion = 1
 
-// RiskLevel describes what an operation threatens. The level is not a label
-// in the interface: it decides the freshness of authentication, the target
-// confirmation and the default campaign policy.
+// RiskLevel describes what an operation threatens.
 type RiskLevel string
 
 const (
@@ -375,9 +298,7 @@ const (
 	RiskDestructive RiskLevel = "destructive"
 )
 
-// LockClass names the host resource an operation uses exclusively. Only one
-// mutation in a given class can run at a time: two package transactions on
-// the same database can damage it.
+// LockClass names the host resource an operation uses exclusively.
 const (
 	LockNone       = ""
 	LockPackages   = "packages"
@@ -391,47 +312,36 @@ const (
 	// Storage is one resource: two parallel operations on the same
 	// filesystem can damage it.
 	LockStorage = "storage"
-	// A backup repository is one resource: the tools hold their own lock on
-	// it, and a second operation would wait under that lock anyway - only
-	// without the panel knowing, and until its time limit runs out.
+	// A backup repository is one resource: the tools hold their own lock on it,
+	// and a second operation would wait under that lock anyway - only without the
+	// panel knowing, and until its time limit runs out.
 	LockBackup = "backup"
-	// The trust store is one per host, and the tool that recomputes it
-	// rewrites the whole bundle: two anchor changes at once give a bundle
-	// neither of the plans saw.
+	// The trust store is one per host, and the tool that recomputes it rewrites
+	// the whole bundle: two anchor changes at once give a bundle neither of the
+	// plans saw.
 	LockCertificates = "certificates"
-	// The whole host: a rename collides with every other mutation the same
-	// way a reboot does, because what the change lands on has a different
-	// name afterwards.
+	// The whole host: a rename collides with every other mutation the same way a
+	// reboot does, because what the change lands on has a different name
+	// afterwards.
 	LockHost = "host"
 )
 
 // CampaignMode says whether and how an operation may run on many hosts at
 // once.
-//
-// Every operation declares it explicitly, and the default value is none.
-// Adding a new operation to the registry therefore does not open it to the
-// whole fleet: missing metadata means a refusal, not "the same payload
-// everywhere".
 type CampaignMode string
 
 const (
-	// CampaignNone marks an operation that is not allowed in bulk. This is
-	// not a missing feature but a deliberate refusal: removing a package,
-	// wiping a disk or shutting a host down has one target, which the
-	// operator types by hand.
+	// CampaignNone marks an operation that is not allowed in bulk.
 	CampaignNone CampaignMode = "none"
-	// CampaignSamePayload marks an operation whose intent carries over: the
-	// same payload means the same thing on every host, and preflight and
-	// verification happen separately anyway.
+	// CampaignSamePayload marks an operation whose intent carries over: the same
+	// payload means the same thing on every host, and preflight and verification
+	// happen separately anyway.
 	CampaignSamePayload CampaignMode = "same_payload"
 	// CampaignPerHostPlan marks a shared target state from which every host
-	// computes its own plan. Two hosts picked by the same request almost
-	// never have the same diff, so the approval has to cover a set of plans
-	// rather than one payload.
+	// computes its own plan.
 	CampaignPerHostPlan CampaignMode = "per_host_plan"
-	// CampaignSpecialized marks an operation with its own state machine: a
-	// reboot is settled by the host coming back, enrollment has its own
-	// stages.
+	// CampaignSpecialized marks an operation with its own state machine: a reboot
+	// is settled by the host coming back, enrollment has its own stages.
 	CampaignSpecialized CampaignMode = "specialized"
 )
 
@@ -449,42 +359,32 @@ type Spec struct {
 	// CampaignMode says whether the operation may run in bulk and on what
 	// terms. A missing declaration means a refusal.
 	CampaignMode CampaignMode `json:"campaign_mode"`
-	// OfflinePolicy says what a campaign does with a host that is not
-	// connected when its turn comes. A campaign may tighten it, never
-	// loosen it.
+	// OfflinePolicy says what a campaign does with a host that is not connected
+	// when its turn comes.
 	OfflinePolicy OfflinePolicy `json:"offline_policy"`
 	// FanOutLimit says how many hosts one diagnostic read may cover at
 	// once. Zero means a read kept to one host - and every mutation.
 	FanOutLimit int `json:"fanout_limit"`
 	// RequiresPlan marks an operation that must not be ordered without a plan
-	// approved by a human. The plan hash binds the approval to one specific
-	// diff.
+	// approved by a human.
 	RequiresPlan bool `json:"requires_plan"`
-	// The second half of the contract: what a cancel does to an operation
-	// under way, whether it may be repeated, what way back exists, what the
-	// campaign checks afterwards and which host resources it takes. A
-	// mutating operation declares all of it; a read derives it.
+	// The second half of the contract: what a cancel does to an operation under
+	// way, whether it may be repeated, what way back exists, what the campaign
+	// checks afterwards and which host resources it takes.
 	CancelMode     CancelMode      `json:"cancel_mode"`
 	RetryClass     RetryPolicy     `json:"retry_class"`
 	Rollback       RollbackClass   `json:"rollback"`
 	Verification   Verification    `json:"verification"`
 	ResourceClaims []ResourceClaim `json:"resource_claims"`
-	// Verifier names the read of the host that confirms the change after
-	// the apply; only it turns the change into a success. OnUnverified
-	// says whether a failed verifier makes the host put the previous
-	// state back or only report.
+	// Verifier names the read of the host that confirms the change after the
+	// apply; only it turns the change into a success.
 	Verifier     Verifier         `json:"verifier"`
 	OnUnverified UnverifiedPolicy `json:"on_unverified"`
-	// ReplacedBy names the operation that took this one's place. A
-	// deprecated operation still runs for one release, so an order placed
-	// before the upgrade is not lost; the catalogue says where new orders
-	// go.
+	// ReplacedBy names the operation that took this one's place.
 	ReplacedBy ActionType `json:"replaced_by,omitempty"`
 }
 
 // replacedActions lists the deprecated operations and their successors.
-// An entry stays for one release after the panel stopped issuing the old
-// name; then both the entry and the old operation go.
 var replacedActions = map[ActionType]ActionType{
 	ActionLocalSSHKeysSet: ActionLocalSSHKeysReplaceAll,
 }
@@ -539,9 +439,7 @@ func (a ActionType) LockClass() string {
 	return actionSpecs[a].lockClass
 }
 
-// CampaignMode returns the bulk-operation mode. An unknown operation and an
-// operation without a declaration both get a refusal: missing metadata must
-// not mean consent.
+// CampaignMode returns the bulk-operation mode.
 func (a ActionType) CampaignMode() CampaignMode {
 	if mode, ok := campaignModes[a]; ok {
 		return mode
@@ -564,12 +462,7 @@ func (a ActionType) RequiresPlan() bool {
 }
 
 // reverseActions names, for every change that has a declared way back, the
-// operation that takes it. The web side keeps the same list for the
-// "Plan the rollback" link; the server is the one that refuses a
-// compensation ordered with anything else. A change with no row has no
-// reverse the panel will run in bulk: a restart or a signal has no before
-// state to return to, and a package downgrade is best effort rather than a
-// way back.
+// operation that takes it.
 var reverseActions = map[ActionType]ActionType{
 	// A managed file keeps its previous versions: the rollback writes the
 	// version named per host, bound to the digest the host has now.
@@ -585,17 +478,14 @@ var reverseActions = map[ActionType]ActionType{
 }
 
 // ReverseAction returns the operation that undoes the given change, and
-// whether there is one. The answer is a declaration of the registry, not a
-// guess from the name: "rollback" in a name says nothing about which
-// change it belongs to.
+// whether there is one.
 func ReverseAction(action ActionType) (ActionType, bool) {
 	reverse, ok := reverseActions[action]
 	return reverse, ok
 }
 
 // RequiresFreshAuth says whether the operator has to confirm their identity
-// right before ordering. An operation that can cut off access to a host must
-// not travel on an hour-old session.
+// right before ordering.
 func (a ActionType) RequiresFreshAuth() bool {
 	switch a.Risk() {
 	case RiskCritical, RiskDestructive:
@@ -607,23 +497,19 @@ func (a ActionType) RequiresFreshAuth() bool {
 // RequiresTargetConfirmation says whether the operator has to type the target
 // name. A click is not decision enough for an irreversible operation.
 func (a ActionType) RequiresTargetConfirmation() bool {
-	// A shutdown destroys no data, but it is irreversible remotely: nobody
-	// will power this host back on through the panel. A list of hosts is
-	// often long and full of similar names, so the target name is the same
-	// decision here as for a destructive operation.
+	// A shutdown destroys no data, but it is irreversible remotely: nobody will
+	// power this host back on through the panel.
 	if a == ActionSystemShutdown {
 		return true
 	}
-	// A rename destroys no data, but every system that knows the host by
-	// name loses it at once: the operator types the name they are taking
-	// away.
+	// A rename destroys no data, but every system that knows the host by name
+	// loses it at once: the operator types the name they are taking away.
 	if a == ActionSystemHostnameSet {
 		return true
 	}
-	// Leaving a domain destroys no data, but every directory account loses
-	// the host at once, and the join back needs a new credential from the
-	// directory: the operator types the name of the host they are taking
-	// out.
+	// Leaving a domain destroys no data, but every directory account loses the
+	// host at once, and the join back needs a new credential from the directory:
+	// the operator types the name of the host they are taking out.
 	if a == ActionDomainLeave {
 		return true
 	}
@@ -631,9 +517,8 @@ func (a ActionType) RequiresTargetConfirmation() bool {
 }
 
 // ConfirmationTarget says what the operator has to type to confirm an
-// operation on the given host: the hostname, or for an operation aimed at
-// an account - the account name. The name typed is the thing that goes
-// away, so a dialog opened on the wrong row cannot be confirmed by habit.
+// operation on the given host: the hostname, or for an operation aimed at an
+// account - the account name.
 func ConfirmationTarget(action ActionType, payload Payload, host string) string {
 	if action == ActionLocalUserDelete && payload.LocalUser != nil {
 		return payload.LocalUser.Name
@@ -641,19 +526,15 @@ func ConfirmationTarget(action ActionType, payload Payload, host string) string 
 	return host
 }
 
-// PrivilegedGroupsIn returns the privileged groups the list names: the
-// ones the installation treats as root by another name (sudo, wheel,
-// docker, lxd by default; FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS). The list
-// lives in the accounts module so the classifier is one for the control
-// plane and the panel's description of it.
+// PrivilegedGroupsIn returns the privileged groups the list names: the ones
+// the installation treats as root by another name (sudo, wheel, docker, lxd by
+// default; FLOTESTRO_ACCOUNTS_PRIVILEGED_GROUPS).
 func PrivilegedGroupsIn(groups []string) []string {
 	return accounts.PrivilegedGroupsIn(groups)
 }
 
-// PutsIntoPrivilegedGroup says whether one order creates an account in,
-// or moves an account into, a privileged group. Both are a grant of root
-// by another name and are judged the same way: the compound permission,
-// the critical risk and the approval that comes with it.
+// PutsIntoPrivilegedGroup says whether one order creates an account in, or
+// moves an account into, a privileged group.
 func PutsIntoPrivilegedGroup(action ActionType, payload Payload) bool {
 	if action != ActionLocalUserCreate && action != ActionLocalUserGroupsSet {
 		return false
@@ -662,10 +543,7 @@ func PutsIntoPrivilegedGroup(action ActionType, payload Payload) bool {
 }
 
 // PayloadRisk returns the risk of one order: the registry's level for the
-// operation, raised where the content of the order calls for it. A groups
-// change that puts an account into sudo is a critical change of access even
-// though the same operation without such a group is not, and so is an
-// account created straight into it.
+// operation, raised where the content of the order calls for it.
 func PayloadRisk(action ActionType, payload Payload) RiskLevel {
 	risk := action.Risk()
 	if PutsIntoPrivilegedGroup(action, payload) {
@@ -674,31 +552,21 @@ func PayloadRisk(action ActionType, payload Payload) RiskLevel {
 	return risk
 }
 
-// Permissions an order needs on top of the one of its operation. The
-// names are the ones the roles use; the constants live here so that the
-// contract of an operation and the roles do not drift apart in spelling.
+// Permissions an order needs on top of the one of its operation.
 const (
-	// PermissionScheduleRootExec lets an entry run as root. Writing
-	// schedules for a service account and putting a command into root's
-	// crontab are two levels of trust, so root needs a grant of its own.
+	// PermissionScheduleRootExec lets an entry run as root.
 	PermissionScheduleRootExec = "schedule.root.exec"
-	// PermissionFileWriteUnvalidated lets a file be written when the host
-	// lacks the validator the order relies on. Without it a missing
-	// validator refuses the write.
+	// PermissionFileWriteUnvalidated lets a file be written when the host lacks
+	// the validator the order relies on.
 	PermissionFileWriteUnvalidated = "file.write.unvalidated"
-	// PermissionPrivilegedGroups lets an account be created in, or moved
-	// into, a group that is root by another name. Creating accounts and
-	// granting root are two levels of trust (security remediation, chapter
-	// 14.1), so the grant is compound: the operation's own permission and
-	// this one, both in the scope of the host.
+	// PermissionPrivilegedGroups lets an account be created in, or moved into, a
+	// group that is root by another name.
 	PermissionPrivilegedGroups = "accounts.privileged_groups"
 )
 
-// PayloadPermissions returns the permissions the content of one order
-// requires beyond the operation's own: an entry for root, a write that
-// may skip its validator. The registry's permission opens the operation;
-// these open what the payload asks for, and the handlers check them the
-// same way, in the scope of the host.
+// PayloadPermissions returns the permissions the content of one order requires
+// beyond the operation's own: an entry for root, a write that may skip its
+// validator.
 func PayloadPermissions(action ActionType, payload Payload) []string {
 	var required []string
 	if action == ActionScheduleEnsure && payload.Schedule != nil && payload.Schedule.User == "root" {
@@ -715,8 +583,8 @@ func PayloadPermissions(action ActionType, payload Payload) []string {
 }
 
 // PayloadRequiresFreshAuth says whether one order needs the operator to
-// confirm their identity right before placing it: the registry's answer,
-// or the raised one where the content of the order calls for it.
+// confirm their identity right before placing it: the registry's answer, or
+// the raised one where the content of the order calls for it.
 func PayloadRequiresFreshAuth(action ActionType, payload Payload) bool {
 	switch PayloadRisk(action, payload) {
 	case RiskCritical, RiskDestructive:
@@ -765,18 +633,14 @@ type actionSpec struct {
 	lockClass      string
 	maxOutputBytes uint64
 	requiresPlan   bool
-	// verifier is the read that confirms a mutation after the apply; a
-	// mutating operation declares it (ValidateVerifiers), a read never.
-	// onUnverified is what a failed verifier makes the host do; empty
-	// means report.
+	// verifier is the read that confirms a mutation after the apply; a mutating
+	// operation declares it (ValidateVerifiers), a read never.
 	verifier     Verifier
 	onUnverified UnverifiedPolicy
 }
 
-// The risk levels and lock classes follow chapters 6.1 and 8 of the
-// specification. Risk is not a label: critical requires fresh
-// authentication, destructive additionally requires typing the target name.
-// The lock class says which operations must not run at once on the same host.
+// The risk levels and lock classes follow chapters 6. 1 and 8 of the
+// specification.
 var actionSpecs = map[ActionType]actionSpec{
 	ActionUnitStart: {mutating: true, capability: "systemd", permission: "unit.start",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierUnitState},
@@ -805,9 +669,8 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Running now executes the same command outside the schedule.
 	ActionScheduleRunNow: {mutating: true, capability: "schedules", permission: "schedule.run",
 		timeoutSeconds: 900, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierNone},
-	// A preview of the next runs of an expression, computed on the host in
-	// its time zone. The panel could compute the dates itself, but it knows
-	// neither the host's zone nor its clock; the numbers come from the host.
+	// A preview of the next runs of an expression, computed on the host in its
+	// time zone.
 	ActionSchedulePreview: {mutating: false, capability: "schedules", permission: "schedule.preview",
 		timeoutSeconds: 30, risk: RiskLow, maxOutputBytes: 64 << 10},
 
@@ -815,35 +678,30 @@ var actionSpecs = map[ActionType]actionSpec{
 	// touch the host.
 	ActionNetworkPlan: {mutating: false, capability: "network", permission: "network.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Changing the address profile means changing the branch the panel sits
-	// on: a wrongly set address cuts the host off and no further order will
-	// ever arrive.
+	// Changing the address profile means changing the branch the panel sits on: a
+	// wrongly set address cuts the host off and no further order will ever
+	// arrive.
 	ActionNetworkProfileApply: {mutating: true, capability: "network.write", permission: "network.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
 	// Routes are a separate permission: changing the default route redirects
 	// all of the host's traffic, not just its address.
 	ActionNetworkRouteEnsure: {mutating: true, capability: "network.write", permission: "network.route.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
-	// MTU has its own permission, because it is a change of a different
-	// weight from rewriting an address: a wrong MTU breaks large packets, a
-	// wrong address cuts the host off.
+	// MTU has its own permission, because it is a change of a different weight
+	// from rewriting an address: a wrong MTU breaks large packets, a wrong
+	// address cuts the host off.
 	ActionNetworkMTUSet: {mutating: true, capability: "network.write", permission: "network.mtu.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork, verifier: VerifierNetworkState},
 	// A rollback on request returns to the state from before the change, so
 	// it is itself a network change - and just as risky as the one it undoes.
 	ActionNetworkRollback: {mutating: true, capability: "network.write", permission: "network.rollback",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockNetwork, verifier: VerifierNetworkState},
-	// Building a layer moves the addressing of every member onto the layer
-	// above: the members lose theirs the moment they are enslaved. That is
-	// the same weight as rewriting an address and carries its own
-	// permission, because an operator trusted with an address on one
-	// interface is not thereby trusted to fold three of them into a bond.
+	// Building a layer moves the addressing of every member onto the layer above:
+	// the members lose theirs the moment they are enslaved.
 	ActionNetworkLinkApply: {mutating: true, capability: "network.write", permission: "network.link.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
-	// Taking a layer away gives the members back their own traffic and
-	// takes the layer's address with it. It has its own permission for the
-	// same reason a removal always does: it is the one direction that
-	// cannot be undone by ordering the opposite.
+	// Taking a layer away gives the members back their own traffic and takes the
+	// layer's address with it.
 	ActionNetworkLinkRemove: {mutating: true, capability: "network.write", permission: "network.link.remove",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierNetworkState},
 
@@ -852,22 +710,21 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDNSResolveTest: {mutating: false, capability: "dns", permission: "dns.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
 	// The resolver plan: the difference between the profile found and the one
-	// requested. It does not touch the host, so it has no rollback and no
-	// lock class.
+	// requested.
 	ActionDNSPlan: {mutating: false, capability: "dns", permission: "dns.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 64 << 10},
-	// A bad resolver cuts the host off from the directory and from Kerberos,
-	// and therefore from logging in - the effect is wider than the one name
-	// that will not resolve.
+	// A bad resolver cuts the host off from the directory and from Kerberos, and
+	// therefore from logging in - the effect is wider than the one name that will
+	// not resolve.
 	ActionDNSHostApply: {mutating: true, capability: "dns.write", permission: "dns.host.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierResolver},
 
 	// Reading the ruleset before a change. The plan does not touch the host.
 	ActionFirewallPlan: {mutating: false, capability: "firewall", permission: "firewall.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 512 << 10},
-	// A bad rule cuts the panel off from the host and there is nothing left
-	// to undo the change with, so every firewall change is an operation of
-	// the highest risk.
+	// A bad rule cuts the panel off from the host and there is nothing left to
+	// undo the change with, so every firewall change is an operation of the
+	// highest risk.
 	ActionFirewallRuleEnsure: {mutating: true, capability: "firewall.write", permission: "firewall.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 	ActionFirewallRuleRemove: {mutating: true, capability: "firewall.write", permission: "firewall.rule.remove",
@@ -881,9 +738,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionFirewallRulesetRestore: {mutating: true, capability: "firewall.write", permission: "firewall.restore",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNetwork, verifier: VerifierFirewallRuleset},
 
-	// Reading the topology on request. The inventory carries it anyway, but
-	// before a change the operator wants the state of this moment, not the
-	// one from the last cycle.
+	// Reading the topology on request.
 	ActionStoragePlan: {mutating: false, capability: "storage", permission: "storage.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 512 << 10},
 	// Mounting is reversible, but the fstab entry decides whether the host
@@ -893,22 +748,15 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionMountRemove: {mutating: true, capability: "storage", permission: "storage.mount.remove",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierMountState},
 	// A filesystem check takes long and requires that nobody is using it.
-	// The exit code of fsck is a bit field, not a verdict: 1 means it
-	// corrected something and 4 means it left errors behind. So the check
-	// settles on a second, read-only pass over the filesystem afterwards
-	// rather than on the code of the first - a repair that left errors is
-	// not a successful check.
 	ActionFilesystemCheck: {mutating: true, capability: "storage", permission: "storage.fsck",
 		timeoutSeconds: 3600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
-	// The SMART read changes nothing and takes no lock: the tool asks the
-	// device for its own log. It has its own permission rather than the
-	// topology read's, because every operation has one.
+	// The SMART read changes nothing and takes no lock: the tool asks the device
+	// for its own log.
 	ActionStorageSmartRead: {mutating: false, capability: "storage", permission: "storage.smart.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 256 << 10},
 
-	// Extending a volume and a filesystem is reversible only in theory:
-	// shrinking requires getting the data below a boundary nobody planned
-	// for. Hence the critical risk, even though nothing is deleted.
+	// Extending a volume and a filesystem is reversible only in theory: shrinking
+	// requires getting the data below a boundary nobody planned for.
 	ActionLVMExtend: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.write",
 		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionFilesystemResize: {mutating: true, capability: "storage", permission: "storage.filesystem.write",
@@ -920,13 +768,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDiskWipe: {mutating: true, capability: "storage", permission: "storage.wipe",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 
-	// Software RAID. Marking a member bad is how a dying disk leaves an
-	// array - and it is also the move that spends the array's redundancy,
-	// so it takes the treatment of a destructive operation: fresh
-	// authentication, the host name typed out and two people. Adding a
-	// device writes an array superblock over whatever it carried, which is
-	// the same loss for that device. Taking an already failed member out
-	// spends nothing and stays a high-risk change.
+	// Software RAID.
 	ActionRAIDMemberFail: {mutating: true, capability: "storage", permission: "storage.raid.fail",
 		timeoutSeconds: 300, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionRAIDMemberRemove: {mutating: true, capability: "storage", permission: "storage.raid.remove",
@@ -934,10 +776,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionRAIDMemberAdd: {mutating: true, capability: "storage", permission: "storage.raid.add",
 		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockStorage, verifier: VerifierStorageLayout},
 
-	// LVM. Creating a volume or a snapshot takes space that was free and
-	// gives it a name; extending a group writes an LVM label over a disk,
-	// and removing a volume deletes what was on it. The last two are
-	// destructive in the same sense as a format and get the same treatment.
+	// LVM.
 	ActionLVMVolumeCreate: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.volume.create",
 		timeoutSeconds: 600, risk: RiskHigh, lockClass: LockStorage, verifier: VerifierStorageLayout},
 	ActionLVMVolumeRemove: {mutating: true, capability: "storage.lvm", permission: "storage.lvm.volume.remove",
@@ -958,26 +797,22 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionSSHConfigApply: {mutating: true, capability: "sshd", permission: "ssh.config.write",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierSSHDConfig},
 	// Replacing the host key changes the identity every client sees: everyone
-	// gets a known_hosts warning, and automation based on the fingerprint
-	// stops working.
+	// gets a known_hosts warning, and automation based on the fingerprint stops
+	// working.
 	ActionSSHHostKeyRotate: {mutating: true, capability: "sshd", permission: "ssh.hostkey.rotate",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierSSHHostKey},
 
-	// The scan does not change the host, but it collects reconnaissance
-	// material: a list of what the host exposes to the outside, together with
-	// the owners of the sockets. Hence higher than an ordinary read and with
-	// its own permission.
+	// The scan does not change the host, but it collects reconnaissance material:
+	// a list of what the host exposes to the outside, together with the owners of
+	// the sockets.
 	ActionSecurityScan: {mutating: false, capability: "security", permission: "security.scan",
 		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 512 << 10},
 	// Switching to permissive takes protection off the whole host and does it
-	// immediately. The change is reversible, but in the meantime it protects
-	// nothing.
+	// immediately.
 	ActionSELinuxModeSet: {mutating: true, capability: "security.mac", permission: "security.mac.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockNone, verifier: VerifierMACMode},
-	// The composite carries no adapter requirement and no lock of its own:
-	// both belong to the steps. Its risk is the highest, because one order
-	// changes many hosts through operations that may each cut off access;
-	// the permission adds to those of the steps rather than replacing them.
+	// The composite carries no adapter requirement and no lock of its own: both
+	// belong to the steps.
 	ActionSecurityRemediate: {mutating: true, capability: "", permission: "security.remediate",
 		timeoutSeconds: 3600, risk: RiskCritical, lockClass: LockNone, verifier: VerifierNone},
 	// Reloading the audit rules changes what the host records. It is
@@ -985,19 +820,11 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionAuditRulesReload: {mutating: true, capability: "security.audit", permission: "security.audit.reload",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockUnits, verifier: VerifierAuditRules},
 
-	// The scan looks at the files it is pointed at and does not change the
-	// host. The result carries dates and names that the certificate shows to
-	// anyone connecting to the service anyway - and it does not touch the
-	// private key.
+	// The scan looks at the files it is pointed at and does not change the host.
 	ActionCertificateScan: {mutating: false, capability: "certificates", permission: "certificate.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// A deployment replaces the identity a service shows to the world and
-	// ends with reloading that service. Bad material stops the service, and
-	// bad key permissions hand it to everyone on the host - hence the
-	// critical risk.
-	// The deployment plan: the difference between the certificate found and
-	// the one ordered. It does not touch the host and does not reach for the
-	// private key.
+	// A deployment replaces the identity a service shows to the world and ends
+	// with reloading that service.
 	ActionCertificatePlan: {mutating: false, capability: "certificates", permission: "certificate.plan",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
 	ActionCertificateTrustPlan: {mutating: false, capability: "certificates", permission: "certificate.trust.plan",
@@ -1013,24 +840,21 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionCertificateDeploy: {mutating: true, capability: "certificates", permission: "certificate.deploy",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierCertificate},
 	// A renewal ends the same way a deployment does: with a new file and a
-	// service that reads it. The host's daemon does it, but the effect is the
-	// same.
+	// service that reads it.
 	ActionCertificateRenew: {mutating: true, capability: "certificates.renew", permission: "certificate.renew",
 		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierCertificate},
 
 	// The synchronisation test does not change the host, but it sends packets
-	// from it to the named servers: that is the only way to say anything
-	// about a server the host is not using yet.
+	// from it to the named servers: that is the only way to say anything about a
+	// server the host is not using yet.
 	ActionTimeSyncTest: {mutating: false, capability: "time", permission: "time.read",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 128 << 10},
 	// The time-source plan: the difference between the panel's file and the
-	// order, together with whether the daemon will be restarted. It does not
-	// touch the host.
+	// order, together with whether the daemon will be restarted.
 	ActionTimePlan: {mutating: false, capability: "time", permission: "time.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
-	// Changing the time sources can step the clock, and then databases,
-	// tokens and certificates see time that went backwards. The unit lock is
-	// needed here because the change ends with restarting the daemon.
+	// Changing the time sources can step the clock, and then databases, tokens
+	// and certificates see time that went backwards.
 	ActionTimeConfigApply: {mutating: true, capability: "time", permission: "time.write",
 		timeoutSeconds: 300, risk: RiskHigh, lockClass: LockUnits, verifier: VerifierTimeSource},
 	// The timezone changes what the host shows to people and writes to the
@@ -1038,9 +862,7 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionTimezoneSet: {mutating: true, capability: "time", permission: "time.timezone.write",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockNone, verifier: VerifierTimezone},
 
-	// Reading kernel settings. The profile plus the keys named in the order;
-	// the whole of /proc/sys has a few thousand entries and enumerating it
-	// answers no question at all.
+	// Reading kernel settings.
 	ActionSysctlPlan: {mutating: false, capability: "kernel", permission: "kernel.read",
 		timeoutSeconds: 120, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// A kernel setting changes the behaviour of the whole host, but it can be
@@ -1054,14 +876,14 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionKernelModulePlan: {mutating: false, capability: "kernel", permission: "kernel.module.plan",
 		timeoutSeconds: 60, risk: RiskLow, maxOutputBytes: 256 << 10},
 	// Blacklisting a module takes effect only after a reboot, and for modules
-	// from the initramfs also after it is rebuilt: the effect shows up when
-	// the host comes back.
+	// from the initramfs also after it is rebuilt: the effect shows up when the
+	// host comes back.
 	ActionKernelModuleBlacklist: {mutating: true, capability: "kernel", permission: "kernel.module.blacklist",
 		timeoutSeconds: 300, risk: RiskCritical, lockClass: LockNone, verifier: VerifierKernelModule},
 
-	// Reading a configuration file reaches for content that is often
-	// sensitive even when the file itself is not a secret: addresses, account
-	// names, topology.
+	// Reading a configuration file reaches for content that is often sensitive
+	// even when the file itself is not a secret: addresses, account names,
+	// topology.
 	ActionFileRead: {mutating: false, capability: "files.managed", permission: "file.read",
 		timeoutSeconds: 60, risk: RiskHigh, maxOutputBytes: 1 << 20},
 	ActionFilePlan: {mutating: false, capability: "files.managed", permission: "file.plan",
@@ -1087,18 +909,14 @@ var actionSpecs = map[ActionType]actionSpec{
 	// it ranks higher than a one-off read and has its own permission.
 	ActionFollowJournal: {mutating: false, capability: "journald", permission: "journal.follow",
 		timeoutSeconds: 300, risk: RiskMedium, maxOutputBytes: 1 << 20},
-	// Reading a file reaches beyond the system journal, so it carries a
-	// higher risk and its own permission: the allowlist is sometimes wide,
-	// and an application log sometimes holds data the journal does not.
+	// Reading a file reaches beyond the system journal, so it carries a higher
+	// risk and its own permission: the allowlist is sometimes wide, and an
+	// application log sometimes holds data the journal does not.
 	ActionReadLogFile: {mutating: false, capability: "", permission: "logfile.read",
 		timeoutSeconds: 60, risk: RiskMedium, maxOutputBytes: 1 << 20},
 
 	// Planning does not change the state of the system, but refreshing the
 	// metadata does, so the plan has its own permission too.
-	// Reading the list does not change the host and does not need root: the
-	// dpkg database and the RPM database are readable by everyone. The output
-	// limit is high, because a list of a thousand packages is its natural
-	// size.
 	ActionPackageList: {mutating: false, capability: "packages", permission: "packages.read",
 		timeoutSeconds: 300, risk: RiskLow, maxOutputBytes: 8 << 20},
 
@@ -1111,78 +929,56 @@ var actionSpecs = map[ActionType]actionSpec{
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, verifier: VerifierAgentVersion},
 
 	// A repair changes the state of the host and can touch packages of great
-	// importance, the bootloader included, so it has its own permission and
-	// its own timeout.
-	//
-	// The requirement is narrower than the mere presence of a package
-	// manager: a repair answers debconf questions and exists only for apt. A
-	// host that does not have it has to say so when the operation is ordered,
-	// not after the task has been delivered.
+	// importance, the bootloader included, so it has its own permission and its
+	// own timeout.
 	ActionPackageRepair: {mutating: true, capability: "packages.repair", permission: "packages.repair",
 		timeoutSeconds: 1800, risk: RiskCritical, lockClass: LockPackages, verifier: VerifierPackageDatabase},
 	// An install adds software to the host that will start running right
 	// away.
 	ActionPackageInstall: {mutating: true, capability: "packages", permission: "packages.install",
 		timeoutSeconds: 1800, risk: RiskHigh, lockClass: LockPackages, requiresPlan: true, verifier: VerifierPackageVersions},
-	// A removal takes the package away together with everything that depends
-	// on it, and it cannot be undone by restoring state: what disappeared has
-	// to be downloaded again.
+	// A removal takes the package away together with everything that depends on
+	// it, and it cannot be undone by restoring state: what disappeared has to be
+	// downloaded again.
 	ActionPackageRemove: {mutating: true, capability: "packages", permission: "packages.remove",
 		timeoutSeconds: 1800, risk: RiskDestructive, lockClass: LockPackages, requiresPlan: true, verifier: VerifierPackageVersions},
 	// A hold freezes the package version. It is reversible and local, but a
 	// held package will not get security fixes either.
 	ActionPackageHoldSet: {mutating: true, capability: "packages", permission: "packages.hold.write",
 		timeoutSeconds: 120, risk: RiskMedium, lockClass: LockPackages, verifier: VerifierPackageHold},
-	// A reboot is a separate, approved campaign phase, not a side effect of
-	// an upgrade. Cutting the host off for the duration of the reboot makes
-	// it critical.
-	// A probe does not change the host, but it leaves it with a connection to
-	// the named service - and that is its whole value: it says what this host
-	// sees, not what monitoring sees from another place in the network.
+	// A reboot is a separate, approved campaign phase, not a side effect of an
+	// upgrade.
 	ActionMonitoringProbe: {mutating: false, capability: "monitoring", permission: "monitoring.probe",
 		timeoutSeconds: 120, risk: RiskMedium, maxOutputBytes: 64 << 10},
 
-	// The plan reads the backup repository: the list of copies and their
-	// size. It changes neither the host nor the repository, but it needs
-	// credentials - a backup repository is encrypted and answers nobody
-	// without a password.
+	// The plan reads the backup repository: the list of copies and their size.
 	ActionBackupPlan: {mutating: false, capability: "backup", permission: "backup.read",
 		timeoutSeconds: 600, risk: RiskLow, lockClass: LockBackup, maxOutputBytes: 512 << 10},
 	// A copy reads the whole named range of the host and sends it to the
-	// repository. It does not change the host, but it costs its disk, its CPU
-	// and its link - and it takes time.
+	// repository.
 	ActionBackupRun: {mutating: true, capability: "backup", permission: "backup.run",
 		timeoutSeconds: 7200, risk: RiskHigh, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierBackupRun},
 	// Verification reads the repository and does not change the host; with
 	// the data read it costs as much as restoring part of a copy.
 	ActionBackupVerify: {mutating: true, capability: "backup", permission: "backup.verify",
 		timeoutSeconds: 3600, risk: RiskMedium, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierNone},
-	// A restore unpacks old state onto a running system. It requires naming
-	// the target and an overwrite plan, and the panel does not allow aiming
-	// at system directories: what comes back from a restored directory to its
-	// place is a separate decision and a separate operation.
+	// A restore unpacks old state onto a running system.
 	ActionBackupRestore: {mutating: true, capability: "backup", permission: "backup.restore",
 		timeoutSeconds: 7200, risk: RiskCritical, lockClass: LockBackup, maxOutputBytes: 512 << 10, verifier: VerifierRestoreTarget},
 
-	// A package source is a decision about trust, not about a version: from
-	// that moment the host takes software from there as well. The package
-	// lock is necessary here, because the write ends with refreshing the
-	// metadata.
+	// A package source is a decision about trust, not about a version: from that
+	// moment the host takes software from there as well.
 	ActionRepositorySet: {mutating: true, capability: "packages", permission: "packages.repository.write",
 		timeoutSeconds: 600, risk: RiskCritical, lockClass: LockPackages, verifier: VerifierRepository},
 
 	ActionSystemReboot: {mutating: true, capability: "systemd", permission: "system.reboot",
 		timeoutSeconds: 120, risk: RiskCritical, verifier: VerifierReboot},
 	// Shutting a host down ends in a state the panel cannot undo: nobody will
-	// power this machine on remotely. The unit lock is needed here so that no
-	// other operation starts at the moment the host is going down.
+	// power this machine on remotely.
 	ActionSystemShutdown: {mutating: true, capability: "systemd", permission: "system.shutdown",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockUnits, verifier: VerifierReboot},
-	// A rename changes the host's identity towards everything that knows it
-	// by name. The panel keeps its own by identifier, so the management
-	// channel survives - but Kerberos, service certificates and the other
-	// hosts' entries do not follow by themselves. Critical, and the whole
-	// host is the lock: nothing else is to land on a host mid-rename.
+	// A rename changes the host's identity towards everything that knows it by
+	// name.
 	ActionSystemHostnameSet: {mutating: true, capability: "systemd", permission: "system.hostname.write",
 		timeoutSeconds: 120, risk: RiskCritical, lockClass: LockHost, verifier: VerifierHostname},
 	// Reading unit state is non-mutating and serves campaign health checks.
@@ -1203,25 +999,18 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Preflight changes nothing, so it needs no approval.
 	ActionDomainPreflight: {mutating: false, capability: "systemd", permission: "identity.read",
 		timeoutSeconds: 120, risk: RiskLow, lockClass: LockIdentity},
-	// Leaving changes authentication for the whole host the same way the
-	// join does, in the other direction: every directory account loses the
-	// host at once. The same risk, the same lock and a permission of its
-	// own - the right to bring hosts in is not the right to take them out.
+	// Leaving changes authentication for the whole host the same way the join
+	// does, in the other direction: every directory account loses the host at
+	// once.
 	ActionDomainLeave: {mutating: true, capability: "systemd", permission: "identity.host.leave",
 		timeoutSeconds: 900, risk: RiskCritical, lockClass: LockIdentity, verifier: VerifierDomainMembership},
-	// A keytab renewal replaces the credential a service authenticates
-	// with: until it lands, the service the principal names cannot prove
-	// who it is. Critical, the identity lock, and the rotation's own
-	// permission - the same one the directory half of the change asks for,
-	// so nobody holds one half without the other.
+	// A keytab renewal replaces the credential a service authenticates with:
+	// until it lands, the service the principal names cannot prove who it is.
 	ActionIdentityKeytabRenew: {mutating: true, capability: "systemd", permission: "identity.keytab.rotate",
 		timeoutSeconds: 180, risk: RiskCritical, lockClass: LockIdentity, verifier: VerifierKeytab},
 
 	// Local accounts depend neither on systemd nor on a directory: the module
 	// works also where the customer stays with plain SSH authorisation.
-	// Locking and unlocking have separate permissions: in response to an
-	// incident, cutting an account off is sometimes allowed where restoring
-	// access is not.
 	ActionLocalUserCreate: {mutating: true, capability: "", permission: "localuser.create",
 		timeoutSeconds: 120, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalUserLock: {mutating: true, capability: "", permission: "localuser.lock",
@@ -1229,44 +1018,31 @@ var actionSpecs = map[ActionType]actionSpec{
 	// Restoring access is always more serious than taking it away.
 	ActionLocalUserUnlock: {mutating: true, capability: "", permission: "localuser.unlock",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
-	// Adding a key grants access and ranks high; removing one takes it
-	// away and ranks high too, because the account may have been left with
-	// no way in. Replacing the whole list is critical: it is the operation
-	// that cut accounts off by accident, and it asks for fresh
-	// authentication, the list the operator saw and - in production - a
-	// second person, like every critical change.
+	// Adding a key grants access and ranks high; removing one takes it away and
+	// ranks high too, because the account may have been left with no way in.
 	ActionLocalSSHKeysAdd: {mutating: true, capability: "", permission: "localuser.sshkeys.add",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalSSHKeysRemove: {mutating: true, capability: "", permission: "localuser.sshkeys.remove",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalSSHKeysReplaceAll: {mutating: true, capability: "", permission: "localuser.sshkeys.replace",
 		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockAccounts, verifier: VerifierLocalAccount},
-	// The previous name of the replace, deprecated: same semantics and the
-	// same risk, the expected list optional. It goes away one release after
-	// the panel started issuing replace_all.
+	// The previous name of the replace, deprecated: same semantics and the same
+	// risk, the expected list optional.
 	ActionLocalSSHKeysSet: {mutating: true, capability: "", permission: "localuser.sshkeys.write",
 		timeoutSeconds: 60, risk: RiskCritical, lockClass: LockAccounts, verifier: VerifierLocalAccount},
-	// The registry lists the base risk of a groups change. The risk of one
-	// order depends on its content: a membership in a privileged group is
-	// root by another name, and PayloadRisk raises such an order to
-	// critical.
+	// The registry lists the base risk of a groups change.
 	ActionLocalUserGroupsSet: {mutating: true, capability: "", permission: "localuser.groups.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 	ActionLocalUserExpirySet: {mutating: true, capability: "", permission: "localuser.expiry.write",
 		timeoutSeconds: 60, risk: RiskHigh, lockClass: LockAccounts, verifier: VerifierLocalAccount},
-	// Deleting an account is irreversible: a removed home directory does not
-	// come back, and neither does the UID's ownership of what it left
-	// behind. The operator types the account name before it starts.
+	// Deleting an account is irreversible: a removed home directory does not come
+	// back, and neither does the UID's ownership of what it left behind.
 	ActionLocalUserDelete: {mutating: true, capability: "", permission: "localuser.delete",
 		timeoutSeconds: 120, risk: RiskDestructive, lockClass: LockAccounts, verifier: VerifierLocalAccount},
 
-	// Reading containers changes nothing, but it can be heavy: the full list
-	// of images on a build host is megabytes, so it has its own resource
-	// class and its own output limit.
-	// Refreshing the inventory does not change the host and takes no lock: a
-	// read may run alongside an operation that is under way - at worst it
-	// will see state halfway through a change, and that is the truth about
-	// this moment.
+	// Reading containers changes nothing, but it can be heavy: the full list of
+	// images on a build host is megabytes, so it has its own resource class and
+	// its own output limit.
 	ActionInventoryRefresh: {mutating: false, permission: "inventory.refresh",
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
@@ -1293,45 +1069,29 @@ var actionSpecs = map[ActionType]actionSpec{
 	ActionDockerPrune: {mutating: true, capability: "docker", permission: "docker.prune",
 		timeoutSeconds: 900, risk: RiskDestructive, lockClass: LockContainers, verifier: VerifierNone},
 	// The event journal changes nothing and takes no container lock: a read
-	// lasting the follow window must not hold back the restart the operator
-	// is asking for - and that restart is exactly what they want to see in
-	// it. The time limit covers the longest allowed window with a margin.
+	// lasting the follow window must not hold back the restart the operator is
+	// asking for - and that restart is exactly what they want to see in it.
 	ActionDockerEvents: {mutating: false, capability: "docker", permission: "docker.events",
 		timeoutSeconds: 180, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
-	// A log read changes nothing and takes no container lock: reading what
-	// a container wrote must not wait for its restart. The byte limit is
-	// the one a log file read has.
+	// A log read changes nothing and takes no container lock: reading what a
+	// container wrote must not wait for its restart.
 	ActionDockerLogs: {mutating: false, capability: "docker", permission: "docker.container.logs",
 		timeoutSeconds: 60, risk: RiskLow, lockClass: LockNone, maxOutputBytes: 1 << 20},
 
 	// The plan of a declared object changes nothing, but it inspects the
-	// container and asks the registry what the image tag means today, so
-	// it carries the read permission of the module rather than none at
-	// all. Reading the state of the engine is what it is.
+	// container and asks the registry what the image tag means today, so it
+	// carries the read permission of the module rather than none at all.
 	ActionDockerPlan: {mutating: false, capability: "docker", permission: "docker.plan",
 		timeoutSeconds: 300, risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 1 << 20},
-	// Declaring a container replaces the container that is there when it
-	// differs, so the service goes down and comes back from another image.
-	// It is the furthest-reaching operation on a single container and must
-	// not be ordered without a plan a human approved. It carries a right of
-	// its own rather than the removal one: a replacement is a deployment,
-	// and an installation that lets somebody remove a container has not
-	// thereby let them put another in its place.
+	// Declaring a container replaces the container that is there when it differs,
+	// so the service goes down and comes back from another image.
 	ActionDockerContainerEnsure: {mutating: true, capability: "docker",
 		permission: "docker.container.ensure", timeoutSeconds: 1800,
 		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
 		maxOutputBytes: 1 << 20, verifier: VerifierContainerSpec},
-	// A network and a volume carry the permission that removes one: an
-	// ensure that finds an object differing from its description replaces
-	// it, and it is that removal the permission is about. Declaring one is
-	// reversible - it adds an object to the host - so it does not reach
-	// the risk of the removal.
-	// Every one of them is bound to a plan for the same reason the
-	// container is: an object that differs is destroyed and made again,
-	// and nobody agrees to that without the list of what differs.
-	// Each carries a permission of its own: a declaration is not a prune -
-	// it replaces an object somebody is using, rather than reclaiming one
-	// nobody is - and the registry gives no two operations one right.
+	// A network and a volume carry the permission that removes one: an ensure
+	// that finds an object differing from its description replaces it, and it is
+	// that removal the permission is about.
 	ActionDockerNetworkEnsure: {mutating: true, capability: "docker", permission: "docker.network.ensure",
 		timeoutSeconds: 300, risk: RiskMedium, lockClass: LockContainers, requiresPlan: true,
 		maxOutputBytes: 1 << 20, verifier: VerifierDockerNetwork},
@@ -1353,8 +1113,6 @@ var actionSpecs = map[ActionType]actionSpec{
 		permission: "docker.compose.plan", timeoutSeconds: 300,
 		risk: RiskLow, lockClass: LockContainers, maxOutputBytes: 1 << 20},
 	// Deploying a manifest starts the images the operator named on the host.
-	// It is the furthest-reaching operation of this module and must not be
-	// ordered without a plan approved by a human.
 	ActionComposeDeploy: {mutating: true, capability: "docker.compose",
 		permission: "docker.compose.deploy", timeoutSeconds: 1800,
 		risk: RiskCritical, lockClass: LockContainers, requiresPlan: true,
@@ -1375,9 +1133,7 @@ func AllActions() []ActionType {
 	return actions
 }
 
-// maxFollowSeconds bounds a single live view. A stream without an upper bound
-// would keep a process on the host even long after the operator closed the
-// browser tab.
+// maxFollowSeconds bounds a single live view.
 const maxFollowSeconds = 900
 
 // validateJournalPayload checks the filters shared by a read and a live view.
@@ -1397,9 +1153,8 @@ func validateJournalPayload(payload *JournalPayload) error {
 			return err
 		}
 	}
-	// The "since" and "until" values go into journalctl arguments. They do
-	// not pass through a shell, but narrower validation is still cheaper
-	// than trust.
+	// The "since" and "until" values go into journalctl arguments. They do not
+	// pass through a shell, but narrower validation is still cheaper than trust.
 	if payload.Since != "" && !periodPattern.MatchString(payload.Since) {
 		return fmt.Errorf("invalid time range %q", payload.Since)
 	}
@@ -1415,26 +1170,21 @@ func validateJournalPayload(payload *JournalPayload) error {
 }
 
 // cursorPattern matches a journal cursor as journalctl prints it with
-// --show-cursor: "s=...;i=...;b=...;m=...;t=...;x=...". The length bound
-// keeps a task argument from growing into something else.
+// --show-cursor: "s=.
 var cursorPattern = regexp.MustCompile(`^[A-Za-z0-9=;:+/._-]{1,512}$`)
 
 // maxDetailUnits bounds one detail read of units.
 const maxDetailUnits = 5
 
-// periodPattern allows the formats journalctl accepts: a timestamp, a
-// relative expression and keywords. A timestamp may say UTC: the panel
-// bounds a read to the window of a job, whose times it knows in UTC, and a
-// bare timestamp would be read in the host's own zone.
+// periodPattern allows the formats journalctl accepts: a timestamp, a relative
+// expression and keywords.
 var periodPattern = regexp.MustCompile(
 	`^(-?\d+ ?(s|sec|second|seconds|m|min|minute|minutes|h|hour|hours|d|day|days|w|week|weeks)( ago)?` +
 		`|yesterday|today|now` +
 		`|\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2})?( UTC)?)?)$`)
 
 // scheduleIdentifier repeats the pattern from the schedules module. The name
-// becomes the name of a file in /etc/cron.d, and cron skips files with a dot
-// and other special characters - an entry with a bad name would silently
-// never run.
+// becomes the name of a file in /etc/cron.
 var scheduleIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`)
 
 // interfaceName allows the names the kernel accepts at all. The length limit
@@ -1443,13 +1193,10 @@ var interfaceName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,14}$`)
 
 // checkFilePath rejects paths the panel will not write - before the task even
 // comes into being.
-//
-// The host decides conclusively with its own allowlist; here we sieve out
-// what is an error in the order regardless of the host.
 func checkFilePath(path string) error {
-	// Paths the panel never touches are rejected already at ordering time:
-	// the host would refuse anyway, and a queued task with such a target
-	// would look like a change about to happen.
+	// Paths the panel never touches are rejected already at ordering time: the
+	// host would refuse anyway, and a queued task with such a target would look
+	// like a change about to happen.
 	if err := filesmodule.Forbidden(path); err != nil {
 		return err
 	}
@@ -1468,9 +1215,7 @@ func checkFilePath(path string) error {
 	return nil
 }
 
-// firstPort returns the single port of a zone operation. The operation
-// concerns exactly one port, so a list longer than one element is an error -
-// and the zone validator reports it.
+// firstPort returns the single port of a zone operation.
 func firstPort(ports []string) string {
 	if len(ports) != 1 {
 		return ""
@@ -1479,8 +1224,7 @@ func firstPort(ports []string) string {
 }
 
 // checkNetworkChange rejects a configuration the host will not accept or one
-// that would cut it off from the panel. The panel refuses early, the host
-// conclusively.
+// that would cut it off from the panel.
 func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 	switch action {
 	case ActionNetworkMTUSet:
@@ -1490,10 +1234,8 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 		return network.ValidateMTU(change.MTU)
 
 	case ActionNetworkRouteEnsure:
-		// An empty list is a valid target state here: it means "a profile
-		// without routes of its own". So that it does not become one by
-		// accident, the order has to give it explicitly as a list rather than
-		// omit the field.
+		// An empty list is a valid target state here: it means "a profile without
+		// routes of its own".
 		if change.Routes == nil {
 			return fmt.Errorf("a route operation requires a list of routes; an empty list clears the profile's routes")
 		}
@@ -1508,18 +1250,15 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 		if change.Link == nil {
 			return fmt.Errorf("a layered change requires the description of the bond, the bridge or the VLAN")
 		}
-		// The shape is checked here so that an order the kernel would never
-		// take is refused before it is ever sent. Everything about the
-		// relations on the host - a member another layer owns, a parent
-		// that is not there - is the plan's answer, because only the host
-		// knows them.
+		// The shape is checked here so that an order the kernel would never take is
+		// refused before it is ever sent.
 		if change.Link.Name != change.Interface && change.Interface != "" {
 			return fmt.Errorf("the layered order names the interface %q and the layer %q; they are the same interface",
 				change.Interface, change.Link.Name)
 		}
-		// A refusal the module names with a code keeps it all the way to
-		// the API: the operator reads the same word here as they would in
-		// the plan the host computes.
+		// A refusal the module names with a code keeps it all the way to the API:
+		// the operator reads the same word here as they would in the plan the host
+		// computes.
 		if err := network.ValidateLinkSpec(*change.Link); err != nil {
 			var refusal *network.LinkRefusal
 			if errors.As(err, &refusal) {
@@ -1549,9 +1288,8 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 		if err := checkNetworkIPv6(change); err != nil {
 			return err
 		}
-		// The manual method without an address would leave the interface
-		// without one, and so cut the host off. That is not a configuration,
-		// it is a mistake.
+		// The manual method without an address would leave the interface without
+		// one, and so cut the host off.
 		if change.Method == "manual" && len(change.Addresses) == 0 {
 			return fmt.Errorf("the manual method requires at least one address")
 		}
@@ -1577,9 +1315,7 @@ func checkNetworkChange(action ActionType, change *NetworkPayload) error {
 
 // checkNetworkIPv6 holds the second family to the first one's standard: a
 // method the mechanisms know, addresses with a prefix length, and a gateway
-// that may be link-local because that is how an IPv6 router announces
-// itself. Whether the host has the family at all is the plan's answer - the
-// panel cannot know it - and comes back as ipv6_disabled_on_host.
+// that may be link-local because that is how an IPv6 router announces itself.
 func checkNetworkIPv6(change *NetworkPayload) error {
 	switch change.Method6 {
 	case "", "auto", "manual", "disabled":
@@ -1608,9 +1344,7 @@ func checkNetworkIPv6(change *NetworkPayload) error {
 	return nil
 }
 
-// scheduleShellCharacters are forbidden in command arguments. Cron runs the
-// command through a shell, so an argument with a metacharacter stops being an
-// argument and becomes a second command.
+// scheduleShellCharacters are forbidden in command arguments.
 var scheduleShellCharacters = `|&;<>()$` + "`" + `\"'` + "\n\r\t" + `*?[]{}~!#%`
 
 func checkScheduleCommand(arguments []string) error {
@@ -1633,22 +1367,8 @@ func checkScheduleCommand(arguments []string) error {
 	return nil
 }
 
-// checkScheduleUser refuses an account name that would not stay in the
-// user field of a cron line, and an entry that names none.
-//
-// The user is separated from the command by whitespace only: a value with
-// a space or a newline ends the field early and runs the rest as root. The
-// same words as on the host, so the panel refuses what the host would; the
-// host still checks that the account exists, which only it can know.
-// checkScheduleKind judges the mechanism an entry is ordered as.
-//
-// A kind the panel does not know is refused rather than carried to a host
-// that would have to guess. An entry ordered as a timer is also checked
-// for a calendar form here: the host would refuse it anyway, and an
-// operator learns more from a refusal at ordering time than from a failed
-// job. An entry that leaves the choice to the host is not checked that
-// way - the host may well write it as cron, where the expression means
-// exactly what it says.
+// checkScheduleUser refuses an account name that would not stay in the user
+// field of a cron line, and an entry that names none.
 func checkScheduleKind(payload *SchedulePayload) error {
 	switch payload.Kind {
 	case "", ScheduleKindCron, ScheduleKindAny:
@@ -1678,16 +1398,7 @@ func checkScheduleUser(name string) error {
 	return nil
 }
 
-// protectedPackages repeats the list from the packages module. The duplicate
-// is deliberate: opspec is the contract of the operations and does not reach
-// for packages that start processes or read host state - and the packages
-// module does both. The plan hash has to be computed by the same
-// implementation on both sides, so the list lives here in full. The panel
-// refuses early, and the host - conclusively.
-//
-// The cron grammar we already use directly from the schedules module: it is a
-// pure parser without side effects, and repeating it here would drift from
-// what the host really understands.
+// protectedPackages repeats the list from the packages module.
 func protectedPackages(packages []string) []string {
 	seen := map[string]bool{}
 	names := map[string]bool{
@@ -1702,8 +1413,7 @@ func protectedPackages(packages []string) []string {
 			name = name[:index]
 		}
 		// The same package appears both on the ordered list and among the
-		// dependants. Repeating it in the message would suggest two problems
-		// instead of one.
+		// dependants.
 		if seen[name] {
 			continue
 		}
@@ -1722,9 +1432,7 @@ func protectedPackages(packages []string) []string {
 	return result
 }
 
-// validateLogPath rejects paths the host will not accept anyway. The
-// allowlist on the host decides; the panel sieves out what is not even an
-// absolute path, so that a hopeless task is not queued.
+// validateLogPath rejects paths the host will not accept anyway.
 func validateLogPath(path string) error {
 	if path == "" {
 		return fmt.Errorf("the log file path is empty")
@@ -1746,11 +1454,7 @@ func validateLogPath(path string) error {
 	return nil
 }
 
-// unitPattern repeats the pattern from the systemd module. The duplicate is
-// deliberate: the opspec package has no dependencies outside the standard
-// library, because the plan hash has to be computed by the same
-// implementation on both sides. The panel refuses early, and the host -
-// conclusively.
+// unitPattern repeats the pattern from the systemd module.
 var unitPattern = regexp.MustCompile(
 	`^[A-Za-z0-9:_.\\@-]+\.(service|socket|timer|target|path|mount|automount|swap|slice|scope)$`)
 
@@ -1771,14 +1475,10 @@ func validateUnitName(unit string) error {
 // goes into a command argument and into container names.
 var composeProjectName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
-// maxComposeManifest bounds the size of a manifest. A file larger than this
-// is no longer a project configuration, but something the operator will not
-// read before approving it.
+// maxComposeManifest bounds the size of a manifest.
 const maxComposeManifest = 256 << 10
 
-// containerIdentifier allows only the engine's hexadecimal identifier. The
-// identifier goes into the path of an Engine API request, so it must not
-// carry anything that changes that path.
+// containerIdentifier allows only the engine's hexadecimal identifier.
 var containerIdentifier = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 
 func validContainerIdentifier(id string) bool {
@@ -1786,8 +1486,7 @@ func validContainerIdentifier(id string) bool {
 }
 
 // imageReference allows a repository name with an optional registry, tag or
-// digest. The reference goes to the engine as a request parameter rather than
-// to a shell, but narrower validation is still cheaper than trust.
+// digest.
 var imageReference = regexp.MustCompile(
 	`^[a-z0-9]+([._\-/][a-z0-9]+)*(:[0-9]{2,5})?(/[a-z0-9]+([._\-/][a-z0-9]+)*)*` +
 		`(:[\w][\w.\-]{0,127})?(@sha256:[a-f0-9]{64})?$`)
@@ -1815,10 +1514,7 @@ var volumeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
 // no longer an operator's decision, but a filter in disguise.
 const maxPruneObjects = 200
 
-// checkEventsRead guards the window boundaries. An order outside them is an
-// error in the order, not something the host should silently trim: an
-// operator who asked for a day of following has to learn that no such
-// operation exists.
+// checkEventsRead guards the window boundaries.
 func checkEventsRead(payload *DockerEventsPayload) error {
 	if payload == nil {
 		// A missing payload is valid: the default window is the most common
@@ -1874,12 +1570,6 @@ func checkPruneList(payload *DockerPrunePayload) error {
 }
 
 // checkDockerDeclaration checks an order about a declared object.
-//
-// The same module that reads the compact words on the host reads them
-// here, so the panel refuses exactly what the host would and names the
-// field rather than answering with a status from a daemon. What it cannot
-// decide is left to the host: whether the image exists, whether the port is
-// free, whether anything is attached to the network.
 func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) error {
 	if payload == nil {
 		return fmt.Errorf("the operation %s requires a docker_ensure payload", action)
@@ -1894,11 +1584,9 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 		return fmt.Errorf("an order describes one object; this one describes %d", described)
 	}
 
-	// A description already says what the object is and what it is called,
-	// so an order that also writes the kind or the name in by hand carries
-	// the same fact twice - and the host, which rebuilds the order from the
-	// description, would rebuild something else. The redundant field is
-	// refused rather than quietly dropped.
+	// A description already says what the object is and what it is called, so an
+	// order that also writes the kind or the name in by hand carries the same
+	// fact twice - and the host, which rebuilds the order from the description,
 	if described > 0 && (payload.Kind != "" || payload.Name != "") {
 		return fmt.Errorf("the description already says what this object is and what it is called; " +
 			"the kind and the name travel by themselves only in a removal")
@@ -1947,10 +1635,8 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 
 	switch {
 	case payload.Container != nil:
-		// The references belong beside the description, where they are
-		// references and are checked as such. A description that carried
-		// them itself would be a second place to write them, and the two
-		// would disagree.
+		// The references belong beside the description, where they are references
+		// and are checked as such.
 		if len(payload.Container.EnvSecrets) > 0 {
 			return fmt.Errorf("the secrets of the variables travel beside the description, " +
 				"under env_secrets of the order")
@@ -1978,11 +1664,7 @@ func checkDockerDeclaration(action ActionType, payload *DockerEnsurePayload) err
 	if len(payload.EnvSecrets) > 0 && payload.Container == nil {
 		return fmt.Errorf("only a container takes variables from the secret store")
 	}
-	// Every change here has to name the plan it was approved from. The
-	// host computes the plan once more and refuses when it moved: the
-	// operator approved one change from one base, not whatever the host
-	// happens to hold now. A plan itself carries no digest, because it is
-	// the thing that produces one.
+	// Every change here has to name the plan it was approved from.
 	if action != ActionDockerPlan && payload.PlanDigest == "" {
 		return fmt.Errorf("the operation %s requires the digest of an approved plan", action)
 	}
@@ -1999,9 +1681,7 @@ func validDockerKind(kind string) bool {
 	return false
 }
 
-// environmentVariable is a variable name a shell can carry. The module
-// checks it again on the description itself; this is for the references,
-// which live beside the description rather than in it.
+// environmentVariable is a variable name a shell can carry.
 var environmentVariable = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 
 // UnitPayload describes an operation on a systemd unit.
@@ -2018,37 +1698,21 @@ type JournalPayload struct {
 	// MaxPriority follows syslog: 0 emerg ... 7 debug. Empty means no filter.
 	MaxPriority *uint32 `json:"max_priority,omitempty"`
 	Since       string  `json:"since,omitempty"`
-	// Until ends the read, in the same forms as Since. The Logs page sets
-	// both to the window of a job, so the lines are the ones written while
-	// the operation ran and a little after. A live view has no end date -
-	// it ends by its own time limit - and the field is refused there
-	// rather than ignored.
+	// Until ends the read, in the same forms as Since.
 	Until string `json:"until,omitempty"`
-	// BootID narrows the view to one boot of the host, in either spelling
-	// the kernel and the journal use; normalised before it travels. The
-	// panel sends it only to an agent whose journald adapter names the
-	// boot_filter feature, and refuses the read otherwise. A live view
-	// takes it too: the running boot keeps the stream inside this life of
-	// the host, an earlier one shows its backlog and then nothing, which
-	// is the truth about a boot that has ended.
+	// BootID narrows the view to one boot of the host, in either spelling the
+	// kernel and the journal use; normalised before it travels.
 	BootID string `json:"boot_id,omitempty"`
-	// FollowSeconds bounds the live view. Zero means the default limit; a
-	// stream without an upper bound would keep a process on the host
-	// forever, including when nobody is watching any more.
+	// FollowSeconds bounds the live view.
 	FollowSeconds uint32 `json:"follow_seconds,omitempty"`
-	// AfterCursor starts the read right after a journal position. The unit
-	// detail view hands over the cursor of its last line, so the Logs page
-	// continues where the detail ended instead of showing the same lines
-	// again. A live view starts there as well and keeps going from it.
+	// AfterCursor starts the read right after a journal position.
 	AfterCursor string `json:"after_cursor,omitempty"`
 }
 
 // PackageChangePayload describes an install, a removal or a hold.
 type PackageChangePayload struct {
 	Packages []string `json:"packages"`
-	// ExpectedRemovals is the set the operator approved for a removal. The
-	// host computes it again right before the operation: a difference means a
-	// different set would be removed from the one that was reviewed.
+	// ExpectedRemovals is the set the operator approved for a removal.
 	ExpectedRemovals []string `json:"expected_removals,omitempty"`
 	// Hold concerns holds only: true freezes, false releases.
 	Hold bool `json:"hold,omitempty"`
@@ -2056,20 +1720,13 @@ type PackageChangePayload struct {
 	// computes the plan once more and refuses when the repository metadata
 	// changed since the approval.
 	PlanHash string `json:"plan_hash,omitempty"`
-	// Plan is the approved plan envelope the change is bound to: the
-	// header the host rebuilds the envelope with and the elements the
-	// operator approved. PlanHash is the digest of that envelope.
+	// Plan is the approved plan envelope the change is bound to: the header the
+	// host rebuilds the envelope with and the elements the operator approved.
 	Plan *PlanReference `json:"plan,omitempty"`
 }
 
-// PlanReference is what an execution carries of the approved plan
-// envelope (chapter 7 of the security remediation plan). The content is
-// not carried in full - the host computes it again right before the
-// change, that is the point - only the header the planner does not
-// compute from the host and the elements the operator approved, so a
-// refusal names the element that moved. It travels in the payload the
-// panel hashes and the capability signs, so the agent cannot change what
-// the helper expects.
+// PlanReference is what an execution carries of the approved plan envelope
+// (chapter 7 of the security remediation plan).
 type PlanReference struct {
 	SchemaVersion     uint32 `json:"schema_version,omitempty"`
 	PlannerVersion    string `json:"planner_version,omitempty"`
@@ -2119,13 +1776,8 @@ type PackageUpgradePayload struct {
 // AgentUpgradePayload describes replacing the agent with a named version.
 type AgentUpgradePayload struct {
 	// TargetVersion is the version that has to report in after the restart.
-	// It is what settles success: the exit code of the package manager says
-	// only that the transaction went through, not that the host came back.
 	TargetVersion string `json:"target_version"`
-	// PackageSHA256 is the checksum of the package from the release. The
-	// manager checks the repository signature, and this is a second,
-	// independent check - and the only one the panel can perform on its own
-	// side.
+	// PackageSHA256 is the checksum of the package from the release.
 	PackageSHA256 string `json:"package_sha256,omitempty"`
 	// RollbackVersion says what to return to when the host does not come back
 	// with the new version. Empty means no prepared return.
@@ -2175,29 +1827,22 @@ type RebootPayload struct {
 	Reason       string `json:"reason,omitempty"`
 }
 
-// UnitStatusPayload describes a read of unit state.
-//
-// An empty list means the full list of the host's units. That is a separate
-// query and a different cost from reading a few units known by name, so it
-// has to be ordered explicitly rather than result from a mistake in the call.
+// UnitStatusPayload describes a read of unit state. An empty list means the
+// full list of the host's units.
 type UnitStatusPayload struct {
 	Units []string `json:"units"`
 	// All orders the full list. Without it an empty list of units is an
 	// error.
 	All bool `json:"all,omitempty"`
-	// Detail asks for the full picture of the named units: dependencies,
-	// drop-ins with their content, the last journal lines. It costs several
-	// processes per unit, so a health check does not get it by accident,
-	// and it is limited to a few units at once.
+	// Detail asks for the full picture of the named units: dependencies, drop-ins
+	// with their content, the last journal lines.
 	Detail bool `json:"detail,omitempty"`
 }
 
 // UnitToggle turns a property of a unit on or off.
 type UnitToggle struct {
 	Unit string `json:"unit"`
-	// Enabled for unit.enable.set, Masked for unit.mask.set. The field is a
-	// target value rather than a toggle: the operation describes the state to
-	// be reached, so repeating it does not undo the change.
+	// Enabled for unit. enable. set, Masked for unit. mask. set.
 	Enabled bool `json:"enabled"`
 }
 
@@ -2252,10 +1897,6 @@ type Payload struct {
 const maxRefreshModules = 32
 
 // InventoryModules lists the modules the panel can refresh on request.
-//
-// The list is here rather than in the agent, because it is part of the
-// operation contract: the panel refuses an order with an unknown name before
-// the task goes out into the world.
 var InventoryModules = []string{
 	"system", "packages", "services", "identity", "accounts", "network",
 	"dns", "firewall", "storage", "ssh", "kernel", "time", "power",
@@ -2275,9 +1916,7 @@ func IsInventoryModule(name string) bool {
 
 // InventoryPayload describes the scope of an inventory refresh.
 type InventoryPayload struct {
-	// Modules narrows the read. Empty means the whole inventory - and that is
-	// the default way, because an operator usually asks "how are things now",
-	// not "how are things now on one tab".
+	// Modules narrows the read.
 	Modules []string `json:"modules,omitempty"`
 }
 
@@ -2286,8 +1925,7 @@ type SecurityPayload struct {
 	// Mode is the mode of mandatory access control.
 	Mode string `json:"mode,omitempty"`
 	// CheckIDs names the compliance checks a fleet remediation removes the
-	// findings of. Only the composite security.remediate carries them; an
-	// empty list is not "everything", because there is no fix-all.
+	// findings of.
 	CheckIDs []string `json:"check_ids,omitempty"`
 }
 
@@ -2303,13 +1941,8 @@ type MonitoringPayload struct {
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 }
 
-// BackupPayload describes a backup operation.
-//
-// The credentials are references to the store: the repository password and
-// the tool's environment variables. The values are in neither the order, nor
-// the audit trail, nor the inventory - the host reaches for them at execution
-// time and hands them to the tool through the environment rather than as an
-// argument visible in /proc.
+// BackupPayload describes a backup operation. The credentials are references
+// to the store: the repository password and the tool's environment variables.
 type BackupPayload struct {
 	ID   string `json:"id"`
 	Tool string `json:"tool"`
@@ -2337,9 +1970,7 @@ type BackupPayload struct {
 	// ReadData turns on verification that reads the data rather than the
 	// structure alone.
 	ReadData bool `json:"read_data,omitempty"`
-	// Plan names the kind of planned operation: run or verify. Empty means a
-	// read of the repository state - the same order serves both things, so
-	// the kind of plan has to be named rather than guessed from the scope.
+	// Plan names the kind of planned operation: run or verify.
 	Plan string `json:"plan,omitempty"`
 	// PlanHash binds the copy to the plan computed on this host: a scope or a
 	// repository changed since planning stops the operation.
@@ -2354,11 +1985,6 @@ type BackupPayload struct {
 }
 
 // RepositoryPayload describes a package source.
-//
-// The source key travels in the order, because it is public material and the
-// plan is meant to show what the host will trust. The password does not
-// travel: it is a reference to the store, which the host reaches for only at
-// write time.
 type RepositoryPayload struct {
 	ID            string   `json:"id"`
 	Name          string   `json:"name,omitempty"`
@@ -2368,13 +1994,10 @@ type RepositoryPayload struct {
 	Architectures []string `json:"architectures,omitempty"`
 	Enabled       bool     `json:"enabled,omitempty"`
 	Priority      int      `json:"priority,omitempty"`
-	// GPGKey is the public key of the source in an ASCII frame. The host
-	// computes its fingerprint and sends it back in the result: only a human
-	// can compare that fingerprint with the one the supplier gave.
+	// GPGKey is the public key of the source in an ASCII frame.
 	GPGKey string `json:"gpg_key,omitempty"`
-	// AllowUnsigned is the consent to a source whose signatures the host does
-	// not check. Without it a source without a key does not pass: an unsigned
-	// repository is a remote root shell, not a default setting.
+	// AllowUnsigned is the consent to a source whose signatures the host does not
+	// check.
 	AllowUnsigned bool   `json:"allow_unsigned,omitempty"`
 	Username      string `json:"username,omitempty"`
 	// PasswordSecret points at the password in the store. The value is in
@@ -2386,10 +2009,6 @@ type RepositoryPayload struct {
 
 // CertificateTarget points at a certificate file together with what the panel
 // knows about it.
-//
-// The key path and the service name come from the panel's configuration
-// rather than from a guess by the host: the link "this file is read by this
-// service" is typed in by a human, because only a human knows it.
 type CertificateTarget struct {
 	Path    string `json:"path"`
 	KeyPath string `json:"key_path,omitempty"`
@@ -2398,39 +2017,29 @@ type CertificateTarget struct {
 
 // CertificatePayload describes an operation of the certificates module.
 type CertificatePayload struct {
-	// Targets sets the scope of the scan. An empty list means scanning what
-	// the host knows about itself - that is, certmonger's requests - and not
-	// scanning the whole disk.
+	// Targets sets the scope of the scan.
 	Targets []CertificateTarget `json:"targets,omitempty"`
 
 	// Path and KeyPath are the target of a deployment.
 	Path    string `json:"path,omitempty"`
 	KeyPath string `json:"key_path,omitempty"`
 	// Certificate is content in the clear: the certificate together with its
-	// chain. It travels in the order, because it is public and the plan is
-	// meant to show what will reach the host.
+	// chain.
 	Certificate string `json:"certificate,omitempty"`
-	// KeySecret points at the private key in the store. The value is in
-	// neither the order, nor the audit trail, nor the inventory - the host
-	// fetches it right before the swap, on a single-use lease.
+	// KeySecret points at the private key in the store.
 	KeySecret *SecretRef `json:"key_secret,omitempty"`
 	Owner     string     `json:"owner,omitempty"`
 	Group     string     `json:"group,omitempty"`
 	Mode      string     `json:"mode,omitempty"`
 	KeyMode   string     `json:"key_mode,omitempty"`
-	// ReloadUnit is the service that has to read the new file. Without it a
-	// deployment ends with a file on disk and the old identity in the
-	// process's memory - and that looks like a change nobody can see.
+	// ReloadUnit is the service that has to read the new file.
 	ReloadUnit string `json:"reload_unit,omitempty"`
-	// ProbeTarget is the address at which the host will check the result of
-	// the deployment. The probe compares the fingerprint rather than trust:
-	// it asks whether the service serves the certificate just written.
+	// ProbeTarget is the address at which the host will check the result of the
+	// deployment.
 	ProbeTarget string `json:"probe_target,omitempty"`
 	// Request points at the certmonger request during a renewal.
 	Request string `json:"request,omitempty"`
-	// AnchorID names the panel's anchor in the host's trust store. The file
-	// on the host is named after it, so that is how the panel recognises its
-	// own anchor.
+	// AnchorID names the panel's anchor in the host's trust store.
 	AnchorID string `json:"anchor_id,omitempty"`
 	// PlanHash binds the deployment to the plan computed on this host; the
 	// host computes the plan once more before swapping the files.
@@ -2454,9 +2063,7 @@ type PowerPayload struct {
 
 // TimePayload describes an operation on the host's time.
 type TimePayload struct {
-	// Servers are the target time servers. An empty list in a configuration
-	// change is an error rather than a request to clear the sources: a host
-	// without a time source drifts silently.
+	// Servers are the target time servers.
 	Servers []string `json:"servers,omitempty"`
 	// Probe names the servers to check without changing the configuration.
 	Probe    []string `json:"probe,omitempty"`
@@ -2465,22 +2072,15 @@ type TimePayload struct {
 	// rejects a change that would move time by more than the threshold.
 	AllowStep bool `json:"allow_step,omitempty"`
 	// EnableDropIn is the consent to add the panel's source directory to the
-	// daemon's main file. Without it a host that includes none stays
-	// read-only - the panel does not add itself to somebody else's
-	// configuration silently.
+	// daemon's main file.
 	EnableDropIn bool `json:"enable_dropin,omitempty"`
 	// PlanHash binds the change to the plan computed on this host; the host
 	// computes the plan once more before writing.
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// SecretRef points at a secret in the panel's store.
-//
-// The task payload carries only the reference. The value passes through
-// neither the task, nor the audit trail, nor the inventory: the host reaches
-// for it only at execution time, on a short lease issued for that one task.
-// Thanks to that the plan hash also describes the reference rather than the
-// content - and it can be shown.
+// SecretRef points at a secret in the panel's store. The task payload carries
+// only the reference.
 type SecretRef struct {
 	Name string `json:"name"`
 	// Version equal to zero means the version current at the moment the task
@@ -2489,9 +2089,7 @@ type SecretRef struct {
 }
 
 // secretName repeats the store's rule, so that an order with a name the store
-// would not accept anyway falls out already at ordering time. The store
-// remains the deciding authority - it checks the name again when it issues
-// the lease.
+// would not accept anyway falls out already at ordering time.
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
 
 // Validate checks the reference to a secret.
@@ -2511,9 +2109,7 @@ func (r *SecretRef) Validate() error {
 // Empty says whether the reference points at nothing.
 func (r *SecretRef) Empty() bool { return r == nil || r.Name == "" }
 
-// String describes the reference as "name#version". The name and the version
-// only: the value of the secret is not in this module and must not appear in
-// a plan or in a log.
+// String describes the reference as "name#version".
 func (r *SecretRef) String() string {
 	if r.Empty() {
 		return ""
@@ -2540,21 +2136,13 @@ type FilePayload struct {
 	// it.
 	VersionSHA256 string `json:"version_sha256,omitempty"`
 	// ContentSecret points at the secret whose value is to land in the file.
-	// It excludes the Content field: either the content is in the clear and
-	// visible in the plan, or it comes from the store and exists nowhere
-	// outside it.
 	ContentSecret *SecretRef `json:"content_secret,omitempty"`
 	// AllowMissingValidator lets the write go on when the host lacks the
-	// validator; without it a missing validator refuses the write. Saying
-	// so in the order is not enough on its own: the principal also needs
-	// the permission file.write.unvalidated.
+	// validator; without it a missing validator refuses the write.
 	AllowMissingValidator bool `json:"allow_missing_validator,omitempty"`
 }
 
 // Secrets lists the references the host will have to reach for.
-//
-// The scheduler issues a lease for exactly what the payload points at -
-// neither less nor more.
 func (p Payload) Secrets() []SecretRef {
 	var references []SecretRef
 	if p.File != nil && !p.File.ContentSecret.Empty() {
@@ -2600,9 +2188,6 @@ type KernelPayload struct {
 }
 
 // SSHPayload describes a change to the sshd server configuration.
-//
-// An empty field means "do not change": the panel does not rewrite the
-// server's whole configuration, only the settings the operator asked about.
 type SSHPayload struct {
 	Port                   string   `json:"port,omitempty"`
 	PermitRootLogin        string   `json:"permit_root_login,omitempty"`
@@ -2614,8 +2199,7 @@ type SSHPayload struct {
 	AllowGroups            []string `json:"allow_groups,omitempty"`
 	DenyUsers              []string `json:"deny_users,omitempty"`
 	// AllowLockout permits writing a configuration after which no working
-	// authentication method is left. It requires an explicit decision by the
-	// operator.
+	// authentication method is left.
 	AllowLockout bool   `json:"allow_lockout,omitempty"`
 	KeyType      string `json:"key_type,omitempty"`
 	// PlanHash binds the change to the plan computed on this host; the host
@@ -2623,9 +2207,7 @@ type SSHPayload struct {
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// DescribesChange says whether the payload carries settings to plan. A
-// payload without settings is a question about the state of the server, not
-// about a difference.
+// DescribesChange says whether the payload carries settings to plan.
 func (p SSHPayload) DescribesChange() bool {
 	return p.Port != "" || p.PermitRootLogin != "" || p.PasswordAuthentication != "" ||
 		p.PubkeyAuthentication != "" || p.KbdInteractive != "" || p.MaxAuthTries != "" ||
@@ -2633,28 +2215,21 @@ func (p SSHPayload) DescribesChange() bool {
 }
 
 // StoragePayload describes an operation on storage.
-//
-// The source is named by a persistent identifier or by a path in /dev: the
-// name /dev/sdX depends on the order of discovery and after a reboot can
-// point at a different disk.
 type StoragePayload struct {
 	Source  string `json:"source,omitempty"`
 	Target  string `json:"target,omitempty"`
 	FSType  string `json:"fs_type,omitempty"`
 	Options string `json:"options,omitempty"`
-	// Persist writes an entry in fstab. Without it the mount disappears after
-	// a reboot - and the operator is to know that before the outage, not
-	// after.
+	// Persist writes an entry in fstab. Without it the mount disappears after a
+	// reboot - and the operator is to know that before the outage, not after.
 	Persist bool   `json:"persist,omitempty"`
 	Device  string `json:"device,omitempty"`
-	// ExpectedSerial and ExpectedSizeBytes bind the operation to the device
-	// the operator reviewed. A /dev/sdX path points at something else after a
-	// reboot.
+	// ExpectedSerial and ExpectedSizeBytes bind the operation to the device the
+	// operator reviewed.
 	ExpectedSerial    string `json:"expected_serial,omitempty"`
 	ExpectedSizeBytes uint64 `json:"expected_size_bytes,omitempty"`
 	// ExpectedByID and ExpectedWWN are the stable identity of the device a
-	// destructive operation binds to; the host refuses without them. The
-	// size stays a description and is never an identity.
+	// destructive operation binds to; the host refuses without them.
 	ExpectedByID string `json:"expected_by_id,omitempty"`
 	ExpectedWWN  string `json:"expected_wwn,omitempty"`
 	// Size is the increment of the volume, e.g. "+10G".
@@ -2663,41 +2238,31 @@ type StoragePayload struct {
 	// ExpectedUUID binds the operation to one specific filesystem.
 	ExpectedUUID string `json:"expected_uuid,omitempty"`
 	Repair       bool   `json:"repair,omitempty"`
-	// Plan names the kind of operation storage.plan is planning on the
-	// device: check, resize or lvm_extend. A mount is recognised by its
-	// target, so it needs no name.
+	// Plan names the kind of operation storage. plan is planning on the device:
+	// check, resize or lvm_extend.
 	Plan string `json:"plan,omitempty"`
 	// PlanHash binds the change to the plan computed on this host; the host
 	// computes the plan once more before the operation.
 	PlanHash string `json:"plan_hash,omitempty"`
 
 	// Array is the software array a member operation acts on, and
-	// ExpectedArrayUUID the identity out of its superblock. /dev/md0 is
-	// whichever array the kernel assembled first this boot; the UUID is the
-	// same array on every boot, so the host compares it before touching a
-	// member. The member itself travels in Device with the by-id link, the
-	// WWN and the serial above.
+	// ExpectedArrayUUID the identity out of its superblock.
 	Array             string `json:"array,omitempty"`
 	ExpectedArrayUUID string `json:"expected_array_uuid,omitempty"`
 
-	// Group is the LVM volume group an operation acts in, and
-	// ExpectedGroupUUID its identity: a group name can be given to another
-	// group after a rename, a UUID cannot.
+	// Group is the LVM volume group an operation acts in, and ExpectedGroupUUID
+	// its identity: a group name can be given to another group after a rename, a
+	// UUID cannot.
 	Group             string `json:"group,omitempty"`
 	ExpectedGroupUUID string `json:"expected_group_uuid,omitempty"`
 	// Volume is the name of the logical volume being created, and
-	// ExpectedVolumeUUID the identity of the volume an operation removes or
-	// takes a snapshot of.
+	// ExpectedVolumeUUID the identity of the volume an operation removes or takes
+	// a snapshot of.
 	Volume             string `json:"volume,omitempty"`
 	ExpectedVolumeUUID string `json:"expected_volume_uuid,omitempty"`
 }
 
 // FirewallPayload describes an operation on the host's firewall.
-//
-// The panel does not accept raw nft text: a rule written as text is a
-// language, and accepting a language would mean the host executes everything
-// that can be written in it. The wizard builds the rule out of fields the
-// panel understands.
 type FirewallPayload struct {
 	RuleID    string   `json:"rule_id,omitempty"`
 	Chain     string   `json:"chain,omitempty"`
@@ -2711,9 +2276,7 @@ type FirewallPayload struct {
 	Zone    string `json:"zone,omitempty"`
 	Service string `json:"service,omitempty"`
 	Enable  bool   `json:"enable,omitempty"`
-	// BreakGlass overrides the protection of the management channel. It
-	// requires an explicit decision by the operator, because the result is
-	// sometimes a host somebody has to drive to.
+	// BreakGlass overrides the protection of the management channel.
 	BreakGlass      bool   `json:"break_glass,omitempty"`
 	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
 	RollbackID      string `json:"rollback_id,omitempty"`
@@ -2723,15 +2286,11 @@ type FirewallPayload struct {
 
 // DNSPayload describes an operation on the host's resolver.
 type DNSPayload struct {
-	// Interface names the connection profile the change goes through. The
-	// host's resolver belongs to the interface rather than to the file: the
-	// file is only what the service computed out of it.
+	// Interface names the connection profile the change goes through.
 	Interface     string   `json:"interface,omitempty"`
 	Servers       []string `json:"servers,omitempty"`
 	SearchDomains []string `json:"search_domains,omitempty"`
-	// IgnoreAutoDNS rejects the servers from DHCP. Without it the panel's
-	// servers and the provider's servers land in one list, and the operator
-	// does not know which one answered.
+	// IgnoreAutoDNS rejects the servers from DHCP.
 	IgnoreAutoDNS   bool     `json:"ignore_auto_dns,omitempty"`
 	RollbackSeconds uint32   `json:"rollback_seconds,omitempty"`
 	Names           []string `json:"names,omitempty"`
@@ -2740,67 +2299,48 @@ type DNSPayload struct {
 	PlanHash string `json:"plan_hash,omitempty"`
 }
 
-// NetworkPayload describes a change to the network configuration.
-//
-// The payload describes the target state of the interface, not commands to
-// run. The panel names the interface, because that is what the operator sees;
-// the NetworkManager profile the host finds by itself.
+// NetworkPayload describes a change to the network configuration. The payload
+// describes the target state of the interface, not commands to run.
 type NetworkPayload struct {
 	Interface string `json:"interface"`
 	// MTU is text, because "auto" is an equally valid value here: zero would
 	// mean a link with an MTU of zero.
 	MTU string `json:"mtu,omitempty"`
 	// Routes is the profile's complete list of routes, not an addition: the
-	// operator saw one specific set in the plan and that is what is to stay
-	// on the host.
+	// operator saw one specific set in the plan and that is what is to stay on
+	// the host.
 	Routes    []string `json:"routes,omitempty"`
 	Method    string   `json:"method,omitempty"`
 	Addresses []string `json:"addresses,omitempty"`
 	Gateway   string   `json:"gateway,omitempty"`
 	DNS       []string `json:"dns,omitempty"`
 	// RollbackSeconds is the window in which the agent has to confirm
-	// connectivity. Zero means the host's default value, not the absence of a
-	// rollback.
+	// connectivity.
 	RollbackSeconds uint32 `json:"rollback_seconds,omitempty"`
 	// RollbackID points at the rollback plan in a network.rollback operation.
 	RollbackID string `json:"rollback_id,omitempty"`
-	// PlanHash binds the change to the plan computed on this host. The host
-	// computes the plan once more before the change: a different digest means
-	// the profile changed since planning and the change would enter a state
-	// other than the one reviewed.
+	// PlanHash binds the change to the plan computed on this host.
 	PlanHash string `json:"plan_hash,omitempty"`
-	// The second family, ordered to the same standard as the first. It is
-	// kept apart from IPv4 on purpose: a host can take its v4 address from
-	// DHCP and hold a static v6 one at the same time, and an order that
-	// could name only one of them would leave the other to whatever was
-	// there before. An empty method leaves the family as the host has it.
+	// The second family, ordered to the same standard as the first.
 	Method6    string   `json:"method6,omitempty"`
 	Addresses6 []string `json:"addresses6,omitempty"`
-	// Gateway6 may be a link-local address: that is how an IPv6 router
-	// ordinarily announces itself, and a check written for IPv4 would
-	// refuse the normal case.
+	// Gateway6 may be a link-local address: that is how an IPv6 router ordinarily
+	// announces itself, and a check written for IPv4 would refuse the normal
+	// case.
 	Gateway6 string `json:"gateway6,omitempty"`
-	// AcceptRA is off, on or on-forwarding; Privacy is off, prefer-public
-	// or prefer-temporary. A mechanism that cannot express one of them
-	// refuses the setting by name rather than approximating it.
+	// AcceptRA is off, on or on-forwarding; Privacy is off, prefer-public or
+	// prefer-temporary.
 	AcceptRA string `json:"accept_ra,omitempty"`
 	Privacy  string `json:"privacy,omitempty"`
-	// Link is the layered interface ordered: a bond, a bridge or a VLAN
-	// with what it is made of. A removal does not use it - it names the
-	// layer in Interface - because a half-filled description of something
-	// about to disappear says nothing.
+	// Link is the layered interface ordered: a bond, a bridge or a VLAN with what
+	// it is made of.
 	Link *network.LinkSpec `json:"link,omitempty"`
-	// LinkRemove marks a plan that is about a removal. The removal itself
-	// is its own operation; the plan needs the flag, because a removal is
-	// refused for the reverse of the reasons a creation is and the operator
-	// has to see those before approving.
+	// LinkRemove marks a plan that is about a removal.
 	LinkRemove bool `json:"link_remove,omitempty"`
 }
 
-// DescribesChange says whether the payload carries a change to plan: an MTU,
-// a list of routes, an address profile of either family, or a layer. A
-// payload with an interface alone is a question about state, not about a
-// difference.
+// DescribesChange says whether the payload carries a change to plan: an MTU, a
+// list of routes, an address profile of either family, or a layer.
 func (p NetworkPayload) DescribesChange() bool {
 	if p.Link != nil || p.LinkRemove {
 		return true
@@ -2810,17 +2350,12 @@ func (p NetworkPayload) DescribesChange() bool {
 }
 
 // DescribesLayer says whether the order is about the layering rather than
-// about what an interface carries. The two are planned against different
-// things - one against a profile, the other against the whole host - so the
-// question is asked before anything is read.
+// about what an interface carries.
 func (p NetworkPayload) DescribesLayer() bool {
 	return p.Link != nil || p.LinkRemove
 }
 
 // SchedulePayload describes a scheduled job.
-//
-// The entry describes the target state, not a command to run once: repeating
-// the operation with the same payload duplicates nothing.
 type SchedulePayload struct {
 	// ID is the stable identifier of a managed entry. An entry found on the
 	// host has no such identifier and cannot be named here.
@@ -2830,9 +2365,8 @@ type SchedulePayload struct {
 	Expression string `json:"expression,omitempty"`
 	// Command is an array of arguments, never a shell line.
 	Command []string `json:"command,omitempty"`
-	// User is the account the entry runs as. It is required for
-	// schedule.ensure and root is not a default: an entry for root needs
-	// the permission schedule.root.exec on top of schedule.write.
+	// User is the account the entry runs as. It is required for schedule. ensure
+	// and root is not a default: an entry for root needs the permission schedule.
 	User    string `json:"user,omitempty"`
 	Comment string `json:"comment,omitempty"`
 	// Enabled concerns schedule.disable only: true enables, false disables.
@@ -2841,29 +2375,21 @@ type SchedulePayload struct {
 	// Adopt allows taking over an entry found on the host. Without it the
 	// panel does not overwrite work nobody entered into the panel.
 	Adopt bool `json:"adopt,omitempty"`
-	// Kind names the mechanism a managed entry is written with: "cron" for
-	// a file in /etc/cron.d, "timer" for a pair of systemd units, "any" to
-	// leave the choice to the host, which takes cron where it has it.
-	// Empty means cron - exactly what an order carried before timers could
-	// be written, so a panel and an agent of different releases mean the
-	// same thing by the same payload.
+	// Kind names the mechanism a managed entry is written with: "cron" for a file
+	// in /etc/cron.
 	Kind string `json:"kind,omitempty"`
 }
 
-// The mechanisms a managed entry can be ordered as. The names are the ones
-// the schedules module uses, so a payload and a snapshot speak one
-// vocabulary.
+// The mechanisms a managed entry can be ordered as. The names are the ones the
+// schedules module uses, so a payload and a snapshot speak one vocabulary.
 const (
 	ScheduleKindCron  = "cron"
 	ScheduleKindTimer = "timer"
 	ScheduleKindAny   = "any"
 )
 
-// RefusalCalendarUnsupported refuses a cron expression that cannot be
-// written as a timer. Cron runs a job when the day of the month or the day
-// of the week matches, systemd only when both do: such an expression means
-// two different things on the two mechanisms, and the panel writes neither
-// by accident.
+// RefusalCalendarUnsupported refuses a cron expression that cannot be written
+// as a timer.
 const RefusalCalendarUnsupported = "timer_calendar_unsupported"
 
 // ProcessListPayload describes a snapshot of processes.
@@ -2875,10 +2401,6 @@ type ProcessListPayload struct {
 }
 
 // ProcessSignalPayload describes a signal to a process.
-//
-// A PID alone does not identify a process: the kernel reuses numbers, so a
-// signal sent a moment after the list was reviewed could hit something else.
-// The start time binds the task to one specific process.
 type ProcessSignalPayload struct {
 	PID           int32  `json:"pid"`
 	ExpectedStart uint64 `json:"expected_start_ticks"`
@@ -2897,10 +2419,6 @@ type LogFilePayload struct {
 }
 
 // ComposePayload carries the manifest of a Compose project.
-//
-// The manifest is part of the payload rather than a reference to a file on
-// the host: the operator approves the content they reviewed, and the payload
-// hash binds the approval to exactly that.
 type ComposePayload struct {
 	Project  string `json:"project"`
 	Manifest string `json:"manifest"`
@@ -2912,11 +2430,8 @@ type ComposePayload struct {
 	ImageDigests map[string]string `json:"image_digests,omitempty"`
 }
 
-// DockerContainerPayload names the container of an operation.
-//
-// The target is an identifier, not a name. A container name is a label: it
-// can be assigned to a different container between the plan and the
-// execution, and the operator approved one specific object.
+// DockerContainerPayload names the container of an operation. The target is an
+// identifier, not a name.
 type DockerContainerPayload struct {
 	ContainerID string `json:"container_id"`
 	// Name serves confirmation and the audit trail only: the operator has the
@@ -2936,9 +2451,7 @@ type DockerImagePayload struct {
 	Reference string `json:"reference"`
 }
 
-// The kinds of object a declaration is about. The plan carries the kind
-// where the payload names an object without describing it - a removal,
-// which has a name and nothing else.
+// The kinds of object a declaration is about.
 const (
 	DockerKindContainer = "container"
 	DockerKindNetwork   = "network"
@@ -2946,20 +2459,10 @@ const (
 )
 
 // DockerEnsurePayload carries the description of one declared object.
-//
-// The description travels in the order rather than as a reference to
-// something on the host: the operator approves the content they read, and
-// the payload hash binds the approval to exactly that. It is also why no
-// value of a secret is in it - the payload is stored with the job and
-// shown to whoever may read it. A variable whose value is a credential
-// names a secret of the store, and the host fetches it right before the
-// container is created.
 type DockerEnsurePayload struct {
 	// Container is the description in the words an operator writes it in -
 	// "8080:80/tcp", "volume:data:/var/lib/data:ro" - and not the engine's
-	// structures. What is approved and what is hashed is the text that was
-	// read; the module turns it into the description the engine takes, and
-	// the panel and the host do that with the same code.
+	// structures.
 	Container *docker.ContainerRequest `json:"container,omitempty"`
 	Network   *docker.NetworkSpec      `json:"network,omitempty"`
 	Volume    *docker.VolumeSpec       `json:"volume,omitempty"`
@@ -2973,22 +2476,15 @@ type DockerEnsurePayload struct {
 	// PlanDigest binds the change to a plan. A change without it has no
 	// basis, and the registry says which operations may go without one.
 	PlanDigest string `json:"plan_digest,omitempty"`
-	// Force says the order accepts what the host would otherwise refuse:
-	// a network recreated under the containers attached to it, a volume
-	// recreated with everything in it, a removal of an object something
-	// still holds.
+	// Force says the order accepts what the host would otherwise refuse: a
+	// network recreated under the containers attached to it, a volume recreated
+	// with everything in it, a removal of an object something still holds.
 	Force bool `json:"force,omitempty"`
 }
 
-// SpecWithSecrets returns the container description as it travels to the
-// host: the secret references written into it under the names of the
-// variables they feed.
-//
-// The references and not the values: the description is hashed into the
-// plan digest, recorded with the job and read back by the verifier. What
-// the reference gives is that a secret rotated to another version changes
-// the description, and a changed description is a replacement - which is
-// the only way a rotated credential ever reaches a running container.
+// SpecWithSecrets returns the container description as it travels to the host:
+// the secret references written into it under the names of the variables they
+// feed.
 func (p *DockerEnsurePayload) SpecWithSecrets() (docker.ContainerSpec, error) {
 	if p == nil || p.Container == nil {
 		return docker.ContainerSpec{}, fmt.Errorf("the order carries no container description")
@@ -3035,20 +2531,13 @@ func (p *DockerEnsurePayload) ObjectName() string {
 }
 
 // DockerPrunePayload lists the objects to remove.
-//
-// Pruning by filter removes what matches at execution time - including an
-// object created after the operator reviewed the preview. That is why the
-// operation takes an explicit list of objects: it removes exactly what was
-// shown, or nothing.
 type DockerPrunePayload struct {
 	ImageIDs   []string `json:"image_ids,omitempty"`
 	VolumeName []string `json:"volume_names,omitempty"`
 	NetworkIDs []string `json:"network_ids,omitempty"`
 }
 
-// The boundaries of an event journal read. The panel refuses an order outside
-// them before the task goes out into the world; the host closes them a second
-// time, because it is the one paying for the read.
+// The boundaries of an event journal read.
 const (
 	maxEventWindow = 24 * 60 * 60
 	maxEventFollow = 60
@@ -3056,10 +2545,6 @@ const (
 )
 
 // DockerEventsPayload describes a closed window of an event journal read.
-//
-// Every field has a boundary, because a task without boundaries stays on the
-// host forever. Zero means the module's default value, not the absence of a
-// limit.
 type DockerEventsPayload struct {
 	// SinceSeconds says how far back to reach.
 	SinceSeconds int `json:"since_seconds,omitempty"`
@@ -3072,18 +2557,11 @@ type DockerEventsPayload struct {
 	MaxEvents int `json:"max_events,omitempty"`
 }
 
-// DockerReadPayload describes a read of the container engine's state. The
-// payload is empty by design: the scope of the read follows from the
-// operation rather than from a parameter - otherwise "read the containers"
-// and "read everything" would be the same operation at a different price for
-// the host.
+// DockerReadPayload describes a read of the container engine's state.
 type DockerReadPayload struct{}
 
-// PackageRepairPayload carries the operator's answers to package
-// configuration questions that block package operations.
-//
-// The payload may be empty: finishing the configuration is enough when the
-// previous transaction was interrupted and nothing is waiting for a decision.
+// PackageRepairPayload carries the operator's answers to package configuration
+// questions that block package operations.
 type PackageRepairPayload struct {
 	Answers []DebconfAnswer `json:"answers,omitempty"`
 }
@@ -3097,11 +2575,6 @@ type DebconfAnswer struct {
 }
 
 // DomainEnrollPayload describes joining the host to a domain.
-//
-// The payload contains no password: the one-time credential is fetched from
-// the directory at send time and injected into the envelope. Storing it in
-// the database would mean a secret lying on disk for the whole life of the
-// task.
 type DomainEnrollPayload struct {
 	Domain   string `json:"domain"`
 	Realm    string `json:"realm"`
@@ -3109,37 +2582,26 @@ type DomainEnrollPayload struct {
 	Hostname string `json:"hostname,omitempty"`
 }
 
-// DomainLeavePayload describes taking the host out of a domain. The domain
-// and the realm are the ones the operator means to leave: the host refuses
-// the order when it is in a different one, so a stale view of the fleet
-// cannot take a host out of the wrong domain.
+// DomainLeavePayload describes taking the host out of a domain.
 type DomainLeavePayload struct {
 	Domain string `json:"domain"`
 	Realm  string `json:"realm"`
 }
 
-// KeytabPayload names the service principal whose keytab the host renews,
-// as service/host.example.test with an optional realm. The keytab file is
-// always the host's own (/etc/krb5.keytab): the payload carries no path
-// and no key material, and the host proves itself with the credentials it
-// holds.
+// KeytabPayload names the service principal whose keytab the host renews, as
+// service/host.
 type KeytabPayload struct {
 	Principal string `json:"principal"`
 }
 
-// LocalUserPayload describes a change to a local account.
-//
-// The payload contains neither a password nor a hash. An account created by
-// the panel is reachable by SSH key only, so there is no secret the panel
-// would have to store or carry.
+// LocalUserPayload describes a change to a local account. The payload contains
+// neither a password nor a hash.
 type LocalUserPayload struct {
 	Name   string   `json:"name"`
 	Gecos  string   `json:"gecos,omitempty"`
 	Shell  string   `json:"shell,omitempty"`
 	Groups []string `json:"groups,omitempty"`
-	// SSHKeys is the complete, intended list of keys of a create or a
-	// replace. An empty list in a replace takes access away and is a
-	// deliberate change, not missing data.
+	// SSHKeys is the complete, intended list of keys of a create or a replace.
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	CreateHome bool     `json:"create_home,omitempty"`
 	// ExpiresAt is the expiry date as YYYY-MM-DD. Empty in an expiry
@@ -3149,45 +2611,30 @@ type LocalUserPayload struct {
 	// account only when the operator says so.
 	RemoveHome bool `json:"remove_home,omitempty"`
 
-	// The key operations of chapter 14.1 of the security remediation.
-	//
-	// Keys are the keys an add appends: each one the file does not carry
-	// yet, by fingerprint, so the same order twice adds nothing twice.
+	// The key operations of chapter 14. 1 of the security remediation.
 	Keys []SSHKeyInput `json:"keys,omitempty"`
 	// Fingerprints names the keys a remove takes away and nothing else.
-	// A fingerprint the account does not have refuses the order unless
-	// IgnoreMissing says the key may already be gone.
 	Fingerprints  []string `json:"fingerprints,omitempty"`
 	IgnoreMissing bool     `json:"ignore_missing,omitempty"`
-	// ExpectedFingerprints is what the operator saw when they ordered a
-	// replace: the list of keys the account has now. A key added or taken
-	// away in between makes the replace stale, and the host refuses it
-	// rather than overwrite what nobody reviewed. A replace requires the
-	// list; the deprecated set takes it when given.
+	// ExpectedFingerprints is what the operator saw when they ordered a replace:
+	// the list of keys the account has now.
 	ExpectedFingerprints []string `json:"expected_fingerprints,omitempty"`
-	// AllowLockout permits taking the last key of an account that has no
-	// password login: after it nobody enters as that account. The same
-	// explicit consent the sshd module asks for before a lockout.
+	// AllowLockout permits taking the last key of an account that has no password
+	// login: after it nobody enters as that account.
 	AllowLockout bool `json:"allow_lockout,omitempty"`
-	// ManagedFile edits the panel's own key file under
-	// /etc/ssh/authorized_keys.d instead of the user's authorized_keys;
-	// the host refuses when sshd does not read that file.
+	// ManagedFile edits the panel's own key file under /etc/ssh/authorized_keys.
 	ManagedFile bool `json:"managed_file,omitempty"`
-	// System says the order means a system account - one outside the
-	// UID range of people in the host's login.defs - and, on a create,
-	// that the account is to be allocated below that range. Without it a
-	// system account is refused on the host.
+	// System says the order means a system account - one outside the UID range of
+	// people in the host's login.
 	System bool `json:"system,omitempty"`
-	// Inactive acknowledges that a created account has no way in: no key
-	// and, since the panel sets no passwords, no password. A create with
-	// neither is refused without it, so an account nobody can enter is a
-	// decision and not an oversight.
+	// Inactive acknowledges that a created account has no way in: no key and,
+	// since the panel sets no passwords, no password.
 	Inactive bool `json:"inactive,omitempty"`
 }
 
-// SSHKeyInput is a key an add appends: the public key as the file takes
-// it, options included, and an optional comment appended when the key
-// carries none.
+// SSHKeyInput is a key an add appends: the public key as the file takes it,
+// options included, and an optional comment appended when the key carries
+// none.
 type SSHKeyInput struct {
 	PublicKey string `json:"public_key"`
 	Comment   string `json:"comment,omitempty"`
@@ -3202,12 +2649,8 @@ type HostnamePayload struct {
 	Pretty string `json:"pretty,omitempty"`
 }
 
-// DockerLogsPayload describes a bounded read of one container's log.
-//
-// The target may be an identifier or a name. Unlike a container mutation,
-// a read aimed at a name that moved to another container shows the wrong
-// log and changes nothing - and the name is what the operator has in front
-// of them.
+// DockerLogsPayload describes a bounded read of one container's log. The
+// target may be an identifier or a name.
 type DockerLogsPayload struct {
 	ContainerID string `json:"container_id"`
 	// Lines is the tail to read; zero means the module default of 200.
@@ -3304,9 +2747,9 @@ func Validate(action ActionType, payload Payload) error {
 		if err := validateLocalUserKeyFields(action, payload.LocalUser); err != nil {
 			return err
 		}
-		// The accounts below the user range and the account the agent runs
-		// under are refused already here: the host refuses them too, but a
-		// queued deletion of root would look like a change about to happen.
+		// The accounts below the user range and the account the agent runs under are
+		// refused already here: the host refuses them too, but a queued deletion of
+		// root would look like a change about to happen.
 		if action == ActionLocalUserDelete && protectedAccount(payload.LocalUser.Name) {
 			return fmt.Errorf("the account %s is not deleted through the panel", payload.LocalUser.Name)
 		}
@@ -3385,9 +2828,8 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		seen := map[string]bool{}
 		for _, module := range payload.Inventory.Modules {
-			// An unknown module name must not pass as "nothing to do": a typo
-			// would end in a refresh that refreshes nothing and looks like a
-			// success.
+			// An unknown module name must not pass as "nothing to do": a typo would end
+			// in a refresh that refreshes nothing and looks like a success.
 			if !IsInventoryModule(module) {
 				return fmt.Errorf("unknown inventory module %q", module)
 			}
@@ -3503,10 +2945,9 @@ func Validate(action ActionType, payload Payload) error {
 		if strings.TrimSpace(payload.Schedule.Expression) == "" {
 			return fmt.Errorf("a schedule requires an expression")
 		}
-		// We check the expression here rather than only on the host: an entry
-		// cron will not understand would never run, and the operator would
-		// learn about it from an execution error instead of a refusal at
-		// ordering time.
+		// We check the expression here rather than only on the host: an entry cron
+		// will not understand would never run, and the operator would learn about it
+		// from an execution error instead of a refusal at ordering time.
 		if _, err := schedules.ParseExpression(payload.Schedule.Expression); err != nil {
 			return fmt.Errorf("schedule expression: %w", err)
 		}
@@ -3543,9 +2984,9 @@ func Validate(action ActionType, payload Payload) error {
 		if _, err := filesmodule.ValidateMode(payload.File.Mode); err != nil {
 			return err
 		}
-		// Clear content and content from the store exclude each other:
-		// otherwise it is unknown what really lands in the file, and the plan
-		// would show something else.
+		// Clear content and content from the store exclude each other: otherwise it
+		// is unknown what really lands in the file, and the plan would show
+		// something else.
 		if !payload.File.ContentSecret.Empty() {
 			if payload.File.Content != "" {
 				return fmt.Errorf("the file is to have content or a secret, not both at once")
@@ -3559,10 +3000,8 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
-		// A version is named only by a return to one, and it names a content
-		// by its digest. An ordinary write that carried a digest would look
-		// like a write of the content in the order while the host wrote
-		// something else entirely.
+		// A version is named only by a return to one, and it names a content by its
+		// digest.
 		if payload.File.VersionSHA256 != "" {
 			if action != ActionFileRollback {
 				return fmt.Errorf("only %s names a version to go back to", ActionFileRollback)
@@ -3575,9 +3014,9 @@ func Validate(action ActionType, payload Payload) error {
 				return fmt.Errorf("the order names a version and carries content that is not that version")
 			}
 		}
-		// A return to a version has to say which one: without a digest and
-		// without content it is an order to write nothing, and writing
-		// nothing over a configuration file is not what anybody meant.
+		// A return to a version has to say which one: without a digest and without
+		// content it is an order to write nothing, and writing nothing over a
+		// configuration file is not what anybody meant.
 		if action == ActionFileRollback && payload.File.VersionSHA256 == "" &&
 			payload.File.Content == "" && payload.File.ContentSecret.Empty() {
 			return fmt.Errorf("a return to a version requires the digest of that version")
@@ -3666,10 +3105,9 @@ func Validate(action ActionType, payload Payload) error {
 				return err
 			}
 		}
-		// The panel knows the manager from the host's inventory, but the
-		// order has to be checkable without it: the shared fields we check
-		// always, and those that depend on the system family - for the
-		// manager that matches the description of the source.
+		// The panel knows the manager from the host's inventory, but the order has
+		// to be checkable without it: the shared fields we check always, and those
+		// that depend on the system family - for the manager that matches the
 		manager := "dnf"
 		if len(repo.Suites) > 0 || len(repo.Components) > 0 {
 			manager = "apt"
@@ -3680,10 +3118,7 @@ func Validate(action ActionType, payload Payload) error {
 		if repo.Remove {
 			return nil
 		}
-		// A source we trust has to have something to show for itself. We
-		// check the key here with the same code the host will use - so that
-		// material without a key falls out at ordering time rather than after
-		// approval.
+		// A source we trust has to have something to show for itself.
 		if !repo.AllowUnsigned {
 			if repo.GPGKey == "" {
 				return fmt.Errorf("a source with signature checking requires a public key")
@@ -3737,9 +3172,9 @@ func Validate(action ActionType, payload Payload) error {
 		return certificates.ValidateAnchor(payload.Certificate.AnchorID)
 
 	case ActionCertificatePlan:
-		// The plan accepts the same thing a deployment does and names by
-		// itself what the host will not accept: a refusal is the content of
-		// the plan, not an error in the order.
+		// The plan accepts the same thing a deployment does and names by itself what
+		// the host will not accept: a refusal is the content of the plan, not an
+		// error in the order.
 		return nil
 
 	case ActionCertificateDeploy:
@@ -3753,9 +3188,9 @@ func Validate(action ActionType, payload Payload) error {
 		if cert.Certificate == "" {
 			return fmt.Errorf("a deployment requires the content of the certificate")
 		}
-		// We check the material here with the same code the host will use: an
-		// order with a broken chain falls out at ordering time rather than
-		// after approval and delivery to the host.
+		// We check the material here with the same code the host will use: an order
+		// with a broken chain falls out at ordering time rather than after approval
+		// and delivery to the host.
 		parsed, err := certificates.ParsePEM([]byte(cert.Certificate))
 		if err != nil {
 			return err
@@ -3785,10 +3220,7 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Certificate == nil {
 			return fmt.Errorf("the operation %s requires a certificate payload", action)
 		}
-		// The request is named by an identifier or by a file path. The path is
-		// needed here not for convenience: a certmonger request identifier is
-		// different on every host, so a campaign renewing the same
-		// certificate across the fleet has nothing to name it with.
+		// The request is named by an identifier or by a file path.
 		if payload.Certificate.Request == "" {
 			if payload.Certificate.Path == "" {
 				return fmt.Errorf("a renewal requires a request identifier or a certificate path")
@@ -3811,9 +3243,7 @@ func Validate(action ActionType, payload Payload) error {
 		return security.ValidateMode(payload.Security.Mode)
 
 	case ActionSecurityRemediate:
-		// The composite is never one task on one host: its steps are the
-		// tasks. The security module orders it as a campaign after computing
-		// the plan of every host; ordered anywhere else it is refused.
+		// The composite is never one task on one host: its steps are the tasks.
 		return fmt.Errorf("the operation %s is a fleet remediation: it is ordered from the "+
 			"security view as a campaign of per-host plans, not as a task on one host", action)
 
@@ -3855,9 +3285,9 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionTimePlan:
-		// The plan accepts the same thing a change does and names by itself
-		// what the host will not accept: a refusal is the content of the
-		// plan, not an error in the order.
+		// The plan accepts the same thing a change does and names by itself what the
+		// host will not accept: a refusal is the content of the plan, not an error
+		// in the order.
 		return nil
 
 	case ActionTimeConfigApply:
@@ -3893,9 +3323,9 @@ func Validate(action ActionType, payload Payload) error {
 		return err
 
 	case ActionKernelModulePlan:
-		// The plan accepts the same thing a change does and names by itself
-		// what the host will not accept: a refusal is the content of the
-		// plan, not an error in the order.
+		// The plan accepts the same thing a change does and names by itself what the
+		// host will not accept: a refusal is the content of the plan, not an error
+		// in the order.
 		return nil
 
 	case ActionKernelModuleLoad, ActionKernelModuleBlacklist:
@@ -3934,16 +3364,11 @@ func Validate(action ActionType, payload Payload) error {
 		return fmt.Errorf("the panel replaces ed25519, rsa or ecdsa keys, not %q", payload.SSH.KeyType)
 
 	case ActionStoragePlan:
-		// A plan is a read and needs nothing but a kind the host knows. A
-		// kind nobody wrote would travel to the host and come back as a
-		// refusal from the far end of a job; refused here, it is refused
-		// where somebody can still change it.
+		// A plan is a read and needs nothing but a kind the host knows.
 		if payload.Storage != nil && payload.Storage.Plan != "" {
-			// Building or tearing down an array is outside the panel on
-			// purpose, so it is answered with that sentence and its own
-			// code rather than with "no such plan": a boundary drawn
-			// deliberately reads in the interface like a missing feature
-			// unless it says why.
+			// Building or tearing down an array is outside the panel on purpose, so it
+			// is answered with that sentence and its own code rather than with "no such
+			// plan": a boundary drawn deliberately reads in the interface like a
 			if refusal := storage.ArrayLifecycleRefusalFor(payload.Storage.Plan); refusal != nil {
 				return &RefusalError{Code: refusal.Code, Err: refusal}
 			}
@@ -4000,10 +3425,9 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Storage == nil {
 			return fmt.Errorf("the operation %s requires a storage payload", action)
 		}
-		// A destructive operation has to know what it aims at: the path alone
-		// is not enough, because /dev/sdX points at a different disk after a
-		// reboot, and a size is a description shared by every disk of that
-		// model. The stable identity is the by-id link.
+		// A destructive operation has to know what it aims at: the path alone is not
+		// enough, because /dev/sdX points at a different disk after a reboot, and a
+		// size is a description shared by every disk of that model.
 		if payload.Storage.ExpectedByID == "" {
 			return &RefusalError{Code: "stable_identity_required",
 				Err: fmt.Errorf("formatting requires the stable identity of the device (its /dev/disk/by-id link); the size is not an identity")}
@@ -4038,9 +3462,7 @@ func Validate(action ActionType, payload Payload) error {
 			payload.Storage.Device, verb); err != nil {
 			return err
 		}
-		// An array is named by the UUID of its superblock. Without it the
-		// order names whichever array the kernel assembled under that path
-		// this boot, and that is not the array anybody looked at.
+		// An array is named by the UUID of its superblock.
 		if payload.Storage.ExpectedArrayUUID == "" {
 			return &RefusalError{Code: storage.CodeArrayUnknown,
 				Err: fmt.Errorf("an array operation requires the UUID of the array; the path /dev/mdN is the order the kernel assembled them in")}
@@ -4087,9 +3509,9 @@ func Validate(action ActionType, payload Payload) error {
 		if _, err := storage.LVRemoveArguments(payload.Storage.Device); err != nil {
 			return err
 		}
-		// Deleting a volume destroys what was on it, so it binds to the same
-		// two identities a format does: the volume's own UUID and the
-		// device-mapper link the kernel publishes for it.
+		// Deleting a volume destroys what was on it, so it binds to the same two
+		// identities a format does: the volume's own UUID and the device-mapper link
+		// the kernel publishes for it.
 		if payload.Storage.ExpectedByID == "" {
 			return &RefusalError{Code: "stable_identity_required",
 				Err: fmt.Errorf("deleting a volume requires its stable identity (its /dev/disk/by-id link); a volume path is a name another volume can carry tomorrow")}
@@ -4104,9 +3526,9 @@ func Validate(action ActionType, payload Payload) error {
 			payload.Storage.Device); err != nil {
 			return err
 		}
-		// Adding a disk to a group writes an LVM label over it: the same
-		// loss as a format for whatever the disk carried, and the same
-		// requirement of a stable identity.
+		// Adding a disk to a group writes an LVM label over it: the same loss as a
+		// format for whatever the disk carried, and the same requirement of a stable
+		// identity.
 		if payload.Storage.ExpectedByID == "" {
 			return &RefusalError{Code: "stable_identity_required",
 				Err: fmt.Errorf("adding a disk to a group requires the stable identity of the disk (its /dev/disk/by-id link); the size is not an identity")}
@@ -4170,9 +3592,9 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionDNSPlan:
-		// The plan accepts the same thing a change does and names by itself
-		// what the host will not accept: a refusal is the content of the
-		// plan, not an error in the order.
+		// The plan accepts the same thing a change does and names by itself what the
+		// host will not accept: a refusal is the content of the plan, not an error
+		// in the order.
 		return nil
 
 	case ActionDNSHostApply:
@@ -4200,9 +3622,9 @@ func Validate(action ActionType, payload Payload) error {
 		return nil
 
 	case ActionNetworkPlan:
-		// A plan of a layered change is checked for shape here as well: the
-		// panel refuses a VLAN identifier of 5000 rather than sending the
-		// whole fleet on a walk to find out.
+		// A plan of a layered change is checked for shape here as well: the panel
+		// refuses a VLAN identifier of 5000 rather than sending the whole fleet on a
+		// walk to find out.
 		if payload.Network != nil && payload.Network.Link != nil {
 			return network.ValidateLinkSpec(*payload.Network.Link)
 		}
@@ -4227,9 +3649,9 @@ func Validate(action ActionType, payload Payload) error {
 		}
 		return checkNetworkChange(action, payload.Network)
 
-	// A layered order names the layer in the description, and the interface
-	// field repeats it: the panel shows the operator one name and the host
-	// writes one name.
+	// A layered order names the layer in the description, and the interface field
+	// repeats it: the panel shows the operator one name and the host writes one
+	// name.
 	case ActionNetworkLinkApply:
 		if payload.Network == nil || payload.Network.Link == nil {
 			return fmt.Errorf("the operation %s requires the description of the layer", action)
@@ -4301,10 +3723,8 @@ func Validate(action ActionType, payload Payload) error {
 		if len(payload.UnitStatus.Units) > 50 {
 			return fmt.Errorf("the list of units is too long")
 		}
-		// A detail read starts several processes per unit and reads files:
-		// it serves one open row in the panel, not a sweep of the host. Its
-		// names reach journalctl and the file system, so they are checked
-		// here as well as on the host.
+		// A detail read starts several processes per unit and reads files: it serves
+		// one open row in the panel, not a sweep of the host.
 		if payload.UnitStatus.Detail {
 			if len(payload.UnitStatus.Units) > maxDetailUnits {
 				return fmt.Errorf("a detail read takes at most %d units", maxDetailUnits)
@@ -4344,9 +3764,8 @@ func Validate(action ActionType, payload Payload) error {
 			if !validAgentVersion(version) {
 				return fmt.Errorf("the rollback version %q is not a package version", version)
 			}
-			// A return to the version being installed is no return at all,
-			// and the host would keep an artefact of it under the name of a
-			// way back.
+			// A return to the version being installed is no return at all, and the host
+			// would keep an artefact of it under the name of a way back.
 			if version == payload.AgentUpgrade.TargetVersion {
 				return fmt.Errorf("the rollback version is the version being installed (%s)", version)
 			}
@@ -4354,10 +3773,7 @@ func Validate(action ActionType, payload Payload) error {
 		if sum := payload.AgentUpgrade.PackageSHA256; sum != "" && !validChecksum(sum) {
 			return fmt.Errorf("the package checksum is not a hexadecimal SHA-256")
 		}
-		// The target has to speak a protocol this panel speaks. Otherwise
-		// the host would come back with the new version and stay unmanaged:
-		// the replacement itself would succeed, and everything after it
-		// would fail.
+		// The target has to speak a protocol this panel speaks.
 		if err := buildinfo.CheckProtocol(payload.AgentUpgrade.TargetVersion); err != nil {
 			return &RefusalError{Code: RefusalProtocolIncompatible, Err: err}
 		}
@@ -4370,10 +3786,8 @@ func Validate(action ActionType, payload Payload) error {
 		if payload.Journal.FollowSeconds > maxFollowSeconds {
 			return fmt.Errorf("a live view must not last longer than %d s", maxFollowSeconds)
 		}
-		// A live view takes the narrowing a read takes, so watching a unit
-		// and reading it are the same question asked twice. Only the end of
-		// the range has no meaning here: a stream ends by its own limit,
-		// and an "until" in the past would close it before the first line.
+		// A live view takes the narrowing a read takes, so watching a unit and
+		// reading it are the same question asked twice.
 		if payload.Journal.Until != "" {
 			return fmt.Errorf("a live view has no end date; it ends by its own time limit, so until belongs to journal.read")
 		}
@@ -4398,21 +3812,12 @@ func Validate(action ActionType, payload Payload) error {
 	return nil
 }
 
-// packageNamePattern matches Debian and RPM package names. A name never
-// reaches a shell, but validation is a second line of defence and rejects
-// shapes that cannot be a package name.
-// localUserNamePattern matches the range of names useradd accepts. Validation
-// on the panel's side does not replace validation in the helper; both exist,
-// because an envelope can reach the agent by a way other than through the
-// panel.
+// packageNamePattern matches Debian and RPM package names.
 var localUserNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}\$?$`)
 
 // protectedAccounts are never deleted through the panel: the superuser, the
 // accounts the agent and the helper run under, and the account that owns
-// nothing and sits above the user range. The other system accounts are
-// refused by the host, which sees their identifiers: that decision has one
-// boundary, the helper's, and the panel does not keep a second list of
-// what a system account is.
+// nothing and sits above the user range.
 var protectedAccounts = map[string]bool{
 	"root": true, "flotestro": true, "flotestro-agent": true, "flotestro-relay": true,
 	"nobody": true,
@@ -4422,10 +3827,8 @@ func protectedAccount(name string) bool {
 	return protectedAccounts[name]
 }
 
-// requireGroupUUID insists that an order acting inside a volume group
-// names the group by its UUID. A group name is a label: after a rename it
-// belongs to another group, and the consent the operator gave would travel
-// to it.
+// requireGroupUUID insists that an order acting inside a volume group names
+// the group by its UUID.
 func requireGroupUUID(payload *StoragePayload) error {
 	if payload.ExpectedGroupUUID == "" {
 		return &RefusalError{Code: storage.CodeVolumeUnknown,
@@ -4444,9 +3847,7 @@ func requireVolumeUUID(payload *StoragePayload) error {
 	return nil
 }
 
-// validateExpiryDate accepts a calendar date the way chage takes it. A date
-// in the past is allowed: it is one way of cutting access off with a record
-// of when.
+// validateExpiryDate accepts a calendar date the way chage takes it.
 func validateExpiryDate(value string) error {
 	if _, err := time.Parse("2006-01-02", value); err != nil {
 		return fmt.Errorf("invalid expiry date %q; expected YYYY-MM-DD", value)
@@ -4463,10 +3864,7 @@ const RefusalAccountWithoutCredential = "account_without_credential"
 var fingerprintPattern = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 
 // validateLocalUserKeyFields checks the fields of the key operations of
-// chapter 14.1 against the operation they arrived with. Each field
-// belongs to one operation; a field on another operation is an order the
-// panel did not compose, and it is refused rather than ignored, because
-// an ignored field is a decision the operator thought they had made.
+// chapter 14.
 func validateLocalUserKeyFields(action ActionType, user *LocalUserPayload) error {
 	if len(user.Keys) > 0 && action != ActionLocalSSHKeysAdd {
 		return fmt.Errorf("the operation %s takes no keys to add; use %s", action, ActionLocalSSHKeysAdd)
@@ -4525,11 +3923,7 @@ func validateLocalUserKeyFields(action ActionType, user *LocalUserPayload) error
 			}
 		}
 	case ActionLocalSSHKeysReplaceAll, ActionLocalSSHKeysSet:
-		// The replace is bound to the list the operator saw. An absent
-		// list on the new operation is an order composed blind; an empty
-		// list says the account had no keys, which is a picture too. The
-		// deprecated name takes the list when it comes and runs blind
-		// otherwise - that was its contract.
+		// The replace is bound to the list the operator saw.
 		if action == ActionLocalSSHKeysReplaceAll && user.ExpectedFingerprints == nil {
 			return fmt.Errorf("a replace carries expected_fingerprints: the keys the account has now, an empty list for none")
 		}
@@ -4542,10 +3936,7 @@ func validateLocalUserKeyFields(action ActionType, user *LocalUserPayload) error
 			}
 		}
 	case ActionLocalUserCreate:
-		// An account with no key has no way in: the panel sets no
-		// password. That is allowed only when the order says the account
-		// is to be inactive, so nobody creates an unreachable account by
-		// forgetting the key.
+		// An account with no key has no way in: the panel sets no password.
 		if len(user.SSHKeys) == 0 && !user.Inactive {
 			return &RefusalError{Code: RefusalAccountWithoutCredential, Err: fmt.Errorf(
 				"the account would have no key and no password, so nobody could log in; " +
@@ -4607,16 +3998,13 @@ var debconfTypePattern = regexp.MustCompile(`^(select|multiselect|boolean|string
 // domainPattern rejects names that cannot be a DNS domain.
 var domainPattern = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
 
-// servicePrincipalPattern is service/host.fqdn with an optional realm: the
-// shape ipa-getkeytab takes. The principal reaches a command line as one
-// argument, so the shape is the second line of defence after the argv
-// call that never sees a shell.
+// servicePrincipalPattern is service/host. fqdn with an optional realm: the
+// shape ipa-getkeytab takes.
 var servicePrincipalPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$`)
 
-// ValidateServicePrincipal checks that a principal names a service of a
-// host and not the host itself: the host's own keytab is replaced by a
-// re-join, and a renewal of host/ would leave the host unable to talk to
-// the directory it is fetching from.
+// ValidateServicePrincipal checks that a principal names a service of a host
+// and not the host itself: the host's own keytab is replaced by a re-join, and
+// a renewal of host/ would leave the host unable to talk to the directory it
 func ValidateServicePrincipal(principal string) error {
 	if !servicePrincipalPattern.MatchString(principal) {
 		return fmt.Errorf("invalid service principal %q: expected service/host.example.test", principal)
@@ -4642,13 +4030,6 @@ func validatePackageNames(names []string) error {
 }
 
 // withoutEmpty removes sub-payloads that carry no content.
-//
-// A payload with an empty sub-payload describes exactly the same operation as
-// a payload without one, but it serialises differently - and a hash computed
-// on both sides has to come out the same. On a read the panel sends an empty
-// payload, the envelope has nothing to carry, and the agent reconstructs a
-// zero structure from it: without this step the task ended with the refusal
-// "the content does not match the plan", although the content was the same.
 func (p Payload) withoutEmpty() Payload {
 	value := reflect.ValueOf(&p).Elem()
 	for i := 0; i < value.NumField(); i++ {
@@ -4665,23 +4046,11 @@ func (p Payload) withoutEmpty() Payload {
 }
 
 // PayloadHashVersion is the version of the payload hash scheme the panel
-// issues. It says how the bytes under the digest are laid out, not what the
-// payload means - that is ActionVersion.
-//
-// Version 1 hashes the encoding/json text of the payload without a scheme
-// line. Version 2 hashes the canonical JSON of RFC 8785 with a scheme line in
-// front, so the digest depends on the document alone and another
-// implementation of the scheme comes out the same. The agent verifies both;
-// the panel issued version 1 until every agent of the fleet knew version 2,
-// because an agent from before the change refuses a hash it cannot recompute
-// and the fleet would stop taking tasks. Raising the constant was the whole
-// switch, made once the agents had been upgraded, not together with them:
-// an agent older than 0.43 does not verify version 2.
+// issues.
 const PayloadHashVersion = 2
 
 // PayloadHash computes the plan hash of the scheme the panel issues,
-// PayloadHashVersion. The agent computes it the same way and compares it
-// with the envelope, so swapping the payload after approval is detectable.
+// PayloadHashVersion.
 func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error) {
 	return PayloadHashOfScheme(PayloadHashVersion, action, version, payload)
 }
@@ -4690,11 +4059,8 @@ func PayloadHash(action ActionType, version int, payload Payload) ([]byte, error
 // one the panel issues first.
 var PayloadHashSchemes = []int{PayloadHashVersion, 1}
 
-// PayloadHashOfScheme computes the plan hash of one scheme version.
-//
-// Version 1 hashes "<type>\n<version>\n<encoding/json text>". Version 2
-// hashes "flotestro-payload-hash/2\n<type>\n<version>\n<canonical JSON>",
-// where the JSON is the canonical form of RFC 8785.
+// PayloadHashOfScheme computes the plan hash of one scheme version. Version 1
+// hashes "<type>\n<version>\n<encoding/json text>".
 func PayloadHashOfScheme(scheme int, action ActionType, version int, payload Payload) ([]byte, error) {
 	switch scheme {
 	case 1:

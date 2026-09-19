@@ -8,17 +8,9 @@ import (
 )
 
 // Refusal codes of a change to a layered interface.
-//
-// Each one is a typed answer the panel and the operator can act on, and the
-// message that travels with it names the particular interface. A layered
-// change is the one place in this module where the mistake is not a wrong
-// value but a wrong relation - a member somebody else already owns, a VLAN
-// on a parent that is not there - and a relation refused as "malformed"
-// would tell the operator nothing.
 const (
-	// CodeLinkMemberTaken: the interface is already a member of another
-	// bond or bridge. Taking it would silently remove it from there, and
-	// whatever ran over that layer would stop.
+	// CodeLinkMemberTaken: the interface is already a member of another bond or
+	// bridge.
 	CodeLinkMemberTaken = "link_member_taken"
 	// CodeLinkMemberMissing: the host does not have the interface the
 	// layer is to be built from.
@@ -29,16 +21,14 @@ const (
 	// CodeVLANParentMissing: the interface the tagged traffic would run on
 	// is not on the host.
 	CodeVLANParentMissing = "vlan_parent_missing"
-	// CodeLinkSwallowsManagement: a member of the layer is the interface
-	// the panel talks to the host over. Enslaving it moves its address to
-	// the layer above, and the host is gone before the layer is finished.
+	// CodeLinkSwallowsManagement: a member of the layer is the interface the
+	// panel talks to the host over.
 	CodeLinkSwallowsManagement = "link_swallows_management"
 	// CodeLinkCarriesManagement: the layer being removed is the one the
 	// panel talks over.
 	CodeLinkCarriesManagement = "link_carries_management"
-	// CodeLinkKindMismatch: the host already has an interface of this name
-	// and it is something else. The panel does not turn a network card
-	// into a bridge under the same name.
+	// CodeLinkKindMismatch: the host already has an interface of this name and it
+	// is something else.
 	CodeLinkKindMismatch = "link_kind_mismatch"
 	// CodeLinkNotLayered: the interface named for removal is a physical
 	// link or one the panel did not build.
@@ -46,13 +36,11 @@ const (
 	// CodeLinkInUse: the layer carries VLANs or is itself a member of
 	// another layer; removing it takes them with it.
 	CodeLinkInUse = "link_in_use"
-	// CodeLinkMechanismUnsupported: the host configures its network
-	// through a mechanism this module does not write layered interfaces
-	// with. Half a bond is worse than none.
+	// CodeLinkMechanismUnsupported: the host configures its network through a
+	// mechanism this module does not write layered interfaces with.
 	CodeLinkMechanismUnsupported = "link_mechanism_unsupported"
-	// CodeIPv6Disabled: the order carries an IPv6 setting and the host has
-	// the second family switched off. The write would go into the void and
-	// the verifier would never find it.
+	// CodeIPv6Disabled: the order carries an IPv6 setting and the host has the
+	// second family switched off.
 	CodeIPv6Disabled = "ipv6_disabled_on_host"
 )
 
@@ -74,25 +62,17 @@ var bondModes = []string{
 // The LACP rates of an 802.3ad bond.
 var lacpRates = []string{"slow", "fast"}
 
-// The VLAN protocols. 802.1ad is the outer tag of a stacked VLAN; a host
-// whose driver cannot do it will say so, but the panel does not refuse it
-// on the operator's behalf.
+// The VLAN protocols. 802.
 var vlanProtocols = []string{"802.1Q", "802.1ad"}
 
 // LinkSpec is the layered interface the operator ordered.
-//
-// It describes the target state of one link, never the commands to reach
-// it: the same specification is what the plan compares against, what the
-// mechanism writes and what the verifier reads back.
 type LinkSpec struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
 	// Members are the interfaces the bond or the bridge is built from. A
 	// VLAN has none: its one lower interface is the parent.
 	Members []string `json:"members,omitempty"`
-	// The bond settings. MIIMonMS zero means the monitoring is off, which
-	// is a decision; the panel writes it as given rather than filling in a
-	// default the operator never saw.
+	// The bond settings.
 	Mode     string `json:"mode,omitempty"`
 	MIIMonMS int    `json:"miimon_ms,omitempty"`
 	Primary  string `json:"primary,omitempty"`
@@ -114,9 +94,7 @@ type LinkSpec struct {
 type LinkState struct {
 	Name string `json:"name"`
 	Kind string `json:"kind,omitempty"`
-	// Present says whether the host has the interface at all. A state that
-	// is not present is the way a creation and a removal are written down
-	// in the same shape.
+	// Present says whether the host has the interface at all.
 	Present bool     `json:"present"`
 	Members []string `json:"members,omitempty"`
 
@@ -137,9 +115,7 @@ type LinkState struct {
 	Management bool `json:"management,omitempty"`
 }
 
-// LinkStateOf reads the layering of one interface out of the snapshot. An
-// interface the host does not report comes back as a state that is not
-// present - which is an answer, not a zero value.
+// LinkStateOf reads the layering of one interface out of the snapshot.
 func LinkStateOf(snapshot Snapshot, name string) LinkState {
 	state := LinkState{Name: name}
 	iface := snapshot.InterfaceByName(name)
@@ -169,9 +145,9 @@ func LinkStateOf(snapshot Snapshot, name string) LinkState {
 		state.VLANID = iface.VLAN.ID
 		state.Protocol = iface.VLAN.Protocol
 	}
-	// The members the layer itself reports and the ones the kernel keeps on
-	// the member side have to agree; where the layer said nothing, the
-	// member side is the answer.
+	// The members the layer itself reports and the ones the kernel keeps on the
+	// member side have to agree; where the layer said nothing, the member side is
+	// the answer.
 	if state.Kind == LinkBond || state.Kind == LinkBridge {
 		if owned := sorted(snapshot.MembersOf(name)); len(owned) > 0 {
 			state.Members = owned
@@ -208,10 +184,9 @@ func desiredState(spec LinkSpec, current LinkState) LinkState {
 	return state
 }
 
-// ValidateLinkSpec checks the shape of the order: the names the kernel
-// would accept, a kind this module knows, and values within the ranges the
-// drivers take. It says nothing about the host - that is what the plan is
-// for - so the panel can run it before the order is ever sent.
+// ValidateLinkSpec checks the shape of the order: the names the kernel would
+// accept, a kind this module knows, and values within the ranges the drivers
+// take.
 func ValidateLinkSpec(spec LinkSpec) error {
 	if err := ValidateInterfaceName(spec.Name); err != nil {
 		return err
@@ -241,11 +216,9 @@ func ValidateLinkSpec(spec LinkSpec) error {
 	}
 	switch spec.Kind {
 	case LinkBond:
-		// A bond of one member is the same link with a driver in between:
-		// no redundancy, no more traffic, and the member's address moved
-		// onto the layer for nothing. This is a property of the order,
-		// knowable without asking any host, so it is refused here - with
-		// the code the host would have used - instead of being sent out.
+		// A bond of one member is the same link with a driver in between: no
+		// redundancy, no more traffic, and the member's address moved onto the layer
+		// for nothing.
 		if len(spec.Members) < 2 {
 			return &LinkRefusal{Code: CodeBondNeedsMembers,
 				Reason: "the bond " + spec.Name + " would have " + strconv.Itoa(len(spec.Members)) +
@@ -255,9 +228,9 @@ func ValidateLinkSpec(spec LinkSpec) error {
 			return fmt.Errorf("unsupported bond mode %q; the kernel knows %s",
 				spec.Mode, strings.Join(bondModes, ", "))
 		}
-		// A monitoring interval the driver would round to nothing is not
-		// monitoring; above a minute a dead member keeps taking traffic for
-		// longer than any operator would call a failover.
+		// A monitoring interval the driver would round to nothing is not monitoring;
+		// above a minute a dead member keeps taking traffic for longer than any
+		// operator would call a failover.
 		if spec.MIIMonMS != 0 && (spec.MIIMonMS < 50 || spec.MIIMonMS > 60000) {
 			return fmt.Errorf("the link monitoring interval %d ms is outside the range 50-60000; zero switches it off", spec.MIIMonMS)
 		}
@@ -310,14 +283,6 @@ func ValidateLinkSpec(spec LinkSpec) error {
 
 // LayerAdapterRefusal says whether the mechanism this host configures its
 // network with can express a layered interface at all.
-//
-// nmstate and netplan describe a whole interface, so a bond is one more
-// entry in a document they already own. Plain NetworkManager is driven here
-// by changing the profile that exists on an interface, and a bond is not a
-// change to a profile: it is several new profiles whose half-written state
-// has no way back through the rollback this module arms. Saying so is the
-// honest answer; writing half a bond on a host the panel then cannot reach
-// is not.
 func LayerAdapterRefusal(adapter string) *LinkRefusal {
 	switch adapter {
 	case AdapterNmstate, AdapterNetplan:
@@ -332,12 +297,6 @@ func LayerAdapterRefusal(adapter string) *LinkRefusal {
 
 // ComputeLink computes the difference between the layering the host has and
 // the one ordered.
-//
-// The whole snapshot goes in, not just the one interface: every refusal
-// here is about a relation to something else on the host - a member another
-// layer owns, a parent that is not there, the interface the panel itself
-// talks over - and a plan computed against one interface could see none of
-// them.
 func ComputeLink(snapshot Snapshot, adapter string, spec LinkSpec) Plan {
 	current := LinkStateOf(snapshot, spec.Name)
 	plan := Plan{
@@ -370,11 +329,7 @@ func ComputeLink(snapshot Snapshot, adapter string, spec LinkSpec) Plan {
 	return plan
 }
 
-// layerConflicts names the first relation on the host that forbids the
-// change. The order of the checks is the order of the questions: is this
-// name already something else, is the lower interface there at all, is the
-// layer worth building, and would it take the interface we are speaking
-// over.
+// layerConflicts names the first relation on the host that forbids the change.
 func layerConflicts(snapshot Snapshot, spec LinkSpec, current LinkState) *LinkRefusal {
 	if current.Present && current.Kind != spec.Kind {
 		found := current.Kind
@@ -406,9 +361,7 @@ func layerConflicts(snapshot Snapshot, spec LinkSpec, current LinkState) *LinkRe
 				Reason: "the host does not report the interface " + member +
 					", and the panel does not build a layer on an interface that is not there"}
 		}
-		// Enslaving a link moves its address to the layer above. On the
-		// interface the panel talks over that happens before the layer is
-		// finished, and the host is gone with the rescue plan still armed.
+		// Enslaving a link moves its address to the layer above.
 		if link.Management || member == snapshot.ManagementInterface {
 			return &LinkRefusal{Code: CodeLinkSwallowsManagement,
 				Reason: "the interface " + member + " is the one the panel talks to this host over; a " +
@@ -429,11 +382,6 @@ func layerConflicts(snapshot Snapshot, spec LinkSpec, current LinkState) *LinkRe
 }
 
 // ComputeLinkRemoval computes the removal of a layered interface.
-//
-// A removal is refused for the reverse of the reasons a creation is: the
-// interface is not one the panel built, it carries the management channel,
-// or something stands on it. An interface that is already gone is not a
-// refusal - it is a change with nothing left to do.
 func ComputeLinkRemoval(snapshot Snapshot, adapter, name string) Plan {
 	current := LinkStateOf(snapshot, name)
 	plan := Plan{
@@ -454,9 +402,9 @@ func ComputeLinkRemoval(snapshot Snapshot, adapter, name string) Plan {
 		return plan
 	}
 	if refusal := removalConflicts(snapshot, current); refusal != nil {
-		// A refused plan carries no desired state: what the panel shows
-		// beside the refusal must be what the host has, and a target state
-		// under a refusal reads as though something were about to happen.
+		// A refused plan carries no desired state: what the panel shows beside the
+		// refusal must be what the host has, and a target state under a refusal
+		// reads as though something were about to happen.
 		plan.DesiredLink = nil
 		return plan.withTypedRefusal(refusal)
 	}
@@ -555,9 +503,8 @@ func builtFrom(desired LinkState) string {
 		return " in the mode " + orNone(desired.Mode) + " from " + list(desired.Members)
 	}
 	if len(desired.Members) == 0 {
-		// A bridge with no member is a legitimate thing to build: virtual
-		// machines are attached to it afterwards. The plan says so, so that
-		// nobody reads an empty list as a mistake.
+		// A bridge with no member is a legitimate thing to build: virtual machines
+		// are attached to it afterwards.
 		return " with no members yet"
 	}
 	return " from " + list(desired.Members)
@@ -577,9 +524,7 @@ func onOff(value bool) string {
 	return "off"
 }
 
-// contains says whether the list holds the value. The lists it is asked
-// about are the kernel's own vocabularies - a handful of entries each - so
-// a walk is the whole of it.
+// contains says whether the list holds the value.
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {

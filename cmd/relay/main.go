@@ -1,15 +1,5 @@
 // Command flotestro-relay mediates between the agents of one site and the
 // centre.
-//
-// The relay is optional. It makes sense where a site connects to the centre
-// over a WAN: it keeps one connection upwards instead of hundreds, buffers
-// the results while the link is down and does not pass on jobs whose TTL has
-// run out.
-//
-// The canonical source of the settings is /etc/flotestro/relay.yaml. The
-// relay is a separate trust boundary and has a separate file: one shared with
-// the agent would mean that a single setting describes two roles with
-// different permissions.
 package main
 
 import (
@@ -68,12 +58,7 @@ func run(args []string, log *slog.Logger) error {
 	}
 }
 
-// configCommand checks the configuration file and shows what follows from
-// it.
-//
-// The relay usually stands in a site without an operator, so a wrong
-// configuration is to be visible before the service starts rather than in the
-// log after a failed start.
+// configCommand checks the configuration file and shows what follows from it.
 func configCommand(args []string) error {
 	flags := flag.NewFlagSet("config", flag.ContinueOnError)
 	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
@@ -120,10 +105,6 @@ func configCommand(args []string) error {
 }
 
 // enrollCommand registers the relay with a token and finishes.
-//
-// A separate command rather than a step of the start of the service: the
-// token is a one-time secret and must not lie in a file that survives a
-// restart. The registration is a decision of the operator and happens once.
 func enrollCommand(args []string, log *slog.Logger) error {
 	flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 	path := flags.String("config", relayconfig.DefaultPath, "the configuration file of the relay")
@@ -152,10 +133,6 @@ func enrollCommand(args []string, log *slog.Logger) error {
 }
 
 // readToken takes the token from a file or from the standard input.
-//
-// We do not take the token from a command line argument: every process on the
-// machine sees an argument, and the token is the key to the identity of a
-// whole site.
 func readToken(file string) (string, error) {
 	if file != "" {
 		content, err := os.ReadFile(file)
@@ -218,10 +195,7 @@ func runCommand(args []string, log *slog.Logger) error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// A relay without an identity does not come up. The unit has a start
-	// condition on the certificate file, so it normally does not get here
-	// without a registration; the message is for the operator who started the
-	// binary by hand.
+	// A relay without an identity does not come up.
 	identity, err := register(ctx, cfg, "")
 	if err != nil {
 		return fmt.Errorf("%w; register the relay: flotestro-relay enroll", err)
@@ -231,17 +205,15 @@ func runCommand(args []string, log *slog.Logger) error {
 
 	live := relay.NewLive(identity)
 	gateway := cfg.Upstream.GatewayURLs[0]
-	// The spool before anything else: a relay that cannot write its spool
-	// must not take the messages of the site, because it would lose them
-	// at the first break of the link.
+	// The spool before anything else: a relay that cannot write its spool must
+	// not take the messages of the site, because it would lose them at the first
+	// break of the link.
 	spoolDir, spoolOptions := spoolSettings(cfg)
 	if err := prepareSpoolDir(spoolDir); err != nil {
 		return err
 	}
-	// The state file is what the tool on the machine reads: whether the
-	// relay reaches the centre, how full its buffer is and when its
-	// certificate ends. Written from the first moment, so that a relay that
-	// never reaches the centre still leaves a record of trying.
+	// The state file is what the tool on the machine reads: whether the relay
+	// reaches the centre, how full its buffer is and when its certificate ends.
 	state := ctl.NewRelayStateWriter(cfg.Relay.StateDir, identity.RelayID, version)
 	state.Update(func(s *ctl.RelayState) {
 		s.Gateway = gateway
@@ -252,9 +224,7 @@ func runCommand(args []string, log *slog.Logger) error {
 	proxy, err := relay.New(relay.Options{
 		UpstreamURL:  gateway,
 		UpstreamURLs: cfg.Upstream.GatewayURLs,
-		// The enrollment address enables the mediation of registrations. In an
-		// isolated site a host does not see the centre and the relay is the
-		// only path.
+		// The enrollment address enables the mediation of registrations.
 		EnrollmentURL: cfg.Upstream.EnrollmentURL,
 		Identity:      identity.Certificate,
 		TrustPool:     identity.CAPool,
@@ -275,16 +245,12 @@ func runCommand(args []string, log *slog.Logger) error {
 	// What waits in the spool at the start is the backlog of the site, and
 	// the operator has to see it before anything else the relay logs.
 	logSpoolBacklog(log, spoolDir, spoolOptions, readSpoolBacklog(proxy, spoolDir))
-	// A host has no certificate before its registration, so the handshake
-	// must not demand one. Every RPC other than the registration checks it
-	// separately.
+	// A host has no certificate before its registration, so the handshake must
+	// not demand one.
 	live.MediatesRegistration(cfg.Upstream.EnrollmentURL != "")
 
-	// The agents connect to the relay with the same protocol as to the
-	// centre, so a client certificate issued by the CA of the fleet is
-	// required. The server certificate comes from the live identity: a
-	// renewal swaps it without a restart, which would tear down the sessions
-	// of the whole site at once.
+	// The agents connect to the relay with the same protocol as to the centre, so
+	// a client certificate issued by the CA of the fleet is required.
 	server := &http.Server{
 		Addr:    cfg.Relay.Listen,
 		Handler: relay.WithClientCertificate(proxy.Handler()),
@@ -325,11 +291,9 @@ func runCommand(args []string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	// The accepts of the listener are watched, because that is what the
-	// liveness answer is about: a relay that has stopped taking the
-	// connections of its site is the wedged one a runtime should restart,
-	// and a dial of the socket would not show it - the kernel accepts
-	// into the backlog whether or not the process still calls Accept.
+	// The accepts of the listener are watched, because that is what the liveness
+	// answer is about: a relay that has stopped taking the connections of its
+	// site is the wedged one a runtime should restart, and a dial of the socket
 	watched := relay.WatchListener(listener)
 	health := relay.NewHealth(relay.HealthOptions{
 		Relay:    proxy,
@@ -362,8 +326,7 @@ func runCommand(args []string, log *slog.Logger) error {
 }
 
 // report empties the buffer after the link is back and shows the state of the
-// relay. The fill of the buffer is an operational signal: a growing one means
-// the site works but the results do not reach the centre.
+// relay.
 func report(ctx context.Context, proxy *relay.Relay, log *slog.Logger) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

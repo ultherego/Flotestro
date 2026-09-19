@@ -13,18 +13,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// The typed refusals of the spool. Every one of them is counted; the
-// relay names the code in its log and the panel sees the count in the
-// heartbeat.
+// The typed refusals of the spool. Every one of them is counted; the relay
+// names the code in its log and the panel sees the count in the heartbeat.
 var (
-	// ErrExhausted is the spool refusing a message of a light class: the
-	// room outside the reserve is spent, or the disk is at its floor. The
-	// stream of interactive logs ends with it, as the document asks.
+	// ErrExhausted is the spool refusing a message of a light class: the room
+	// outside the reserve is spent, or the disk is at its floor.
 	ErrExhausted = errors.New("resource_exhausted: the spool of the relay has no room for this class")
-	// ErrCritical is the spool refusing a message of a durable class: the
-	// whole quota is spent or the disk is at its floor. It is the alarm
-	// relay_spool_critical of the document, and a new session is refused
-	// before an existing record is lost.
+	// ErrCritical is the spool refusing a message of a durable class: the whole
+	// quota is spent or the disk is at its floor.
 	ErrCritical = errors.New("relay_spool_critical: the spool of the relay is full")
 	// ErrClosed is a spool after Close.
 	ErrClosed = errors.New("the spool is closed")
@@ -36,13 +32,12 @@ type Options struct {
 	Site string
 	// MaxBytes is the room the segments may take together.
 	MaxBytes int64
-	// CriticalReserveBytes is the part of MaxBytes only control and job
-	// results may enter. Inventory, metrics and logs are refused once the
-	// spool has grown to MaxBytes - CriticalReserveBytes.
+	// CriticalReserveBytes is the part of MaxBytes only control and job results
+	// may enter.
 	CriticalReserveBytes int64
-	// MinFreeBytes is the floor of free space on the filesystem of the
-	// spool: nothing is appended below it, whatever the class, because a
-	// filesystem the relay filled takes from the site what works locally.
+	// MinFreeBytes is the floor of free space on the filesystem of the spool:
+	// nothing is appended below it, whatever the class, because a filesystem the
+	// relay filled takes from the site what works locally.
 	MinFreeBytes int64
 	// AckTimeout is how long a sent record waits for the panel's
 	// acknowledgement before it is sent again.
@@ -131,9 +126,9 @@ type Stats struct {
 	DiskBytes int64
 	Items     int
 	Inflight  int
-	// DroppedTotal counts the messages the spool refused or evicted since
-	// the start of the process: a non-zero value means the site lost
-	// something, and the panel alarms on its growth.
+	// DroppedTotal counts the messages the spool refused or evicted since the
+	// start of the process: a non-zero value means the site lost something, and
+	// the panel alarms on its growth.
 	DroppedTotal int64
 	// ExpiredTotal counts the records cut for their age.
 	ExpiredTotal int64
@@ -153,9 +148,8 @@ type Spool struct {
 	segments map[uint64]*segmentState
 	active   *segment
 	nextID   uint64
-	// live is what the waiting records take together: the fill of the
-	// spool as the quota reads it. The files take more - a deleted record
-	// stays in its segment until the segment dies or is compacted.
+	// live is what the waiting records take together: the fill of the spool as
+	// the quota reads it.
 	live     int64
 	dropped  int64
 	expired  int64
@@ -173,9 +167,7 @@ type segmentState struct {
 	live int
 }
 
-// Open opens or creates the spool under the directory. The directory is
-// the relay's own and readable by nobody else: the spool carries the
-// hosts' messages, signed but not sealed.
+// Open opens or creates the spool under the directory.
 func Open(dir string, options Options) (*Spool, error) {
 	options.fill()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -238,15 +230,8 @@ func (s *Spool) flushLoop() {
 	}
 }
 
-// Append writes a message to the spool by the policy of its class and
-// returns the record it became. A message the class cannot keep is
-// counted as dropped and refused with the typed error.
-//
-// Control and job results may spend the whole quota and are synced
-// before the call returns. Inventory coalesces: a full report replaces
-// the older inventory records of the host that have not been sent.
-// Metrics evict the oldest waiting sample when there is no room. Logs are
-// refused with ErrExhausted.
+// Append writes a message to the spool by the policy of its class and returns
+// the record it became.
 func (s *Spool) Append(record *Record) error {
 	if record == nil {
 		return errors.New("no record")
@@ -279,12 +264,8 @@ func (s *Spool) Append(record *Record) error {
 		return err
 	}
 	if Durable(record.Stream) {
-		// Every durable class reaches the disk before the caller goes on:
-		// what the relay took is what it holds, whatever happens next.
-		// Control, job results and inventory alike - a class written
-		// ahead of the live forward is a class the relay answers for, and
-		// a batch of a tenth of a second is exactly the window a power
-		// failure takes a report away in.
+		// Every durable class reaches the disk before the caller goes on: what the
+		// relay took is what it holds, whatever happens next.
 		if err := s.active.sync(); err != nil {
 			s.flushErr = err
 			return err
@@ -299,11 +280,6 @@ func (s *Spool) Append(record *Record) error {
 
 // FlushError returns the last failure of the batched sync of the light
 // classes, nil once a sync succeeded again.
-//
-// The batch is the one place where a record is on its way to the disk
-// rather than on it, and a disk that stopped taking writes shows up here
-// first. The relay reads it into its readiness: a spool that cannot
-// reach the disk is not a spool the site should be handing results to.
 func (s *Spool) FlushError() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -337,10 +313,8 @@ func (s *Spool) diskLocked() int64 {
 	return used
 }
 
-// coalesceInventoryLocked removes the inventory records of the host that
-// have not been sent: a full report about to be written says everything
-// they said. One in flight is left alone - the panel may be committing
-// it - and is acknowledged or resent on its own.
+// coalesceInventoryLocked removes the inventory records of the host that have
+// not been sent: a full report about to be written says everything they said.
 func (s *Spool) coalesceInventoryLocked(hostID string) {
 	for _, item := range append([]*entry(nil), s.byHost[hostID]...) {
 		if item.stream == StreamInventory && item.sentAt.IsZero() {
@@ -349,9 +323,8 @@ func (s *Spool) coalesceInventoryLocked(hostID string) {
 	}
 }
 
-// evictOldestMetricLocked removes waiting metric samples, oldest first
-// and of any host, until the given size fits or none is left. Each
-// eviction is a drop and is counted.
+// evictOldestMetricLocked removes waiting metric samples, oldest first and of
+// any host, until the given size fits or none is left.
 func (s *Spool) evictOldestMetricLocked(size int64) bool {
 	var candidates []*entry
 	for _, item := range s.index {
@@ -421,9 +394,9 @@ func (s *Spool) rollLocked() error {
 	return nil
 }
 
-// deleteLocked forgets a record: a tombstone in the active segment, the
-// index entry gone, and the segment file removed once nothing in it is
-// alive and it is not the one being written.
+// deleteLocked forgets a record: a tombstone in the active segment, the index
+// entry gone, and the segment file removed once nothing in it is alive and it
+// is not the one being written.
 func (s *Spool) deleteLocked(item *entry) error {
 	if _, known := s.index[item.id]; !known {
 		return nil
@@ -453,9 +426,8 @@ func (s *Spool) deleteLocked(item *entry) error {
 	if state := s.segments[item.segment]; state != nil {
 		state.live--
 		if state.live <= 0 && (s.active == nil || state.id != s.active.id) {
-			// A dead segment goes at once: its tombstones are in a later
-			// one, and a rebuild that never sees the file has nothing to
-			// forget.
+			// A dead segment goes at once: its tombstones are in a later one, and a
+			// rebuild that never sees the file has nothing to forget.
 			if err := os.Remove(segmentPath(s.dir, state.id)); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
@@ -465,12 +437,8 @@ func (s *Spool) deleteLocked(item *entry) error {
 	return s.compactLocked()
 }
 
-// compactLocked rewrites the living records of the older segments into a
-// fresh one once the dead bytes outgrow their allowance, and removes the
-// old files. The segments are append-only, so a deleted record keeps its
-// bytes until its segment dies; under a long outage with samples evicted
-// and results acknowledged one by one, the files would otherwise grow
-// well past the quota the live records respect.
+// compactLocked rewrites the living records of the older segments into a fresh
+// one once the dead bytes outgrow their allowance, and removes the old files.
 func (s *Spool) compactLocked() error {
 	allowance := s.options.SegmentBytes
 	if quarter := s.options.MaxBytes / 4; quarter > allowance {
@@ -517,11 +485,8 @@ func (s *Spool) compactLocked() error {
 	return nil
 }
 
-// Next returns the records of the host due to be sent, by priority and
-// then by sequence, and marks them sent. Due is a record never sent or
-// one whose acknowledgement did not arrive within the timeout. The count
-// is bounded by the in-flight limit of the host. Expired records are cut
-// on the way.
+// Next returns the records of the host due to be sent, by priority and then by
+// sequence, and marks them sent.
 func (s *Spool) Next(hostID string, limit int) ([]*Record, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -578,9 +543,9 @@ func (s *Spool) Next(hostID string, limit int) ([]*Record, error) {
 	return records, nil
 }
 
-// MarkSent notes that a record went up outside Next - written ahead of a
-// live forward - so that the tick does not send it again before the
-// acknowledgement timeout.
+// MarkSent notes that a record went up outside Next - written ahead of a live
+// forward - so that the tick does not send it again before the acknowledgement
+// timeout.
 func (s *Spool) MarkSent(id uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -612,10 +577,7 @@ func (s *Spool) Unsend(hostID string) {
 }
 
 // Ack deletes the record the panel acknowledged, found by the host, the
-// session and the sequence of its envelope. It returns whether a record
-// was found: an acknowledgement of a record already deleted, or of a
-// message the relay forwarded live without spooling it, finds none and
-// that is no error.
+// session and the sequence of its envelope.
 func (s *Spool) Ack(hostID, sessionID string, sequence uint64) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -678,9 +640,8 @@ func (s *Spool) Stats() Stats {
 	return stats
 }
 
-// Critical says whether the spool is in its reserve or the disk at its
-// floor: the relay refuses new sessions then, before an existing record
-// is lost.
+// Critical says whether the spool is in its reserve or the disk at its floor:
+// the relay refuses new sessions then, before an existing record is lost.
 func (s *Spool) Critical() bool { return s.Stats().Critical }
 
 // readLocked reads a record back from its segment.
@@ -710,9 +671,7 @@ func (s *Spool) readLocked(item *entry) (*Record, error) {
 	return record, nil
 }
 
-// rebuild reads every segment and builds the index. A torn tail is
-// truncated; a segment nothing lives in is removed; the newest segment
-// is reopened for appending.
+// rebuild reads every segment and builds the index.
 func (s *Spool) rebuild() error {
 	ids, err := listSegments(s.dir)
 	if err != nil {
@@ -742,9 +701,9 @@ func (s *Spool) rebuild() error {
 			}
 			record, err := decode(body)
 			if err != nil {
-				// A record that frames correctly but does not decode is one
-				// this release cannot read; it is skipped and counted, not
-				// a reason to refuse the whole spool.
+				// A record that frames correctly but does not decode is one this release
+				// cannot read; it is skipped and counted, not a reason to refuse the whole
+				// spool.
 				s.dropped++
 				return nil
 			}
@@ -776,9 +735,9 @@ func (s *Spool) rebuild() error {
 			s.nextID = id
 		}
 	}
-	// Segments without a living record are removed, except the newest,
-	// which is reopened: the tombstones it holds may name records of
-	// older segments that still exist.
+	// Segments without a living record are removed, except the newest, which is
+	// reopened: the tombstones it holds may name records of older segments that
+	// still exist.
 	for _, id := range ids {
 		state := s.segments[id]
 		if state.live == 0 && id != s.nextID {

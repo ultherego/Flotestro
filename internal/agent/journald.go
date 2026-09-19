@@ -13,22 +13,8 @@ import (
 
 const journalctlPath = "/usr/bin/journalctl"
 
-// journalFilters assembles the narrowing of a journal view from typed
-// fields, never from a concatenated string.
-//
-// A read and a live view take the same filters, because they are the same
-// question asked twice: an operator who narrowed a read to a unit, a
-// priority and one boot of the host expects the stream to show exactly
-// that. Only the ends of the range differ - a read has an end date, a
-// stream has a line budget and a time limit - and those the callers add
-// themselves.
-//
-// The boot identifier is checked once more here, on the machine: the panel
-// checks it too, but the argument goes to journalctl from this process, and
-// a value that is not a boot must not become "every boot" on the way. This
-// agent announces the filter as a feature of its journald adapter; an agent
-// without the feature never sees the field, because the panel refuses the
-// view before dispatch.
+// journalFilters assembles the narrowing of a journal view from typed fields,
+// never from a concatenated string.
 func journalFilters(payload *opspec.JournalPayload) ([]string, error) {
 	var args []string
 	if payload.Unit != "" {
@@ -55,9 +41,7 @@ func journalFilters(payload *opspec.JournalPayload) ([]string, error) {
 	return args, nil
 }
 
-// readJournal reads the journal locally and returns a bounded result. The host
-// does no work when nobody is looking at the logs: the read happens only on
-// request, without a permanent shipper.
+// readJournal reads the journal locally and returns a bounded result.
 func (e *TaskExecutor) readJournal(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.JournalPayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -116,10 +100,7 @@ func clampBytes(data []byte, limit int) ([]byte, bool) {
 	return data[len(data)-limit:], true
 }
 
-// readLogFile reads a log file through the helper. The agent has no access to
-// the files of root and must not have one - the allowlist is the property of
-// the host, and deciding on it belongs to the process that has something to
-// read with.
+// readLogFile reads a log file through the helper.
 func (e *TaskExecutor) readLogFile(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.LogFilePayload) *agentv1.TaskResult {
 	if payload == nil {

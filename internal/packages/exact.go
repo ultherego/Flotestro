@@ -13,18 +13,14 @@ import (
 )
 
 // Exact is a manager that carries an approved plan out exactly as it was
-// approved: every element at the version, the architecture and the origin
-// the plan names, nothing the tool resolves anew at the time of the
-// transaction. The helper checks the plan against the host right before
-// and hands the manager the plan it computed then - the approved one,
-// since the digests matched.
+// approved: every element at the version, the architecture and the origin the
+// plan names, nothing the tool resolves anew at the time of the transaction.
 type Exact interface {
 	ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error)
 }
 
-// settleEffects reads the expected effects of the plan off the state after
-// the transaction. The applied list is what changed; the outcomes say
-// whether what changed is what was promised, effect by effect.
+// settleEffects reads the expected effects of the plan off the state after the
+// transaction.
 func settleEffects(apply *Apply, approved Plan, after map[string]string) error {
 	achieved, missed := approved.Envelope().Effects.Settle(after)
 	apply.EffectsAchieved, apply.EffectsMissed = achieved, missed
@@ -45,9 +41,6 @@ func removalSpecs(approved Plan) []string {
 
 // ApplyExact installs the exact versions of the plan with apt-get: every
 // element as name=version, a removal as name-, in one transaction.
-// --allow-downgrades is given only when the plan contains a downgrade,
-// and an upgrade plan runs with --only-upgrade so that nothing new is
-// installed that the upgrade simulation did not list.
 func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: a.Name()}
 	specs := approved.ExactSpecs()
@@ -79,9 +72,8 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 		args = append(args, "--only-upgrade")
 	}
 	args = append(args, specs...)
-	// The agent is not raised in a transaction it carries out itself; the
-	// plan does not name it, and the hold keeps a dependency from pulling
-	// it in.
+	// The agent is not raised in a transaction it carries out itself; the plan
+	// does not name it, and the hold keeps a dependency from pulling it in.
 	if release, err := a.holdAgent(ctx); err == nil {
 		defer release()
 	}
@@ -118,16 +110,9 @@ func (a *APT) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 	return apply, partial
 }
 
-// ApplyExact carries the plan out with dnf on the exact NEVRAs and only
-// from the repositories the plan names, against the metadata the plan
-// was read from: the cached metadata is declared never expired, so dnf
-// resolves on what the plan saw and downloads only the archives -
-// --cacheonly would refuse the download itself. The elements go in by
-// direction - an
-// upgrade, an installation and a downgrade are different commands of dnf
-// - and the dependencies of each are already named, so a later command
-// finds its work done by an earlier one rather than resolving anything
-// new.
+// ApplyExact carries the plan out with dnf on the exact NEVRAs and only from
+// the repositories the plan names, against the metadata the plan was read
+// from: the cached metadata is declared never expired, so dnf resolves on what
 func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	byAction := map[string][]string{}
@@ -193,10 +178,7 @@ func (d *DNF) ApplyExact(ctx context.Context, approved Plan, options Options) (A
 
 // ApplyExact carries the plan out with pacman from downloaded, signed
 // archives: the targets are resolved against the private copy of the sync
-// database the plan was read from, downloaded into the cache with -Sw,
-// and installed with -U of exactly those files. The system sync database
-// is never refreshed here - -Sy without -u is the half-step Arch warns
-// against - and pacman checks the signatures of the archives itself.
+// database the plan was read from, downloaded into the cache with -Sw, and
 func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options) (Apply, error) {
 	apply := Apply{Manager: p.Name()}
 	if len(approved.Changes) == 0 {
@@ -209,10 +191,7 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 		return apply, fmt.Errorf("%w: %s", ErrModulesHidden, dir)
 	}
 
-	// The targets and their archives, as the copy resolves them. An
-	// installation plan was read against the system sync database, so its
-	// targets are resolved there too. A plan of removals alone has nothing
-	// to fetch.
+	// The targets and their archives, as the copy resolves them.
 	var installs []Change
 	for _, change := range approved.Changes {
 		if change.Action != ActionRemove {
@@ -225,9 +204,8 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 		upgrade := approved.Mode == "" || approved.Mode == ModeUpgrade
 		var printArgs, downloadArgs []string
 		if upgrade {
-			// The archives are fetched against the same database the plan
-			// was read from, so the transaction carries out the plan that
-			// was approved.
+			// The archives are fetched against the same database the plan was read
+			// from, so the transaction carries out the plan that was approved.
 			database := pacmanDatabaseArgs(pacmanPlanDatabase())
 			printArgs = append([]string{"-Sup", "--noconfirm", "--ignore", AgentPackage,
 				"--print-format", pacmanPrintFormat}, database...)

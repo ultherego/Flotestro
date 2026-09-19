@@ -6,13 +6,6 @@ import (
 )
 
 // ReadTimers assembles schedules from the systemctl output.
-//
-// Timers and cron are two mechanisms of the same thing: the operator wants
-// to see one table of recurring jobs, not two lists to merge in their head.
-// What this function reads is what systemd knows; the entries the panel
-// wrote itself are recognised by their marker and merged in afterwards by
-// MergeManagedTimers, because their files say more than systemd's lists
-// do.
 func ReadTimers(timerList, unitList, calendars string) []Schedule {
 	next := parseTimerList(timerList)
 	states := parseUnitStates(unitList)
@@ -26,9 +19,8 @@ func ReadTimers(timerList, unitList, calendars string) []Schedule {
 			Source: SourceManual,
 			// An active timer is one that is loaded and enabled.
 			Enabled: states[name] != "" && states[name] != "inactive",
-			// A timer without OnCalendar runs relative to an event
-			// (OnBootSec, OnUnitActiveSec). Its expression is unknown, so it
-			// is left empty instead of writing anything.
+			// A timer without OnCalendar runs relative to an event (OnBootSec,
+			// OnUnitActiveSec).
 			Expression: expressions[name],
 			// A timer found on the host is described in systemd's own
 			// language, so the two expressions are the same text.
@@ -47,10 +39,6 @@ func ReadTimers(timerList, unitList, calendars string) []Schedule {
 }
 
 // parseTimerList reads the output of "systemctl list-timers --all".
-//
-// The columns are separated by spaces and the date contains spaces, so the
-// timer name is found by suffix, not by position: the format of this list
-// has changed between systemd versions.
 func parseTimerList(output string) map[string]time.Time {
 	result := map[string]time.Time{}
 	for _, line := range strings.Split(output, "\n") {
@@ -71,9 +59,7 @@ func parseTimerList(output string) map[string]time.Time {
 	return result
 }
 
-// parseTimerDate reads the first date at the start of the row. The value
-// "-" means a timer without a scheduled date and stays an empty time, not a
-// zero date pretending to be a specific moment.
+// parseTimerDate reads the first date at the start of the row.
 func parseTimerDate(fields []string) time.Time {
 	if len(fields) < 2 {
 		return time.Time{}
@@ -106,16 +92,7 @@ func parseUnitStates(output string) map[string]string {
 }
 
 // parseCalendars reads the output of "systemctl show --property=Id
-// --property=TimersCalendar '*.timer'".
-//
-// The OnCalendar expression is what the operator knows from the unit file.
-// Without it the timer row would only say "sometime" - and the next run by
-// itself does not explain what is behind it.
-//
-// Records are separated by an empty line, and the order of properties in a
-// record is not the order of the question: systemd can print
-// TimersCalendar before Id. Reading line by line would therefore attribute
-// the calendar to the previous timer.
+// --property=TimersCalendar '*.
 func parseCalendars(output string) map[string]string {
 	result := map[string]string{}
 	for _, record := range strings.Split(output, "\n\n") {

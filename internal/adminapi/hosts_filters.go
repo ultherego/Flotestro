@@ -17,14 +17,7 @@ import (
 
 // attentionFilters reads the "needs attention" filters of the host list into
 // the filter: the ones a dashboard tile links here with, so the count on the
-// tile leads to the hosts it counted. Each yes-or-no filter takes true or
-// false, and a value that is neither is refused rather than read as one of
-// them. The answer has been written when the result is false.
-//
-// The team filter is read here too, because this is the hook the fleet
-// list hands the query to. It narrows within what the caller may see and
-// never beyond it: the boundary is the scope condition the store applies
-// to every listing, and a filter cannot lift it.
+// tile leads to the hosts it counted.
 func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.ListFilter) bool {
 	flags := []struct {
 		name   string
@@ -47,10 +40,9 @@ func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.Lis
 		}
 		*flag.target = &parsed
 	}
-	// The relay is a typed column: an identifier that is not one would
-	// fail in the database and come back as a server fault, when it is
-	// the request that is wrong. A relay that does not exist is a valid
-	// question with an empty answer.
+	// The relay is a typed column: an identifier that is not one would fail in
+	// the database and come back as a server fault, when it is the request that
+	// is wrong.
 	if relay := strings.TrimSpace(query.Get("relay")); relay != "" {
 		if _, err := uuid.Parse(relay); err != nil {
 			problem(w, http.StatusBadRequest, "invalid_filter", "relay must be a relay identifier")
@@ -58,11 +50,8 @@ func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.Lis
 		}
 		filter.Relay = relay
 	}
-	// The team is a typed column, like the relay: an identifier that is
-	// not one would come back as a server fault when it is the request
-	// that is wrong. The word "none" asks for the other list - the hosts
-	// nobody has placed in a team yet, which after the migration is every
-	// host in the installation.
+	// The team is a typed column, like the relay: an identifier that is not one
+	// would come back as a server fault when it is the request that is wrong.
 	if team := strings.TrimSpace(query.Get("team")); team != "" {
 		switch {
 		case team == "none":
@@ -75,9 +64,8 @@ func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.Lis
 			return false
 		}
 	}
-	// A domain name is matched as an operator recorded it; a name that
-	// could not have been recorded is refused for the same reason it
-	// could not be set.
+	// A domain name is matched as an operator recorded it; a name that could not
+	// have been recorded is refused for the same reason it could not be set.
 	if domain := query.Get("failure_domain"); domain != "" {
 		normalized, err := hosts.NormalizeFailureDomain(domain)
 		if err != nil {
@@ -90,15 +78,6 @@ func attentionFilters(w http.ResponseWriter, query url.Values, filter *hosts.Lis
 }
 
 // The head of every fleet view.
-//
-// A screen of the whole fleet says three numbers before any other: how
-// many hosts it covers, how many of them it judged, and how many it could
-// not - the hosts without the fact, with a stale one, or without the
-// adapter that reports it. An unknown host is never a zero: a fleet of a
-// thousand hosts with findings on nine hundred and nothing known about the
-// rest is a different fleet from one with a hundred clean hosts. When the
-// answer is not complete the view says so outright, with a stable reason,
-// and the screen shows a badge rather than a plausible number.
 type fleetCoverage struct {
 	TotalHosts     int  `json:"total_hosts"`
 	EvaluatedHosts int  `json:"evaluated_hosts"`
@@ -154,12 +133,8 @@ func invalidCursor(w http.ResponseWriter, err error) {
 	problem(w, http.StatusBadRequest, "invalid_cursor", "the cursor did not come from this list: "+err.Error())
 }
 
-// fleetSweepBudget bounds the time one request spends judging the fleet
-// host by host in the panel. The compliance checks and the trust store
-// are judged from the inventory in Go, not counted by the database, so a
-// fleet of ten thousand hosts is a sweep; the sweep stops at the budget
-// and says so, rather than holding the socket until a proxy closes it and
-// the screen shows nothing at all.
+// fleetSweepBudget bounds the time one request spends judging the fleet host
+// by host in the panel.
 const fleetSweepBudget = 20 * time.Second
 
 // fleetSweep is the outcome of one sweep over the fleet.
@@ -177,11 +152,8 @@ type fleetSweep struct {
 }
 
 // sweepFleet visits every host of the filter in the order of the key
-// (hostname, id), a page at a time, with the inventory fragments of the
-// named modules. The visit stops the sweep by answering false; the sweep
-// stops itself at fleetSweepBudget and reports a partial result. A store
-// error ends the sweep with the error: a fleet judged from half its facts
-// is not a fleet judged.
+// (hostname, id), a page at a time, with the inventory fragments of the named
+// modules.
 func (s *Server) sweepFleet(ctx context.Context, filter hosts.ListFilter, afterName, afterID string,
 	modules []string, visit func(host hosts.Host, fragments []inventory.Fragment) bool) (fleetSweep, error) {
 	deadline := time.Now().Add(fleetSweepBudget)
@@ -216,11 +188,8 @@ func (s *Server) sweepFleet(ctx context.Context, filter hosts.ListFilter, afterN
 	}
 }
 
-// fleetFragments reads the fragments of the named modules for many hosts
-// at once. A sweep reads only the modules its checks compute from: the
-// package list of a host is the largest fragment by far and no check
-// reads it, so loading it for five hundred hosts a page would cost the
-// panel the memory of the whole fleet's package lists for nothing.
+// fleetFragments reads the fragments of the named modules for many hosts at
+// once.
 func (s *Server) fleetFragments(ctx context.Context, ids, modules []string) (map[string][]inventory.Fragment, error) {
 	result := map[string][]inventory.Fragment{}
 	if len(ids) == 0 || len(modules) == 0 {

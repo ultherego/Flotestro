@@ -11,33 +11,15 @@ import (
 )
 
 // The desired state of the objects this module creates.
-//
-// A specification describes what is to stand on the host, not the commands
-// that would put it there. That is what lets the plan say what would change
-// before anything does, and it is what lets the same order run twice
-// without doing the work twice: a container that already matches its
-// specification is no change at all.
-//
-// A container is never mutated. The engine can change a handful of a
-// running container's settings and refuses the rest, so an order that
-// promised to change the image or the command would sometimes work and
-// sometimes leave the operator with a container half-way between two
-// descriptions. A container that differs is therefore replaced - removed
-// and created again from the specification - and the plan says so before
-// the operator approves it.
 
-// The shapes the engine accepts. They are checked here rather than left to
-// the engine, because a refusal from the panel names the field and a
-// refusal from the engine names an HTTP status.
+// The shapes the engine accepts.
 var (
 	// objectName is what the engine allows a container, a network and a
 	// volume to be called.
 	objectName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 	// environmentName is a variable name a shell can carry.
 	environmentName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
-	// imageReference is a reference with an optional registry, tag or
-	// digest. The engine takes more than this, but not in one word without
-	// whitespace, and everything the panel offers fits here.
+	// imageReference is a reference with an optional registry, tag or digest.
 	imageReference = regexp.MustCompile(`^[a-z0-9][A-Za-z0-9._\-/:@]{0,511}$`)
 	// digestReference is the sha256 digest an image is pinned by.
 	digestReference = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -48,9 +30,7 @@ var (
 	labelName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$`)
 )
 
-// The limits of a specification. They exist so that an order nobody could
-// review does not reach the host: a container with two hundred mounts is
-// not a description an approver reads.
+// The limits of a specification.
 const (
 	maxSpecEntries = 64
 	maxSpecValue   = 4096
@@ -58,27 +38,17 @@ const (
 )
 
 // RestartPolicies are the policies the engine knows. An unknown one is a
-// refusal here rather than an engine error after the container was
-// created.
+// refusal here rather than an engine error after the container was created.
 var RestartPolicies = []string{"no", "always", "unless-stopped", "on-failure"}
 
 // MountTypes are the mount kinds a specification may name.
 var MountTypes = []string{"volume", "bind", "tmpfs"}
 
 // ContainerSpec is the desired state of one container.
-//
-// The name is the identity here, unlike in the lifecycle operations, which
-// take an engine identifier: a declaration is about "the container called
-// this", and the identifier of the container that carries the name changes
-// with every replacement.
 type ContainerSpec struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`
-	// ImageDigest is the digest the reference resolves to. The plan fills
-	// it in - from the reference itself when it is pinned, from the
-	// registry, or from the image already on the host - and the container
-	// is created from it, never from the tag as the registry serves it at
-	// that moment.
+	// ImageDigest is the digest the reference resolves to.
 	ImageDigest string `json:"image_digest,omitempty"`
 	// DigestSource names where the digest came from: reference, registry
 	// or local.
@@ -87,15 +57,10 @@ type ContainerSpec struct {
 	// point. An empty list leaves the image's own.
 	Command    []string `json:"command,omitempty"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
-	// Env are the variables whose value is not a secret. A value that is
-	// one belongs in EnvSecrets: this map travels in the order, is stored
-	// with the job and is shown to whoever may read it.
+	// Env are the variables whose value is not a secret.
 	Env map[string]string `json:"env,omitempty"`
 	// EnvSecrets names the variables whose value the host fetches from the
-	// panel's secret store right before the container is created. The map
-	// carries the reference - "name#version" - and never the value: the
-	// specification is hashed into the plan, travels in the job record and
-	// is read back by the verifier.
+	// panel's secret store right before the container is created.
 	EnvSecrets map[string]string `json:"env_secrets,omitempty"`
 	Ports      []PortSpec        `json:"ports,omitempty"`
 	Mounts     []MountSpec       `json:"mounts,omitempty"`
@@ -113,13 +78,10 @@ type ContainerSpec struct {
 	// ReadOnlyRootFilesystem keeps the container's own layer read only;
 	// what it has to write goes into a mount.
 	ReadOnlyRootFilesystem bool `json:"read_only_root_filesystem,omitempty"`
-	// StopTimeoutSeconds is how long the container gets to shut down
-	// before the engine kills it, both for a replacement and for a later
-	// stop.
+	// StopTimeoutSeconds is how long the container gets to shut down before the
+	// engine kills it, both for a replacement and for a later stop.
 	StopTimeoutSeconds int `json:"stop_timeout_seconds,omitempty"`
-	// Stopped asks for a container that exists and does not run. The
-	// default is a running container: an order that creates a container
-	// means to have the service.
+	// Stopped asks for a container that exists and does not run.
 	Stopped bool `json:"stopped,omitempty"`
 }
 
@@ -212,9 +174,8 @@ type NetworkSpec struct {
 	IPv6        bool   `json:"ipv6,omitempty"`
 	IPv6Subnet  string `json:"ipv6_subnet,omitempty"`
 	IPv6Gateway string `json:"ipv6_gateway,omitempty"`
-	// Internal is a network without a way out of the host, Attachable one
-	// a container outside the service may join. Both change what passes
-	// through this network, so they are part of the description.
+	// Internal is a network without a way out of the host, Attachable one a
+	// container outside the service may join.
 	Internal   bool              `json:"internal,omitempty"`
 	Attachable bool              `json:"attachable,omitempty"`
 	Options    map[string]string `json:"options,omitempty"`
@@ -231,11 +192,6 @@ type VolumeSpec struct {
 }
 
 // Validate checks a container specification.
-//
-// Everything the engine would refuse is refused here, and named: the
-// operator gets the field back, not an HTTP status from a daemon. What
-// stays with the engine is what only the host knows - whether the image
-// exists, whether the port is free, whether the bind source is there.
 func (s *ContainerSpec) Validate() error {
 	if s == nil {
 		return fmt.Errorf("the order carries no container description")
@@ -312,9 +268,8 @@ func checkEnvironment(plain map[string]string, secrets map[string]string) error 
 		if strings.ContainsRune(value, 0) {
 			return fmt.Errorf("the value of %s carries a null byte", name)
 		}
-		// A value that looks like a credential in the plain map would be
-		// stored with the job and shown to everyone who may read it. The
-		// store exists for exactly this.
+		// A value that looks like a credential in the plain map would be stored with
+		// the job and shown to everyone who may read it.
 		if looksLikeSecret(name) {
 			return fmt.Errorf("%s looks like a credential; name a secret of the store for it "+
 				"instead of writing the value into the order", name)
@@ -346,21 +301,18 @@ func checkLabels(labels map[string]string) error {
 			return fmt.Errorf("the value of the label %s is longer than %d characters", key, maxSpecValue)
 		}
 		// The compose labels decide which project a container belongs to.
-		// A container that claims membership without being deployed by
-		// compose would make the project view lie.
 		if strings.HasPrefix(key, "com.docker.compose.") {
 			return fmt.Errorf("the label %s belongs to Compose; a container declared here is not part of a project", key)
 		}
-		// The module writes its own marks under this prefix; a label from
-		// the order that overwrote one would make the plan compare a
-		// description against itself.
+		// The module writes its own marks under this prefix; a label from the order
+		// that overwrote one would make the plan compare a description against
+		// itself.
 		if strings.HasPrefix(key, "io.flotestro.") {
 			return fmt.Errorf("the label %s belongs to the panel's own marks on the object", key)
 		}
-		// The engine does not tell a plain label from one carrying a
-		// credential, so the inventory hides the value of a label whose
-		// name suggests one - and a description whose value could never be
-		// read back would be replaced at every plan.
+		// The engine does not tell a plain label from one carrying a credential, so
+		// the inventory hides the value of a label whose name suggests one - and a
+		// description whose value could never be read back would be replaced at
 		if looksLikeSecret(key) {
 			return fmt.Errorf("the label %s looks like a credential; its value would be hidden "+
 				"in the inventory and could never be compared", key)
@@ -592,18 +544,13 @@ func checkOptions(options map[string]string) error {
 	return nil
 }
 
-// Normalized returns the specification with the engine's own defaults
-// written out.
-//
-// Comparison needs it: a container created without a protocol carries tcp
-// in the engine, and a specification that leaves the field empty describes
-// the same container. Without normalisation every such pair would read as a
-// difference and the plan would replace a container that matches.
+// Normalized returns the specification with the engine's own defaults written
+// out.
 func (s ContainerSpec) Normalized() ContainerSpec {
 	normalized := s
 	// Where the digest came from is a fact about the plan, not about the
-	// container: the same description resolved once at the registry and
-	// once from a local image must not read as two different ones.
+	// container: the same description resolved once at the registry and once from
+	// a local image must not read as two different ones.
 	normalized.DigestSource = ""
 	normalized.Ports = make([]PortSpec, 0, len(s.Ports))
 	for _, port := range s.Ports {
@@ -662,19 +609,13 @@ func (s ContainerSpec) SecretVariables() []string {
 }
 
 // planDigest binds a change to the plan that described it.
-//
-// It covers three things: what is to stand on the host, what stands there
-// now, and what the plan said would happen. A specification that changed
-// invalidates the approval, and so does a host whose container was replaced
-// by somebody else between the plan and the change - the operator approved
-// a change from one base, not from whichever base the host happens to have.
 func planDigest(kind, action string, spec any, base ...string) string {
 	sum := sha256.New()
 	fmt.Fprintf(sum, "kind=%s\n", kind)
 	fmt.Fprintf(sum, "action=%s\n", action)
-	// The specification is hashed as canonical JSON: the Go marshaller
-	// writes map keys in sorted order and the fields in declaration order,
-	// so the same description always gives the same text.
+	// The specification is hashed as canonical JSON: the Go marshaller writes map
+	// keys in sorted order and the fields in declaration order, so the same
+	// description always gives the same text.
 	encoded, err := json.Marshal(spec)
 	if err != nil {
 		// A specification that does not marshal cannot be described, and a
@@ -701,9 +642,7 @@ func portKey(port PortSpec) string {
 	return fmt.Sprintf("%05d/%s/%s/%05d", port.ContainerPort, protocolOf(port), port.HostIP, port.HostPort)
 }
 
-// addressLike says whether a value reads as an IP address. The engine
-// decides conclusively; this keeps a value that is plainly not one out of
-// the request it lands in.
+// addressLike says whether a value reads as an IP address.
 func addressLike(value string) bool {
 	if value == "" {
 		return false

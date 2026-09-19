@@ -1,6 +1,4 @@
-// Package hosts stores the identity and state of hosts. The package knows
-// neither the HTTP layer nor the agent protocol; mapping the contracts belongs
-// to the gateway.
+// Package hosts stores the identity and state of hosts.
 package hosts
 
 import (
@@ -43,9 +41,7 @@ type Capability struct {
 // Capabilities is the registry of a host's adapters.
 type Capabilities []Capability
 
-// The names of the adapters and the requirements of operations. A
-// requirement is a logical name: an upgrade operation is not to know whether
-// the host uses apt or dnf.
+// The names of the adapters and the requirements of operations.
 const (
 	CapSystemd   = "systemd"
 	CapAPT       = "packages.apt"
@@ -65,9 +61,8 @@ const (
 
 	NeedPackages      = "packages"
 	NeedPackageRepair = "packages.repair"
-	// Writing the network configuration. Reading works everywhere iproute2
-	// is, so the module alone does not yet say that anything can be changed
-	// here.
+	// Writing the network configuration. Reading works everywhere iproute2 is, so
+	// the module alone does not yet say that anything can be changed here.
 	NeedNetworkWrite  = "network.write"
 	NeedDNSWrite      = "dns.write"
 	NeedFirewallWrite = "firewall.write"
@@ -93,11 +88,6 @@ func (c Capabilities) Feature(name, feature string) bool {
 
 // FeatureState separates "it does not have this part" from "it is not known
 // whether it has it".
-//
-// An agent from before the registry sends no features at all, and its
-// registry is reconstructed from logical fields. Treating silence as a
-// refusal would take away from such a host an operation that works on it - an
-// unknown feature is not an absent feature.
 func (c Capabilities) FeatureState(name, feature string) (value bool, known bool) {
 	for _, capability := range c {
 		if capability.Name != name {
@@ -138,9 +128,8 @@ func (c Capabilities) Satisfies(requirement string) bool {
 			if value {
 				return true
 			}
-			// The adapter is present but silent about its features: the host
-			// decides at execution time, as it did before the registry was
-			// introduced.
+			// The adapter is present but silent about its features: the host decides at
+			// execution time, as it did before the registry was introduced.
 			if !known && c.Available(adapter) {
 				return true
 			}
@@ -166,25 +155,21 @@ func (c Capabilities) Satisfies(requirement string) bool {
 		}
 		return !known && c.Available(CapDNS)
 	case NeedNetworkWrite:
-		// Writing the network requires a mechanism that persists the change
-		// and allows rolling it back. A host without one is to learn about it
-		// when the operation is ordered, not after the task is delivered.
+		// Writing the network requires a mechanism that persists the change and
+		// allows rolling it back.
 		value, known := c.FeatureState(CapNetwork, "write")
 		if value {
 			return true
 		}
-		// The adapter is present but silent about its features: the host
-		// decides at execution time, as it did before the registry was
-		// introduced.
+		// The adapter is present but silent about its features: the host decides at
+		// execution time, as it did before the registry was introduced.
 		return !known && c.Available(CapNetwork)
 	default:
 		return c.Available(requirement)
 	}
 }
 
-// Health is the minimal set of signals from a heartbeat. An empty pointer
-// means a state the agent did not determine and does not overwrite the last
-// known value.
+// Health is the minimal set of signals from a heartbeat.
 type Health struct {
 	FailedUnits            *uint32
 	RebootRequired         *bool
@@ -214,31 +199,22 @@ type Host struct {
 	Hostname    string `json:"hostname"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	// PlacementChangedAt is when an operator last moved the host to another
-	// site or environment. Absent for a host that stands where it enrolled:
-	// the placement of such a host is the enrollment order's, and the
-	// order is the record of it.
+	// PlacementChangedAt is when an operator last moved the host to another site
+	// or environment.
 	PlacementChangedAt *time.Time `json:"placement_changed_at,omitempty"`
 	Owner              string     `json:"owner,omitempty"`
-	// TeamID is the team the host belongs to and TeamName what that team
-	// is called. The identifier is the boundary - a role binding may name
-	// a team, and the name may be rewritten without moving anybody's
-	// access - and the name travels with it because every screen that
-	// shows a host shows names, not identifiers. Both are absent for a
-	// host nobody has placed in a team; such a host is reachable through
-	// its site alone.
+	// TeamID is the team the host belongs to and TeamName what that team is
+	// called.
 	TeamID   string `json:"team_id,omitempty"`
 	TeamName string `json:"team_name,omitempty"`
-	// FailureDomain is what the host goes down with - a rack, an
-	// availability zone, a cluster whose members keep a service alive -
-	// recorded by an operator, and keyed on by the budgets that keep a
-	// campaign from taking a whole domain off at once. Absent for a host
-	// nobody placed: an unknown domain is not a shared one.
+	// FailureDomain is what the host goes down with - a rack, an availability
+	// zone, a cluster whose members keep a service alive - recorded by an
+	// operator, and keyed on by the budgets that keep a campaign from taking a
 	FailureDomain  string `json:"failure_domain,omitempty"`
 	LifecycleState string `json:"lifecycle_state"`
-	// LifecycleReason and LifecycleChangedAt are the decision behind a
-	// state other than active: who cut the host off and why is part of the
-	// host, not a line to dig out of the audit trail.
+	// LifecycleReason and LifecycleChangedAt are the decision behind a state
+	// other than active: who cut the host off and why is part of the host, not a
+	// line to dig out of the audit trail.
 	LifecycleReason    string     `json:"lifecycle_reason,omitempty"`
 	LifecycleChangedAt *time.Time `json:"lifecycle_changed_at,omitempty"`
 	// LifecycleChangedBy is who took the decision: an operator's subject,
@@ -252,33 +228,23 @@ type Host struct {
 	ConnectionState    string     `json:"connection_state"`
 	LastSeenAt         *time.Time `json:"last_seen_at,omitempty"`
 	BootID             string     `json:"boot_id,omitempty"`
-	// What the agent reported about itself at its last Hello beyond the
-	// version: the commit it was built from, the protocols it speaks, and
-	// the configuration it runs on. Every field is absent for a host whose
-	// agent predates the report - an unknown build is not an empty one.
+	// What the agent reported about itself at its last Hello beyond the version:
+	// the commit it was built from, the protocols it speaks, and the
+	// configuration it runs on.
 	AgentBuildCommit string `json:"agent_build_commit,omitempty"`
 	AgentProtocolMin *int   `json:"agent_protocol_min,omitempty"`
 	AgentProtocolMax *int   `json:"agent_protocol_max,omitempty"`
-	// ConfigFingerprint digests the effective agent.yaml; absent also for
-	// a host on the environment variables of the old flow, which has no
-	// file. ConfigSchemaVersion is what the file declares, zero for no
-	// file, and ConfigLegacy is the verdict: the host runs on the
-	// environment file or on a schema older than the current one. Absent
-	// when the agent reported nothing: not knowing is not "legacy".
+	// ConfigFingerprint digests the effective agent. yaml; absent also for a host
+	// on the environment variables of the old flow, which has no file.
 	ConfigFingerprint   string `json:"config_fingerprint,omitempty"`
 	ConfigSchemaVersion *int   `json:"config_schema_version,omitempty"`
 	ConfigLegacy        *bool  `json:"config_legacy,omitempty"`
-	// Tags are what operators recorded about the host: 'key' or
-	// 'key=value'. The list is always present - a host without tags has an
-	// empty one - so a selector can tell "no tags" from "not asked".
+	// Tags are what operators recorded about the host: 'key' or 'key=value'.
 	Tags []string `json:"tags"`
-	// ReleaseChannel says which agent releases the host follows: stable or
-	// beta. It is a policy recorded in the panel, always set - a host on no
-	// channel would follow nothing.
+	// ReleaseChannel says which agent releases the host follows: stable or beta.
 	ReleaseChannel string `json:"release_channel"`
-	// Notes are what an operator wrote about the host that fits no other
-	// field: the ticket, the quirk, whom to call. Absent when nobody wrote
-	// any; the list of hosts carries them too, so a search can find them.
+	// Notes are what an operator wrote about the host that fits no other field:
+	// the ticket, the quirk, whom to call.
 	Notes string `json:"notes,omitempty"`
 	// Empty fields mean an undetermined state, not zero.
 	RebootRequired           *bool  `json:"reboot_required"`
@@ -287,25 +253,19 @@ type Host struct {
 	PendingSecurityUpdates   *int   `json:"pending_security_updates"`
 	CurrentInventoryRevision string `json:"current_inventory_revision,omitempty"`
 	PackageDatabaseBroken    bool   `json:"package_database_broken"`
-	// The management address and where it came from. Empty fields mean an
-	// undetermined address; the interface is then to say "unknown" rather
-	// than show any address of the host as a supposed management address.
+	// The management address and where it came from.
 	ManagementAddress           string     `json:"management_address,omitempty"`
 	ManagementAddressSource     string     `json:"management_address_source,omitempty"`
 	ManagementAddressObservedAt *time.Time `json:"management_address_observed_at,omitempty"`
 	// Maintenance is the maintenance window. An empty field means a host
 	// outside a window, not a window of zero length.
 	Maintenance *MaintenanceWindow `json:"maintenance,omitempty"`
-	// LastConnectionRefusal is why the gateway last turned the host away
-	// since its last session. Absent for a host that connected the last
-	// time it tried: a session that opens clears it, so an old refusal
-	// never outlives a reconnect.
+	// LastConnectionRefusal is why the gateway last turned the host away since
+	// its last session.
 	LastConnectionRefusal *ConnectionRefusal `json:"last_connection_refusal,omitempty"`
 	// RelayIdentity says how the host's last session through a relay was
 	// identified: end_to_end when the host's own signature on the envelope
-	// verified, attested when the relay named the certificate and the
-	// gateway checked it, or weak when the relay named the host alone.
-	// Empty for a host that last connected directly.
+	// verified, attested when the relay named the certificate and the gateway
 	RelayIdentity string       `json:"relay_identity,omitempty"`
 	Identity      HostIdentity `json:"identity"`
 	EnrolledAt    time.Time    `json:"enrolled_at"`
@@ -318,15 +278,12 @@ type ConnectionRefusal struct {
 	Code string    `json:"code"`
 	At   time.Time `json:"at"`
 	// Detail is what the gateway saw - the serial and the validity of the
-	// certificate, or the state of the host - for the operator who wants
-	// more than the code.
+	// certificate, or the state of the host - for the operator who wants more
+	// than the code.
 	Detail string `json:"detail,omitempty"`
 }
 
-// The refusal codes of the gateway. The certificate ones name the
-// certificate the host presented; a lifecycle refusal is spelled as
-// lifecycle_<state> and is a decision of an operator rather than a fault of
-// the host.
+// The refusal codes of the gateway.
 const (
 	// RefusalCertificateExpired is an agent that missed its renewal: the
 	// remedy is an identity recovery ordered from the panel.
@@ -343,28 +300,24 @@ const (
 	// RefusalIdentityMismatch is a certificate on record for another host
 	// than the one it names.
 	RefusalIdentityMismatch = "identity_mismatch"
-	// RefusalRelayIdentityMissing is a session through a relay that did
-	// not attest which certificate the host presented, refused because the
+	// RefusalRelayIdentityMissing is a session through a relay that did not
+	// attest which certificate the host presented, refused because the
 	// installation requires the attestation (FLOTESTRO_RELAY_IDENTITY=enforce).
-	// The remedy is a relay at a release that sends it.
 	RefusalRelayIdentityMissing = "relay_identity_missing"
-	// RefusalRelayIdentityInvalid is an attestation the gateway could not
-	// read: a fingerprint that is not one, or a serial that does not
-	// belong to the fingerprint.
+	// RefusalRelayIdentityInvalid is an attestation the gateway could not read: a
+	// fingerprint that is not one, or a serial that does not belong to the
+	// fingerprint.
 	RefusalRelayIdentityInvalid = "relay_identity_invalid"
 	// RefusalRelayScopeMismatch is a host attested by a relay of another
 	// site or environment: a relay mediates for its own scope alone.
 	RefusalRelayScopeMismatch = "relay_scope_mismatch"
-	// RefusalRelayEnvelopeInvalid is a relayed message whose identity
-	// envelope the gateway could not accept for a reason other than the
-	// three below: another schema, a relay other than the one that
-	// forwarded it, a host other than the one the relay named, a kind
-	// other than the payload, a missing envelope on a session that
-	// signed its Hello, or no public key to check it against.
+	// RefusalRelayEnvelopeInvalid is a relayed message whose identity envelope
+	// the gateway could not accept for a reason other than the three below:
+	// another schema, a relay other than the one that forwarded it, a host other
 	RefusalRelayEnvelopeInvalid = "relay_envelope_invalid"
-	// RefusalRelayBodyHashMismatch is a payload other than the one the
-	// host signed: changed on the way, or carrying a field this panel does
-	// not know, which the fleet rule - panel before agents - rules out.
+	// RefusalRelayBodyHashMismatch is a payload other than the one the host
+	// signed: changed on the way, or carrying a field this panel does not know,
+	// which the fleet rule - panel before agents - rules out.
 	RefusalRelayBodyHashMismatch = "relay_body_hash_mismatch"
 	// RefusalRelaySequenceReplayed is a signed message carried a second
 	// time under a sequence the session already accepted.
@@ -372,37 +325,32 @@ const (
 	// RefusalRelayHostSignatureInvalid is an envelope whose signature does
 	// not verify under the key of the certificate it names.
 	RefusalRelayHostSignatureInvalid = "relay_host_signature_invalid"
-	// RefusalBlockedUpgradeRequired is a host whose agent predates a proof
-	// the installation requires: behind a relay under
-	// FLOTESTRO_RELAY_IDENTITY=enforce, an agent that does not sign the
-	// envelope. The relay did its part; the remedy is the agent's upgrade.
+	// RefusalBlockedUpgradeRequired is a host whose agent predates a proof the
+	// installation requires: behind a relay under
+	// FLOTESTRO_RELAY_IDENTITY=enforce, an agent that does not sign the envelope.
 	RefusalBlockedUpgradeRequired = "blocked_upgrade_required"
 )
 
-// The strength of the identity behind a host's session, as the host
-// record shows it. Empty is a direct connection: the certificate of the
-// host itself was in the handshake.
+// The strength of the identity behind a host's session, as the host record
+// shows it.
 const (
 	// RelayIdentityAttested is a session through a relay that named the
-	// certificate of the host, and the gateway checked that certificate
-	// against the record as it would in a direct handshake.
+	// certificate of the host, and the gateway checked that certificate against
+	// the record as it would in a direct handshake.
 	RelayIdentityAttested = "attested"
-	// RelayIdentityWeak is a session through a relay that named the host
-	// alone: the relay vouches for it, and the gateway could check nothing
-	// about the certificate. Let in under prefer; refused under enforce.
+	// RelayIdentityWeak is a session through a relay that named the host alone:
+	// the relay vouches for it, and the gateway could check nothing about the
+	// certificate.
 	RelayIdentityWeak = "weak"
-	// RelayIdentityEndToEnd is a session through a relay in which the host
-	// itself signed the envelope of every message with its key, and the
-	// gateway verified the signature against the certificate on record.
-	// The relay carried the host's word; it did not speak for it.
+	// RelayIdentityEndToEnd is a session through a relay in which the host itself
+	// signed the envelope of every message with its key, and the gateway verified
+	// the signature against the certificate on record.
 	RelayIdentityEndToEnd = "end_to_end"
 )
 
 // AuthStrength is the strength of a session as agent_sessions records it:
-// end_to_end for a verified envelope, relay_only for a session that rests
-// on the relay's attestation or word, empty for a direct connection. It
-// follows from the relay identity, so it is derived rather than stored
-// twice in memory.
+// end_to_end for a verified envelope, relay_only for a session that rests on
+// the relay's attestation or word, empty for a direct connection.
 func AuthStrength(relayIdentity string) string {
 	switch relayIdentity {
 	case RelayIdentityEndToEnd:
@@ -414,11 +362,6 @@ func AuthStrength(relayIdentity string) string {
 }
 
 // MaintenanceWindow describes a host's maintenance window.
-//
-// A host inside a window runs and accepts manually ordered operations;
-// campaigns skip it, and its alerts do not wake the on-call engineer. A
-// window always has an end: "until further notice" ends with a host everybody
-// forgot about.
 type MaintenanceWindow struct {
 	Until  time.Time `json:"until"`
 	Reason string    `json:"reason,omitempty"`
@@ -439,8 +382,7 @@ type HostIdentity struct {
 	SSSDOnline *bool      `json:"sssd_online"`
 	CheckedAt  *time.Time `json:"checked_at,omitempty"`
 	// OfflineVerdict is the panel's judgement on directory logins during an
-	// outage, from the facts the host reported. Absent for a host outside a
-	// domain: there is nothing to judge.
+	// outage, from the facts the host reported.
 	OfflineVerdict *OfflineVerdict `json:"offline_verdict,omitempty"`
 }
 
@@ -456,8 +398,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
 // Upsert creates a host or updates its identifying data. The identity key is
-// machine_id, so enrolling the same machine again does not create a
-// duplicate.
+// machine_id, so enrolling the same machine again does not create a duplicate.
 func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID string, created bool, err error) {
 	const query = `
 		insert into hosts (id, machine_id, hostname, site, environment,
@@ -481,10 +422,6 @@ func (s *Store) Upsert(ctx context.Context, tx pgx.Tx, id Identity) (hostID stri
 }
 
 // IDByMachineID returns the host with this machine identifier.
-//
-// An empty value means "the panel does not know such a machine" - and that is
-// an answer rather than an error: enrolling a new host rests on exactly
-// that.
 func (s *Store) IDByMachineID(ctx context.Context, tx pgx.Tx, machineID string) (string, error) {
 	if machineID == "" {
 		return "", nil
@@ -501,11 +438,6 @@ func (s *Store) IDByMachineID(ctx context.Context, tx pgx.Tx, machineID string) 
 }
 
 // AdoptMachine binds an existing host to a new machine.
-//
-// Used when restoring an identity: a reinstalled host has a new machine_id
-// but is the same host in the panel - with the same history, the same tasks
-// and the same place in the fleet. Creating a second row for it would leave a
-// dead twin in the panel.
 func (s *Store) AdoptMachine(ctx context.Context, tx pgx.Tx, hostID string, id Identity) error {
 	const query = `
 		update hosts set
@@ -528,20 +460,13 @@ func (s *Store) AdoptMachine(ctx context.Context, tx pgx.Tx, hostID string, id I
 	return nil
 }
 
-// The host lifecycle states.
-//
-// Only an active host gets tasks, sessions, secrets and renewals. The other
-// states are different kinds of "no" and each means something else to the
-// operator: quarantine is reversible, recovery waits for a new key, retiring
-// is under way, retired is the end of trust.
+// The host lifecycle states. Only an active host gets tasks, sessions, secrets
+// and renewals.
 const (
 	StateActive      = "active"
 	StateQuarantined = "quarantined"
-	// StateRecovery is the host between an identity recovery order and the
-	// first session of the new certificate. No operation and no secret, as
-	// in quarantine; the old certificate may still open a session for the
-	// overlap, so that the operator keeps reading the host until the new
-	// key has proven it works.
+	// StateRecovery is the host between an identity recovery order and the first
+	// session of the new certificate.
 	StateRecovery = "recovery"
 	// StateRetiring is the host in the decommission handshake: the final
 	// task went out and the host is finishing what it started.
@@ -549,9 +474,8 @@ const (
 	StateRetired  = "retired"
 )
 
-// RecoveryOverlap is how long the certificate replaced by a recovery may
-// still open a session. Long enough to cover a reinstall that takes a day;
-// short enough that a key nobody replaced does not keep working for good.
+// RecoveryOverlap is how long the certificate replaced by a recovery may still
+// open a session.
 const RecoveryOverlap = 24 * time.Hour
 
 // RetiredMachineRetention is how long the machine identifier of a retired
@@ -562,9 +486,7 @@ const RetiredMachineRetention = 30 * 24 * time.Hour
 func Active(state string) bool { return state == StateActive }
 
 // Connectable says whether a certificate of a host in this state may open a
-// session at the given moment. Only an active host connects without a
-// condition; a host in recovery connects while the overlap since the order
-// lasts, so that the operator can still read it with the old key.
+// session at the given moment.
 func Connectable(state string, changedAt *time.Time, now time.Time) bool {
 	switch state {
 	case StateActive:
@@ -579,10 +501,6 @@ func Connectable(state string, changedAt *time.Time, now time.Time) bool {
 var ErrForbiddenTransition = errors.New("forbidden lifecycle transition")
 
 // ChangeLifecycleState moves a host between lifecycle states.
-//
-// The transition is conditional and runs in a single query: two orders issued
-// at once must not end with a host that is both retired and restored. The
-// allowed source states are part of the caller's decision.
 func (s *Store) ChangeLifecycleState(ctx context.Context, tx pgx.Tx, hostID string,
 	fromStates []string, newState, reason, actor string) error {
 	const query = `
@@ -607,10 +525,6 @@ func (s *Store) ChangeLifecycleState(ctx context.Context, tx pgx.Tx, hostID stri
 }
 
 // RevokeCertificates invalidates every valid certificate of a host.
-//
-// Used when the host's key may have leaked or when the host leaves the fleet:
-// the certificate stays cryptographically valid, so without this record a
-// captured machine would still introduce itself to the panel successfully.
 func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reason string) (int, error) {
 	const query = `
 		update agent_certificates set revoked_at = now(), revocation_reason = $2
@@ -624,11 +538,6 @@ func (s *Store) RevokeCertificates(ctx context.Context, tx pgx.Tx, hostID, reaso
 
 // LeaveRecovery moves a host from recovery back to active once a certificate
 // issued after the recovery order has opened a session.
-//
-// The presented certificate is compared with the moment of the order rather
-// than with "the newest one": the old certificate may still connect during
-// the overlap, and its session must not close a recovery it has nothing to
-// do with. The return value says whether the state changed.
 func (s *Store) LeaveRecovery(ctx context.Context, hostID string, fingerprint []byte) (bool, error) {
 	const query = `
 		update hosts set
@@ -648,13 +557,9 @@ func (s *Store) LeaveRecovery(ctx context.Context, hostID string, fingerprint []
 	return tag.RowsAffected() > 0, nil
 }
 
-// LapseRecoveries returns to active the hosts whose recovery has nothing
-// left to wait for: no pending recovery order, and no certificate issued
-// since the order. The old key is then still the identity of the host, and
-// keeping it cut off would punish it for an order somebody revoked or let
-// expire. A host whose order was used stays in recovery until the new
-// certificate opens its first session - that is what the state is for.
-// The identifiers of the hosts that came back are returned for the trail.
+// LapseRecoveries returns to active the hosts whose recovery has nothing left
+// to wait for: no pending recovery order, and no certificate issued since the
+// order.
 func (s *Store) LapseRecoveries(ctx context.Context) ([]string, error) {
 	const query = `
 		update hosts h set
@@ -689,12 +594,11 @@ func (s *Store) LapseRecoveries(ctx context.Context) ([]string, error) {
 }
 
 // RetiredMachine says whether the host with this identifier is retired, and
-// until when its machine identifier is held back from "new host" tokens. A
-// host that is not retired answers false with a zero time.
+// until when its machine identifier is held back from "new host" tokens.
 func (s *Store) RetiredMachine(ctx context.Context, tx pgx.Tx, hostID string) (retired bool, until time.Time, err error) {
-	// A host retired before the hold existed gets the same retention from
-	// its retirement: the rule is about the machine, not about the release
-	// that introduced the column.
+	// A host retired before the hold existed gets the same retention from its
+	// retirement: the rule is about the machine, not about the release that
+	// introduced the column.
 	const query = `
 		select lifecycle_state = 'retired',
 		       coalesce(retired_machine_id_until, retired_at + $2::interval, now())
@@ -708,10 +612,9 @@ func (s *Store) RetiredMachine(ctx context.Context, tx pgx.Tx, hostID string) (r
 	return retired, until, nil
 }
 
-// ReleaseMachineID frees the machine identifier of a retired host, so that
-// the same machine can enter the fleet as a new host once the retention has
-// passed. The retired row keeps its history under a marked identifier: the
-// unique index on machine_id leaves no other way to have both rows.
+// ReleaseMachineID frees the machine identifier of a retired host, so that the
+// same machine can enter the fleet as a new host once the retention has
+// passed.
 func (s *Store) ReleaseMachineID(ctx context.Context, tx pgx.Tx, hostID string) error {
 	const query = `
 		update hosts set machine_id = 'retired:' || id::text || ':' || machine_id, updated_at = now()
@@ -726,12 +629,8 @@ func (s *Store) ReleaseMachineID(ctx context.Context, tx pgx.Tx, hostID string) 
 	return nil
 }
 
-// RevokeSupersededCertificates revokes the certificates of a host older
-// than the one it has just presented. A host has one identity at a time:
-// once the new certificate has opened a session, the earlier ones - the
-// one replaced by a recovery, or the one renewed from - are keys that
-// nobody legitimate holds any more. The row of the presented certificate
-// is the reference, so an unknown fingerprint revokes nothing.
+// RevokeSupersededCertificates revokes the certificates of a host older than
+// the one it has just presented.
 func (s *Store) RevokeSupersededCertificates(ctx context.Context, hostID string,
 	fingerprint []byte, reason string) (int, error) {
 	const query = `
@@ -747,9 +646,8 @@ func (s *Store) RevokeSupersededCertificates(ctx context.Context, hostID string,
 	return int(tag.RowsAffected()), nil
 }
 
-// HasLiveCertificate says whether the host holds a certificate that is
-// neither revoked nor expired. A host without one cannot come back on its
-// own: its return starts with identity recovery.
+// HasLiveCertificate says whether the host holds a certificate that is neither
+// revoked nor expired.
 func (s *Store) HasLiveCertificate(ctx context.Context, hostID string) (bool, error) {
 	const query = `
 		select exists (
@@ -790,24 +688,17 @@ type CertificateStatus struct {
 	// Serial identifies the certificate in the audit trail; on a renewal it
 	// allows linking the new certificate with the replaced one.
 	Serial string
-	// NotBefore and NotAfter are the validity as issued. A direct
-	// connection has the certificate itself to read them from; a session
-	// attested by a relay has only the record, so the record carries them.
+	// NotBefore and NotAfter are the validity as issued.
 	NotBefore time.Time
 	NotAfter  time.Time
-	// Fingerprint is the SHA-256 of the certificate as issued, and
-	// PublicKeyDER its SubjectPublicKeyInfo. The envelope of a relayed
-	// session names the certificate by serial, and the signature is
-	// checked against this key; a certificate issued before the key was
-	// recorded has none here, and the gateway learns it from the
-	// certificate the relay presents once the fingerprint confirms it.
+	// Fingerprint is the SHA-256 of the certificate as issued, and PublicKeyDER
+	// its SubjectPublicKeyInfo.
 	Fingerprint  []byte
 	PublicKeyDER []byte
 }
 
 // LookupCertificate checks whether the certificate is known and not revoked
-// and whether the host is not in quarantine. The gateway rejects sessions
-// based on this result.
+// and whether the host is not in quarantine.
 func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (CertificateStatus, error) {
 	const query = `
 		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial,
@@ -831,8 +722,6 @@ func (s *Store) LookupCertificate(ctx context.Context, fingerprint []byte) (Cert
 
 // LookupCertificateBySerial reads the record of a certificate the gateway
 // never saw itself: the envelope of a relayed session names it by serial.
-// The fingerprint and the public key come with it, for the signature and
-// for confirming a certificate a relay presents.
 func (s *Store) LookupCertificateBySerial(ctx context.Context, serial string) (CertificateStatus, error) {
 	const query = `
 		select c.host_id, h.lifecycle_state, h.lifecycle_changed_at, c.revoked_at is not null, c.serial,
@@ -859,12 +748,9 @@ type Executor interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 }
 
-// RecordCertificatePublicKey writes the public key of an issued certificate
-// on its record, once: a key already on record is not replaced, because
-// the record is what the envelopes of the host are checked against and a
-// certificate has one key. The renewal writes it in its transaction at
-// issue; the gateway writes it when it learns the key of an older
-// certificate from the relay's attestation.
+// RecordCertificatePublicKey writes the public key of an issued certificate on
+// its record, once: a key already on record is not replaced, because the
+// record is what the envelopes of the host are checked against and a
 func (s *Store) RecordCertificatePublicKey(ctx context.Context, db Executor, serial string, der []byte) error {
 	if db == nil {
 		db = s.pool
@@ -897,16 +783,16 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 			last_connection_refusal_at     = null,
 			last_connection_refusal_detail = null
 		where id = $1`
-	// The refusal goes with the session that opens: whatever kept the host
-	// out is over, and a reason left standing would send the operator after
-	// a fault the host no longer has.
+	// The refusal goes with the session that opens: whatever kept the host out is
+	// over, and a reason left standing would send the operator after a fault the
+	// host no longer has.
 	if _, err := tx.Exec(ctx, hostQuery, hostID, agentVersion, bootID); err != nil {
 		return fmt.Errorf("updating the host: %w", err)
 	}
 
-	// The registry is replaced in full: an adapter the host no longer reports
-	// has disappeared from the host and must not stay in the database as a
-	// stale truth.
+	// The registry is replaced in full: an adapter the host no longer reports has
+	// disappeared from the host and must not stay in the database as a stale
+	// truth.
 	const deleteQuery = `delete from host_capability_registry where host_id = $1`
 	if _, err := tx.Exec(ctx, deleteQuery, hostID); err != nil {
 		return fmt.Errorf("clearing the adapter registry: %w", err)
@@ -933,9 +819,7 @@ func (s *Store) ApplyHello(ctx context.Context, hostID, agentVersion, bootID str
 }
 
 // ApplyHeartbeat records the minimal health signals and refreshes
-// last_seen_at. A signal the agent did not determine leaves the previous
-// value untouched: a momentary read failure on the host must neither delete
-// what we already know nor pretend to be zero.
+// last_seen_at.
 func (s *Store) ApplyHeartbeat(ctx context.Context, hostID string, health Health) error {
 	const query = `
 		update hosts set
@@ -977,13 +861,6 @@ func (s *Store) MarkDisconnected(ctx context.Context, hostID string) error {
 }
 
 // RecordConnectionRefusal writes down why the gateway turned the host away.
-// The row keeps the newest refusal alone: the trail has every one of them,
-// and the host needs only the reason it is not connected now.
-//
-// The identity comes from a certificate, so it is checked for the shape of
-// an identifier before it reaches the query: a name that is not one matches
-// no host, and must not turn into a query error either. False means no host
-// of that identifier.
 func (s *Store) RecordConnectionRefusal(ctx context.Context, hostID, code, detail string) (bool, error) {
 	if _, err := uuid.Parse(hostID); err != nil {
 		return false, nil
@@ -1003,10 +880,8 @@ func (s *Store) RecordConnectionRefusal(ctx context.Context, hostID, code, detai
 }
 
 // RecordRelayIdentity writes down how the session that has just opened
-// identified the host: end_to_end, attested or weak through a relay, empty
-// for a direct connection. It is a fact of the newest session, so every open
-// overwrites it - a host that came back directly no longer carries the
-// weakness of a relay it left.
+// identified the host: end_to_end, attested or weak through a relay, empty for
+// a direct connection.
 func (s *Store) RecordRelayIdentity(ctx context.Context, hostID, strength string) error {
 	_, err := s.pool.Exec(ctx,
 		`update hosts set relay_identity = nullif($2, ''), updated_at = now() where id = $1`,
@@ -1035,55 +910,38 @@ type ListFilter struct {
 	// IdentityDomain narrows to the hosts in a given domain.
 	IdentityDomain string
 	// Search keeps the hosts with the text somewhere in the hostname, the
-	// management address, the machine identifier or the owner. The
-	// operator types what they remember about a host, and that is one of
-	// those four things.
+	// management address, the machine identifier or the owner.
 	Search         string
 	LifecycleState string
 	Owner          string
 	// Maintenance keeps the hosts inside a maintenance window (true) or
 	// outside one (false). Nil does not narrow.
 	Maintenance *bool
-	// RebootRequired keeps the hosts that need a reboot (true) or the ones
-	// that reported they do not (false). A host that has not said either
-	// way is in neither list: unknown is not "no".
+	// RebootRequired keeps the hosts that need a reboot (true) or the ones that
+	// reported they do not (false).
 	RebootRequired *bool
-	// SecurityUpdates keeps the hosts with a security update waiting
-	// (true) or with a count of none (false); unknown counts are left out
-	// of both, for the same reason.
+	// SecurityUpdates keeps the hosts with a security update waiting (true) or
+	// with a count of none (false); unknown counts are left out of both, for the
+	// same reason.
 	SecurityUpdates *bool
-	// FailedUnits keeps the hosts with at least one failed unit (true) or
-	// with a count of none (false). A host that has not reported its
-	// units is in neither list: unknown is not "none".
+	// FailedUnits keeps the hosts with at least one failed unit (true) or with a
+	// count of none (false).
 	FailedUnits *bool
-	// PackageDatabaseBroken keeps the hosts whose package database the
-	// last operation found broken (true) or sound (false). The true list
-	// leaves the retired hosts out, as the dashboard's counter does: a
-	// retired host is nobody's concern any more.
+	// PackageDatabaseBroken keeps the hosts whose package database the last
+	// operation found broken (true) or sound (false).
 	PackageDatabaseBroken *bool
 	// SSSDOffline keeps the domain-joined hosts whose SSSD reported itself
-	// offline (true) or online (false). A host outside a domain, or one
-	// whose SSSD has not answered, is in neither list; the true list
-	// leaves the retired hosts out, like the dashboard's counter.
+	// offline (true) or online (false).
 	SSSDOffline *bool
-	// AgentBehind keeps the hosts whose agent is older (true) or as new
-	// (false) as the newest version any visible host reports - the same
-	// yardstick the dashboard's "agents behind" tile counts by, since the
-	// panel has no release feed to name a newer one. A host whose version
-	// does not parse is neither behind nor current, and a retired host is
-	// out of both the yardstick and the lists.
+	// AgentBehind keeps the hosts whose agent is older (true) or as new (false)
+	// as the newest version any visible host reports - the same yardstick the
+	// dashboard's "agents behind" tile counts by, since the panel has no release
 	AgentBehind *bool
 	// Relay keeps the hosts whose open session the named relay attested.
-	// The session, not the host, says which route it took: a host that
-	// connects directly today is not behind the relay it used yesterday.
 	Relay string
 	// FailureDomain keeps the hosts an operator placed in the named domain.
 	FailureDomain string
-	// Team keeps the hosts of one team, named by its identifier. It is a
-	// filter, not a boundary: what the caller may see at all is Scopes,
-	// and a team filter can only narrow that further. TeamUnassigned
-	// keeps instead the hosts nobody has placed in a team - the list an
-	// administrator works through after the teams are created.
+	// Team keeps the hosts of one team, named by its identifier.
 	Team           string
 	TeamUnassigned bool
 	// Capability keeps the hosts whose registry has the named adapter
@@ -1093,26 +951,21 @@ type ListFilter struct {
 	Tags []string
 	// Channel keeps the hosts on the given release channel.
 	Channel string
-	// ConnectionRefusal keeps the hosts the gateway last turned away for
-	// the given reason, so the dashboard counter leads to the hosts it
-	// counted.
+	// ConnectionRefusal keeps the hosts the gateway last turned away for the
+	// given reason, so the dashboard counter leads to the hosts it counted.
 	ConnectionRefusal string
 	// IDs keeps the named hosts. Nil does not narrow; an empty list keeps
 	// nothing, because a list of nobody names nobody.
 	IDs []string
-	// Expression is a selector already expanded of its group references;
-	// it is compiled into the same query as the other filters, so a
-	// campaign's targets and the host list answer the same question.
+	// Expression is a selector already expanded of its group references; it is
+	// compiled into the same query as the other filters, so a campaign's targets
+	// and the host list answer the same question.
 	Expression *selector.Expression
-	// Scopes narrow the result to what the caller may read. Nil narrows
-	// nothing, which is right only for a caller that has checked the scope
-	// itself or has the global one.
+	// Scopes narrow the result to what the caller may read.
 	Scopes []authz.Scope
 	Limit  int
 	// Sort is the order of a paged list; the zero value is the hostname,
-	// ascending. Only ListPaged reads it: a sweep and Page walk the fleet by
-	// the key (hostname, id) whatever the operator's screen is sorted by,
-	// because a sweep needs a key that does not move under it.
+	// ascending.
 	Sort Sort
 }
 
@@ -1120,10 +973,8 @@ type ListFilter struct {
 // the list, or a direction that is neither asc nor desc.
 var ErrInvalidSort = errors.New("invalid sort")
 
-// Sort is the order of the host list: a column of the whitelist below and
-// a direction. The zero value stands for the default order, the hostname
-// ascending, so a caller that never heard of sorting gets the list it
-// always got.
+// Sort is the order of the host list: a column of the whitelist below and a
+// direction.
 type Sort struct {
 	Column     string
 	Descending bool
@@ -1166,10 +1017,9 @@ func (s Sort) String() string {
 	return s.column()
 }
 
-// sortColumn is one column the list can be ordered by: the SQL expression
-// that carries its order, the type the cursor's value is cast back to, the
-// rendering of a row's value for the cursor and the check of a value that
-// came back in one.
+// sortColumn is one column the list can be ordered by: the SQL expression that
+// carries its order, the type the cursor's value is cast back to, the
+// rendering of a row's value for the cursor and the check of a value that came
 type sortColumn struct {
 	expression string
 	kind       string
@@ -1177,14 +1027,7 @@ type sortColumn struct {
 	valid      func(string) bool
 }
 
-// sortColumns are the columns the host list can be ordered by. Every
-// expression is free of nulls, so the pair (expression, id) is a total
-// order a cursor can stand on without the special cases nulls bring to a
-// row comparison. A fact the host has not reported still stays a group of
-// its own rather than being read as a value: an unreported count sorts as
-// -1, apart from the zeros, and a host never seen as the earliest possible
-// moment, apart from the ones seen long ago. The agent version is ordered
-// part by part, like the dashboard orders it, so 0.10.0 comes after 0.9.0.
+// sortColumns are the columns the host list can be ordered by.
 var sortColumns = map[string]sortColumn{
 	"hostname": {"h.hostname", "text", func(h Host) string { return h.Hostname }, anyText},
 	"site":     {"h.site", "text", func(h Host) string { return h.Site }, anyText},
@@ -1232,9 +1075,8 @@ func SortColumns() []string {
 }
 
 // The cursor value of each kind of key, rendered from the row the way the
-// database renders the expression, and checked on the way back so that a
-// token somebody edited fails as an invalid cursor rather than as a query
-// the database refuses.
+// database renders the expression, and checked on the way back so that a token
+// somebody edited fails as an invalid cursor rather than as a query the
 
 func anyText(string) bool { return true }
 
@@ -1275,8 +1117,7 @@ func validCountKey(value string) bool {
 var versionPattern = regexp.MustCompile(`^v?(\d+(?:\.\d+)*)`)
 
 // versionKey renders an agent version as the array literal the database
-// compares: {0,49,0} for 0.49.0, an empty array for a version that does
-// not parse or was never reported.
+// compares: {0,49,0} for 0.
 func versionKey(version string) string {
 	match := versionPattern.FindStringSubmatch(version)
 	if match == nil {
@@ -1291,9 +1132,7 @@ func validVersionKey(value string) bool {
 	return versionKeyPattern.MatchString(value)
 }
 
-// conditions renders the filter as SQL over the alias h. Every list of
-// hosts - the page, the count and the plain list - goes through this one
-// place, so a filter cannot work in the list and be forgotten in the count.
+// conditions renders the filter as SQL over the alias h.
 func (f ListFilter) conditions() ([]string, []any, error) {
 	var (
 		conditions []string
@@ -1385,10 +1224,9 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 		}
 	}
 	if f.AgentBehind != nil {
-		// The version is ordered numerically part by part, the way the
-		// dashboard orders it, and the newest one is taken over the hosts
-		// the caller may see: a scoped operator's fleet has a newest of its
-		// own, and the tile they clicked counted against that one.
+		// The version is ordered numerically part by part, the way the dashboard
+		// orders it, and the newest one is taken over the hosts the caller may see:
+		// a scoped operator's fleet has a newest of its own, and the tile they
 		newest := "select max(" + versionParts("n") + ") from hosts n" +
 			" where n.lifecycle_state <> 'retired' and n.agent_version ~ '^v?\\d+(\\.\\d+)*'"
 		if f.Scopes != nil {
@@ -1438,13 +1276,8 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 		args = append(args, extra...)
 	}
 	if f.Scopes != nil {
-		// The narrowing rule lives next to the authorisation, so that a list
-		// cannot show what a direct read would refuse. It is this package's
-		// ScopeSQL rather than the one in authz, because a team binding
-		// carries the wildcard site and environment its constraint gives
-		// it: read with the site columns alone it would look like the whole
-		// fleet, and a team's operator would be listed every host in the
-		// installation.
+		// The narrowing rule lives next to the authorisation, so that a list cannot
+		// show what a direct read would refuse.
 		if condition, extra := ScopeSQL(f.Scopes, "h.site", "h.environment", "h.team_id", len(args)); condition != "" {
 			conditions = append(conditions, condition)
 			args = append(args, extra...)
@@ -1453,10 +1286,8 @@ func (f ListFilter) conditions() ([]string, []any, error) {
 	return conditions, args, nil
 }
 
-// versionParts renders the agent version of the aliased host row as an
-// array of integers, so two versions compare part by part rather than as
-// text - '0.10.0' after '0.9.0', not before it. It reads only a version
-// the caller has already matched against the same pattern.
+// versionParts renders the agent version of the aliased host row as an array
+// of integers, so two versions compare part by part rather than as text - '0.
 func versionParts(alias string) string {
 	return "string_to_array(substring(" + alias + ".agent_version from '^v?(\\d+(?:\\.\\d+)*)'), '.')::int[]"
 }
@@ -1489,16 +1320,6 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Host, error) {
 }
 
 // Page returns the next page of hosts matching the filter.
-//
-// A campaign must not have a hidden limit: a selector covering a thousand
-// hosts has to mean a thousand hosts, not the first five hundred sorted
-// alphabetically. Paging goes by the key (hostname, id) rather than by an
-// offset - the fleet changes while it is being browsed, and an offset then
-// loses hosts in the middle. The filter's Sort is not read here: a sweep
-// keys on the name whatever order an operator's screen is in, and the
-// sorted pages of the screen come from ListPaged.
-//
-// The first page is taken with an empty key.
 func (s *Store) Page(ctx context.Context, filter ListFilter,
 	afterName, afterID string, limit int) ([]Host, error) {
 	conditions, args, err := filter.conditions()
@@ -1524,10 +1345,6 @@ func (s *Store) Page(ctx context.Context, filter ListFilter,
 }
 
 // Count returns the number of hosts matching the filter.
-//
-// A campaign preview has to give the true number of targets rather than the
-// length of the first page: the operator approves a change on as many hosts
-// as they were shown.
 func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 	conditions, args, err := filter.conditions()
 	if err != nil {
@@ -1544,10 +1361,8 @@ func (s *Store) Count(ctx context.Context, filter ListFilter) (int, error) {
 	return count, nil
 }
 
-// Cursor is the key of the last host of the previous page: the order the
-// page was read in, the value of the sorted column on that host and its
-// identifier. The order travels with the cursor so a token issued for one
-// order is refused under another, rather than read as a key of nothing.
+// Cursor is the key of the last host of the previous page: the order the page
+// was read in, the value of the sorted column on that host and its identifier.
 type Cursor struct {
 	Sort  Sort
 	Value string
@@ -1583,9 +1398,7 @@ func (c Cursor) String() string {
 	return paging.Encode(c.Sort.String(), c.Value, c.ID)
 }
 
-// Matches says whether the cursor was issued for the given order. A page
-// asked for under another order with this cursor would start from a key
-// of the wrong kind, so the caller refuses the request instead.
+// Matches says whether the cursor was issued for the given order.
 func (c Cursor) Matches(order Sort) bool {
 	return !c.Set || c.Sort.String() == order.String()
 }
@@ -1593,25 +1406,16 @@ func (c Cursor) Matches(order Sort) bool {
 // ListPage is one page of the host list.
 type ListPage struct {
 	Items []Host `json:"items"`
-	// Total is the number of hosts matching the filter across every page:
-	// the operator is to know how many hosts a filter names, not how many
-	// fit on the screen.
+	// Total is the number of hosts matching the filter across every page: the
+	// operator is to know how many hosts a filter names, not how many fit on the
+	// screen.
 	Total int `json:"total"`
 	// NextCursor is empty on the last page.
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// ListPaged reads the hosts matching the filter page by page, in the order
-// the filter's Sort names - the hostname by default. The count comes with
-// the page, so the screen can say how many hosts stand behind a filter
-// without a second request.
-//
-// The paging stays keyset under a sort: the key is (sorted column, id),
-// and the cursor carries the column's value on the last row together with
-// the order, so the next page starts after that row whatever enrolled or
-// changed in the meantime. An offset would have been simpler to carry but
-// skips a host or shows one twice as soon as the fleet moves under the
-// operator, and a screen sorted by "last seen" moves all the time.
+// ListPaged reads the hosts matching the filter page by page, in the order the
+// filter's Sort names - the hostname by default.
 func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	page := ListPage{Items: []Host{}}
 	column, ok := sortColumns[filter.Sort.column()]
@@ -1636,9 +1440,8 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 		direction, comparison = "desc", "<"
 	}
 	if cursor.Set {
-		// The key comes back as text and is cast to the column's type in
-		// the query, so one cursor format serves a name, a count and a
-		// timestamp alike.
+		// The key comes back as text and is cast to the column's type in the query,
+		// so one cursor format serves a name, a count and a timestamp alike.
 		args = append(args, cursor.Value, cursor.ID)
 		conditions = append(conditions, fmt.Sprintf("(%s, h.id) %s ($%d::%s, $%d::uuid)",
 			column.expression, comparison, len(args)-1, column.kind, len(args)))
@@ -1671,10 +1474,6 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 }
 
 // Summary is what a sweep over the whole fleet needs to know about a host.
-//
-// A sweep is not a list for the UI: it has neither a limit from a filter nor
-// the capability registry, because it is to cover every host rather than the
-// first page.
 type Summary struct {
 	ID             string
 	Hostname       string
@@ -1685,14 +1484,8 @@ type Summary struct {
 // PageSize is the size of one page of a sweep.
 const PageSize = 500
 
-// Sweep returns the next page of the fleet in the order of the key
-// (hostname, id).
-//
-// Paging by key rather than by offset: the fleet changes during a sweep, and
-// an offset then loses hosts in the middle. A sweep that silently skips hosts
-// gives the verdict "no vulnerabilities" where nobody looked.
-//
-// The first page is taken with an empty key.
+// Sweep returns the next page of the fleet in the order of the key (hostname,
+// id).
 func (s *Store) Sweep(ctx context.Context, afterName, afterID string, limit int) ([]Summary, error) {
 	if limit <= 0 {
 		limit = PageSize
@@ -1803,11 +1596,9 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 			h.Identity.OfflineVerdict = judgeFromFragment(h.Identity.SSSDOnline,
 				identityPayload, identityObservedAt)
 		}
-		// The verdict on the configuration is judged here, against the
-		// schema this panel ships with: a host that reported a schema is
-		// on the legacy configuration when it runs on no file (zero) or on
-		// a file older than the current schema. A host that reported none
-		// gets no verdict.
+		// The verdict on the configuration is judged here, against the schema this
+		// panel ships with: a host that reported a schema is on the legacy
+		// configuration when it runs on no file (zero) or on a file older than the
 		if h.ConfigSchemaVersion != nil {
 			legacy := *h.ConfigSchemaVersion < agentconfig.SchemaVersion
 			h.ConfigLegacy = &legacy
@@ -1837,9 +1628,8 @@ func (s *Store) query(ctx context.Context, clause string, args ...any) ([]Host, 
 }
 
 // AgentReport is what an agent says about itself in its Hello beyond the
-// version and the boot: the sources it was built from, the protocols it
-// speaks and the configuration it runs on. An agent that announces no
-// protocol range predates the report and sends none.
+// version and the boot: the sources it was built from, the protocols it speaks
+// and the configuration it runs on.
 type AgentReport struct {
 	BuildCommit         string
 	ProtocolMin         int
@@ -1848,11 +1638,7 @@ type AgentReport struct {
 	ConfigSchemaVersion int
 }
 
-// RecordAgentReport writes what the agent reported about itself at its
-// Hello. A nil report clears the columns: the agent that connected says
-// nothing about its build, and what the previous one said is not a fact
-// about this one - a host downgraded to an agent from before the report
-// is a host of an unknown build, not of the last known one.
+// RecordAgentReport writes what the agent reported about itself at its Hello.
 func (s *Store) RecordAgentReport(ctx context.Context, hostID string, report *AgentReport) error {
 	const query = `
 		update hosts
@@ -1879,9 +1665,7 @@ func (s *Store) RecordAgentReport(ctx context.Context, hostID string, report *Ag
 	return err
 }
 
-// The sources of the management address. The order is not accidental: an
-// address set manually by an operator describes an intent rather than an
-// observation, so it must not be overwritten by the next connection.
+// The sources of the management address.
 const (
 	AddressFromSession = "session"
 	AddressFromAgent   = "agent"
@@ -1889,9 +1673,7 @@ const (
 )
 
 // SetManagementAddress records the management address together with where it
-// came from. An empty address is not recorded: a missing observation is not a
-// fact about the host and must not delete the address we know from the
-// previous connection.
+// came from.
 func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, source string) error {
 	if address == "" || source == "" {
 		return nil
@@ -1908,11 +1690,7 @@ func (s *Store) SetManagementAddress(ctx context.Context, hostID, address, sourc
 	return err
 }
 
-// Rename records the name the host reports for itself. The hosts table
-// keeps the name from enrollment until the host says otherwise: the name
-// a host answers to is a fact of the host, not of the panel. The previous
-// name comes back so the change can be recorded; a report of the same name
-// changes nothing and returns changed false.
+// Rename records the name the host reports for itself.
 func (s *Store) Rename(ctx context.Context, hostID, hostname string) (previous string, changed bool, err error) {
 	if hostname == "" {
 		return "", false, nil
@@ -1937,10 +1715,7 @@ func (s *Store) Rename(ctx context.Context, hostID, hostname string) (previous s
 }
 
 // AdoptCertificateIssuer fills in the issuer of certificates from before CA
-// rotation was introduced. It may be done only when exactly one CA exists -
-// with more of them the issuer cannot be established other than by guessing,
-// and a guessed issuer would lead to hosts being cut off when a CA is
-// withdrawn.
+// rotation was introduced.
 func (s *Store) AdoptCertificateIssuer(ctx context.Context, subject, serial string) (int64, error) {
 	const query = `
 		update agent_certificates set issuer_subject = $1, issuer_serial = $2
@@ -1953,10 +1728,7 @@ func (s *Store) AdoptCertificateIssuer(ctx context.Context, subject, serial stri
 }
 
 // CertificateIssuers counts hosts by the CA that issued their current,
-// unrevoked certificate. The map key is the issuer's "subject serial".
-//
-// Without that knowledge withdrawing a CA would be guesswork: it is not
-// visible how many hosts lose access.
+// unrevoked certificate.
 func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) {
 	const query = `
 		select coalesce(issuer_subject, ''), coalesce(issuer_serial, ''), count(*)
@@ -1983,16 +1755,6 @@ func (s *Store) CertificateIssuers(ctx context.Context) (map[string]int, error) 
 
 // HostsWithoutCertificateSince counts the hosts that have not received a new
 // certificate since the given moment.
-//
-// It serves CA rotation: the agent learns the new CA together with its
-// certificate, so a host without a fresh certificate does not have the new CA
-// yet. Handing signing over to it would cut such a host off at the panel's
-// next restart.
-//
-// What counts is the moment the certificate was issued rather than the start
-// of its validity: the latter is deliberately backdated to allow for clock
-// skew, and a freshly issued certificate would therefore look older than it
-// is.
 func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Time) (int, error) {
 	const query = `
 		select count(*)
@@ -2010,10 +1772,6 @@ func (s *Store) HostsWithoutCertificateSince(ctx context.Context, since time.Tim
 }
 
 // SetMaintenanceWindow opens or closes a host's maintenance window.
-//
-// Closing the window also clears the reason and the author: a reason left
-// behind would describe a window that no longer exists and would look current
-// the next time one is opened.
 func (s *Store) SetMaintenanceWindow(ctx context.Context, hostID string,
 	until *time.Time, reason, actor string) (*Host, error) {
 	tag, err := s.pool.Exec(ctx, `
@@ -2040,10 +1798,8 @@ const MaxTags = 32
 // names the tag.
 var ErrInvalidTags = errors.New("invalid tags")
 
-// NormalizeTags checks a tag list and returns it sorted and without
-// repeats. A tag is 'key' or 'key=value' in the shape selector.TagPattern
-// describes; the same tag twice is one tag, and the order is not a fact
-// about the host.
+// NormalizeTags checks a tag list and returns it sorted and without repeats. A
+// tag is 'key' or 'key=value' in the shape selector.
 func NormalizeTags(tags []string) ([]string, error) {
 	seen := map[string]bool{}
 	normalized := make([]string, 0, len(tags))
@@ -2074,15 +1830,14 @@ func NormalizeTags(tags []string) ([]string, error) {
 // TagCount is one tag of the catalogue with the hosts carrying it.
 type TagCount struct {
 	Tag string `json:"tag"`
-	// Hosts counts the visible hosts carrying the tag, the retired ones
-	// too: a tag on a retired host is still a tag somebody has to know
-	// about before renaming it.
+	// Hosts counts the visible hosts carrying the tag, the retired ones too: a
+	// tag on a retired host is still a tag somebody has to know about before
+	// renaming it.
 	Hosts int `json:"hosts"`
 }
 
-// TagCatalogue lists every tag any visible host carries, with the number
-// of hosts carrying it, most used first. Scopes narrow the hosts counted
-// the way the host list is narrowed; nil narrows nothing.
+// TagCatalogue lists every tag any visible host carries, with the number of
+// hosts carrying it, most used first.
 func (s *Store) TagCatalogue(ctx context.Context, scopes []authz.Scope) ([]TagCount, error) {
 	query := `
 		select tag, count(*)
@@ -2120,12 +1875,9 @@ type TagChange struct {
 	After    []string
 }
 
-// RenameTag replaces one tag by another on every visible host carrying
-// it, in one transaction on the given handle: half a fleet renamed is a
-// selector that matches half a fleet. A host that already carries the new
-// tag ends up with it once. The changes come back host by host, so the
-// caller can put each host's before and after on the trail; a host
-// outside the scopes is not touched and not listed.
+// RenameTag replaces one tag by another on every visible host carrying it, in
+// one transaction on the given handle: half a fleet renamed is a selector that
+// matches half a fleet.
 func (s *Store) RenameTag(ctx context.Context, tx pgx.Tx, from, to string, scopes []authz.Scope) ([]TagChange, error) {
 	query := `select id, hostname, tags from hosts h where $1 = any(h.tags)`
 	args := []any{from}
@@ -2163,9 +1915,9 @@ func (s *Store) RenameTag(ctx context.Context, tx pgx.Tx, from, to string, scope
 			}
 			after = append(after, tag)
 		}
-		// The normalisation is the same one a single host's tags go
-		// through: it drops the duplicate a host carrying both tags would
-		// end up with, and sorts.
+		// The normalisation is the same one a single host's tags go through: it
+		// drops the duplicate a host carrying both tags would end up with, and
+		// sorts.
 		normalized, err := NormalizeTags(after)
 		if err != nil {
 			return nil, err
@@ -2189,9 +1941,7 @@ const (
 // ErrInvalidChannel means a channel the panel does not have.
 var ErrInvalidChannel = errors.New("invalid release channel")
 
-// NormalizeChannel checks a channel name. An empty name is refused rather
-// than read as the default: assigning a host to a channel is an explicit
-// decision, and "no channel" is not one.
+// NormalizeChannel checks a channel name.
 func NormalizeChannel(channel string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(channel)) {
 	case ChannelStable:
@@ -2219,10 +1969,7 @@ func (s *Store) SetChannel(ctx context.Context, hostID, channel string) (*Host, 
 	return s.Get(ctx, hostID)
 }
 
-// SetTags replaces the tags of a host. The list is the whole list: a tag
-// left out is a tag removed, so the caller sends what it read plus the
-// change, and two operators editing at once see the second write win in
-// full rather than a merge nobody asked for.
+// SetTags replaces the tags of a host.
 func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Host, error) {
 	if tags == nil {
 		tags = []string{}
@@ -2237,19 +1984,15 @@ func (s *Store) SetTags(ctx context.Context, hostID string, tags []string) (*Hos
 	return s.Get(ctx, hostID)
 }
 
-// MaxNotesLength bounds the notes of a host. A note is a few paragraphs
-// an operator reads on the host page, not a runbook; a longer text
-// belongs in the documentation the note can link to.
+// MaxNotesLength bounds the notes of a host.
 const MaxNotesLength = 4000
 
 // ErrInvalidNotes means notes the panel does not accept; the message says
 // what is wrong with them.
 var ErrInvalidNotes = errors.New("invalid notes")
 
-// NormalizeNotes checks the notes of a host. Empty notes are allowed and
-// mean nobody wrote any. Line breaks and tabs are kept - a note has
-// paragraphs - but the other control characters are refused, because the
-// notes are printed in the trail and on the screen.
+// NormalizeNotes checks the notes of a host. Empty notes are allowed and mean
+// nobody wrote any.
 func NormalizeNotes(notes string) (string, error) {
 	notes = strings.TrimSpace(strings.ReplaceAll(notes, "\r\n", "\n"))
 	if len([]rune(notes)) > MaxNotesLength {
@@ -2280,19 +2023,15 @@ func (s *Store) SetNotes(ctx context.Context, hostID, notes string) (*Host, erro
 	return s.Get(ctx, hostID)
 }
 
-// MaxOwnerLength bounds the owner of a host. The owner is a name or a team
-// the operator types, not a paragraph; a longer value is a note in the
-// wrong field.
+// MaxOwnerLength bounds the owner of a host.
 const MaxOwnerLength = 128
 
 // ErrInvalidOwner means an owner the panel does not accept; the message
 // says what is wrong with it.
 var ErrInvalidOwner = errors.New("invalid owner")
 
-// NormalizeOwner checks an owner. An empty owner is allowed and means
-// nobody: clearing the field is how a host is handed back to the pool.
-// Control characters are refused, because the owner is printed in tables
-// and in the trail, where a line break would forge a second row.
+// NormalizeOwner checks an owner. An empty owner is allowed and means nobody:
+// clearing the field is how a host is handed back to the pool.
 func NormalizeOwner(owner string) (string, error) {
 	owner = strings.TrimSpace(owner)
 	if len(owner) > MaxOwnerLength {
@@ -2331,11 +2070,7 @@ const MaxFailureDomainLength = 128
 // accept; the message says what is wrong with it.
 var ErrInvalidFailureDomain = errors.New("invalid failure domain")
 
-// NormalizeFailureDomain checks a failure domain. An empty domain is
-// allowed and means nobody placed the host: clearing the field takes the
-// host out from under the domain budgets rather than putting it in a
-// domain of the unplaced. Control characters are refused, because the
-// domain is printed in tables and becomes part of a budget key.
+// NormalizeFailureDomain checks a failure domain.
 func NormalizeFailureDomain(domain string) (string, error) {
 	domain = strings.TrimSpace(domain)
 	if len(domain) > MaxFailureDomainLength {
@@ -2367,23 +2102,14 @@ func (s *Store) SetFailureDomain(ctx context.Context, hostID, domain string) (*H
 	return s.Get(ctx, hostID)
 }
 
-// MaxPlacementLength bounds the site and the environment of a host. Both
-// are names an operator types and a selector names; the bound is the one
-// the selectors put on a leaf value, so a placement the panel accepts is
-// one a group can select on.
+// MaxPlacementLength bounds the site and the environment of a host.
 const MaxPlacementLength = 128
 
 // ErrInvalidPlacement means a site or an environment the panel does not
 // accept; the message says which and what is wrong with it.
 var ErrInvalidPlacement = errors.New("invalid placement")
 
-// NormalizePlacement checks a site and an environment. Neither may be
-// empty: a host is always somewhere, and the enrollment order that
-// admitted it already named a site and an environment - "default" and
-// "unassigned" when the operator named none. Clearing them would put the
-// host under no budget and in no scope, which is not "unplaced" but
-// invisible. Control characters are refused, because both names are
-// printed in tables, become budget keys and are matched by role bindings.
+// NormalizePlacement checks a site and an environment.
 func NormalizePlacement(site, environment string) (string, string, error) {
 	site = strings.TrimSpace(site)
 	environment = strings.TrimSpace(environment)
@@ -2405,10 +2131,7 @@ func NormalizePlacement(site, environment string) (string, string, error) {
 	return site, environment, nil
 }
 
-// SetPlacement moves a host to a site and an environment. The moment of
-// the move is recorded only when something actually changed: a write that
-// repeats the current placement is a no-op on the host, not a move, so
-// the host page keeps showing when the host really arrived.
+// SetPlacement moves a host to a site and an environment.
 func (s *Store) SetPlacement(ctx context.Context, hostID, site, environment string) (*Host, error) {
 	site, environment, err := NormalizePlacement(site, environment)
 	if err != nil {
@@ -2438,9 +2161,6 @@ var ErrInvalidAddress = errors.New("invalid management address")
 var hostnamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$`)
 
 // NormalizeManagementAddress checks an address an operator types by hand.
-// An IP address comes back in its canonical spelling and a name in lower
-// case, so the same address typed twice is stored once. An empty address
-// is allowed: it is the request to forget the manual value.
 func NormalizeManagementAddress(address string) (string, error) {
 	address = strings.TrimSpace(address)
 	if address == "" {
@@ -2457,12 +2177,7 @@ func NormalizeManagementAddress(address string) (string, error) {
 }
 
 // SetManualManagementAddress records the address an operator chose for
-// reaching the host. The source is then 'manual', which the observations
-// of the gateway and of the agent do not overwrite: the operator said how
-// this host is reached, and a connection from behind NAT knows less than
-// they do. An empty address takes the manual value away - only that one:
-// an observed address is a fact and stays - so the next session or agent
-// report fills the field again.
+// reaching the host.
 func (s *Store) SetManualManagementAddress(ctx context.Context, hostID, address string) (*Host, error) {
 	normalized, err := NormalizeManagementAddress(address)
 	if err != nil {
@@ -2505,12 +2220,7 @@ func (s *Store) SetManualManagementAddress(ctx context.Context, hostID, address 
 }
 
 // ApplyEnrollmentFacts records what the installation order said about the
-// host: its owner and its tags. The order is written by the operator who
-// knows the machine before it exists in the panel, so the facts land in the
-// same transaction as the host row. The tags are added to the ones already
-// there and the owner is set only when the order names one: a token can
-// bring a known machine back, and what an operator recorded about it
-// meanwhile is not the token's to erase.
+// host: its owner and its tags.
 func (s *Store) ApplyEnrollmentFacts(ctx context.Context, tx pgx.Tx, hostID, owner string, tags []string) error {
 	if owner == "" && len(tags) == 0 {
 		return nil
@@ -2535,10 +2245,8 @@ func (s *Store) ApplyEnrollmentFacts(ctx context.Context, tx pgx.Tx, hostID, own
 	return nil
 }
 
-// SystemHistoryLimit is how many (kernel, distribution) pairs the panel
-// keeps per host. A host changes its kernel a few times a year; twenty
-// pairs reach back further than anybody asks, and a bounded row count
-// keeps the fleet's history from growing with every reboot.
+// SystemHistoryLimit is how many (kernel, distribution) pairs the panel keeps
+// per host.
 const SystemHistoryLimit = 20
 
 // SystemHistoryEntry is one platform the panel has seen a host on: a
@@ -2551,12 +2259,8 @@ type SystemHistoryEntry struct {
 	LastSeenAt          time.Time `json:"last_seen_at"`
 }
 
-// RecordSystemHistory notes that the host was seen on this kernel and
-// release at the given moment. A pair seen before moves its last_seen;
-// a new one gets a row, and the oldest rows beyond the limit go.
-//
-// It returns whether the pair was new: the gateway logs a host that came
-// up on something it had not seen before, and stays quiet otherwise.
+// RecordSystemHistory notes that the host was seen on this kernel and release
+// at the given moment.
 func (s *Store) RecordSystemHistory(ctx context.Context, hostID string, entry SystemHistoryEntry) (bool, error) {
 	if entry.Kernel == "" && entry.Distribution == "" {
 		// A report that names neither says nothing about the platform.

@@ -7,15 +7,6 @@ import (
 )
 
 // The container description as an order carries it.
-//
-// An operator writes a published port as "8080:80/tcp" and a mount as
-// "volume:data:/var/lib/data:ro"; that is what the form shows, what the job
-// record keeps and what the approval covers. ContainerSpec is the same
-// description in the shape the plan compares and the engine takes, and
-// Spec is the one place the compact words are read. The panel and the host
-// call it with the same text, so the panel refuses exactly what the host
-// would - and the field that is wrong is named rather than answered with a
-// status from a daemon.
 type ContainerRequest struct {
 	Name  string `json:"name"`
 	Image string `json:"image"`
@@ -23,23 +14,14 @@ type ContainerRequest struct {
 	// an empty list leaves the image's own.
 	Command    []string `json:"command,omitempty"`
 	Entrypoint []string `json:"entrypoint,omitempty"`
-	// Env are the variables whose value is not a credential. One that is
-	// belongs in the secret references of the order: this map is stored
-	// with the job and shown to whoever may read it.
+	// Env are the variables whose value is not a credential.
 	Env map[string]string `json:"env,omitempty"`
-	// EnvSecrets names the variables whose value comes from the panel's
-	// secret store, as "name#version". An order does not fill it in - it
-	// carries its references in a field of its own, where they are checked
-	// as references - and it is written in on the way to the host, so that
-	// the description the host reads says which secret feeds which
-	// variable. That is what makes a rotated secret a changed description,
-	// and a changed description a replacement: the only way a new
-	// credential ever reaches a running container.
+	// EnvSecrets names the variables whose value comes from the panel's secret
+	// store, as "name#version".
 	EnvSecrets map[string]string `json:"env_secrets,omitempty"`
 	// Ports, Mounts and Networks are the compact forms:
-	//   [host-address:][host-port:]container-port[/protocol]
-	//   volume:<name>:<target>[:ro] | bind:<path>:<target>[:ro] | tmpfs:<target>[:<bytes>]
-	//   <network>[=alias,alias][@address]
+	// [host-address:][host-port:]container-port[/protocol]
+	// volume:<name>:<target>[:ro] | bind:<path>:<target>[:ro] |
 	Ports    []string `json:"ports,omitempty"`
 	Mounts   []string `json:"mounts,omitempty"`
 	Networks []string `json:"networks,omitempty"`
@@ -68,19 +50,12 @@ type ContainerRequest struct {
 	Hostname               string `json:"hostname,omitempty"`
 	ReadOnlyRootFilesystem bool   `json:"read_only_root_filesystem,omitempty"`
 	StopTimeoutSeconds     int    `json:"stop_timeout_seconds,omitempty"`
-	// Stopped asks for a container that exists and does not run. The
-	// default is a running container: an order that creates one means to
-	// have the service.
+	// Stopped asks for a container that exists and does not run. The default is a
+	// running container: an order that creates one means to have the service.
 	Stopped bool `json:"stopped,omitempty"`
 }
 
-// Spec turns the order into the description the plan and the engine work
-// with.
-//
-// The references given here take the place of the ones written into the
-// request, so the panel can compose the description out of an order that
-// keeps its references typed and beside it. Either way it is references
-// that travel; a value never does.
+// Spec turns the order into the description the plan and the engine work with.
 func (r *ContainerRequest) Spec(secrets map[string]string) (ContainerSpec, error) {
 	if r == nil {
 		return ContainerSpec{}, fmt.Errorf("the order carries no container description")
@@ -134,9 +109,7 @@ func (r *ContainerRequest) Spec(secrets map[string]string) (ContainerSpec, error
 		}
 		spec.Networks = append(spec.Networks, attachment)
 	}
-	// A check the order says nothing about is the image's own. Saying so
-	// with nothing rather than with an empty structure matters: an empty
-	// structure would read as a check with no command.
+	// A check the order says nothing about is the image's own.
 	if r.HealthDisable || len(r.HealthTest) > 0 {
 		spec.Health = &HealthSpec{
 			Disable:            r.HealthDisable,
@@ -155,9 +128,6 @@ func (r *ContainerRequest) Spec(secrets map[string]string) (ContainerSpec, error
 
 // ParsePort reads a published port:
 // [host-address:][host-port:]container-port[/protocol].
-//
-// A host port left out asks the engine for a free one, and the plan says
-// that the port is not fixed. The protocol is tcp when it is not written.
 func ParsePort(entry string) (PortSpec, error) {
 	value := strings.TrimSpace(entry)
 	if value == "" {
@@ -183,10 +153,7 @@ func ParsePort(entry string) (PortSpec, error) {
 		}
 		port.HostPort = host
 	default:
-		// Everything before the last two colons is the address. An address
-		// of the second family carries colons of its own, so it is written
-		// in brackets - the way the engine's own command line takes it;
-		// without them there is no telling an address from a third port.
+		// Everything before the last two colons is the address.
 		if len(fields) > 3 && !strings.HasPrefix(value, "[") {
 			return PortSpec{}, fmt.Errorf("%q has more parts than a published port has; "+
 				"write an IPv6 address in brackets, as [::1]:8080:80", entry)
@@ -225,13 +192,8 @@ func portNumber(value string) (uint16, error) {
 	return uint16(number), nil
 }
 
-// ParseMount reads one mount:
-// volume:<name>:<target>[:ro], bind:<path>:<target>[:ro] or
-// tmpfs:<target>[:<bytes>].
-//
-// The kind comes first because it decides everything else: a volume name
-// and a host path look alike enough that guessing would sooner or later
-// bind-mount a directory that was meant to be a volume.
+// ParseMount reads one mount: volume:<name>:<target>[:ro],
+// bind:<path>:<target>[:ro] or tmpfs:<target>[:<bytes>].
 func ParseMount(entry string) (MountSpec, error) {
 	value := strings.TrimSpace(entry)
 	kind, rest, found := strings.Cut(value, ":")
@@ -264,9 +226,7 @@ func ParseMount(entry string) (MountSpec, error) {
 	return mount, nil
 }
 
-// readOnlySuffix separates the mount point from the ":ro" that may follow
-// it. Anything else after the mount point is refused by the caller through
-// the mount point itself, which then is not an absolute path.
+// readOnlySuffix separates the mount point from the ":ro" that may follow it.
 func readOnlySuffix(value string) (string, bool) {
 	if target, found := strings.CutSuffix(value, ":ro"); found {
 		return target, true
@@ -277,10 +237,8 @@ func readOnlySuffix(value string) (string, bool) {
 	return value, false
 }
 
-// ParseAttachment reads one network attachment: <network>[=alias,alias][@address].
-//
-// The address is the last part, because a network name may carry neither
-// an equals sign nor an at sign, and an alias may not either.
+// ParseAttachment reads one network attachment:
+// <network>[=alias,alias][@address].
 func ParseAttachment(entry string) (AttachmentSpec, error) {
 	value := strings.TrimSpace(entry)
 	attachment := AttachmentSpec{}

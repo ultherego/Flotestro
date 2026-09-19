@@ -15,11 +15,7 @@ import (
 	"github.com/ultherego/flotestro/internal/plan"
 )
 
-// PlannerVersion names the package planner. It changes when the planner
-// starts computing something else for the same host - another field in
-// the envelope, another reading of the tools - so that an approval given
-// on the old planner is not executed by the new one: a version mismatch
-// at execution is replan_required, not a stale plan and not a JSON error.
+// PlannerVersion names the package planner.
 const PlannerVersion = "packages/1"
 
 // The kinds of the preconditions a package plan carries.
@@ -48,11 +44,8 @@ func ActionTypeOf(mode string) string {
 	return "packages.upgrade"
 }
 
-// Envelope renders the plan in the shape every planner's answer takes
-// before it is hashed, approved and executed. Every element of the plan
-// becomes an artifact (what is fetched), a step (the exact spec the tool
-// gets) and an effect (what the host looks like afterwards); the
-// removals become steps and effects without an artifact.
+// Envelope renders the plan in the shape every planner's answer takes before
+// it is hashed, approved and executed.
 func (p Plan) Envelope() plan.Envelope {
 	envelope := plan.Envelope{
 		SchemaVersion:     p.SchemaVersion,
@@ -148,9 +141,8 @@ func (p Plan) Description() string {
 	return strings.Join(parts, ", ") + " (" + p.Manager + ")"
 }
 
-// ExactSpecs returns the arguments the transaction hands to the tool: one
-// per element of the plan, in the tool's own spelling of an exact version.
-// The executor installs what is named here and nothing it resolves anew.
+// ExactSpecs returns the arguments the transaction hands to the tool: one per
+// element of the plan, in the tool's own spelling of an exact version.
 func (p Plan) ExactSpecs() []string {
 	specs := make([]string, 0, len(p.Changes))
 	for _, change := range p.Changes {
@@ -189,11 +181,9 @@ func (p Plan) RepositoryIDs() []string {
 	return ids
 }
 
-// exactSpec spells one element the way the manager takes an exact version
-// on its command line: name=version for apt (with the architecture where
-// the plan names one, so a foreign-architecture package is not resolved
-// to the native one), the full NEVRA for dnf, name=version for pacman
-// where the archive is later resolved from the download.
+// exactSpec spells one element the way the manager takes an exact version on
+// its command line: name=version for apt (with the architecture where the plan
+// names one, so a foreign-architecture package is not resolved to the native
 func exactSpec(manager string, change Change) string {
 	if change.Action == ActionRemove {
 		return change.Name
@@ -249,12 +239,9 @@ func lockPathsOf(manager string) []string {
 	return nil
 }
 
-// finishPlan completes what every manager's plan shares: the header from
-// the options, the planner's own version, the metadata revision the plan
-// was read against, the direction and the flags of every element, and the
-// rollback answer. It runs on the agent when the plan is made and in the
-// helper when the plan is made again before the transaction, so both
-// compute the same envelope.
+// finishPlan completes what every manager's plan shares: the header from the
+// options, the planner's own version, the metadata revision the plan was read
+// against, the direction and the flags of every element, and the rollback
 func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) Plan {
 	p.SchemaVersion = plan.SchemaVersion
 	p.PlannerVersion = PlannerVersion
@@ -280,10 +267,9 @@ func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) P
 	for _, entry := range p.Blocked {
 		blocked[entry.Name] = true
 	}
-	// An ordinary upgrade skips the agent package - raised in a transaction
-	// it carries out itself it would cut the host off halfway through - so
-	// the plan does not promise a change the transaction will not make.
-	// Replacing the agent has an operation of its own.
+	// An ordinary upgrade skips the agent package - raised in a transaction it
+	// carries out itself it would cut the host off halfway through - so the plan
+	// does not promise a change the transaction will not make.
 	if p.Mode == "" || p.Mode == ModeUpgrade {
 		kept := p.Changes[:0]
 		for _, change := range p.Changes {
@@ -307,10 +293,9 @@ func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) P
 		change.Blocked = blocked[change.Name]
 		change.Protected = change.Action == ActionRemove && Protected(change.Name)
 	}
-	// The removals of the older shape become elements of the plan: a
-	// removal plan whose only content was its list of removals read as
-	// "nothing to change", and a dependency that goes away is exactly
-	// what the operator approves or refuses.
+	// The removals of the older shape become elements of the plan: a removal plan
+	// whose only content was its list of removals read as "nothing to change",
+	// and a dependency that goes away is exactly what the operator approves or
 	for _, name := range p.Removals {
 		if hasChange(p.Changes, name) {
 			continue
@@ -330,12 +315,7 @@ func finishPlan(ctx context.Context, manager Manager, p Plan, options Options) P
 	return p
 }
 
-// rollbackOf is the plan's honest answer about undoing the change. Dnf
-// records every transaction and can undo it; pacman keeps the archives of
-// the previous versions in its cache, which is a rollback as long as the
-// cache is not cleaned; apt keeps no transaction to undo. The identifier
-// of a dnf transaction exists only once it ran, so the plan names the
-// mechanism and the result names the identifier.
+// rollbackOf is the plan's honest answer about undoing the change.
 func rollbackOf(manager string) Rollback {
 	switch manager {
 	case "dnf":
@@ -350,13 +330,9 @@ func rollbackOf(manager string) Rollback {
 	}
 }
 
-// MetadataRevision digests the repository indexes the plan is read
-// against: the release files of apt, the repomd of every dnf repository
-// in the cache, the databases of the pacman sync copy. The same indexes
-// give the same revision whoever reads them, and a repository that
-// published between the plan and the transaction gives another - which is
-// the one signal that a plan approved against the old indexes is stale
-// even when the versions it names happen to be the same.
+// MetadataRevision digests the repository indexes the plan is read against:
+// the release files of apt, the repomd of every dnf repository in the cache,
+// the databases of the pacman sync copy.
 func MetadataRevision(manager Manager) string {
 	if manager == nil {
 		return ""
@@ -373,9 +349,8 @@ func MetadataRevision(manager Manager) string {
 	return manager.Name() + ":" + digestFiles(files)
 }
 
-// aptIndexFiles lists the release files of the package lists; the
-// Packages files are what they sign, so the release files alone stand for
-// the indexes.
+// aptIndexFiles lists the release files of the package lists; the Packages
+// files are what they sign, so the release files alone stand for the indexes.
 func aptIndexFiles() []string {
 	entries, err := os.ReadDir(aptListsDir)
 	if err != nil {
@@ -403,10 +378,8 @@ func dnfIndexFiles() []string {
 	return files
 }
 
-// pacmanIndexFiles lists the databases the plan reads: the copy on a host
-// that syncs one, the host's own database where the plan comes from there.
-// The digest of the plan envelope is made of these files, so a plan read
-// against the host's own database stops matching once the host syncs.
+// pacmanIndexFiles lists the databases the plan reads: the copy on a host that
+// syncs one, the host's own database where the plan comes from there.
 func pacmanIndexFiles() []string {
 	root := pacmanPlanDatabase()
 	if root == "" {
@@ -416,10 +389,7 @@ func pacmanIndexFiles() []string {
 	return matches
 }
 
-// digestFiles digests the names and the contents of the files, sorted by
-// name. No file at all is written down as such rather than as the digest
-// of nothing: a plan read against no index is not the same plan as one
-// read against an index.
+// digestFiles digests the names and the contents of the files, sorted by name.
 func digestFiles(files []string) string {
 	if len(files) == 0 {
 		return "none"

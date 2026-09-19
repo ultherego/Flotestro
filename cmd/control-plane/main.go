@@ -82,20 +82,16 @@ func main() {
 
 func run() error {
 	// Which of the three things this process is, before anything else: the
-	// serving control plane, the migrator, or the check that answers
-	// whether the schema is the one this binary expects.
+	// serving control plane, the migrator, or the check that answers whether the
+	// schema is the one this binary expects.
 	cmd, args, err := parseCommand(os.Args[1:])
 	if err != nil {
 		return err
 	}
 	cfg := config.ControlPlane{}
-	// The secrets are read before the flags are defined, so that an
-	// installation can mount each of them as a file instead of putting the
-	// value into the environment of the process - where the container
-	// engine's inspection, the shell history and every child process read
-	// it along. For every FLOTESTRO_X the panel also accepts
-	// FLOTESTRO_X_FILE; a mount it will not read stops the start rather
-	// than turning off in silence the feature that needs it.
+	// The secrets are read before the flags are defined, so that an installation
+	// can mount each of them as a file instead of putting the value into the
+	// environment of the process - where the container engine's inspection, the
 	databaseURL, err := config.OptionalSecretValue("FLOTESTRO_DATABASE_URL")
 	if err != nil {
 		return err
@@ -112,10 +108,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	// The DSN of the migrator. A deployment with separate roles hands the
-	// migration job a login that may run DDL and the serving replicas one
-	// that may not; a quick start configures neither and everything runs
-	// on the single FLOTESTRO_DATABASE_URL.
+	// The DSN of the migrator.
 	migrationURL, err := config.OptionalSecretValue(config.EnvMigrationDatabaseURL)
 	if err != nil {
 		return err
@@ -160,10 +153,9 @@ func run() error {
 	sessionGroupRefresh := flag.Duration("session-group-refresh",
 		config.EnvDuration("FLOTESTRO_SESSION_GROUP_REFRESH", 5*time.Minute),
 		"how often the groups of a live panel session are confirmed with the identity provider; 0 turns it off")
-	// The key of the store lies in the state directory next to the CA key:
-	// that is the only place the service is allowed to write to, and the only
-	// one whose permissions are narrow enough to keep cryptographic material
-	// in.
+	// The key of the store lies in the state directory next to the CA key: that
+	// is the only place the service is allowed to write to, and the only one
+	// whose permissions are narrow enough to keep cryptographic material in.
 	secretsKeyFile := flag.String("secrets-key-file",
 		config.Env("FLOTESTRO_SECRETS_KEY_FILE", ""),
 		"the key file of a secret store from before the key provider; adopted as the key \"legacy\" at the first start")
@@ -189,8 +181,7 @@ func run() error {
 		"end a disabled user's sessions at the identity provider through the Keycloak admin API")
 	// The name of the variable has to match the configuration file the
 	// installation gets in the package: a divergence meant that a filled in
-	// FLOTESTRO_IPA_URL enabled nothing while the panel said nothing about
-	// the reason.
+	// FLOTESTRO_IPA_URL enabled nothing while the panel said nothing about the
 	ipaServer := flag.String("ipa-server",
 		config.Env("FLOTESTRO_IPA_URL", config.Env("FLOTESTRO_IPA_SERVER", "")),
 		"the address of the FreeIPA server, e.g. https://ipa.example.org")
@@ -203,8 +194,7 @@ func run() error {
 	ipaRealm := flag.String("ipa-realm",
 		config.Env("FLOTESTRO_IPA_REALM", ""), "the Kerberos realm of the directory")
 	// The built-in monitoring keeps the raw samples for two days and the
-	// quarter-hour rollups for a month. Longer keeps more history on the
-	// charts at the cost of the database; shorter is for a large fleet.
+	// quarter-hour rollups for a month.
 	metricsRetention := monitoring.Options{}
 	flag.DurationVar(&metricsRetention.RawRetention, "metrics-retention-raw",
 		config.EnvDuration("FLOTESTRO_METRICS_RETENTION_RAW", monitoring.DefaultRawRetention),
@@ -227,9 +217,8 @@ func run() error {
 	flag.DurationVar(&metricsRetention.EvaluatorLease, "metrics-evaluator-lease",
 		config.EnvDuration("FLOTESTRO_METRICS_EVALUATOR_LEASE", monitoring.DefaultEvaluatorLease),
 		"how long one control-plane instance holds the right to evaluate the alert rules")
-	// The buffer history of the relays: a week of raw reports and a quarter
-	// of a year of quarter-hour rollups. It is what answers "was this site
-	// cut off last night" after the night is over.
+	// The buffer history of the relays: a week of raw reports and a quarter of a
+	// year of quarter-hour rollups.
 	relayRetention := relays.Options{}
 	flag.DurationVar(&relayRetention.RawRetention, "relay-buffer-retention-raw",
 		config.EnvDuration("FLOTESTRO_RELAY_BUFFER_RETENTION_RAW", relays.DefaultRawRetention),
@@ -238,17 +227,15 @@ func run() error {
 		config.EnvDuration("FLOTESTRO_RELAY_BUFFER_RETENTION_ROLLUP", relays.DefaultRollupRetention),
 		"how long the quarter-hour rollups of the relay buffer reports are kept")
 	// How much of the snapshot in force a feed fetch may lose and still be
-	// activated. An unreadable value keeps the default: a mistyped setting
-	// must not switch the gate off.
+	// activated.
 	vulnShrinkShare := vuln.DefaultShrinkShare
 	if raw := config.Env("FLOTESTRO_VULN_SHRINK_SHARE", ""); raw != "" {
 		if parsed, err := strconv.ParseFloat(raw, 64); err == nil {
 			vulnShrinkShare = parsed
 		}
 	}
-	// The lifecycle orders between the control-plane instances: an order
-	// written for the instance that holds a host's session. One loop per
-	// instance; an installation with a single instance never writes one.
+	// The lifecycle orders between the control-plane instances: an order written
+	// for the instance that holds a host's session.
 	commandOptions := gateway.CommandOptions{}
 	flag.DurationVar(&commandOptions.Poll, "command-poll",
 		config.EnvDuration("FLOTESTRO_COMMAND_POLL", gateway.DefaultCommandPoll),
@@ -257,9 +244,7 @@ func run() error {
 		config.EnvDuration("FLOTESTRO_COMMAND_EXPIRY", gateway.DefaultCommandExpiry),
 		"how long an unclaimed lifecycle order stands before it is settled as expired")
 
-	// The notification queue. One worker per instance; the defaults are
-	// the ones the document names, and an installation with a few
-	// channels has no reason to touch them.
+	// The notification queue.
 	notifyOptions := notify.Options{}
 	flag.DurationVar(&notifyOptions.Poll, "notify-poll",
 		config.EnvDuration("FLOTESTRO_NOTIFY_POLL", notify.DefaultPoll),
@@ -279,15 +264,15 @@ func run() error {
 	flag.DurationVar(&notifyOptions.Lease, "notify-lease",
 		config.EnvDuration("FLOTESTRO_NOTIFY_LEASE", notify.DefaultLease),
 		"how long a claimed notification delivery belongs to one worker")
-	// The trail is evidence and is kept forever unless the installation
-	// decides otherwise; the ended agent sessions are swept after a month
-	// on their own, because nothing reads an older one.
+	// The trail is evidence and is kept forever unless the installation decides
+	// otherwise; the ended agent sessions are swept after a month on their own,
+	// because nothing reads an older one.
 	auditRetention := flag.Duration("audit-retention",
 		config.EnvDuration("FLOTESTRO_AUDIT_RETENTION", 0),
 		"how long the audit trail is kept; zero keeps it forever")
-	// The working record of the fleet, unlike the trail, is always swept:
-	// a finished job, a finished campaign and a delivered event are read
-	// for a while and then only take room. Zero means the built-in default.
+	// The working record of the fleet, unlike the trail, is always swept: a
+	// finished job, a finished campaign and a delivered event are read for a
+	// while and then only take room.
 	jobRetention := flag.Duration("job-retention",
 		config.EnvDuration("FLOTESTRO_JOB_RETENTION", housekeeping.JobRetention),
 		"how long finished jobs are kept")
@@ -297,9 +282,8 @@ func run() error {
 	outboxRetention := flag.Duration("outbox-retention",
 		config.EnvDuration("FLOTESTRO_OUTBOX_RETENTION", housekeeping.OutboxRetention),
 		"how long the delivered events of the durable trail are kept")
-	// The dispatch rate of the document: a queue of thousands after an
-	// outage drains at a pace the fleet and the panel carry, rather than
-	// in one wave. Zero turns the pacing off.
+	// The dispatch rate of the document: a queue of thousands after an outage
+	// drains at a pace the fleet and the panel carry, rather than in one wave.
 	dispatchRate := flag.Int("dispatch-rate",
 		config.EnvInt("FLOTESTRO_DISPATCH_RATE", 100),
 		"how many task envelopes this gateway sends per second; zero sends every leased task at once")
@@ -308,27 +292,24 @@ func run() error {
 	clonePolicyValue := flag.String("clone-policy",
 		config.Env("FLOTESTRO_CLONE_POLICY", ""),
 		"what to do with the same identity alive on two boots: report or quarantine (the default)")
-	// What the gateway does with a session through a relay that names the
-	// host without the certificate it presented: observe and prefer let it
-	// in - prefer marks the host as weakly identified - and enforce refuses
-	// it until the relay is upgraded to one that attests the certificate.
+	// What the gateway does with a session through a relay that names the host
+	// without the certificate it presented: observe and prefer let it in - prefer
+	// marks the host as weakly identified - and enforce refuses it until the
 	relayIdentityValue := flag.String("relay-identity",
 		config.Env("FLOTESTRO_RELAY_IDENTITY", ""),
 		"a relayed session without the host's certificate: observe, prefer (the default) or enforce")
-	// How strictly a campaign order is held to the preview it was placed
-	// from: observe records the difference, prefer refuses an order whose
-	// preview no longer describes what the order resolves, enforce also
-	// refuses an order placed without a preview at all.
+	// How strictly a campaign order is held to the preview it was placed from:
+	// observe records the difference, prefer refuses an order whose preview no
+	// longer describes what the order resolves, enforce also refuses an order
 	campaignPreviewValue := flag.String("campaign-preview",
 		config.Env("FLOTESTRO_CAMPAIGN_PREVIEW", ""),
 		"how a campaign order is held to its preview: observe, prefer (the default) or enforce")
 	stepUpTokens := flag.String("stepup-tokens",
 		config.Env("FLOTESTRO_STEPUP_TOKENS", "allow"),
 		"whether an API token may carry out the operations of the greatest impact: allow or refuse")
-	// The rollout stage of the root helper's signed capability on the
-	// panel's side: observe and prefer dispatch to every host, prefer
-	// reports a host whose agent forwards no capability, enforce holds a
-	// mutating task back from such a host.
+	// The rollout stage of the root helper's signed capability on the panel's
+	// side: observe and prefer dispatch to every host, prefer reports a host
+	// whose agent forwards no capability, enforce holds a mutating task back from
 	helperCapabilityModeValue := flag.String("helper-capability-mode",
 		config.Env("FLOTESTRO_HELPER_CAPABILITY_MODE", "prefer"),
 		"the stage of the helper capability rollout: observe, prefer (the default) or enforce")
@@ -376,17 +357,12 @@ func run() error {
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"the environments where a change has to be approved by a second person")
-	// The deprecated spelling of the migrate command. It stays because the
-	// installer and the continuous integration call it; the process says
-	// in the log what to call instead.
+	// The deprecated spelling of the migrate command.
 	migrateOnly := flag.Bool("migrate-only",
 		config.Env("FLOTESTRO_MIGRATE_ONLY", "") != "",
 		"deprecated: the old spelling of the migrate command")
-	// The shape of the connection pool of this replica and the contract of
-	// the schema. Both are read from the environment first, and a value
-	// that cannot be read or contradicts itself stops the start there: a
-	// replica allowed to open more connections than the server answers is
-	// an outage of the whole fleet at the next restart, not a preference.
+	// The shape of the connection pool of this replica and the contract of the
+	// schema.
 	dbPool, err := config.DatabasePoolFromEnv()
 	if err != nil {
 		return err
@@ -418,9 +394,9 @@ func run() error {
 		return err
 	}
 
-	// The whole numbers of the pool are the int32 the pool driver takes; a
-	// value that would wrap around is refused rather than turned into a
-	// pool of a different size than the one that was asked for.
+	// The whole numbers of the pool are the int32 the pool driver takes; a value
+	// that would wrap around is refused rather than turned into a pool of a
+	// different size than the one that was asked for.
 	if *dbMaxConns < 0 || *dbMaxConns > math.MaxInt32 || *dbMinConns < 0 || *dbMinConns > math.MaxInt32 {
 		return fmt.Errorf("the connection counts are whole numbers between 0 and %d", math.MaxInt32)
 	}
@@ -431,8 +407,7 @@ func run() error {
 	dbPool.HealthCheckPeriod = *dbHealthCheckPeriod
 	dbPool.ConnectTimeout = *dbConnectTimeout
 	// A connect timeout named on the command line counts as named: it wins
-	// against a connect_timeout the DSN carries, exactly as the variable
-	// does.
+	// against a connect_timeout the DSN carries, exactly as the variable does.
 	if flagWasSet("db-connect-timeout") {
 		dbPool.ConnectTimeoutSet = true
 	}
@@ -447,16 +422,16 @@ func run() error {
 			"already running is a migrator that races it", migration.LockWait)
 	}
 
-	// A raw retention shorter than the window the panel offers plus the
-	// longest a sample may take to arrive deletes a reading a relay is
-	// still carrying, by definition and without anybody ordering it.
+	// A raw retention shorter than the window the panel offers plus the longest a
+	// sample may take to arrive deletes a reading a relay is still carrying, by
+	// definition and without anybody ordering it.
 	if err := metricsRetention.Validate(); err != nil {
 		return fmt.Errorf("the monitoring settings would delete samples before they can arrive: %w", err)
 	}
 
-	// An operation without an explicit decision on what a cancel, a retry
-	// or a rollback means is a reason not to start: the panel would draw a
-	// promise the host cannot keep.
+	// An operation without an explicit decision on what a cancel, a retry or a
+	// rollback means is a reason not to start: the panel would draw a promise the
+	// host cannot keep.
 	if err := opspec.ValidateContracts(); err != nil {
 		return err
 	}
@@ -465,9 +440,8 @@ func run() error {
 	if *stepUpTokens != "allow" && *stepUpTokens != "refuse" {
 		return fmt.Errorf("FLOTESTRO_STEPUP_TOKENS must be allow or refuse, not %q", *stepUpTokens)
 	}
-	// A zero would fall back to the built-in window in silence, and a
-	// window past the absolute limit never applies; neither is a setting
-	// anybody meant.
+	// A zero would fall back to the built-in window in silence, and a window past
+	// the absolute limit never applies; neither is a setting anybody meant.
 	if *sessionIdle < time.Minute || *sessionIdle > sessionAbsolute {
 		return fmt.Errorf("FLOTESTRO_SESSION_IDLE must be between 1m and %s, not %s", sessionAbsolute, *sessionIdle)
 	}
@@ -536,10 +510,8 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		// A migrator that carries fewer migrations than the database
-		// already has is an older image pointed at an upgraded database.
-		// It applied nothing, and saying "done" would let a deployment
-		// carry on towards replicas that will refuse to serve.
+		// A migrator that carries fewer migrations than the database already has is
+		// an older image pointed at an upgraded database.
 		if report.Code() == database.CodeSchemaAhead {
 			return schemaRefusal(log, report, "the migration changed nothing")
 		}
@@ -558,10 +530,8 @@ func run() error {
 		return nil
 	}
 
-	// Serving. Bringing the schema forward at the start is the quick
-	// start: one DSN owns the schema and serves the fleet. A deployment
-	// with a migration job of its own turns it off, and then this process
-	// only reads the schema - it never holds the rights to change one.
+	// Serving. Bringing the schema forward at the start is the quick start: one
+	// DSN owns the schema and serves the fleet.
 	if migration.AutoMigrate {
 		log.Info("the schema is brought forward at this start", "migration_mode", "auto",
 			"note", "set FLOTESTRO_AUTO_MIGRATE=false and run the migrate command as its own job "+
@@ -582,11 +552,8 @@ func run() error {
 	}
 	log.Info("the database schema is current", "level", report.Level, "applied", report.Applied)
 
-	// The cryptographic identity of the installation is checked before
-	// anything touches the secret store or the CA. A missing key or a
-	// missing part of the CA next to an existing database stops the
-	// start here, with the state named; nothing is ever created anew in
-	// place of what is missing.
+	// The cryptographic identity of the installation is checked before anything
+	// touches the secret store or the CA.
 	legacyKeyPath := *secretsKeyFile
 	if legacyKeyPath == "" {
 		legacyKeyPath = filepath.Join(cfg.StateDir, "secrets.key")
@@ -607,9 +574,9 @@ func run() error {
 	if err != nil {
 		var fatal *cryptostate.FatalError
 		if errors.As(err, &fatal) {
-			// The code is what the runbook indexes; the reason names the
-			// file or row; the hint is the one line that stops somebody
-			// from "fixing" it by generating material.
+			// The code is what the runbook indexes; the reason names the file or row;
+			// the hint is the one line that stops somebody from "fixing" it by
+			// generating material.
 			log.Error("the control plane refuses to start: the cryptographic state of the installation is not usable",
 				"code", fatal.Code, "reason", fatal.Reason, "detail", errorText(fatal.Err),
 				"hint", cryptostate.RunbookHint)
@@ -620,9 +587,9 @@ func run() error {
 	trust := cryptoRuntime.Trust()
 	ca := trust.Active()
 	ca.AgentTTL = *agentCertTTL
-	// The names of the panel are reserved: a relay certificate carrying one
-	// of them would let the relay stand in for the panel towards the
-	// agents of its site.
+	// The names of the panel are reserved: a relay certificate carrying one of
+	// them would let the relay stand in for the panel towards the agents of its
+	// site.
 	ca.ReservedNames = splitList(*advertised)
 	log.Info("the CA is ready", "subject", ca.Certificate.Subject.CommonName,
 		"not_after", ca.Certificate.NotAfter.Format(time.RFC3339),
@@ -630,8 +597,7 @@ func run() error {
 		"trusted_cas", len(trust.Authorities()))
 
 	// Certificates from before the introduction of the CA exchange carry no
-	// recorded issuer. We fill it in only when there is exactly one CA: with
-	// more of them the issuer cannot be established other than by guessing.
+	// recorded issuer.
 	if len(trust.Authorities()) == 1 {
 		filledIn, err := hosts.NewStore(pool).AdoptCertificateIssuer(ctx,
 			ca.Certificate.Subject.CommonName, ca.Certificate.SerialNumber.String())
@@ -644,9 +610,8 @@ func run() error {
 	}
 
 	// A panel available under localhost alone will serve no fleet: the
-	// certificate of the gateway will not match the address the agent
-	// connects to the panel under. Silence here costs an installation where
-	// everything looks started and not a single host registers.
+	// certificate of the gateway will not match the address the agent connects to
+	// the panel under.
 	if *advertised == "127.0.0.1" {
 		log.Warn("the panel presents itself to the agents as 127.0.0.1; " +
 			"set FLOTESTRO_ADVERTISE to an address visible to the hosts of the fleet")
@@ -661,13 +626,9 @@ func run() error {
 		return err
 	}
 
-	// The trust set changes when the CA is exchanged, so the verification of
-	// a client reads it at every handshake instead of holding a copy from the
+	// The trust set changes when the CA is exchanged, so the verification of a
+	// client reads it at every handshake instead of holding a copy from the
 	// moment of the start.
-	// The verifier takes the place of the built-in check: it verifies the
-	// chain the same way, and it also names the host behind an expired
-	// certificate on the host's row, which the built-in check cannot do.
-	// It is built once the stores exist and read at every handshake.
 	var clientVerifier *gateway.ClientVerifier
 	clientTrust := func(*tls.ClientHelloInfo) (*tls.Config, error) {
 		config := &tls.Config{
@@ -675,10 +636,8 @@ func run() error {
 			ClientAuth:   tls.RequireAndVerifyClientCert,
 			ClientCAs:    trust.Pool(),
 			MinVersion:   tls.VersionTLS13,
-			// The configuration returned here replaces the one of the server
-			// as a whole, so it has to declare HTTP/2 itself. Without that
-			// the negotiation ends at HTTP/1.1 and a bidirectional stream has
-			// no way of working.
+			// The configuration returned here replaces the one of the server as a
+			// whole, so it has to declare HTTP/2 itself.
 			NextProtos: []string{"h2"},
 		}
 		if clientVerifier != nil {
@@ -707,8 +666,8 @@ func run() error {
 	warnAboutBootstrapToken(ctx, authzStore, log)
 
 	// The identity provider is optional: without it only the API tokens work,
-	// which is enough for automation but does not meet the requirement of a
-	// login with MFA.
+	// which is enough for automation but does not meet the requirement of a login
+	// with MFA.
 	var identityProvider *oidc.Provider
 	if *issuerURL != "" {
 		identityProvider, err = oidc.Discover(ctx, oidc.Config{
@@ -731,11 +690,8 @@ func run() error {
 	// the identity view rather than a panel that does not work.
 	var directory *freeipa.Client
 	if *ipaServer != "" && *ipaPrincipal != "" {
-		// The keytab is a credential of the directory: readable by anyone on
-		// the machine, it hands the connector's identity to anyone. It stays
-		// a path rather than a value, so what is checked is the file the
-		// panel is about to hand to the Kerberos library - by the same rule
-		// every other secret file is read under.
+		// The keytab is a credential of the directory: readable by anyone on the
+		// machine, it hands the connector's identity to anyone.
 		if err := config.CheckSecretFile(*ipaKeytab); err != nil {
 			return fmt.Errorf("the directory connector: %w", err)
 		}
@@ -770,9 +726,7 @@ func run() error {
 	}
 
 	// A membership taken away in Keycloak or FreeIPA behind the panel's back
-	// reaches a live session through this loop rather than at the next
-	// login. Without a provider there is nobody to ask, and the token-only
-	// deployment stays as it is.
+	// reaches a live session through this loop rather than at the next login.
 	if identityProvider != nil && *sessionGroupRefresh > 0 {
 		go identity.NewSessionGroupRefresher(authzStore, identityProvider, recorder,
 			log, *sessionGroupRefresh).Run(ctx)
@@ -781,8 +735,6 @@ func run() error {
 	}
 
 	// The issuer stands between the services and the certificate authority.
-	// Today the CA key lies in a file of the panel; moving it into an HSM is
-	// to change this one line alone rather than the protocol of the agent.
 	certIssuer := issuer.FromTrust(trust)
 
 	agentService := gateway.NewAgentService(pool, hostStore, inventoryStore, jobStore, recorder,
@@ -810,10 +762,8 @@ func run() error {
 		"campaign_preview", string(campaignPreview))
 
 	// The key that signs the root helper's capabilities lies in the state
-	// directory next to the CA key and the secret store key, and nowhere
-	// else: a copy of the database must not be enough to mint an
-	// authorization for root. The hosts learn the public key at every
-	// session, at enrollment and at renewal.
+	// directory next to the CA key and the secret store key, and nowhere else: a
+	// copy of the database must not be enough to mint an authorization for root.
 	helperCapabilityMode, err := helpercap.ParseMode(*helperCapabilityModeValue)
 	if err != nil {
 		return fmt.Errorf("FLOTESTRO_HELPER_CAPABILITY_MODE: %w", err)
@@ -853,18 +803,13 @@ func run() error {
 			}
 		}
 	}()
-	// A host switching between gateways leaves a session on the previous one
-	// that still looks alive. Without this listener both gateways would
-	// consider themselves the right one and the same job would go out twice.
+	// A host switching between gateways leaves a session on the previous one that
+	// still looks alive.
 	go gateway.WatchEpochs(ctx, pool, registry, cfg.GatewayID, log)
 
-	// The relay has a service of its own on the same listener: its certificate
-	// is a certificate of the fleet, only of a different kind, so it goes
-	// through the same mTLS handshake. A separate RPC makes sure the
-	// operations of a host stay out of its reach.
-	// Enrollment is one service for both paths: the direct one and the one
-	// through a relay. A second instance would mean two sets of the same rules
-	// that drift apart silently over time.
+	// The relay has a service of its own on the same listener: its certificate is
+	// a certificate of the fleet, only of a different kind, so it goes through
+	// the same mTLS handshake.
 	enrollmentService := gateway.NewEnrollmentService(certIssuer, hostStore, relayStore,
 		tokenStore, recorder, log)
 	enrollmentService.SetHelperSigner(helperSigner)
@@ -872,9 +817,7 @@ func run() error {
 		enrollmentService, log)
 
 	gatewayMux := http.NewServeMux()
-	// Every message from a host has a ceiling. An inventory of a large host
-	// fits in a few megabytes; anything beyond that is not an inventory,
-	// whatever the certificate says.
+	// Every message from a host has a ceiling.
 	gatewayMux.Handle(agentv1connect.NewAgentServiceHandler(agentService,
 		connect.WithReadMaxBytes(8<<20)))
 	gatewayMux.Handle(agentv1connect.NewRelayServiceHandler(relayService,
@@ -885,9 +828,9 @@ func run() error {
 		TLSConfig: &tls.Config{
 			Certificates: []tls.Certificate{serverCert},
 			ClientAuth:   tls.RequireAndVerifyClientCert,
-			// The trust set is read at every handshake: after an exchange of
-			// the CA the new agent certificates have to be accepted without a
-			// restart of the panel.
+			// The trust set is read at every handshake: after an exchange of the CA the
+			// new agent certificates have to be accepted without a restart of the
+			// panel.
 			GetConfigForClient: clientTrust,
 			MinVersion:         tls.VersionTLS13,
 			NextProtos:         []string{"h2"},
@@ -918,34 +861,30 @@ func run() error {
 		MaxHeaderBytes:    16 << 10,
 	}
 
-	// The event bus wakes the open screens when the state of an operation
-	// changes and when a running operation reports progress. Without it the
-	// panel works as before - the progress is visible after refreshing the
-	// page.
+	// The event bus wakes the open screens when the state of an operation changes
+	// and when a running operation reports progress.
 	eventBus := events.NewBus(pool)
 	go eventBus.Run(ctx, log)
 	agentService.SetEvents(eventBus)
 	// The cancel relay: sends the open cancel requests to the hosts this
 	// instance holds and settles the ones nobody answered in time.
 	go agentService.RunCancelRelay(ctx)
-	// The lifecycle orders of the other instances: a decommission or a
-	// quarantine that landed on an instance which does not hold the host's
-	// session is carried out here, by the instance that does.
+	// The lifecycle orders of the other instances: a decommission or a quarantine
+	// that landed on an instance which does not hold the host's session is
+	// carried out here, by the instance that does.
 	commandOptions.Registry = registry
 	commandOptions.Decommissioner = gateway.NewDecommissioner(pool, hostStore, jobStore, recorder, registry, log)
 	commandOptions.Audit = recorder
 	commandOptions.Events = eventBus
 	go gateway.NewCommands(pool, log, commandOptions).RunCommandLoop(ctx)
 
-	// The publisher of the durable trail: the triggers write the events,
-	// this hands them on at least once and marks them published. The
-	// campaign notifications wake it, so a screen sees a state change with
-	// the delay of one round trip rather than of the polling interval.
+	// The publisher of the durable trail: the triggers write the events, this
+	// hands them on at least once and marks them published.
 	trailPublisher := outbox.NewPublisher(pool, outbox.NotifySink{}, log, 2*time.Second)
 	go trailPublisher.Run(ctx)
-	// The webhook is a consumer of the trail with a cursor of its own: it
-	// moves only after the receiver took the batch, so a receiver that is
-	// down loses nothing and shows as a growing lag.
+	// The webhook is a consumer of the trail with a cursor of its own: it moves
+	// only after the receiver took the batch, so a receiver that is down loses
+	// nothing and shows as a growing lag.
 	var webhook *outbox.Consumer
 	if *webhookURL != "" {
 		if *webhookSecret == "" {
@@ -989,11 +928,8 @@ func run() error {
 			StepUpACR:              *stepUpACR,
 			StepUpRefuseTokens:     *stepUpTokens == "refuse",
 			CampaignPreview:        campaignPreview,
-			// The metric of the validity of the CA is to show the signing CA,
-			// after an exchange as well, so it reads the whole trust set.
-			// The relay buffers come from the heartbeats the registry keeps in
-			// memory; without the source the collector says nothing about
-			// them rather than reporting empty buffers.
+			// The metric of the validity of the CA is to show the signing CA, after an
+			// exchange as well, so it reads the whole trust set.
 			Metrics: metrics.NewCollector(pool, registry, trust, cfg.GatewayID).
 				WithAuthorities(trust.Authorities).WithRelays(relayStore),
 			Trust: trust,
@@ -1009,18 +945,17 @@ func run() error {
 	})
 	panelServer.SetRelays(relayStore)
 	// The buffer history of the relays: the gateway writes a point at every
-	// heartbeat, this loop rolls them up, applies the retention and
-	// evaluates the built-in rules over the newest reading.
+	// heartbeat, this loop rolls them up, applies the retention and evaluates the
+	// built-in rules over the newest reading.
 	relayStore.SetRetention(relayRetention)
 	go relayStore.Run(ctx, log)
 	log.Info("the relay buffer history is running",
 		"raw_retention", relayRetention.RawRetention.String(),
 		"rollup_retention", relayRetention.RollupRetention.String())
 
-	// The built-in monitoring: the agents send their resource samples down
-	// the same stream as the heartbeat, the store keeps them, rolls them up
-	// and evaluates the alert rules over them. Nothing outside the panel is
-	// asked for a chart or an alert.
+	// The built-in monitoring: the agents send their resource samples down the
+	// same stream as the heartbeat, the store keeps them, rolls them up and
+	// evaluates the alert rules over them.
 	monitoringStore := monitoring.NewStore(pool, log, metricsRetention)
 	agentService.SetMetrics(monitoringStore)
 	panelServer.SetMonitoring(monitoringStore)
@@ -1048,12 +983,7 @@ func run() error {
 	packageStore := vuln.NewPackageStore(pool)
 	panelServer.SetVulnerabilities(vulnStore, packageStore, vulnerabilities.MaxSnapshotAge)
 
-	// The secret store. The key encryption keys lie in files outside the
-	// database, behind the provider the startup guard checked: a copy of
-	// the database without them is not enough to read anything. The rows
-	// still on another key - the legacy one after an upgrade, the
-	// previous one after a rotation - are moved onto the active key in
-	// the background.
+	// The secret store.
 	secretStore := secrets.NewStore(pool, keyProvider)
 	cryptoRuntime.SetSecrets(secretStore)
 	go cryptoRuntime.Maintain(ctx)
@@ -1061,19 +991,13 @@ func run() error {
 	agentService.SetSecrets(secretStore)
 	agentService.SetSecretLeases(secretStore)
 
-	// The notification channels: a second consumer of the durable trail,
-	// with a cursor of its own beside the webhook from the environment, so
-	// the legacy webhook keeps working as an implicit channel and neither
-	// holds the other back. The router reads the mail passwords from the
-	// secret store at the moment of sending; the links in the messages
-	// point at the public address of the panel.
+	// The notification channels: a second consumer of the durable trail, with a
+	// cursor of its own beside the webhook from the environment, so the legacy
+	// webhook keeps working as an implicit channel and neither holds the other
 	notificationStore := notify.NewStore(pool, secretStore)
-	// The credentials of the channels written by the previous release are
-	// moved into the secret store once, here: only this process holds the
-	// key that seals a version, so the migration could add the columns but
-	// not fill them. A row already moved carries no plaintext, and a
-	// failure stops the start - a panel that went on sending with a
-	// credential in a column is what this release ends.
+	// The credentials of the channels written by the previous release are moved
+	// into the secret store once, here: only this process holds the key that
+	// seals a version, so the migration could add the columns but not fill them.
 	if moved, err := notificationStore.MigrateSecrets(ctx); err != nil {
 		return fmt.Errorf("moving the notification channel credentials into the secret store: %w", err)
 	} else if moved > 0 {
@@ -1083,11 +1007,9 @@ func run() error {
 	panelServer.SetNotifications(notificationStore, notifier)
 	notifications := outbox.NewConsumer(pool, "notifications", notifier, log, 2*time.Second)
 	go notifications.Run(ctx)
-	// The queue is what actually sends: the consumer writes a row per
-	// channel in the transaction of the event, and the worker of every
-	// instance takes the rows that are due. A recipient that is down
-	// delays a row rather than consuming the event, and a restart of the
-	// panel resumes from the rows.
+	// The queue is what actually sends: the consumer writes a row per channel in
+	// the transaction of the event, and the worker of every instance takes the
+	// rows that are due.
 	notificationWorker := notify.NewWorker(notificationStore, notifier, notifyOptions, log)
 	panelServer.SetNotificationQueue(notificationWorker)
 	go notificationWorker.Run(ctx)
@@ -1103,9 +1025,9 @@ func run() error {
 			}
 		}
 	}()
-	// The settings screen shows what this process resolved, with the
-	// secrets reduced to "set" or "not set": the values themselves stay in
-	// the environment file.
+	// The settings screen shows what this process resolved, with the secrets
+	// reduced to "set" or "not set": the values themselves stay in the
+	// environment file.
 	panelServer.SetSettings(config.Effective{
 		Version: buildinfo.Version, Commit: buildinfo.ShortCommit(), BuildDate: buildinfo.Date,
 		Protocol:             buildinfo.AgentProtocol,
@@ -1177,11 +1099,9 @@ func run() error {
 
 	go markStaleHosts(ctx, pool, cfg.StaleAfter, log)
 
-	// The retention sweep: the ended sessions of the agents go after a
-	// month, the trail after the configured retention if there is one, and
-	// the expired browser sessions with their abandoned logins alongside.
-	// A role binding past its validity is noted on the trail by the same
-	// sweep; it stopped granting anything the moment it expired.
+	// The retention sweep: the ended sessions of the agents go after a month, the
+	// trail after the configured retention if there is one, and the expired
+	// browser sessions with their abandoned logins alongside.
 	sweeper := housekeeping.New(pool, log, housekeeping.Options{
 		Audit:     *auditRetention,
 		Jobs:      *jobRetention,
@@ -1190,12 +1110,9 @@ func run() error {
 	}).
 		WithAudit(recorder).
 		Also("web sessions", authzStore.PurgeExpired).
-		// A host whose owner stopped renewing - an instance that died
-		// without releasing it - is forgotten by its row on the same
-		// clock; the token stays, so the dead instance's writes stay refused.
-		// A preview nobody ordered from is of no use to anybody once it has
-		// been expired long enough that the refusal "already used" no
-		// longer helps: a day after it stopped standing.
+		// A host whose owner stopped renewing - an instance that died without
+		// releasing it - is forgotten by its row on the same clock; the token stays,
+		// so the dead instance's writes stay refused.
 		Also("campaign previews", func(ctx context.Context) error {
 			swept, err := campaignStore.SweepPreviews(ctx, time.Now().Add(-24*time.Hour))
 			if swept > 0 {
@@ -1265,16 +1182,13 @@ func run() error {
 	dispatcher.SetBudgets(budgetStore)
 	go dispatcher.Run(ctx)
 
-	// The budgets answer a question other than the limit of a campaign: not
-	// how many hosts are to move in this change, but how many changes the
-	// fleet and the site will carry.
+	// The budgets answer a question other than the limit of a campaign: not how
+	// many hosts are to move in this change, but how many changes the fleet and
+	// the site will carry.
 	go budgetStore.Run(ctx)
 
-	// The orchestrator carries the campaigns through the canary and the
-	// waves, creating the jobs the scheduler delivers. Every instance of
-	// the control plane runs one, and each campaign is driven by one of
-	// them at a time under a runner lease in the database; the identifier
-	// logged here is the one the campaign rows name as their runner.
+	// The orchestrator carries the campaigns through the canary and the waves,
+	// creating the jobs the scheduler delivers.
 	orchestrator := campaigns.NewOrchestrator(campaignStore, jobStore, hostStore, recorder,
 		budgetStore, log, 5*time.Second)
 	orchestrator.Authorizer = authzStore
@@ -1282,30 +1196,27 @@ func run() error {
 		"runner_id", orchestrator.Runner(), "lease", campaigns.RunnerLeaseTerm.String())
 	go orchestrator.Run(ctx)
 
-	// The scheduled campaigns: the loop places the stored orders at their
-	// moments through the same door a request takes, under the rights of
-	// whoever wrote the schedule; each campaign then waits for its
-	// approval like any other.
+	// The scheduled campaigns: the loop places the stored orders at their moments
+	// through the same door a request takes, under the rights of whoever wrote
+	// the schedule; each campaign then waits for its approval like any other.
 	go campaigns.NewScheduleLoop(campaignStore, panelServer, log, 5*time.Second).Run(ctx)
 
-	// The runner carries the remediation plans out step by step: every step is
-	// an ordinary job of a module, and the next one starts only once the
-	// previous one has succeeded.
+	// The runner carries the remediation plans out step by step: every step is an
+	// ordinary job of a module, and the next one starts only once the previous
+	// one has succeeded.
 	go remediation.NewRunner(remediationStore, jobStore, hostStore, recorder,
 		log, 5*time.Second).Run(ctx)
 
 	// The desired-state policies: judged from the inventory at their own
-	// intervals, never by reading a host; a drift becomes a remediation
-	// campaign where the policy's mode asks for one.
+	// intervals, never by reading a host; a drift becomes a remediation campaign
+	// where the policy's mode asks for one.
 	policyStore := policy.NewStore(pool)
 	go policy.NewLoop(policyStore, policy.NewEvaluator(policyStore, hostStore, inventoryStore,
 		selector.NewStore(pool), packageStore, managedfiles.NewStore(pool), campaignStore,
 		recorder, authzStore, log), log, time.Minute).Run(ctx)
 
 	// The vulnerability correlator: the trackers of the distribution vendors
-	// settle whether the installed version is vulnerable. The panel guesses
-	// nothing - a host without a feed or without a package list gets an
-	// undetermined state with a reason rather than zero findings.
+	// settle whether the installed version is vulnerable.
 	if vulnerabilities.Enabled {
 		var sources []vuln.Source
 		if vulnerabilities.DebianURL != "" {
@@ -1333,16 +1244,14 @@ func run() error {
 					MaxSnapshotAge: vulnerabilities.MaxSnapshotAge,
 					ShrinkShare:    vulnShrinkShare,
 				}, log)
-			// A host that has just sent its package list or the findings of
-			// its repositories gets a recomputation at once. Otherwise it
-			// would show up for half an hour as a host the panel knows
-			// nothing about - although it has just answered it.
+			// A host that has just sent its package list or the findings of its
+			// repositories gets a recomputation at once.
 			agentService.SetAssessmentRefresh(vulnScheduler.Refresh)
 			go vulnScheduler.Run(ctx)
 		}
-		// The enrichment runs in a separate, rarer cycle and by a separate
-		// path: the descriptions from NVD do not change a single answer about
-		// hosts, so their absence must not hold the assessment back.
+		// The enrichment runs in a separate, rarer cycle and by a separate path: the
+		// descriptions from NVD do not change a single answer about hosts, so their
+		// absence must not hold the assessment back.
 		if vulnerabilities.NVDURL != "" {
 			log.Info("the enrichment of the vulnerability descriptions has started",
 				"source", nvdsource.Provider, "interval", vulnerabilities.NVDInterval,
@@ -1375,9 +1284,7 @@ func serveTLS(server *http.Server, name string, log *slog.Logger, errCh chan<- e
 	}
 }
 
-// markStaleHosts marks the hosts that have stopped speaking. A session can
-// disappear without the stream being closed, so the online state must not rest
-// on it alone.
+// markStaleHosts marks the hosts that have stopped speaking.
 func markStaleHosts(ctx context.Context, pool *pgxpool.Pool, staleAfter time.Duration, log *slog.Logger) {
 	ticker := time.NewTicker(staleCheckInterval)
 	defer ticker.Stop()
@@ -1398,9 +1305,7 @@ func markStaleHosts(ctx context.Context, pool *pgxpool.Pool, staleAfter time.Dur
 	}
 }
 
-// bootstrapAdmin creates the first identity when the system is empty. Without
-// it no operation can be carried out, because every endpoint requires
-// permissions. The token is shown once, in the log, and cannot be read later.
+// bootstrapAdmin creates the first identity when the system is empty.
 func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, log *slog.Logger) error {
 	count, err := store.CountPrincipals(ctx)
 	if err != nil {
@@ -1436,9 +1341,7 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 	}
 
 	// The token also lands in a file in the state directory so that it can be
-	// read after the log has been rotated. The file should be deleted once the
-	// proper identities have been created - as long as it exists it is a
-	// secret lying on disk.
+	// read after the log has been rotated.
 	tokenPath := filepath.Join(stateDir, "bootstrap-token")
 	if err := os.WriteFile(tokenPath, []byte(token.Value+"\n"), 0o600); err != nil {
 		log.Error("the bootstrap token was not written", "path", tokenPath, "err", err)
@@ -1453,9 +1356,7 @@ func bootstrapAdmin(ctx context.Context, store *authz.Store, stateDir string, lo
 const bootstrapTokenTTL = 30 * 24 * time.Hour
 
 // warnAboutBootstrapToken says at every start that the bootstrap token is
-// still usable although the installation has other administrators. The
-// token was meant for the first hour; once there is somebody to revoke it,
-// it should be revoked.
+// still usable although the installation has other administrators.
 func warnAboutBootstrapToken(ctx context.Context, store *authz.Store, log *slog.Logger) {
 	live, others, err := store.BootstrapTokenState(ctx)
 	if err != nil {
@@ -1476,11 +1377,8 @@ func errorText(err error) string {
 	return err.Error()
 }
 
-// schemaRefusal reports a schema that is not the one this binary expects
-// and turns it into the exit of the process. The code is what the runbook
-// indexes and what a readiness gate matches on; the hint is the one line
-// that stops somebody from "fixing" it by writing rows into
-// schema_migrations by hand.
+// schemaRefusal reports a schema that is not the one this binary expects and
+// turns it into the exit of the process.
 func schemaRefusal(log *slog.Logger, report database.SchemaReport, headline string) error {
 	hint := "run the migrate command as its own job, with the credentials of the migrator, " +
 		"before the serving replicas start"
@@ -1532,9 +1430,8 @@ func defaultGatewayID() string {
 	return name
 }
 
-// subjectPermissions reads the permissions of a task's creator for the
-// grants of a helper capability. A subject the store does not know grants
-// nothing beyond the action's own permission.
+// subjectPermissions reads the permissions of a task's creator for the grants
+// of a helper capability.
 type subjectPermissions struct {
 	store *authz.Store
 }

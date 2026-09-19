@@ -16,26 +16,19 @@ const (
 	SysClassBlock = "/sys/class/block"
 )
 
-// Refusal codes of a destructive device operation. Each is a typed answer
-// the panel and the operator can act on; the message that goes with it
-// explains the particular device.
+// Refusal codes of a destructive device operation.
 const (
 	// CodeStableIdentityRequired: the plan names the device by nothing that
-	// survives a reboot. Formatting by path alone is formatting whatever
-	// got that path today.
+	// survives a reboot.
 	CodeStableIdentityRequired = "stable_identity_required"
 	// CodeDiskChanged: the device under the path is not the one the plan
 	// was computed for.
 	CodeDiskChanged = "disk_changed"
-	// CodeDiskInUse: the device carries the root filesystem, mounted
-	// partitions or is a member of a volume group, an array or an
-	// encrypted container.
+	// CodeDiskInUse: the device carries the root filesystem, mounted partitions
+	// or is a member of a volume group, an array or an encrypted container.
 	CodeDiskInUse = "disk_in_use"
 	// CodeFilesystemErrorsRemain: a repair ran and the filesystem still has
-	// errors. fsck answers in a bit field and exits non-zero for both a
-	// successful repair and a failed one; this code is the difference, and
-	// it is settled by a second, read-only pass rather than by the code of
-	// the pass that wrote.
+	// errors.
 	CodeFilesystemErrorsRemain = "filesystem_errors_remain"
 )
 
@@ -48,25 +41,15 @@ type Refusal struct {
 
 func (r *Refusal) Error() string { return r.Reason }
 
-// ValidateDestructiveTarget decides whether a destructive operation may
-// touch the observed device.
-//
-// The plan is what the operator consented to: the by-id link, the WWN and
-// the serial of the device they looked at. The observed device is what the
-// host has under the path now, read again right before the change. The
-// size is deliberately not compared: two disks of the same size are the
-// most ordinary thing in a fleet, and a size that matched would prove
-// nothing. The order of the checks is the order of the questions: is the
-// plan bound to anything stable at all, is it still the same device, and
-// is anything standing on it.
+// ValidateDestructiveTarget decides whether a destructive operation may touch
+// the observed device.
 func ValidateDestructiveTarget(plan DevicePlan, observed Device) error {
 	if plan.ByID == "" {
 		return &Refusal{Code: CodeStableIdentityRequired,
 			Reason: "the plan names " + plan.Device + " by path only; the device has no /dev/disk/by-id link to bind to"}
 	}
-	// A physical device is known by its WWN or serial; a device-mapper or
-	// RAID device has neither and is known by the UUID its by-id link
-	// carries. A by-id link of any other kind is a name, not an identity.
+	// A physical device is known by its WWN or serial; a device-mapper or RAID
+	// device has neither and is known by the UUID its by-id link carries.
 	if plan.WWN == "" && plan.Serial == "" && !volumeIdentity(plan.ByID) {
 		return &Refusal{Code: CodeStableIdentityRequired,
 			Reason: "the plan names " + plan.Device + " without a WWN or a serial; the link " +
@@ -126,11 +109,8 @@ func volumeIdentity(byID string) bool {
 	return false
 }
 
-// byIDRanks orders the by-id links of one device from the most to the
-// least telling. A WWN is burnt into the drive; a serial is the next best;
-// a bus-specific name still carries the serial; the UUID of a volume is
-// the identity of a device-mapper or RAID device. dm-name links are not
-// ranked at all: a name can be given to another volume tomorrow.
+// byIDRanks orders the by-id links of one device from the most to the least
+// telling.
 var byIDRanks = []string{
 	"wwn-", "nvme-eui.", "scsi-3", "scsi-S", "scsi-", "ata-", "nvme-", "virtio-", "usb-",
 	"mmc-", "dm-uuid-", "md-uuid-", "lvm-pv-uuid-",
@@ -145,10 +125,8 @@ func byIDRank(name string) int {
 	return -1
 }
 
-// ChooseByID picks the by-id path that identifies the device best out of
-// the links pointing at it. The choice is deterministic: the same device
-// gets the same link on every read, otherwise a plan would go stale on
-// nothing.
+// ChooseByID picks the by-id path that identifies the device best out of the
+// links pointing at it.
 func ChooseByID(links []string) string {
 	best, bestRank := "", -1
 	for _, link := range links {
@@ -202,8 +180,7 @@ func ReadHolders(sysClassBlock, name string) []string {
 }
 
 // ReadIdentity completes the devices with what the host publishes outside
-// lsblk: the by-id links and the holders. It reads the real directories;
-// FillIdentity does the pure part.
+// lsblk: the by-id links and the holders.
 func ReadIdentity(devices []Device) {
 	links, err := ReadByIDLinks(ByIDDirectory)
 	holders := map[string][]string{}
@@ -221,10 +198,6 @@ func ReadIdentity(devices []Device) {
 
 // FillIdentity assigns the by-id links and the holders and completes the
 // topology flags that depend on them.
-//
-// A device without a link gets a reason: on a virtual machine the disk
-// has no WWN and at times no serial either, and the operator is to read
-// why the panel will not format it rather than see an empty cell.
 func FillIdentity(devices []Device, links map[string][]string, holders map[string][]string,
 	unavailableReason string) {
 	for i := range devices {
@@ -253,9 +226,9 @@ func kernelName(device Device) string {
 	return device.Name
 }
 
-// CompleteTopology fills the fields derived from the whole list: the
-// children of every device and whether the device or anything under it
-// carries root, is mounted or is held by another device.
+// CompleteTopology fills the fields derived from the whole list: the children
+// of every device and whether the device or anything under it carries root, is
+// mounted or is held by another device.
 func CompleteTopology(devices []Device) {
 	children := map[string][]string{}
 	for _, device := range devices {
@@ -307,9 +280,7 @@ func CompleteTopology(devices []Device) {
 	}
 }
 
-// FstabRevision digests the content of /etc/fstab. The revision goes into
-// the mount plan: an fstab edited after the plan is a different base than
-// the one the operator approved.
+// FstabRevision digests the content of /etc/fstab.
 func FstabRevision(content []byte) string {
 	sum := sha256.Sum256(content)
 	return hex.EncodeToString(sum[:])

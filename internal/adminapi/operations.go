@@ -38,19 +38,14 @@ type createOperationRequest struct {
 	MaxOutputBytes int    `json:"max_output_bytes,omitempty"`
 	TTLSeconds     int    `json:"ttl_seconds,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
-	// PinBootID binds the job to the current boot of the host. After a
-	// reboot the job is rejected instead of running against a different
-	// state.
+	// PinBootID binds the job to the current boot of the host. After a reboot the
+	// job is rejected instead of running against a different state.
 	PinBootID bool `json:"pin_boot_id,omitempty"`
-	// Class is how urgently the job asks the budgets for capacity. An
-	// operator may say a restart is an incident response; left out, the
-	// scheduler derives the class from the operation and its author.
+	// Class is how urgently the job asks the budgets for capacity.
 	Class string `json:"class,omitempty"`
 }
 
-// requestedClass reads the budget class of an order. Only the classes an
-// operator can claim are accepted: maintenance is what a campaign is, and
-// background is the panel's own work - neither is a thing to ask for by hand.
+// requestedClass reads the budget class of an order.
 func requestedClass(value string) (budgets.Class, bool) {
 	class := budgets.Class(strings.TrimSpace(value))
 	switch class {
@@ -103,8 +98,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Beyond the right to order anything at all, the permission of this
-	// particular operation is needed: restarting a service is a different
-	// level of trust than reading a log.
+	// particular operation is needed: restarting a service is a different level
+	// of trust than reading a log.
 	if _, ok := s.authorize(w, r, authz.Permission(action.Permission()), scope, "host", hostID); !ok {
 		return
 	}
@@ -116,17 +111,15 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A refusal on grounds other than shape - a release whose protocol
-	// this panel does not speak - carries a code of its own, so the
-	// interface can tell it from a typo in the order.
+	// A refusal on grounds other than shape - a release whose protocol this panel
+	// does not speak - carries a code of its own, so the interface can tell it
+	// from a typo in the order.
 	if err := opspec.Validate(action, payload); err != nil {
 		problem(w, http.StatusBadRequest, opspec.RefusalCode(err), err.Error())
 		return
 	}
-	// The content of the order can ask for more than the operation does: an
-	// entry for root, a write allowed to skip its validator. Each such
-	// permission is checked in the scope of the host, like the operation's
-	// own, and the refusal names what the payload asked for.
+	// The content of the order can ask for more than the operation does: an entry
+	// for root, a write allowed to skip its validator.
 	if _, ok := s.authorizePayload(w, r, action, payload, scope, "host", hostID); !ok {
 		return
 	}
@@ -151,9 +144,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only an active host takes an operation. The other states are different
-	// kinds of "no", and the code names which: a quarantine is lifted, a
-	// recovery ends when the new key connects, a retirement does not end.
+	// Only an active host takes an operation.
 	if !hosts.Active(host.LifecycleState) {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -172,20 +163,15 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 			"the host lacks capability "+capability)
 		return
 	}
-	// A read narrowed to one boot is refused where the agent does not
-	// apply the filter: an older agent ignores the field and answers with
-	// every boot, which would look like the boot that was asked for. The
-	// host has to say it has the feature; silence is not enough here,
-	// because silence is exactly what an old agent says.
+	// A read narrowed to one boot is refused where the agent does not apply the
+	// filter: an older agent ignores the field and answers with every boot, which
+	// would look like the boot that was asked for.
 	if payload.Journal != nil && payload.Journal.BootID != "" && !bootFilterSupported(host) {
 		problem(w, http.StatusConflict, "boot_filter_unsupported",
 			"the agent of this host does not filter the journal by boot; read without the boot filter or upgrade the agent")
 		return
 	}
 	// A managed timer is written only by an agent that says it writes one.
-	// An older agent ignores the kind and would write a cron entry under the
-	// name of a timer; silence is exactly what such an agent says, so silence
-	// refuses the order.
 	if payload.Schedule != nil && payload.Schedule.Kind == opspec.ScheduleKindTimer &&
 		!host.Capabilities.Feature(hosts.CapSchedules, "managed_timers") {
 		problem(w, http.StatusConflict, "managed_timers_unsupported",
@@ -193,12 +179,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A highest-risk operation requires fresh authentication: one that can
-	// cut off access to the host or wipe data must not go from an hour-old
-	// session.
-	// The risk of one order can be higher than the registry's level for the
-	// operation: a group list that puts an account into sudo is a critical
-	// change of access, and it asks for the same fresh authentication.
+	// A highest-risk operation requires fresh authentication: one that can cut
+	// off access to the host or wipe data must not go from an hour-old session.
 	var stepUpProof map[string]any
 	if opspec.PayloadRequiresFreshAuth(action, payload) {
 		proof, ok := s.requireStepUp(w, r, principal, request.Reason,
@@ -209,10 +191,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		stepUpProof = proof
 	}
 
-	// A destructive operation requires typing in the target name. A click is
-	// not a sufficient decision for a change that cannot be undone - and the
-	// host list tends to be long and alike. An operation aimed at an account
-	// takes the account name: it is the thing that goes away.
+	// A destructive operation requires typing in the target name.
 	if action.RequiresTargetConfirmation() &&
 		request.TargetConfirmation != opspec.ConfirmationTarget(action, payload, host.Hostname) {
 		s.audit.Record(r.Context(), audit.Event{
@@ -228,23 +207,15 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A package change bound to a plan the host no longer computes is
-	// refused here, before a job is queued for it: a plan past its expiry,
-	// or a plan made by another planner than the one the host plans with
-	// now. The host checks the same and more right before the transaction;
-	// this is the answer the screen gets at once.
+	// A package change bound to a plan the host no longer computes is refused
+	// here, before a job is queued for it: a plan past its expiry, or a plan made
+	// by another planner than the one the host plans with now.
 	if code, detail := s.planReferenceConflict(r.Context(), hostID, action, payload); code != "" {
 		problem(w, http.StatusConflict, code, detail)
 		return
 	}
 
-	// A rollback names a version by its digest. The panel attaches the
-	// content when it holds a copy, so the plan and what reaches the host
-	// are the same thing; the digest stays in the payload either way,
-	// because the host keeps copies of its own and restores the inode of
-	// the version, not only its bytes. A version the panel never saw
-	// travels as the digest alone, and the host refuses it with
-	// file_version_unknown when it does not have it either.
+	// A rollback names a version by its digest.
 	if action == opspec.ActionFileRollback && payload.File != nil && payload.File.VersionSHA256 != "" {
 		content, err := s.files.Content(r.Context(), payload.File.VersionSHA256)
 		switch {
@@ -257,9 +228,7 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The secret named in the order must exist and be issuable. Otherwise
-	// the job would wait for approval, go to the host and only fail there -
-	// and the operator would learn about the typo minutes later.
+	// The secret named in the order must exist and be issuable.
 	for _, reference := range payload.Secrets() {
 		if s.secrets == nil {
 			problem(w, http.StatusServiceUnavailable, "secrets_disabled",
@@ -288,9 +257,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A mutation always waits for its approval; the request may ask for
-	// an approval where none is needed, never waive one. Waiving it was
-	// the way around the second person and the plan review.
+	// A mutation always waits for its approval; the request may ask for an
+	// approval where none is needed, never waive one.
 	requiresApproval := action.Mutating() || (request.RequiresApproval != nil && *request.RequiresApproval)
 
 	preconditions := jobs.Preconditions{
@@ -341,12 +309,8 @@ func (s *Server) handleCreateOperation(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err)
 		return
 	}
-	// The content is saved right now, so that the history and the rollback
-	// have the bytes the operator approved. The desired state is recorded
-	// only by the gateway, after a successful operation: the panel must not
-	// claim to manage a file the host rejected.
-	// A file from a secret leaves neither the content nor its digest in the
-	// panel: the value exists only in the store and briefly on the host.
+	// The content is saved right now, so that the history and the rollback have
+	// the bytes the operator approved.
 	if payload.File != nil && payload.File.ContentSecret.Empty() &&
 		(action == opspec.ActionFileEnsure || action == opspec.ActionFileRollback) {
 		if _, err := s.files.SaveVersion(r.Context(), tx, []byte(payload.File.Content)); err != nil {
@@ -410,9 +374,8 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 	}
 	actor := principal.Subject
 
-	// The second-person rule: in a production environment the requester
-	// cannot approve their own change. Role separation is not enough, because
-	// one person may hold both roles.
+	// The second-person rule: in a production environment the requester cannot
+	// approve their own change.
 	if operation == "approve" && s.requiresSecondPerson(scope.Environment) && current.CreatedBy == actor {
 		s.audit.Record(r.Context(), audit.Event{
 			ActorType: audit.ActorUser, ActorID: actor,
@@ -440,15 +403,8 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
-	// A cancel that reaches an operation the host cannot stop is answered
-	// as such rather than recorded as done. Once the host has reported the
-	// start of an operation whose contract says impossible_after_start - a
-	// package transaction, a filesystem resize - the cancel is information
-	// only: the request goes on the trail and to the agent, which notes it,
-	// and the job stays running until the host reports the real result. A
-	// job marked cancelled here would meet that result as one for a job
-	// that no longer exists, and the screen would show a stopped transaction
-	// that ran to its end.
+	// A cancel that reaches an operation the host cannot stop is answered as such
+	// rather than recorded as done.
 	if operation == "cancel" {
 		if mode, refused := nonCancelable(current.State, opspec.ActionType(current.ActionType)); refused {
 			s.audit.Record(r.Context(), audit.Event{
@@ -503,9 +459,8 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
-	// An approval names everybody behind the change: who ordered it and
-	// who has consented so far, this approval included. The list is read
-	// inside the transaction, so it already holds the row just written.
+	// An approval names everybody behind the change: who ordered it and who has
+	// consented so far, this approval included.
 	var chain *audit.ApprovalChain
 	if operation == "approve" {
 		approvals, err := s.jobs.ApprovalsTx(r.Context(), tx, jobID)
@@ -528,9 +483,9 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 			"host_id": job.HostID, "action_type": job.ActionType,
 			"payload_hash": job.PayloadHash, "state": string(job.State),
 			"reason": request.Reason,
-			// The audit trail also carries which of the required approvals
-			// this is: for a destructive operation the first approval starts
-			// nothing yet, and that has to be visible after the fact.
+			// The audit trail also carries which of the required approvals this is: for
+			// a destructive operation the first approval starts nothing yet, and that
+			// has to be visible after the fact.
 			"approvals": job.CollectedApprovals, "required_approvals": job.RequiredApprovals,
 		},
 	}); err != nil {
@@ -542,20 +497,15 @@ func (s *Server) transitionJob(w http.ResponseWriter, r *http.Request, operation
 		return
 	}
 
-	// A cancellation recorded in the database does not stop the work on the
-	// host by itself. The request to the host - with its revision and its
-	// deadline - goes out from the outbox row the store wrote in the same
-	// transaction, by the instance that holds the host's session; the host
-	// answers what it found and the job settles on that answer.
+	// A cancellation recorded in the database does not stop the work on the host
+	// by itself.
 
 	writeJSON(w, http.StatusOK, job)
 }
 
-// nonCancelable says whether a cancel can still do anything to the job:
-// it cannot once the host has reported the start of an operation whose
-// contract says impossible_after_start. Before the start every operation
-// is cancellable - the host has not touched anything - and an operation
-// with any other cancel mode is interrupted or checkpointed by the agent.
+// nonCancelable says whether a cancel can still do anything to the job: it
+// cannot once the host has reported the start of an operation whose contract
+// says impossible_after_start.
 func nonCancelable(state jobs.State, action opspec.ActionType) (opspec.CancelMode, bool) {
 	if state != jobs.StateRunning {
 		return "", false
@@ -598,9 +548,9 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		FanoutID:       query.Get("fanout_id"),
 		ErrorCode:      query.Get("error_code"),
 	}
-	// The identifiers are typed columns: a value that is not one would
-	// fail in the database and come back as a server fault, when it is
-	// the request that is wrong.
+	// The identifiers are typed columns: a value that is not one would fail in
+	// the database and come back as a server fault, when it is the request that
+	// is wrong.
 	if filter.HostID != "" {
 		if _, err := uuid.Parse(filter.HostID); err != nil {
 			problem(w, http.StatusBadRequest, "invalid_filter", "host_id must be a host identifier")
@@ -613,9 +563,7 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, "invalid_filter", "hostname must be the beginning of a host name")
 		return
 	}
-	// A family of operations is named by its prefix, packages. for the
-	// package history of a host; the prefix is an operation name cut short,
-	// so it takes the same characters and nothing that could be a pattern.
+	// A family of operations is named by its prefix, packages.
 	if filter.ActionPrefix != "" && !actionPrefixPattern.MatchString(filter.ActionPrefix) {
 		problem(w, http.StatusBadRequest, "invalid_filter", "action_prefix must be the beginning of an operation type, such as packages.")
 		return
@@ -645,9 +593,8 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 		filter.Scopes = append(filter.Scopes,
 			jobs.Scope{Site: scope.Site, Environment: scope.Environment, Team: scope.Team})
 	}
-	// The order of the list: one of the columns the store whitelists,
-	// newest first unless the value names another column or direction. A
-	// column that is not one is the request's fault, named as such.
+	// The order of the list: one of the columns the store whitelists, newest
+	// first unless the value names another column or direction.
 	order, err := jobs.ParseSort(query.Get("sort"))
 	if err != nil {
 		problem(w, http.StatusBadRequest, "invalid_sort", err.Error())
@@ -685,20 +632,16 @@ func (s *Server) handleListJobs(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// jobsCSVColumns is the header of the task export. The order is fixed: a
-// sheet built against one export reads the next one. The payload stays
-// out: it is JSON of any shape, and a plan is read on the job page.
+// jobsCSVColumns is the header of the task export. The order is fixed: a sheet
+// built against one export reads the next one.
 var jobsCSVColumns = []string{
 	"id", "hostname", "host_id", "action_type", "state", "created_at", "created_by", "requires_approval",
 	"approved_by", "approved_at", "finished_at", "result_status", "result_error_code", "result_message",
 	"wait_reason", "canceled_by", "cancel_reason", "campaign_id", "fanout_id", "expires_at",
 }
 
-// writeJobsCSV streams the task list as a file: the same filter and the
-// same scope as the JSON list, every page of it, newest first as the list
-// goes. The pages come one at a time from the store; the file ends with a
-// truncation row past exportRowLimit tasks, and a history that long is
-// narrowed by since and until rather than read whole.
+// writeJobsCSV streams the task list as a file: the same filter and the same
+// scope as the JSON list, every page of it, newest first as the list goes.
 func (s *Server) writeJobsCSV(w http.ResponseWriter, r *http.Request, filter jobs.ListFilter) {
 	s.writeCSV(w, r, exportFileName("jobs", time.Now()), jobsCSVColumns, func(yield func([]string) bool) error {
 		cursor := jobs.Cursor{}
@@ -752,9 +695,9 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermJobRead, s.jobScope(r, job.HostID), "job", jobID); !ok {
 		return
 	}
-	// The view of a single job also carries the people who approved it: for
-	// an operation requiring two approvals the question "who are we still
-	// waiting for" is what the operator comes here for.
+	// The view of a single job also carries the people who approved it: for an
+	// operation requiring two approvals the question "who are we still waiting
+	// for" is what the operator comes here for.
 	if approvals, err := s.jobs.Approvals(r.Context(), jobID); err == nil {
 		job.Approvals = approvals
 	}
@@ -802,34 +745,28 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 		DefaultTimeout     int    `json:"default_timeout_seconds"`
 		Risk               string `json:"risk"`
 		LockClass          string `json:"lock_class,omitempty"`
-		// CampaignMode says what the operation is with respect to the fleet,
-		// and CampaignReady - what the panel can really carry out today. These
-		// are two different pieces of information: the wizard shows only the
-		// latter and explains a refusal with the former.
+		// CampaignMode says what the operation is with respect to the fleet, and
+		// CampaignReady - what the panel can really carry out today.
 		CampaignMode  string `json:"campaign_mode"`
 		CampaignReady bool   `json:"campaign_ready"`
 		// OfflinePolicy is what a campaign does with a host that is not
 		// connected when its turn comes; a campaign may only tighten it.
 		OfflinePolicy string `json:"offline_policy"`
-		// FanOutLimit says on how many hosts at once the read may be
-		// ordered as one fan-out; zero means a read kept to one host, and
-		// every mutation. FanOutRefusal says why when it is zero.
+		// FanOutLimit says on how many hosts at once the read may be ordered as one
+		// fan-out; zero means a read kept to one host, and every mutation.
 		FanOutLimit   int    `json:"fanout_limit"`
 		FanOutRefusal string `json:"fanout_refusal,omitempty"`
-		// CampaignRefusal carries the reason the operation cannot be ordered
-		// in bulk. A refusal without a reason looks in the interface like a
-		// missing feature, while it is often a boundary drawn deliberately.
+		// CampaignRefusal carries the reason the operation cannot be ordered in
+		// bulk.
 		CampaignRefusal string `json:"campaign_refusal,omitempty"`
 		// PayloadTemplate is the example payload the wizard starts from for an
-		// operation without a form of its own; NeedsMaterial says the template
-		// holds a placeholder for certificate material the operator supplies.
+		// operation without a form of its own; NeedsMaterial says the template holds
+		// a placeholder for certificate material the operator supplies.
 		PayloadTemplate *opspec.Payload `json:"payload_template,omitempty"`
 		NeedsMaterial   bool            `json:"needs_material,omitempty"`
-		// The second half of the contract: what a cancel does to an
-		// operation under way, whether it may be repeated, what way back
-		// exists, what the campaign checks afterwards and which host
-		// resources it takes. The panel draws its cancel button and its
-		// rollback link from these, never from the operation name.
+		// The second half of the contract: what a cancel does to an operation under
+		// way, whether it may be repeated, what way back exists, what the campaign
+		// checks afterwards and which host resources it takes.
 		CancelMode     opspec.CancelMode      `json:"cancel_mode"`
 		RetryClass     opspec.RetryPolicy     `json:"retry_class"`
 		Rollback       opspec.RollbackClass   `json:"rollback"`
@@ -876,8 +813,7 @@ func (s *Server) handleListActions(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListErrors serves the guide to error codes: what each one means,
-// whether a retry helps and what the operator does next. Automation reads
-// the retry policy from here rather than matching messages.
+// whether a retry helps and what the operator does next.
 func (s *Server) handleListErrors(w http.ResponseWriter, r *http.Request) {
 	if principal := authz.FromContext(r.Context()); !principal.Authenticated() {
 		w.Header().Set("WWW-Authenticate", `Bearer realm="flotestro"`)
@@ -890,26 +826,20 @@ func (s *Server) handleListErrors(w http.ResponseWriter, r *http.Request) {
 
 // bootFilterSupported says whether the agent of the host applies a boot
 // identifier to a journal read: the journald adapter has to name the
-// boot_filter feature as present. An adapter silent about the feature is
-// an agent from before it, which would not apply the filter.
+// boot_filter feature as present.
 func bootFilterSupported(host *hosts.Host) bool {
 	return host.Capabilities.Feature(hosts.CapJournald, "boot_filter")
 }
 
 // hostHasCapability resolves the operation requirement against the host's
-// adapter registry. The decision belongs to the registry, not to this file:
-// the operation states a logical requirement, the host says which adapters
-// it has.
+// adapter registry.
 func hostHasCapability(host *hosts.Host, capability string) bool {
 	return host.Capabilities.Satisfies(capability)
 }
 
-// planReferenceConflict says whether a package change is bound to a plan
-// the host no longer computes: plan_expired when the envelope is past its
-// expiry, replan_required when the newest plan the host computed names
-// another planner version than the one the order carries. An order
-// without a plan reference is not judged - it binds by its digest alone,
-// and the host decides.
+// planReferenceConflict says whether a package change is bound to a plan the
+// host no longer computes: plan_expired when the envelope is past its expiry,
+// replan_required when the newest plan the host computed names another planner
 func (s *Server) planReferenceConflict(ctx context.Context, hostID string,
 	action opspec.ActionType, payload opspec.Payload) (string, string) {
 	var reference *opspec.PlanReference
@@ -943,9 +873,9 @@ func (s *Server) planReferenceConflict(ctx context.Context, hostID string,
 	return "", ""
 }
 
-// hostPlannerVersion reads the planner version off the newest package plan
-// the host computed, or nothing when the host has not planned yet or its
-// plans carry no planner version.
+// hostPlannerVersion reads the planner version off the newest package plan the
+// host computed, or nothing when the host has not planned yet or its plans
+// carry no planner version.
 func (s *Server) hostPlannerVersion(ctx context.Context, hostID string) string {
 	page, err := s.jobs.ListPaged(ctx, jobs.ListFilter{
 		HostID: hostID, Action: string(opspec.ActionPackagePlan), State: string(jobs.StateSucceeded),
@@ -985,8 +915,8 @@ func requestIDOf(r *http.Request) string {
 }
 
 // idempotencyKeyOf reads the key a caller repeats an order with: the
-// Idempotency-Key header the document names, or the body field for
-// callers that prefer it. The header wins when both are given.
+// Idempotency-Key header the document names, or the body field for callers
+// that prefer it.
 func idempotencyKeyOf(r *http.Request, fromBody string) string {
 	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
 		return key
@@ -996,11 +926,6 @@ func idempotencyKeyOf(r *http.Request, fromBody string) string {
 
 // blockedByBrokenDatabase says which package operations make no sense on a
 // host with a broken package database.
-//
-// Repair and plan are excluded from this, and that is not an exception for
-// convenience: repair is the only way out of this state, so blocking it would
-// lock the host in a loop with no exit from the panel. Plan changes nothing
-// and is needed most on a blocked host, because it shows what blocks.
 func blockedByBrokenDatabase(action opspec.ActionType) bool {
 	switch action {
 	case opspec.ActionPackageRepair, opspec.ActionPackagePlan:
@@ -1010,9 +935,6 @@ func blockedByBrokenDatabase(action opspec.ActionType) bool {
 }
 
 // requestInterrupt sends the agent a request to interrupt the running attempt.
-//
-// A missing session is not an error: the host may be offline, and the job is
-// already cancelled in the database anyway and will not be delivered again.
 func (s *Server) requestInterrupt(ctx context.Context, job *jobs.Job) {
 	attemptID, err := s.jobs.LastAttempt(ctx, job.ID)
 	if err != nil || attemptID == "" {

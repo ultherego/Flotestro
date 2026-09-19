@@ -26,9 +26,8 @@ var (
 	// ErrConflict means an attempt at a transition forbidden in this state.
 	ErrConflict = errors.New("the operation is not allowed in the current state of the task")
 	// ErrSessionStale means a delivery over a session that is no longer the
-	// host's open one: another gateway took the host over between the send
-	// and the record. The task was not marked dispatched, and the caller
-	// gives the lease back so the host's current session delivers it.
+	// host's open one: another gateway took the host over between the send and
+	// the record.
 	ErrSessionStale = errors.New("session_stale: the session is no longer the open session of the host")
 )
 
@@ -39,28 +38,22 @@ type Spec struct {
 	Payload          opspec.Payload
 	IdempotencyKey   string
 	RequiresApproval bool
-	// RequiredApprovals says how many people are needed. An operation that
-	// destroys data requires two: a mistake by one person with the right to
-	// approve costs data nobody will restore. Zero means the default value.
+	// RequiredApprovals says how many people are needed.
 	RequiredApprovals int
 	TimeoutSeconds    int
 	MaxOutputBytes    int
 	TTL               time.Duration
 	CreatedBy         string
 	RequestID         string
-	// CampaignID binds the operation to the rollout that ordered it. Without
-	// it the audit trail's correlation breaks off at the operation, and the
-	// campaign screen does not know which operations are its own - the
-	// progress of an upgrade under way had no way of reaching it.
+	// CampaignID binds the operation to the rollout that ordered it.
 	CampaignID string
-	// FanoutID binds the operation to the diagnostic read fan-out that
-	// ordered it, for the same reason: the fan-out page lists its jobs
-	// by it, and the result of every host is read from its own job.
+	// FanoutID binds the operation to the diagnostic read fan-out that ordered
+	// it, for the same reason: the fan-out page lists its jobs by it, and the
+	// result of every host is read from its own job.
 	FanoutID      string
 	Preconditions Preconditions
-	// Class is the urgency the job asks for capacity with, when the order
-	// stated one. Empty is not a class: the scheduler derives one from the
-	// operation and its author at dispatch time.
+	// Class is the urgency the job asks for capacity with, when the order stated
+	// one.
 	Class budgets.Class
 }
 
@@ -87,9 +80,8 @@ type Job struct {
 	IdempotencyKey   string          `json:"idempotency_key"`
 	State            State           `json:"state"`
 	RequiresApproval bool            `json:"requires_approval"`
-	// RequiredApprovals and Approvals say how many approvals are needed and
-	// how many there already are. Without them the operator clicks "approve"
-	// and does not know why nothing happened.
+	// RequiredApprovals and Approvals say how many approvals are needed and how
+	// many there already are.
 	RequiredApprovals  int             `json:"required_approvals"`
 	CollectedApprovals int             `json:"collected_approvals"`
 	Approvals          []Approval      `json:"approvals,omitempty"`
@@ -103,18 +95,16 @@ type Job struct {
 	ApprovedAt         *time.Time      `json:"approved_at,omitempty"`
 	CanceledBy         string          `json:"canceled_by,omitempty"`
 	CancelReason       string          `json:"cancel_reason,omitempty"`
-	// CancelRequestedAt is when a cancel was asked of the host holding the
-	// task; CancelAckAt, CancelOutcome and CancelPhase are the agent's
-	// answer - what the request found on the host and what the host was
-	// doing. All empty for a job that never left the panel.
+	// CancelRequestedAt is when a cancel was asked of the host holding the task;
+	// CancelAckAt, CancelOutcome and CancelPhase are the agent's answer - what
+	// the request found on the host and what the host was doing.
 	CancelRequestedAt *time.Time `json:"cancel_requested_at,omitempty"`
 	CancelAckAt       *time.Time `json:"cancel_ack_at,omitempty"`
 	CancelOutcome     string     `json:"cancel_outcome,omitempty"`
 	CancelPhase       string     `json:"cancel_phase,omitempty"`
-	// WaitReason says why a job has not started yet: the budget a queued
-	// job waits for, as awaiting_budget:<key>, or the resource lock a
-	// delivered job waits for on its host, as awaiting_lock:<blocker>. A
-	// job standing still with no reason given looks like a forgotten job.
+	// WaitReason says why a job has not started yet: the budget a queued job
+	// waits for, as awaiting_budget:<key>, or the resource lock a delivered job
+	// waits for on its host, as awaiting_lock:<blocker>.
 	WaitReason string `json:"wait_reason,omitempty"`
 	// BudgetClass is the class the order stated; empty means it was left
 	// to the scheduler to derive.
@@ -145,39 +135,24 @@ type Attempt struct {
 	UnitStateBefore json.RawMessage `json:"unit_state_before,omitempty"`
 	UnitStateAfter  json.RawMessage `json:"unit_state_after,omitempty"`
 	Detail          json.RawMessage `json:"detail,omitempty"`
-	// Verification is the read of the host after the change, as the host
-	// reported it: {verifier, verified, expected, observed, reason}. Empty
-	// for a read, for an operation whose verifier the panel settles on the
-	// host's return, and for an agent from before the verifiers - which is
-	// not the same as a change nobody confirmed, so the screens say which
-	// of the three it is rather than showing a silent success.
+	// Verification is the read of the host after the change, as the host reported
+	// it: {verifier, verified, expected, observed, reason}.
 	Verification json.RawMessage `json:"verification,omitempty"`
 	DispatchedAt *time.Time      `json:"dispatched_at,omitempty"`
-	// AcceptedAt is when the agent said it holds the task, and StartedAt
-	// when it said the operation is starting on the host. Both come from
-	// the agent's acknowledgement; an attempt without them was never heard
-	// from, which is not the same as one that started at the dispatch.
+	// AcceptedAt is when the agent said it holds the task, and StartedAt when it
+	// said the operation is starting on the host.
 	AcceptedAt *time.Time `json:"accepted_at,omitempty"`
 	StartedAt  *time.Time `json:"started_at,omitempty"`
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 }
 
-// DispatchLease is how long the panel waits for the agent to say it holds
-// a task after the envelope went out. It is much shorter than the
-// execution lease the scheduler gives at the take (five minutes,
-// cmd/control-plane/main.go): before the acknowledgement nothing runs on
-// the host, so an envelope sent into a stream that died a moment earlier
-// is safe to send again, and waiting five minutes to do so would leave a
-// campaign's host idle for that long. The acknowledgement moves the lease
-// back out to the execution lease. A minute leaves room for a slow host
-// and the housekeeping pass that reclaims expired leases every thirty
-// seconds.
+// DispatchLease is how long the panel waits for the agent to say it holds a
+// task after the envelope went out.
 const DispatchLease = 60 * time.Second
 
-// WaitReasonLockPrefix marks a wait reason that names a resource lock of
-// the host, as awaiting_lock:<blocker>. The blocker text is the agent's:
-// the resource and the task holding it.
+// WaitReasonLockPrefix marks a wait reason that names a resource lock of the
+// host, as awaiting_lock:<blocker>.
 const WaitReasonLockPrefix = "awaiting_lock:"
 
 // LockWaitReason renders the wait reason of a job whose task waits for a
@@ -186,9 +161,7 @@ func LockWaitReason(blocker string) string {
 	return WaitReasonLockPrefix + blocker
 }
 
-// LockBlocker reads the blocker back out of a wait reason. False means the
-// job was not waiting on a lock - it may have been waiting on nothing, or
-// on a budget, which is another prefix.
+// LockBlocker reads the blocker back out of a wait reason.
 func LockBlocker(reason string) (string, bool) {
 	if !strings.HasPrefix(reason, WaitReasonLockPrefix) {
 		return "", false
@@ -207,9 +180,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 
 func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 
-// Create creates a task together with the plan hash. A task that requires
-// approval starts in awaiting_approval and does not reach the queue until
-// somebody approves it.
+// Create creates a task together with the plan hash.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) {
 	if err := opspec.Validate(spec.Action, spec.Payload); err != nil {
 		return nil, err
@@ -274,12 +245,8 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec) (*Job, error) 
 	return s.getTx(ctx, tx, "where id = $1", jobID)
 }
 
-// Approve records an approval and lets the task through once it has
-// collected enough of them.
-//
-// The approval is always recorded, also when one is not enough: a destructive
-// operation requires two people, and the first of them is to see that their
-// approval was accepted rather than bounced without a trace.
+// Approve records an approval and lets the task through once it has collected
+// enough of them.
 func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
 	const recordApproval = `
 		insert into job_approvals (job_id, approver, reason)
@@ -289,9 +256,8 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason str
 		return nil, err
 	}
 
-	// The same person does not count twice: the table's primary key guards
-	// that in the database rather than in code, which can be bypassed by
-	// another path.
+	// The same person does not count twice: the table's primary key guards that
+	// in the database rather than in code, which can be bypassed by another path.
 	const query = `
 		update jobs set state = $2, approved_by = $3, approved_at = now(), updated_at = now()
 		where id = $1 and state = $4
@@ -300,9 +266,8 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, jobID, actor, reason str
 	var updated string
 	err := tx.QueryRow(ctx, query, jobID, string(StateQueued), actor, string(StateAwaitingApproval)).Scan(&updated)
 	if errors.Is(err, pgx.ErrNoRows) {
-		// The task stays waiting: either approvals are missing, or somebody
-		// changed its state in the meantime. The state we are about to read
-		// settles it.
+		// The task stays waiting: either approvals are missing, or somebody changed
+		// its state in the meantime.
 		task, err := s.getTx(ctx, tx, "where id = $1", jobID)
 		if err != nil {
 			return nil, err
@@ -323,9 +288,9 @@ func (s *Store) Approvals(ctx context.Context, jobID string) ([]Approval, error)
 	return s.approvalsFrom(ctx, s.pool, jobID)
 }
 
-// ApprovalsTx returns the approvals as the caller's transaction sees them:
-// an approval written a moment ago in the same transaction is on the list,
-// which a read through the pool would not show yet.
+// ApprovalsTx returns the approvals as the caller's transaction sees them: an
+// approval written a moment ago in the same transaction is on the list, which
+// a read through the pool would not show yet.
 func (s *Store) ApprovalsTx(ctx context.Context, tx pgx.Tx, jobID string) ([]Approval, error) {
 	return s.approvalsFrom(ctx, tx, jobID)
 }
@@ -358,9 +323,6 @@ type Approval struct {
 }
 
 // requiredApprovals decides how many people have to approve the task.
-//
-// The number is a property of the operation rather than of the environment: a
-// disk formatted in a test environment is a formatted disk too.
 func requiredApprovals(spec Spec) int {
 	if spec.RequiredApprovals > 0 {
 		return spec.RequiredApprovals
@@ -372,18 +334,6 @@ func requiredApprovals(spec Spec) int {
 }
 
 // Cancel cancels a task that has not reached a final state yet.
-//
-// A task still in the panel - planned, awaiting an approval, queued, or
-// taken by a scheduler and not yet handed over - ends canceled at once:
-// no host holds it, and the tokens a lease may have taken go back with
-// it. A task the host holds - dispatched or running - is not written off:
-// the cancel becomes a request, the job stands cancel_requested with its
-// tokens, a record of the request goes on the durable trail for the
-// instance that holds the host's session to deliver, and the agent's
-// acknowledgement or the operation's timeout settles it. Writing
-// "canceled" on a task the host is carrying would hand its capacity to
-// the next task while the host is still using it, and meet the host's
-// result as one for a job that no longer exists.
 func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason string) (*Job, error) {
 	var state string
 	err := tx.QueryRow(ctx, `select state from jobs where id = $1 for update`, jobID).Scan(&state)
@@ -416,11 +366,6 @@ func (s *Store) Cancel(ctx context.Context, tx pgx.Tx, jobID, actor, reason stri
 }
 
 // CancelUndelivered ends the host's tasks that have not started yet.
-//
-// Tasks being delivered and running stay: the agent may be halfway through an
-// uninterruptible operation, and the panel has no way of undoing it.
-// Cancelling them in the database would only mean the result arriving for a
-// task that no longer exists.
 func (s *Store) CancelUndelivered(ctx context.Context, tx pgx.Tx, hostID, actor,
 	reason string) (int, error) {
 	const query = `
@@ -443,10 +388,6 @@ func (s *Store) CancelUndelivered(ctx context.Context, tx pgx.Tx, hostID, actor,
 
 // OpenTasksOfAction returns the host's unfinished tasks of a given action
 // together with their last attempt and payload.
-//
-// Used by operations that only the host's return settles: the agent replaces
-// itself and has no way of sending the result back, because the process that
-// computed it has just been replaced.
 func (s *Store) OpenTasksOfAction(ctx context.Context, hostID,
 	action string) ([]OpenTask, error) {
 	const query = `
@@ -483,11 +424,7 @@ type OpenTask struct {
 	AttemptID string
 	Payload   json.RawMessage
 	// SessionBootID is the boot identifier of the host in the session that
-	// carried the last attempt out - the boot the operation was ordered
-	// under. A settlement that has to see the host come back another boot
-	// (a reboot) compares against it, and never against the host's record,
-	// which the Hello has already moved on. Empty when the attempt never
-	// went out over a session; an empty one proves no return.
+	// carried the last attempt out - the boot the operation was ordered under.
 	SessionBootID string
 }
 
@@ -498,9 +435,9 @@ type LeasedJob struct {
 	Attempt   int
 }
 
-// Candidate is a queued task the scheduler weighs before taking it,
-// together with the site of its host: the site is what the budgets are
-// keyed by, and the task itself does not carry it.
+// Candidate is a queued task the scheduler weighs before taking it, together
+// with the site of its host: the site is what the budgets are keyed by, and
+// the task itself does not carry it.
 type Candidate struct {
 	Job  Job
 	Site string
@@ -508,11 +445,6 @@ type Candidate struct {
 
 // Queued lists the tasks ready to run on the given hosts, oldest first,
 // without taking them.
-//
-// Taking a task and deciding whether the fleet can carry it are two steps
-// on purpose: a task refused by a budget must stay in the queue as it was,
-// with no attempt opened for it - otherwise every pass of the scheduler
-// would leave a record of an attempt that never went anywhere.
 func (s *Store) Queued(ctx context.Context, hostIDs []string, limit int) ([]Candidate, error) {
 	if len(hostIDs) == 0 || limit <= 0 {
 		return nil, nil
@@ -552,10 +484,8 @@ func (s *Store) Queued(ctx context.Context, hostIDs []string, limit int) ([]Cand
 	return candidates, nil
 }
 
-// LeaseJobs takes the given tasks, provided they are still queued, and
-// gives each a lease. SKIP LOCKED means parallel workers neither block each
-// other nor take the same task; a task somebody else took or canceled in
-// the meantime is simply missing from the result.
+// LeaseJobs takes the given tasks, provided they are still queued, and gives
+// each a lease.
 func (s *Store) LeaseJobs(ctx context.Context, gatewayID string, jobIDs []string,
 	leaseDuration time.Duration) ([]LeasedJob, error) {
 	if len(jobIDs) == 0 {
@@ -619,10 +549,7 @@ func (s *Store) LeaseJobs(ctx context.Context, gatewayID string, jobIDs []string
 	return leased, nil
 }
 
-// SetWaitReason records why a queued task was not taken. The write happens
-// only when the reason changes: the scheduler asks every few seconds, and
-// a task waiting a quarter of an hour must not be rewritten hundreds of
-// times to say the same thing.
+// SetWaitReason records why a queued task was not taken.
 func (s *Store) SetWaitReason(ctx context.Context, jobID, reason string) error {
 	_, err := s.pool.Exec(ctx, `
 		update jobs set wait_reason = $2, updated_at = now()
@@ -630,10 +557,8 @@ func (s *Store) SetWaitReason(ctx context.Context, jobID, reason string) error {
 	return err
 }
 
-// InFlight lists the tasks between the lease and the result that were
-// admitted one by one - the ones whose budget tokens the scheduler has to
-// keep alive. A campaign's and a fan-out's tasks hold tokens under their
-// campaign target and fan-out, which renew themselves.
+// InFlight lists the tasks between the lease and the result that were admitted
+// one by one - the ones whose budget tokens the scheduler has to keep alive.
 func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 	return collectIDs(s.pool.Query(ctx, `
 		select id from jobs
@@ -641,26 +566,14 @@ func (s *Store) InFlight(ctx context.Context) ([]string, error) {
 		  and campaign_id is null and fanout_id is null`))
 }
 
-// MarkDispatched records handing the task over to the agent. The lease of
-// the attempt is cut down to the dispatch lease from here: the scheduler
-// gave the execution lease at the take, and until the agent acknowledges
-// the task nothing runs that the lease would have to outlast. A lease
-// already shorter than that stays as it is.
+// MarkDispatched records handing the task over to the agent.
 func (s *Store) MarkDispatched(ctx context.Context, jobID, attemptID string, fence Fence) error {
 	return s.MarkDispatchedWithLease(ctx, jobID, attemptID, fence, DispatchLease)
 }
 
-// MarkDispatchedWithLease is MarkDispatched with the lease the caller
-// chose: the short dispatch lease for an agent that acknowledges a task,
-// the execution lease for one that never will - an agent from before the
-// acknowledgement would be reclaimed and redelivered every minute for the
-// length of every operation.
-//
-// The write is fenced: the fence names the session the envelope went over
-// and the token that session claimed the host with, and a session that
-// no longer owns the host - superseded, or with a lease that ran out -
-// gets ErrStaleFence and records nothing. The caller gives the lease
-// back; it never repeats the write without the fence.
+// MarkDispatchedWithLease is MarkDispatched with the lease the caller chose:
+// the short dispatch lease for an agent that acknowledges a task, the
+// execution lease for one that never will - an agent from before the
 func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID string,
 	fence Fence, lease time.Duration) error {
 	tx, err := s.pool.Begin(ctx)
@@ -669,12 +582,7 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// The delivery counts only over the host's open session. A gateway
-	// whose stream the host has left - the takeover closed its row, the
-	// notification is late or lost - must not record a delivery the host
-	// will never answer on: the database, not the memory of the process,
-	// says whose session it is. The row is locked so that a takeover in
-	// flight waits for the answer rather than racing it.
+	// The delivery counts only over the host's open session.
 	var openSession string
 	err = tx.QueryRow(ctx, `
 		select s.id::text
@@ -688,9 +596,8 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 	if err != nil {
 		return err
 	}
-	// An open row is the session's word that it is the newest; the fence
-	// is the database's word that it owns the host right now. The second
-	// is the one a late or lost notification cannot fool.
+	// An open row is the session's word that it is the newest; the fence is the
+	// database's word that it owns the host right now.
 	if err := fenceHolds(ctx, tx, jobID, fence); err != nil {
 		return err
 	}
@@ -701,9 +608,8 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 		return err
 	}
 	// The envelope leaves before this row is written, and a quick agent
-	// acknowledges it in between: an attempt that was accepted already
-	// keeps the lease the acceptance gave it, and the job stays where the
-	// acknowledgement moved it.
+	// acknowledges it in between: an attempt that was accepted already keeps the
+	// lease the acceptance gave it, and the job stays where the acknowledgement
 	if _, err := tx.Exec(ctx, `
 		update job_attempts
 		   set dispatched_at = now(), session_id = $2,
@@ -718,13 +624,8 @@ func (s *Store) MarkDispatchedWithLease(ctx context.Context, jobID, attemptID st
 }
 
 // AcceptAttempt records the agent's word that it holds the task: the
-// acceptance time goes on the attempt, once, and the lease moves out from
-// the dispatch lease to the execution lease given - never back. It returns
-// whether an open attempt of the host was there to accept; a closed one
-// keeps its state, the same as with a late progress report.
-//
-// The time from the hand-over to the acceptance is what the dispatch lease
-// is sized against, so it is measured here, on the first acceptance only.
+// acceptance time goes on the attempt, once, and the lease moves out from the
+// dispatch lease to the execution lease given - never back.
 func (s *Store) AcceptAttempt(ctx context.Context, attemptID, hostID string,
 	executionLease time.Duration) (bool, error) {
 	var actionType string
@@ -750,9 +651,9 @@ func (s *Store) AcceptAttempt(ctx context.Context, attemptID, hostID string,
 	if err != nil {
 		return false, fmt.Errorf("accepting the attempt: %w", err)
 	}
-	// A repeated acceptance - the agent sent it twice - measures nothing:
-	// the first one set the time, and now() is the same inside one
-	// statement, so the case above tells the two apart.
+	// A repeated acceptance - the agent sent it twice - measures nothing: the
+	// first one set the time, and now() is the same inside one statement, so the
+	// case above tells the two apart.
 	if firstAck != nil {
 		metrics.TaskAck.Observe(*firstAck, actionType)
 	}
@@ -760,10 +661,7 @@ func (s *Store) AcceptAttempt(ctx context.Context, attemptID, hostID string,
 }
 
 // SetLockWait records why a delivered task has not started: it waits for a
-// resource of its host that another task holds. The reason is written on
-// the job as awaiting_lock:<blocker>, only while the job is dispatched -
-// a running job holds its resources - and only when the text changes,
-// since the agent repeats the report while the wait lasts.
+// resource of its host that another task holds.
 func (s *Store) SetLockWait(ctx context.Context, attemptID, hostID, blocker string) error {
 	reason := LockWaitReason(blocker)
 	_, err := s.pool.Exec(ctx, `
@@ -783,14 +681,9 @@ func (s *Store) SetLockWait(ctx context.Context, attemptID, hostID, blocker stri
 	return nil
 }
 
-// MarkRunning moves the job of an attempt from dispatched to running on
-// the agent's word that the operation started on the host, stamps the
-// start on the attempt and clears whatever the job was waiting on. It
-// returns whether the transition happened: a job already running - the
-// agent repeated itself - or settled meanwhile is left as it is.
-//
-// The time a task spent waiting for a lock is measured here, from the
-// acceptance to the start, for the attempts whose wait was reported.
+// MarkRunning moves the job of an attempt from dispatched to running on the
+// agent's word that the operation started on the host, stamps the start on the
+// attempt and clears whatever the job was waiting on.
 func (s *Store) MarkRunning(ctx context.Context, attemptID, hostID string) (bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -831,19 +724,18 @@ func (s *Store) MarkRunning(ctx context.Context, attemptID, hostID string) (bool
 	if err := tx.Commit(ctx); err != nil {
 		return false, err
 	}
-	// Only a wait the agent reported counts: the gap between acceptance
-	// and start of a task that found its resources free is the budget slot
-	// and the checks, not a lock. An attempt never accepted has no gap to
-	// measure - a null here is "unknown", not zero.
+	// Only a wait the agent reported counts: the gap between acceptance and start
+	// of a task that found its resources free is the budget slot and the checks,
+	// not a lock.
 	if _, waited := LockBlocker(waitReason); waited && lockWait != nil {
 		metrics.ResourceLockWait.Observe(*lockWait, actionType)
 	}
 	return true, nil
 }
 
-// FailUndelivered settles a task that could not be assembled for delivery
-// and never will be by trying again: the attempt is closed with the reason,
-// the job fails with a typed code, and the tokens go back.
+// FailUndelivered settles a task that could not be assembled for delivery and
+// never will be by trying again: the attempt is closed with the reason, the
+// job fails with a typed code, and the tokens go back.
 func (s *Store) FailUndelivered(ctx context.Context, jobID, attemptID, code, message string) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -899,14 +791,7 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, attemptID, reason strin
 }
 
 // RenewAttemptLease moves the lease of an open attempt forward on a sign of
-// life from the host: a progress report or a preview line. The lease is the
-// only thing the scheduler judges a silent attempt by, so an attempt that
-// talks must not run out of it. The lease is never shortened: an extension
-// behind the current deadline changes nothing.
-//
-// It returns whether an open lease was there to renew. A closed attempt -
-// settled, reclaimed or superseded - keeps its state: the report is late,
-// and lateness is not a reason to reopen anything.
+// life from the host: a progress report or a preview line.
 func (s *Store) RenewAttemptLease(ctx context.Context, attemptID, hostID string,
 	extension time.Duration) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
@@ -926,27 +811,17 @@ func (s *Store) RenewAttemptLease(ctx context.Context, attemptID, hostID string,
 	return tag.RowsAffected() > 0, nil
 }
 
-// AttemptStatusLeaseExpired is the status of an attempt the scheduler gave
-// up on: its lease ran out with no result, and the job went back to the
-// queue.
+// AttemptStatusLeaseExpired is the status of an attempt the scheduler gave up
+// on: its lease ran out with no result, and the job went back to the queue.
 const AttemptStatusLeaseExpired = "lease_expired"
 
 // AttemptStatusSuperseded is the status of an open attempt closed by the
 // result of an earlier attempt of the same job: the panel had given the
-// earlier one up, the host had not, and its result settled the job. The
-// newer attempt did no work and reports nothing of its own.
+// earlier one up, the host had not, and its result settled the job.
 const AttemptStatusSuperseded = "superseded_by_result"
 
-// lateResultDisposition says what a result does to an attempt that already
-// has a status, by that status.
-//
-// An attempt the scheduler gave up on (lease_expired) is the ordinary case
-// of a host that outlasted its lease: the result is recorded, and the
-// attempt the redelivery opened is superseded by it. An attempt closed as
-// superseded gets nothing: the agent delivers the same result under both
-// attempts, the copy carries nothing the job does not have, and the row
-// says why the attempt exists. Every other status - none, or a result -
-// is recorded as before and supersedes nothing.
+// lateResultDisposition says what a result does to an attempt that already has
+// a status, by that status.
 func lateResultDisposition(previousStatus string) (record, supersedes bool) {
 	switch previousStatus {
 	case AttemptStatusSuperseded:
@@ -973,34 +848,12 @@ type Result struct {
 	// Detail is the result specific to the operation type, e.g. an upgrade plan.
 	Detail json.RawMessage
 	// Verification is the host's reading of itself after the change, as the
-	// contract's verifier made it. It goes onto the attempt exactly as it
-	// came: it carries a state word, a digest or a version, never the
-	// content of a file or a secret.
+	// contract's verifier made it.
 	Verification json.RawMessage
 }
 
 // RecordResult records the result of an attempt and moves the task to a final
-// state. It returns whether the result was accepted: a result that arrives
-// after the job was settled or canceled is kept for diagnostics but does not
-// overwrite the decision.
-//
-// A result on an attempt the scheduler gave up on (lease_expired) is not
-// late in that sense: the host was carrying the operation the whole time,
-// and the job is still open. It settles the job, and the newer attempt the
-// redelivery opened - which did no work - is closed as superseded by it.
-//
-// The settlement is fenced: the fence names the session the result came
-// in on and the token that session claimed the host with. A result
-// replayed from the agent's journal arrives on the host's current session
-// and is fenced with the current owner, which is right - it is the
-// session that carries the host now. A result on a session that no longer
-// owns the host - the instance holding the stream was superseded and has
-// not noticed, or its lease ran out - is refused with ErrStaleFence and
-// writes nothing; the newer instance settles the job from the replay. The
-// state is judged before the fence, so that a late result after a
-// settlement keeps its own answer (not accepted, recorded on the attempt)
-// and a stale owner keeps its own (refused): both are one row short in
-// the database, and the trail has to tell them apart.
+// state.
 func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	result Result, jobState State, fence Fence) (accepted bool, err error) {
 	tx, err := s.pool.Begin(ctx)
@@ -1032,14 +885,9 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		return false, tx.Commit(ctx)
 	}
 
-	// A final state is final: a result that arrived after a cancellation or
-	// after another settlement does not undo the decision - and does not
-	// rewrite what the attempt says either. The output and the detail of a
-	// settled job are what the operator read and the approver consented
-	// to; a late or replayed copy must not overwrite them. An attempt still
-	// open under a settled job is closed with the bare facts of the result
-	// - its status, exit code and error code - so that it does not stay
-	// open forever, and nothing more.
+	// A final state is final: a result that arrived after a cancellation or after
+	// another settlement does not undo the decision - and does not rewrite what
+	// the attempt says either.
 	if currentState.Terminal() || currentState.Validate(jobState) != nil {
 		if previousStatus == "" {
 			if _, err := tx.Exec(ctx, `
@@ -1056,22 +904,20 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		return false, tx.Commit(ctx)
 	}
 
-	// The job is open and the result would settle it: only the session
-	// that owns the host may do that. A refused write leaves the job as
-	// it was, for the owner's copy of the result.
+	// The job is open and the result would settle it: only the session that owns
+	// the host may do that.
 	if err := fenceHolds(ctx, tx, jobID, fence); err != nil {
 		return false, err
 	}
 
-	// The agent is asked to bound its output, but the bound is the task's
-	// and holds here whatever the agent sent: an agent that ignores it must
-	// not fill the database with one result.
+	// The agent is asked to bound its output, but the bound is the task's and
+	// holds here whatever the agent sent: an agent that ignores it must not fill
+	// the database with one result.
 	result.Stdout, result.Stderr, result.OutputTruncated = clampOutput(
 		result.Stdout, result.Stderr, result.OutputTruncated, maxOutput)
 
-	// The time from the hand-over to the result is the agent's task
-	// duration, measured here because this is the one place every result
-	// passes through.
+	// The time from the hand-over to the result is the agent's task duration,
+	// measured here because this is the one place every result passes through.
 	var elapsed *float64
 	if err := tx.QueryRow(ctx, `
 		update job_attempts set
@@ -1095,10 +941,9 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 		metrics.PlanStale.Inc(actionType, result.ErrorCode)
 	}
 
-	// The attempt was given up on, the job was delivered again, and the
-	// result of the first delivery is here: the redelivered attempt has
-	// nothing left to wait for. It is closed with the job, so that no lease
-	// of a settled job is left for the scheduler to reclaim.
+	// The attempt was given up on, the job was delivered again, and the result of
+	// the first delivery is here: the redelivered attempt has nothing left to
+	// wait for.
 	if supersedes {
 		if _, err := tx.Exec(ctx, `
 			update job_attempts
@@ -1130,11 +975,7 @@ func (s *Store) RecordResult(ctx context.Context, jobID, attemptID string,
 	return true, tx.Commit(ctx)
 }
 
-// clampOutput cuts the output of an attempt to the bound of its task. The
-// bound covers both streams together, stdout first: the error stream of a
-// failed command is usually the shorter and the more telling one, so it
-// keeps whatever room the standard output has not used. A cut is marked
-// as a truncation, just as one made by the agent.
+// clampOutput cuts the output of an attempt to the bound of its task.
 func clampOutput(stdout, stderr []byte, truncated bool, limit int) ([]byte, []byte, bool) {
 	if limit <= 0 || len(stdout)+len(stderr) <= limit {
 		return stdout, stderr, truncated
@@ -1160,28 +1001,11 @@ func staleReason(code string) bool {
 	return false
 }
 
-// RebootReturnGrace is how much longer than its lease a restart of a host
-// is waited for.
-//
-// The attempt of a reboot goes quiet the moment the host goes down: there
-// is no process left to renew its lease, and the lease is the panel's only
-// clock. Five minutes of silence is an ordinary reboot on a slow machine,
-// so the grace is added on top of the lease before the panel gives up -
-// and it gives up rather than queueing the task again, because a reboot
-// delivered a second time restarts a machine somebody is already waiting
-// for. A host that comes back later reconnects and settles nothing: the
-// job is closed, and the trail says the return was never observed.
+// RebootReturnGrace is how much longer than its lease a restart of a host is
+// waited for.
 const RebootReturnGrace = 10 * time.Minute
 
-// ReclaimExpiredLeases returns tasks whose lease expired to the queue. A
-// gateway can disappear without closing its session, so time is the only
-// certain signal that an attempt failed.
-//
-// A reboot is the one operation that is not given back to the queue: its
-// result is settled by the panel on the host's return (opspec.VerifierReboot),
-// so an attempt without a result is a return nobody saw, and repeating the
-// order would restart the host again. It ends failed with
-// reboot_not_observed instead.
+// ReclaimExpiredLeases returns tasks whose lease expired to the queue.
 func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	const query = `
 		with expired as (
@@ -1229,9 +1053,9 @@ func (s *Store) ReclaimExpiredLeases(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// The task asks for its tokens again when it is taken again; until
-	// then it holds none, so that the capacity of a gateway that vanished
-	// comes back to the fleet with the tasks.
+	// The task asks for its tokens again when it is taken again; until then it
+	// holds none, so that the capacity of a gateway that vanished comes back to
+	// the fleet with the tasks.
 	if err := releaseBudgets(ctx, tx, reclaimed...); err != nil {
 		return 0, err
 	}
@@ -1299,16 +1123,13 @@ func (s *Store) Get(ctx context.Context, jobID string) (*Job, error) {
 // ListFilter describes the filters of a task list.
 type ListFilter struct {
 	HostID string
-	// HostnamePrefix keeps the tasks of the hosts whose name begins with
-	// it: the operator knows a host by its name, and a name typed in full
-	// is a prefix of itself.
+	// HostnamePrefix keeps the tasks of the hosts whose name begins with it: the
+	// operator knows a host by its name, and a name typed in full is a prefix of
+	// itself.
 	HostnamePrefix string
 	State          string
-	// Action keeps one operation type; ActionPrefix a family of them, by
-	// the beginning of the name (packages. is every package operation);
-	// Actor the identity that ordered it; CampaignID the rollout the tasks
-	// belong to; FanoutID the read fan-out that ordered them; ErrorCode the
-	// result the tasks ended with.
+	// Action keeps one operation type; ActionPrefix a family of them, by the
+	// beginning of the name (packages.
 	Action       string
 	ActionPrefix string
 	Actor        string
@@ -1319,9 +1140,8 @@ type ListFilter struct {
 	Since *time.Time
 	Until *time.Time
 	Limit int
-	// Scopes narrow the result to the scopes in which the caller has the
-	// right to read. An empty list narrows nothing; an empty scope inside the
-	// list means a global permission.
+	// Scopes narrow the result to the scopes in which the caller has the right to
+	// read.
 	Scopes []Scope
 	// Sort is the order of the list; the zero value is the creation time,
 	// newest first, the order the list always had.
@@ -1332,18 +1152,15 @@ type ListFilter struct {
 // the list, or a direction that is neither asc nor desc.
 var ErrInvalidSort = errors.New("invalid sort")
 
-// Sort is the order of the task list: a column of the whitelist below and
-// a direction. The zero value stands for the default order, the creation
-// time descending.
+// Sort is the order of the task list: a column of the whitelist below and a
+// direction.
 type Sort struct {
 	Column     string
 	Descending bool
 }
 
 // ParseSort reads a sort as the API carries it: column, column:asc or
-// column:desc. An empty value is the default order; a bare created_at is
-// read as created_at:desc, because a list of tasks is read newest first
-// and a caller naming the column without a direction means that.
+// column:desc.
 func ParseSort(value string) (Sort, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1382,10 +1199,9 @@ func (s Sort) String() string {
 	return s.Column + ":asc"
 }
 
-// sortColumn is one column the list can be ordered by: the SQL expression
-// that carries its order, the type the cursor's value is cast back to, the
-// rendering of a row's value for the cursor and the check of a value that
-// came back in one.
+// sortColumn is one column the list can be ordered by: the SQL expression that
+// carries its order, the type the cursor's value is cast back to, the
+// rendering of a row's value for the cursor and the check of a value that came
 type sortColumn struct {
 	expression string
 	kind       string
@@ -1393,11 +1209,7 @@ type sortColumn struct {
 	valid      func(string) bool
 }
 
-// sortColumns are the columns the task list can be ordered by. Every
-// expression is free of nulls, so the pair (expression, id) is a total
-// order a cursor can stand on: a task not finished yet sorts as the
-// earliest possible moment, apart from every task that did finish, and a
-// task whose host is gone sorts under an empty name.
+// sortColumns are the columns the task list can be ordered by.
 var sortColumns = map[string]sortColumn{
 	"created_at": {
 		"created_at", "timestamptz", func(j Job) string { return paging.FormatTime(j.CreatedAt) }, validTimeKey,
@@ -1448,12 +1260,7 @@ func validTimeKey(value string) bool {
 type Scope struct {
 	Site        string
 	Environment string
-	// Team is the group of hosts a binding names instead of a site. The
-	// listing cannot express it - the jobs table has no team column, and
-	// the boundary is a property of the host - so a scope that carries one
-	// narrows this listing to nothing rather than to everything. A screen
-	// that has to show a team's jobs asks the host listing which hosts
-	// those are and filters by them.
+	// Team is the group of hosts a binding names instead of a site.
 	Team string
 }
 
@@ -1463,9 +1270,8 @@ func (f ListFilter) conditions() ([]string, []any) {
 		conditions []string
 		args       []any
 	)
-	// A task belongs to a host, so it inherits visibility from it: the
-	// operator of one environment must not see the tasks of the whole
-	// fleet.
+	// A task belongs to a host, so it inherits visibility from it: the operator
+	// of one environment must not see the tasks of the whole fleet.
 	if len(f.Scopes) > 0 {
 		translated := make([]authz.Scope, 0, len(f.Scopes))
 		for _, scope := range f.Scopes {
@@ -1486,9 +1292,9 @@ func (f ListFilter) conditions() ([]string, []any) {
 		conditions = append(conditions, fmt.Sprintf("%s = $%d", column, len(args)))
 	}
 	add("host_id", f.HostID)
-	// The name is compared as a string, like the operation prefix: a
-	// hostname carries dots and dashes, and an underscore typed by mistake
-	// must not turn into a wildcard.
+	// The name is compared as a string, like the operation prefix: a hostname
+	// carries dots and dashes, and an underscore typed by mistake must not turn
+	// into a wildcard.
 	if f.HostnamePrefix != "" {
 		args = append(args, f.HostnamePrefix)
 		conditions = append(conditions, fmt.Sprintf(
@@ -1528,10 +1334,8 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Job, error) {
 	return page.Items, nil
 }
 
-// Cursor is the key of the last task of the previous page: the order the
-// page was read in, the value of the sorted column on that task and its
-// identifier. The order travels with the cursor so a token issued for one
-// order is refused under another, rather than read as a key of nothing.
+// Cursor is the key of the last task of the previous page: the order the page
+// was read in, the value of the sorted column on that task and its identifier.
 type Cursor struct {
 	Sort  Sort
 	Value string
@@ -1567,9 +1371,7 @@ func (c Cursor) String() string {
 	return paging.Encode(c.Sort.String(), c.Value, c.ID)
 }
 
-// Matches says whether the cursor was issued for the given order. A page
-// asked for under another order with this cursor would start from a key
-// of the wrong kind, so the caller refuses the request instead.
+// Matches says whether the cursor was issued for the given order.
 func (c Cursor) Matches(order Sort) bool {
 	return !c.Set || c.Sort.String() == order.String()
 }
@@ -1581,17 +1383,8 @@ type ListPage struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// ListPaged reads the tasks matching the filter page by page, in the order
-// the filter's Sort names - newest first by default. The key is (sorted
-// column, id): two tasks ordered in the same microsecond, or in the same
-// state, still have an order, so a page boundary between them loses
-// neither.
-//
-// The paging stays keyset under a sort rather than falling back to an
-// offset: the cursor carries the sorted column's value on the last row
-// and the order itself, so the next page starts after that row whatever
-// tasks arrived or changed state in the meantime - and on a list sorted
-// by state they change state all the time.
+// ListPaged reads the tasks matching the filter page by page, in the order the
+// filter's Sort names - newest first by default.
 func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor, limit int) (ListPage, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -1610,9 +1403,8 @@ func (s *Store) ListPaged(ctx context.Context, filter ListFilter, cursor Cursor,
 	}
 	conditions, args := filter.conditions()
 	if cursor.Set {
-		// The key comes back as text and is cast to the column's type in
-		// the query, so one cursor format serves a name, a state and a
-		// timestamp alike.
+		// The key comes back as text and is cast to the column's type in the query,
+		// so one cursor format serves a name, a state and a timestamp alike.
 		args = append(args, cursor.Value, cursor.ID)
 		conditions = append(conditions, fmt.Sprintf("(%s, id) %s ($%d::%s, $%d::uuid)",
 			column.expression, comparison, len(args)-1, column.kind, len(args)))
@@ -1734,9 +1526,8 @@ func (s *Store) queryJobs(ctx context.Context, q queryable, clause string, args 
 			&j.CancelRequestedAt, &j.CancelAckAt, &j.CancelOutcome, &j.CancelPhase); err != nil {
 			return nil, err
 		}
-		// Every view of a task carries the number of collected approvals:
-		// without it the operator clicks "approve" and does not know why
-		// nothing happened.
+		// Every view of a task carries the number of collected approvals: without it
+		// the operator clicks "approve" and does not know why nothing happened.
 		j.CollectedApprovals = collected
 		jobs = append(jobs, j)
 	}
@@ -1765,14 +1556,10 @@ func nullableJSON(value json.RawMessage) any {
 }
 
 // AttemptOwner returns the task an attempt belongs to, together with the
-// status the attempt has right now. The agent sends the result back with
-// the attempt identifier, so the gateway has to find the job; the status
-// tells it whether the scheduler had given the attempt up already.
+// status the attempt has right now.
 func (s *Store) AttemptOwner(ctx context.Context, attemptID, hostID string) (jobID, action, status string, err error) {
-	// The attempt must belong to the host that reports it: a host that
-	// learned another host's attempt identifier must not settle that
-	// host's operation. The identity comes from the certificate, never
-	// from the message.
+	// The attempt must belong to the host that reports it: a host that learned
+	// another host's attempt identifier must not settle that host's operation.
 	err = s.pool.QueryRow(ctx, `
 		select a.job_id, j.action_type, coalesce(a.status, '')
 		  from job_attempts a join jobs j on j.id = a.job_id
@@ -1783,9 +1570,7 @@ func (s *Store) AttemptOwner(ctx context.Context, attemptID, hostID string) (job
 	return jobID, action, status, err
 }
 
-// LastAttempt returns the identifier of the operation's last attempt. An
-// empty one means an operation that has not been delivered yet - there is
-// then nothing to interrupt on the host.
+// LastAttempt returns the identifier of the operation's last attempt.
 func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
 	var attemptID string
 	err := s.pool.QueryRow(ctx, `
@@ -1800,8 +1585,6 @@ func (s *Store) LastAttempt(ctx context.Context, jobID string) (string, error) {
 }
 
 // AttemptContext returns the attempt's operation together with its campaign.
-// Progress ordered in a campaign has to reach the campaign screen as well,
-// and the agent knows only the attempt identifier.
 func (s *Store) AttemptContext(ctx context.Context, attemptID, hostID string) (jobID, campaignID string, err error) {
 	var campaign *string
 	// Bound to the reporting host for the same reason as AttemptOwner: a

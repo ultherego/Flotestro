@@ -8,24 +8,10 @@ import (
 )
 
 // The fleet-wide counts the module screens rest on.
-//
-// A screen of the whole fleet - the certificates, the backups, the
-// findings - used to read the first five hundred hosts and add them up in
-// the panel, so on a bigger fleet it showed a plausible number that was
-// wrong. The numbers here are counted by the database over every host the
-// caller may see, with the same scope condition the host list applies, so
-// the screen and the list never disagree about how many hosts there are.
 
-// ScopeCondition renders the visibility of a host row for the given
-// scopes: the condition of this package's ScopeSQL, or "true" for a
-// caller who sees the whole fleet. An empty scope list gives "false" - no
-// scope is no host, never every host - so a query that concatenates the
-// result cannot widen what a reader sees by leaving the condition out.
-//
-// teamColumn is the team column of the host row being counted. It is
-// asked for rather than guessed, because a count that reads a team
-// binding with the site columns alone would answer with the whole fleet:
-// a team binding carries the wildcard site and environment.
+// ScopeCondition renders the visibility of a host row for the given scopes:
+// the condition of this package's ScopeSQL, or "true" for a caller who sees
+// the whole fleet.
 func ScopeCondition(scopes []authz.Scope, siteColumn, envColumn, teamColumn string, offset int) (string, []any) {
 	condition, args := ScopeSQL(scopes, siteColumn, envColumn, teamColumn, offset)
 	if condition == "" {
@@ -34,9 +20,9 @@ func ScopeCondition(scopes []authz.Scope, siteColumn, envColumn, teamColumn stri
 	return condition, args
 }
 
-// ModuleCoverage says, for one inventory module, how much of the visible
-// fleet has reported it: a screen that judges hosts by that module needs
-// to say how many hosts it judged and how many it could not.
+// ModuleCoverage says, for one inventory module, how much of the visible fleet
+// has reported it: a screen that judges hosts by that module needs to say how
+// many hosts it judged and how many it could not.
 type ModuleCoverage struct {
 	// Hosts is the number of hosts in scope.
 	Hosts int
@@ -61,9 +47,9 @@ func (c ModuleCoverage) Missing() int {
 	return missing
 }
 
-// Unknown counts the hosts a screen must not describe as anything: the
-// ones without a fragment, the ones whose module could not be read and
-// the ones whose fragment is too old to trust.
+// Unknown counts the hosts a screen must not describe as anything: the ones
+// without a fragment, the ones whose module could not be read and the ones
+// whose fragment is too old to trust.
 func (c ModuleCoverage) Unknown() int {
 	return c.Missing() + c.Unavailable + c.Stale
 }
@@ -75,8 +61,7 @@ func (c ModuleCoverage) Evaluated() int {
 }
 
 // ModuleCoverage counts the hosts in scope by the state of one module's
-// fragment. staleBefore is the oldest observation still trusted; a
-// fragment observed before it counts as stale.
+// fragment.
 func (s *Store) ModuleCoverage(ctx context.Context, scopes []authz.Scope, module string,
 	staleBefore time.Time) (ModuleCoverage, error) {
 	args := []any{module, staleBefore}

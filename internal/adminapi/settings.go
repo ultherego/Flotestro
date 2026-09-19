@@ -10,10 +10,7 @@ import (
 	"github.com/ultherego/flotestro/internal/housekeeping"
 )
 
-// The settings screen: what this panel was started with, read-only. An
-// administrator debugging a login or a feed asks first "which issuer is
-// this panel talking to, and with which client" - the answer was in the
-// process environment and nowhere in the panel.
+// The settings screen: what this panel was started with, read-only.
 
 // settingsSource is where the values are set. The screen names it, so
 // whoever wants a change knows where to make it.
@@ -74,10 +71,8 @@ func durationFact(key string, value time.Duration) settingsFact {
 	return fact(key, value.String())
 }
 
-// handleSettings returns the effective configuration with the secrets
-// masked. The permission is settings.read, which the platform
-// administrator holds; principal.manage stands in for it, because whoever
-// decides who may do what in the panel may also see how it is set up.
+// handleSettings returns the effective configuration with the secrets masked.
+// The permission is settings.
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() || !principal.Can(authz.PermSettingsRead, authz.GlobalScope) {
@@ -132,9 +127,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		Detail: map[string]any{},
 	})
 
-	// The switches the gateway, the scheduler and the sweeper run with come
-	// from the process rather than from the effective configuration; a
-	// panel started without them shows the rows empty rather than made up.
+	// The switches the gateway, the scheduler and the sweeper run with come from
+	// the process rather than from the effective configuration; a panel started
+	// without them shows the rows empty rather than made up.
 	var process Process
 	if s.process != nil {
 		process = *s.process
@@ -218,10 +213,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			durationFact("nvd_interval", vulnerabilities.NVDInterval),
 			feedAge("nvd", vulnerabilities.NVDURL),
 		}},
-		// The audit retention stands apart from the working record: the
-		// trail is evidence and is kept forever unless the installation
-		// decides otherwise, while the jobs, the campaigns and the
-		// delivered events are always swept after their retention.
+		// The audit retention stands apart from the working record: the trail is
+		// evidence and is kept forever unless the installation decides otherwise,
+		// while the jobs, the campaigns and the delivered events are always swept
 		{Key: "retention", Title: "Retention", Facts: []settingsFact{
 			durationFact("metrics_raw", effective.MetricsRawRetention),
 			durationFact("metrics_rollup", effective.MetricsRollupRetention),
@@ -232,9 +226,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			durationFact("outbox_events", sweeps.Outbox),
 			fact("secrets_key_file", effective.SecretsKeyFile),
 		}},
-		// The shape of the connection pool and how the schema is brought
-		// forward: the two settings an operator compares with what the
-		// database server allows and with how the deployment migrates.
+		// The shape of the connection pool and how the schema is brought forward:
+		// the two settings an operator compares with what the database server allows
+		// and with how the deployment migrates.
 		{Key: "database", Title: "Database", Facts: []settingsFact{
 			fact("pool_max_conns", effective.DatabasePool.MaxConns),
 			fact("pool_min_conns", effective.DatabasePool.MinConns),

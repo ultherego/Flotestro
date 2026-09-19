@@ -2,14 +2,8 @@ package opspec
 
 import "errors"
 
-// The guide to error codes.
-//
-// A code answers two questions: what happened and what can safely be done
-// next. The message is for people; the code is for policy and automation,
-// so it never carries a hostname, a path or a package name - those are in
-// the structured detail. Whether a retry helps is a decision of the server
-// derived from the class of the error and the stage it happened at, never
-// from matching the message.
+// The guide to error codes. A code answers two questions: what happened and
+// what can safely be done next.
 
 // RetryPolicy says whether repeating the same thing can succeed.
 type RetryPolicy string
@@ -32,12 +26,8 @@ const (
 type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
-	// admission, dispatch, agent, helper, verify, reconcile, approval,
-	// cancel, startup for the states the panel refuses to start in,
-	// notification for the dead letters of the notification queue,
-	// directory for the phases of a change the control plane carries out
-	// in the directory, or monitoring for the machinery behind the charts
-	// and the alert rules.
+	// admission, dispatch, agent, helper, verify, reconcile, approval, cancel,
+	// startup for the states the panel refuses to start in, notification for the
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -47,12 +37,9 @@ type ErrorGuide struct {
 	// CountsAsFailure says whether the code raises the failure rate of a
 	// campaign. An excluded or skipped host is visible but not a failure.
 	CountsAsFailure bool `json:"counts_as_failure"`
-	// Alias is the code the panel really puts on a job or a target when
-	// this entry is one of the names the campaigns document uses for the
-	// same condition. The document's name stays searchable in the guide
-	// ("also reported as ..."), and a screen looking up a code from the
-	// document lands on the same advice as one looking up the reported
-	// code; a plain entry has no alias.
+	// Alias is the code the panel really puts on a job or a target when this
+	// entry is one of the names the campaigns document uses for the same
+	// condition.
 	Alias string `json:"alias,omitempty"`
 }
 
@@ -74,16 +61,11 @@ func ErrorGuideFor(code string) (ErrorGuide, bool) {
 }
 
 // errorGuides is the guide as served: the codes the machinery reports,
-// followed by the names of the campaigns document that stand for one of
-// them. The aliases are derived at start from the entries they point at,
-// so the two can never say different things about the same condition.
+// followed by the names of the campaigns document that stand for one of them.
 var errorGuides = withAliases(reportedGuides, documentAliases)
 
 // documentAlias is a name the campaigns document (chapter 51) gives a
-// condition the panel reports under another code. Meaning says, in the
-// document's terms, which reported codes it stands for; the stage, the
-// retry policy, the action and the failure count come from the reported
-// code.
+// condition the panel reports under another code.
 type documentAlias struct {
 	code, reportedAs, meaning string
 }
@@ -97,9 +79,7 @@ var documentAliases = []documentAlias{
 		meaning: "The selector names more hosts than the policy lets one campaign carry; the panel reports it as selector_too_broad."},
 }
 
-// withAliases appends the document's names to the guide. An alias whose
-// reported code is not in the guide is a mistake in this file and fails
-// at start rather than serving advice about nothing.
+// withAliases appends the document's names to the guide.
 func withAliases(guides []ErrorGuide, aliases []documentAlias) []ErrorGuide {
 	result := make([]ErrorGuide, 0, len(guides)+len(aliases))
 	result = append(result, guides...)
@@ -282,9 +262,7 @@ var reportedGuides = []ErrorGuide{
 	{Code: "secret_unavailable", Stage: "dispatch", Retry: RetryAutomatic,
 		Meaning: "The secret the operation needs could not be issued.",
 		Action:  "Fix the secret store; the attempt is repeated until the deadline.", CountsAsFailure: true},
-	// The states the control plane refuses to start in. They never land on
-	// a job; they are in the guide because the log names them and the
-	// operator looks them up here first.
+	// The states the control plane refuses to start in.
 	{Code: "secrets_key_unavailable", Stage: "startup", Retry: RetryAfterChange,
 		Meaning: "The installation has secrets or a recorded key, and the key that opens them is missing or is not the installation's.",
 		Action:  "Restore keys/<key-id>.key (or secrets.key) from the backup of the state directory; never generate a key in its place. See docs/runbooks/db-restore.md."},
@@ -338,9 +316,9 @@ var reportedGuides = []ErrorGuide{
 	{Code: ErrorRebootNotObserved, Stage: "verify", Retry: RetryReadState,
 		Meaning: "The reboot was ordered and accepted by the host, and no session with a new boot identifier followed within the wait: the host is down, is up without the agent, or came back so late that the wait ran out first.",
 		Action:  "Check the host out of band. A host that comes back later reconnects on its own; the job stays failed, because nobody saw the return in time.", CountsAsFailure: true},
-	// The gate in front of a vulnerability feed: a fetch that lost most of
-	// what the snapshot in force holds is a source in trouble far more
-	// often than a fleet that became safe overnight.
+	// The gate in front of a vulnerability feed: a fetch that lost most of what
+	// the snapshot in force holds is a source in trouble far more often than a
+	// fleet that became safe overnight.
 	{Code: "feed_shrank", Stage: "startup", Retry: RetryAfterChange,
 		Meaning: "A fetch of a vulnerability feed carried far fewer findings than the snapshot in force, so it was not activated.",
 		Action:  "Compare the two counts on the Vulnerabilities screen; accept the fetch there if the vendor really retired the findings, otherwise fix the source. The previous snapshot stays in force and ages into stale."},
@@ -542,9 +520,7 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Read the journal without the boot filter and narrow it by time, or upgrade the agent on the host; not a failure."},
 
 	// The plan envelope: the binding of a plan to its execution (security
-	// remediation, chapter 7.1 and 7.2). stale_plan, the shared refusal of
-	// a plan whose fingerprint moved, is listed with the plans bound to a
-	// stable identity below.
+	// remediation, chapter 7.
 	{Code: "replan_required", Stage: "helper", Retry: RetryAfterReplan,
 		Meaning: "The plan was made by another version of the planner than the one that would execute it - the agent or the helper was upgraded between the plan and the change. That is not a change of the host and not a broken plan: the new planner computes something else for the same host, so the old consent cannot be carried over.",
 		Action:  "Compute the plan again with the current planner and approve the new set; the previous approval does not apply.", CountsAsFailure: true},
@@ -573,10 +549,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The repair ran on the filesystem and a second, read-only pass still finds errors. fsck exits non-zero for a successful repair and for a failed one alike, so the operation is settled by that second pass and not by the code of the first.",
 		Action:  "The filesystem needs a person at the console: unmount it, run the check by hand and read what it says, or restore from a backup. Ordering the same repair again changes nothing.", CountsAsFailure: true},
 
-	// The layers above a bare disk: the software array and the volume
-	// manager. An array is named by the UUID in its superblock and a group
-	// or a volume by its LVM UUID, because a path and a name both belong to
-	// something else after a reboot or a rename.
+	// The layers above a bare disk: the software array and the volume manager.
 	{Code: "array_unknown", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The host has no software array under that path, the kernel has no md driver at all, or the array carries no UUID to bind the change to - which is what an array whose superblock could not be read looks like. Nothing was done to any array.",
 		Action:  "Read the storage tab: an array without a UUID says why it has none (usually a host without mdadm). Install mdadm on the host, or order the change on the host that really holds the array.", CountsAsFailure: true},
@@ -606,13 +579,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A Compose service or a declared container names its image by a tag the host could resolve to a digest neither at the registry (no network, or a private registry the host is not logged into) nor among the images already on the host. The plan binds digests, so it was not computed.",
 		Action:  "Pin the digest in the description (image@sha256:...), pull the image on the host first, or give the host access to the registry; then plan again.", CountsAsFailure: true},
 
-	// Declared containers, networks and volumes. The engine can change a
-	// handful of a running container's settings and refuses the rest, and
-	// it can change nothing at all about a network's address range or a
-	// volume's driver - so a description that differs is carried out by
-	// destroying the object and making it again. These are the refusals
-	// that stop such a replacement where nobody consented to what it
-	// costs.
+	// Declared containers, networks and volumes.
 	{Code: "docker_object_conflict", Stage: "planning", Retry: RetryAfterChange,
 		Meaning: "The object on the host differs in a setting the engine cannot change in place - a volume's driver or driver option, a network's address range - so bringing it to the description means destroying it and creating it again. A volume recreated is a volume emptied, and the order did not say it accepts that.",
 		Action:  "Read the change list of the plan. Declare the object the way it already stands, give the new one another name, or order the change again with force once the data in it is accounted for.", CountsAsFailure: true},
@@ -627,10 +594,7 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Read the engine state of the host again; the object is already gone, or it was never on this host.", CountsAsFailure: true},
 
 	// The inner identity envelope of a session through a relay (security
-	// remediation, chapter 4). The gateway refuses the session, the
-	// message or the call and writes the code on the host as its last
-	// connection refusal; none of these sits on a job, so none counts
-	// against a campaign.
+	// remediation, chapter 4).
 	{Code: "relay_envelope_invalid", Stage: "admission", Retry: RetryAfterChange,
 		Meaning: "The identity envelope of a relayed message could not be accepted: another layout, a relay or a host other than the one the message came through or was named for, a message kind other than the payload, a missing envelope on a session that signed its Hello (that message alone is dropped), a spent or foreign renewal challenge, or no public key on record to check it against.",
 		Action:  "Read the detail on the host. A layout or a missing key is a release to bring level - panel, relay, agent, in that order; a relay or a host that does not match is a path to inspect before the host is trusted again."},
@@ -659,10 +623,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The skip named a host that is not waiting for its connection: a host under way settles on its own, a host in the queue starts on the next pass, and a settled host is settled.",
 		Action:  "Read the host's state again. Cancel the campaign to stop a host that has not started; a host carrying its task cannot be skipped."},
 
-	// Local accounts and their keys (security remediation, chapter 14.1).
-	// The host edits the key file line by line under the account lock and
-	// refuses, with the code, what would cut an account off or write
-	// what nobody reviewed.
+	// Local accounts and their keys (security remediation, chapter 14. 1).
 	{Code: "account_without_credential", Stage: "admission", Retry: RetryAfterChange,
 		Meaning: "The order would create an account with no key and, since the panel sets no passwords, no way to log in - and did not say so.",
 		Action:  "Give the account a key, or set inactive: true to create it deliberately without a way in; the panel then shows it as locked."},
@@ -682,9 +643,8 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The account's identifier lies outside the UID range of people in the host's login.defs (UID_MIN..UID_MAX): it belongs to a service or to the system, and the order did not say it meant one.",
 		Action:  "Pick the account of a person; a change to a service account is ordered with system: true, and root and the agent's own account are never changed through the panel.", CountsAsFailure: true},
 
-	// The dead letters of the notification queue (security remediation,
-	// chapter 10). The stage is the delivery of a notification, not a
-	// task; none of them counts against a campaign.
+	// The dead letters of the notification queue (security remediation, chapter
+	// 10).
 	{Code: "channel_credentials_rejected", Stage: "notification", Retry: RetryAfterChange,
 		Meaning: "The receiver of a notification channel answered 401 or 403, or the mail relay refused the login: the credential of the channel is wrong or revoked. The message is a dead letter.",
 		Action:  "Replace the credential on the channel (the incoming webhook address, the signing secret, the password secret) and retry the dead letters from the notifications screen."},
@@ -701,10 +661,8 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A notification channel cannot send as it is: it was disabled while its messages waited, its configuration does not read, or the panel has no sender for its kind.",
 		Action:  "Enable or correct the channel and retry the dead letters; the messages of a channel that is to stay disabled can be left as they are."},
 
-	// The lifecycle orders that travel between the instances of the
-	// control plane (security remediation, chapter 6). None of them is a
-	// failure of a change on a host: they say where the decision is and
-	// what has not been confirmed yet.
+	// The lifecycle orders that travel between the instances of the control plane
+	// (security remediation, chapter 6).
 	{Code: "lifecycle_handover_pending", Stage: "reconcile", Retry: RetryReadState,
 		Meaning: "The host holds its session on another instance of the panel, the order to end its membership was written for that instance, and it had not answered within the wait. The host stands in retiring; nothing about its disk is decided.",
 		Action:  "Read the host page: the owning instance finishes the handshake on its own and the host turns retired. Repeating the decommission afterwards picks the host up from retiring; do not wipe the machine until the phase says committed. Not a failure."},
@@ -715,9 +673,8 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A quarantine or an identity recovery asked the instance holding the host's session to end it, and that instance did not answer within the wait. The decision itself is recorded, and the gateway refuses the host at its next connection.",
 		Action:  "Nothing at once: the ownership claim of a dead instance runs out within a minute and the session with it. Check the host's connection state on its page; a host that still heartbeats after that has an instance that is not reading its orders - restart it."},
 
-	// Replacing the agent with a named release (security remediation,
-	// chapter 14.5). Each of these is answered before the package database
-	// is touched, so the host keeps the version it runs.
+	// Replacing the agent with a named release (security remediation, chapter 14.
+	// 5).
 	{Code: "agent_upgrade_metadata_stale", Stage: "agent", Retry: RetryAutomatic,
 		Meaning: "The host did not confirm that it refreshed its repository metadata, so the version the order names may not be installable from the lists its package manager holds. The replacement was not started.",
 		Action:  "Read the reason the refresh carries in the message - an unreachable repository, a busy package manager - and order again once the host can reach its repository.", CountsAsFailure: true},
@@ -731,11 +688,7 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The order named a version to go back to and the host could not keep its package file: it is neither in the package cache nor in the repository. The upgrade was not started, because a prepared return that does not exist is worse than an upgrade postponed.",
 		Action:  "Put the named version back into the repository the host uses, or order the upgrade without a version to go back to and accept that a return would then depend on the repository.", CountsAsFailure: true},
 
-	// The phases of a directory change (security remediation, chapter
-	// 14.3). None of them sits on a job of a host, so none counts against a
-	// campaign; they are in the guide because the change screen shows them
-	// and an operator looks them up here. A plan the directory moved under
-	// is reported as stale_plan, the shared code listed above.
+	// The phases of a directory change (security remediation, chapter 14. 3).
 	{Code: "directory_moddn_unsupported", Stage: "preflight", Retry: RetryAfterChange,
 		Meaning: "The preflight asked the directory what it can do and it proved it cannot preserve an account: the connector's service account may not move an entry, or the container of preserved accounts is not there. Nothing was ordered and the local account was not touched.",
 		Action:  "Run the directory provisioning step for preserving accounts: it gives the connector's service account the four rights the move needs - System: Preserve User for the move itself, System: Modify User RDN for the name it carries, System: Read Preserved Users so the directory can report what it moved, and System: Modify Preserved Users because the directory clears the password of the entry it preserves - through the privilege Flotestro Preserve Users and the role Flotestro Directory Connector, and nothing else. It is safe to repeat - a second run changes nothing. If the directory refuses the connector that step too, the refusal names the ipa commands a directory administrator runs instead. A directory that merely does not report its rights does not raise this."},
@@ -749,10 +702,8 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The directory did not answer, so nothing is known about what it would have done and nothing was changed anywhere.",
 		Action:  "Check the connector on the identity screen - the keytab, the KDC, the directory itself - and order again once it answers."},
 
-	// The built-in monitoring (security remediation, chapters 12 and 16).
-	// None of these sits on a job of a host, so none counts against a
-	// campaign. They are in the guide because a gap in a chart and a
-	// refused start both have to name a reason somebody can look up.
+	// The built-in monitoring (security remediation, chapters 12 and 16). None of
+	// these sits on a job of a host, so none counts against a campaign.
 	{Code: "metric_sample_too_old", Stage: "monitoring", Retry: RetryNever,
 		Meaning: "A resource sample reached the panel older than the raw samples are kept for, so it was not stored: writing it would put a reading into a window the retention drops in the same pass. The host was told so and dropped its copy, and the chart keeps a gap at that moment rather than a line drawn through it.",
 		Action:  "Read how long the host or its relay was cut off: a gap longer than the maximum lateness is the outage, not a fault. Raise the maximum lateness and the raw retention together if such an outage has to be recoverable; the panel refuses a retention shorter than the query window plus the lateness."},
@@ -766,15 +717,8 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "The panel refused to start because the raw retention is shorter than the window it offers at full resolution plus the longest a sample may take to arrive. Such a configuration deletes a reading a relay is still carrying, by definition and without anybody ordering it.",
 		Action:  "Raise the raw retention to at least the sum, or lower the raw query window or the maximum lateness. The three are named in the configuration reference under the monitoring settings."},
 
-	// The proof of the management channel after a change of the network or
-	// the firewall (security remediation, chapter 14.4). Such a change arms a
-	// rescue plan before it touches the host, and only a call the host makes
-	// with its own identity, acknowledged by the panel, disarms it.
-	// The layered network changes (ROADMAPE, gap 8). Every one of these is a
-	// refusal about a relation on the host - what owns what, what the panel
-	// itself talks over - rather than about a wrong value, so each has a
-	// code of its own: an operator told only "malformed" would have no idea
-	// which of five relations was in the way.
+	// The proof of the management channel after a change of the network or the
+	// firewall (security remediation, chapter 14.
 	{Code: "link_member_taken", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "An interface named as a member of the bond or the bridge is already owned by another layer, or is a VLAN running on one. Taking it would remove it from there and stop whatever runs over that layer, so nothing was written.",
 		Action:  "Read the layering of the host. Take the interface out of the layer that owns it first, or build this one from interfaces that are free.", CountsAsFailure: true},
@@ -814,11 +758,7 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Wait for the rollback, read the state of the host, and order the change again only with a rule that leaves the management channel working - or, deliberately, with break-glass consent.", CountsAsFailure: true},
 }
 
-// RefusalError is a validation refusal with a code of its own. Validate
-// returns plain errors for a malformed payload - the interface shows the
-// message and that is enough - but a refusal on grounds other than shape
-// needs a code the interface can act on: a protocol the panel does not
-// speak is a fact about the release, not a typo in the order.
+// RefusalError is a validation refusal with a code of its own.
 type RefusalError struct {
 	Code string
 	Err  error
@@ -832,10 +772,8 @@ func (e *RefusalError) Error() string { return e.Code + ": " + e.Err.Error() }
 
 func (e *RefusalError) Unwrap() error { return e.Err }
 
-// RefusalCode returns the code of a validation error: the refusal's own
-// one, or invalid_payload for a plain validation error. The handlers that
-// call Validate answer with it, so the interface tells a wrong shape from
-// a refused release.
+// RefusalCode returns the code of a validation error: the refusal's own one,
+// or invalid_payload for a plain validation error.
 func RefusalCode(err error) string {
 	var refusal *RefusalError
 	if errors.As(err, &refusal) {

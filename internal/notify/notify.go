@@ -1,25 +1,5 @@
-// Package notify carries what the fleet says to the people who are not
-// looking at the panel.
-//
-// The durable trail already records every state change; the outbox
-// delivers it to one webhook set in the environment. A channel is the
-// same idea made a record of the panel: an address, the subjects it
-// carries and the part of the fleet it speaks for, written by an
-// administrator with a reason. The router is one more consumer of the
-// trail, with a cursor of its own, so the legacy webhook and the channels
-// move independently and neither holds the other back.
-//
-// Three rules hold throughout. A credential never lies in a channel: the
-// address of an incoming webhook, the key a webhook is signed with and a
-// mail password are versions of the secret store, and the API shows only
-// that one is set and when it was last replaced. A receiver that is down
-// is a fact the queue records, never a reason to lose the message: the
-// router writes one durable row per event and channel, a worker sends it
-// under a lease and retries with a growing pause, and a row whose
-// attempts ran out is a dead letter an operator can send again - the
-// trail's cursor is never the only record of what was sent. And a
-// channel of one site is told nothing it cannot be sure is that site's:
-// an event that names no site reaches only a channel of the whole fleet.
+// Package notify carries what the fleet says to the people who are not looking
+// at the panel.
 package notify
 
 import (
@@ -43,21 +23,16 @@ const (
 // Kinds lists the kinds a channel can be of.
 var Kinds = []string{KindWebhook, KindEmail, KindSlackWebhook}
 
-// Subject is one thing a channel can be told about. It is coarser than
-// an event of the trail: campaign.finished stands for every terminal
-// state of a campaign, so an operator subscribes to "the campaign ended"
-// without listing six states.
+// Subject is one thing a channel can be told about. It is coarser than an
+// event of the trail: campaign.
 type Subject struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
 // SubjectSecurity is the subject of the security alerts of the whole
-// installation: a duplicate identity, a helper that refused a signature,
-// a relay envelope that did not verify. They are global by nature - the
-// installation's, not a site's - so a silence bound to a host or a rule
-// never keeps them back; only a global silence does, and writing one
-// needs the global permission.
+// installation: a duplicate identity, a helper that refused a signature, a
+// relay envelope that did not verify.
 const SubjectSecurity = "security.alert"
 
 // Subjects is the catalogue of what a channel can carry.
@@ -74,8 +49,6 @@ var Subjects = []Subject{
 }
 
 // subjectOfEvent maps a type of the trail to the subject it belongs to.
-// The terminal campaign states are the ones campaigns_state_check names
-// as ends; the rest of the campaign states are phases, not news.
 var subjectOfEvent = map[string]string{
 	"alert.fired":                    "alert.fired",
 	"alert.resolved":                 "alert.resolved",
@@ -135,19 +108,12 @@ type Filter struct {
 	// events that are not alerts have no severity and pass.
 	SeverityMin string `json:"severity_min,omitempty"`
 	// Site and Environment narrow to the events of one part of the fleet.
-	// Both empty is the explicitly global channel: it carries the events
-	// of every site and the ones that name no site - a campaign's end,
-	// a security alert of the installation. A channel that names a site
-	// is told only what is known to be that site's: an event whose site
-	// is unknown fails the filter rather than passing it, because "we do
-	// not know where this happened" is no reason to tell one site.
 	Site        string `json:"site,omitempty"`
 	Environment string `json:"environment,omitempty"`
 }
 
-// Global says whether the filter names no part of the fleet: the channel
-// of the whole installation, the only kind an event of unknown place
-// reaches.
+// Global says whether the filter names no part of the fleet: the channel of
+// the whole installation, the only kind an event of unknown place reaches.
 func (f Filter) Global() bool {
 	return f.Site == "" && f.Environment == ""
 }
@@ -160,11 +126,7 @@ type Scope struct {
 	Severity    string
 }
 
-// Matches says whether an event of the scope passes the filter. The
-// place is fail-closed: a filter that names a site or an environment
-// wants the event to name the same one, and an event that names none
-// fails. The severity is not: an event that is not an alert has no
-// severity by nature, and the filter on severity speaks of alerts alone.
+// Matches says whether an event of the scope passes the filter.
 func (f Filter) Matches(scope Scope) bool {
 	if f.SeverityMin != "" && scope.Severity != "" &&
 		severityRank(scope.Severity) < severityRank(f.SeverityMin) {
@@ -191,15 +153,11 @@ type Channel struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
 	Kind string `json:"kind"`
-	// Config is the configuration of the kind without its credential:
-	// what the API shows and takes. The credential travels in it only on
-	// the way in - a typed secret, a typed address - and is moved to the
-	// secret store before the row is written; on the way out the store
-	// leaves the flags secret_set and url_set in its place.
+	// Config is the configuration of the kind without its credential: what the
+	// API shows and takes.
 	Config json.RawMessage `json:"config"`
 	// PublicConfig is the summary of the address the API shows beside the
-	// configuration: the host of an incoming webhook, the relay of a
-	// mailbox. Nothing in it is a credential.
+	// configuration: the host of an incoming webhook, the relay of a mailbox.
 	PublicConfig json.RawMessage `json:"public_config"`
 	// SecretConfigured says the channel has its credential in the secret
 	// store; SecretRotatedAt is when it was last set or replaced.
@@ -218,9 +176,8 @@ type Channel struct {
 	// glance whether the channel works.
 	LastDelivery *DeliverySummary `json:"last_delivery,omitempty"`
 
-	// secret is the credential read from the store for one send; it is
-	// never encoded and never kept past the send. secretRef is the
-	// identifier of the secret that holds it.
+	// secret is the credential read from the store for one send; it is never
+	// encoded and never kept past the send.
 	secret    string
 	secretRef string
 }
@@ -250,11 +207,8 @@ func (c Channel) WithSecret(secret string) Channel {
 	return c
 }
 
-// ChannelSecretPrefix starts the name of every secret the panel holds for
-// a channel. The name is the channel's identifier under this prefix, so
-// a secret of the store reads as the channel's at a glance, and the
-// scheduler can refuse to issue one to a host: a credential of the panel
-// is not a task's to carry.
+// ChannelSecretPrefix starts the name of every secret the panel holds for a
+// channel.
 const ChannelSecretPrefix = "panel.notification."
 
 // ChannelSecretName is the name of the secret that holds a channel's
@@ -264,8 +218,6 @@ func ChannelSecretName(channelID string) string {
 }
 
 // WebhookConfig is the address of a webhook of the installation's own.
-// The deliveries are signed the way the legacy webhook signs them, so a
-// receiver written for one reads the other.
 type WebhookConfig struct {
 	URL string `json:"url"`
 	// Secret signs the deliveries; empty means unsigned, and the API says
@@ -283,20 +235,15 @@ type EmailConfig struct {
 	From     string   `json:"from"`
 	To       []string `json:"to"`
 	Username string   `json:"username,omitempty"`
-	// PasswordSecret names the secret of the store that holds the
-	// password; the row never holds the password. The channel's
-	// secret_ref points at the same secret.
+	// PasswordSecret names the secret of the store that holds the password; the
+	// row never holds the password.
 	PasswordSecret string `json:"password_secret,omitempty"`
 }
 
 // SlackConfig is an incoming webhook of Slack or of a service that reads
 // its shape - Mattermost, Rocket.Chat, Discord's Slack endpoint.
 type SlackConfig struct {
-	// URL is the incoming webhook. It carries the token that lets anybody
-	// post to the channel, so it is the credential: it is in the
-	// configuration only on the way in, the store keeps it as a secret,
-	// the API never shows it back and an edit without retyping it keeps
-	// the stored one.
+	// URL is the incoming webhook.
 	URL string `json:"url,omitempty"`
 	// URLSet is what the API shows in place of the address.
 	URLSet bool `json:"url_set,omitempty"`
@@ -328,8 +275,7 @@ const (
 var secretName = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{1,62}$`)
 
 // Validate checks a channel as it comes from the API and normalises it:
-// trimmed strings, the event list without duplicates. It returns the
-// configuration decoded for the kind.
+// trimmed strings, the event list without duplicates.
 func (c *Channel) Validate() (any, error) {
 	c.Name = strings.TrimSpace(c.Name)
 	if c.Name == "" {
@@ -362,9 +308,9 @@ func (c *Channel) Validate() (any, error) {
 	return decodeConfig(c.Kind, c.Config)
 }
 
-// decodeConfig reads the configuration of the kind and checks what can
-// be checked without sending: an address that parses, a port, a mailbox
-// list that reads as addresses.
+// decodeConfig reads the configuration of the kind and checks what can be
+// checked without sending: an address that parses, a port, a mailbox list that
+// reads as addresses.
 func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
@@ -379,9 +325,8 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		if err := checkHTTPURL(config.URL); err != nil {
 			return nil, err
 		}
-		// A typed secret replaces the stored one; "the secret is set" with
-		// none typed keeps it; neither clears it. The store reads the
-		// flag, so it survives here.
+		// A typed secret replaces the stored one; "the secret is set" with none
+		// typed keeps it; neither clears it.
 		if config.Secret != "" {
 			config.SecretSet = false
 		}
@@ -392,10 +337,9 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 			return nil, Error{Code: "invalid_config", Message: "the configuration does not read as an incoming webhook: " + err.Error()}
 		}
 		config.URL = strings.TrimSpace(config.URL)
-		// An edit that says "the address is set" and types none keeps the
-		// stored address; the store checks that one is stored and refuses
-		// a channel that ends up with none. Every other case has to carry
-		// an address.
+		// An edit that says "the address is set" and types none keeps the stored
+		// address; the store checks that one is stored and refuses a channel that
+		// ends up with none.
 		if config.URL == "" && config.URLSet {
 			return config, nil
 		}
@@ -469,9 +413,8 @@ func checkHTTPURL(address string) error {
 	return nil
 }
 
-// displayHost is the host of an address, for the public summary of a
-// channel: enough to tell hooks.slack.com from a mistyped address,
-// nothing of the path that carries the token.
+// displayHost is the host of an address, for the public summary of a channel:
+// enough to tell hooks.
 func displayHost(address string) string {
 	parsed, err := url.Parse(address)
 	if err != nil {
@@ -481,9 +424,7 @@ func displayHost(address string) string {
 }
 
 // publicConfigOf is the summary of an address the API shows beside the
-// configuration. It is computed from the configuration as it goes in,
-// once, and stored: what the API shows is a column, not a redaction that
-// could be forgotten.
+// configuration.
 func publicConfigOf(kind string, config any, secretAddress string) json.RawMessage {
 	summary := map[string]any{}
 	switch c := config.(type) {
@@ -541,31 +482,26 @@ const (
 	SuppressedBySilence = "silence"
 	// SuppressedByMaintenance: the host is inside a maintenance window.
 	SuppressedByMaintenance = "maintenance_window"
-	// SuppressedFireKept: the resolve of an alert whose fire the channel
-	// never got, because a silence kept it; a resolve of nothing said is
-	// nothing to say.
+	// SuppressedFireKept: the resolve of an alert whose fire the channel never
+	// got, because a silence kept it; a resolve of nothing said is nothing to
+	// say.
 	SuppressedFireKept = "fired_suppressed"
 )
 
 // The codes a dead letter carries, as the document names them, beside
 // the transport codes of a failed attempt.
 const (
-	// CodeCredentialsRejected: the receiver answered 401 or 403, or the
-	// mail relay refused the login. Retrying with the same credential
-	// cannot help; an operator replaces it and retries.
+	// CodeCredentialsRejected: the receiver answered 401 or 403, or the mail
+	// relay refused the login.
 	CodeCredentialsRejected = "channel_credentials_rejected"
-	// CodePermanentHTTP: the receiver answered a status that is neither a
-	// success nor a failure that passes - a 404, a 400 - so the address
-	// or the body is wrong for it.
+	// CodePermanentHTTP: the receiver answered a status that is neither a success
+	// nor a failure that passes - a 404, a 400 - so the address or the body is
+	// wrong for it.
 	CodePermanentHTTP = "permanent_http_error"
 	// CodePermanentSMTP: the mail relay refused the message with a
 	// permanent reply.
 	CodePermanentSMTP = "permanent_smtp_error"
 	// CodeAttemptsExhausted named a delivery the queue stopped retrying.
-	// It is no longer put on a delivery: the state says the queue gave up
-	// and the transport's own code says why it kept failing, which is what
-	// an operator acts on. The constant stays for the records written
-	// before this, which the panel still lists and explains.
 	CodeAttemptsExhausted = "delivery_attempts_exhausted"
 	// CodeChannelMisconfigured: the channel cannot send as it is - no
 	// sender for its kind, a configuration that does not read.
@@ -601,17 +537,17 @@ type Delivery struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 
-	// The fields below are the names of the previous release, kept for
-	// the readers that know them: status sent or failed, the code and
-	// the sentence of the failure, and the moment of the row.
+	// The fields below are the names of the previous release, kept for the
+	// readers that know them: status sent or failed, the code and the sentence of
+	// the failure, and the moment of the row.
 	Status    string    `json:"status"`
 	ErrorCode string    `json:"error_code"`
 	Error     string    `json:"error"`
 	SentAt    time.Time `json:"sent_at"`
 
-	// aggregateID, message and channelRevision are the row's own: what
-	// the event is about, the composed message as JSON, and the revision
-	// of the channel the row was queued under.
+	// aggregateID, message and channelRevision are the row's own: what the event
+	// is about, the composed message as JSON, and the revision of the channel the
+	// row was queued under.
 	aggregateID     string
 	message         []byte
 	channelRevision int64
@@ -646,10 +582,9 @@ const (
 	StatusFailed = "failed"
 )
 
-// legacyStatus reads a state as the previous release's status: delivered
-// is sent, a dead letter or a wait for the next attempt is failed, and
-// the rest - queued, in hand, suppressed - has no word in that vocabulary
-// and reads as the state itself.
+// legacyStatus reads a state as the previous release's status: delivered is
+// sent, a dead letter or a wait for the next attempt is failed, and the rest -
+// queued, in hand, suppressed - has no word in that vocabulary and reads as
 func legacyStatus(state string) string {
 	switch state {
 	case StateDelivered:

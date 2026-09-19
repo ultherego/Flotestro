@@ -20,14 +20,6 @@ import (
 )
 
 // The contract of the public API.
-//
-// The document requires a REST/JSON API with an OpenAPI contract, so that
-// a CMDB, a ticketing system or a pipeline can be built against it without
-// reading the panel's source. The contract is generated from the same
-// table the router is built from: a route that exists is in the contract,
-// and a route in the contract exists. The schemas of the main resources
-// come from the Go types by reflection, for the same reason - a schema
-// written by hand next to the type would drift from it.
 
 // route registers a handler and records it for the contract.
 func (s *Server) route(mux *http.ServeMux, pattern string, handler http.HandlerFunc) {
@@ -137,9 +129,7 @@ func (s *Server) openAPI() map[string]any {
 	// names it once, so the sentences below land on the shape a client sees.
 	schemas["Budget"].(map[string]any)["properties"].(map[string]any)["holders"] =
 		map[string]any{"type": "array", "items": ref("BudgetHolder")}
-	// The reflection reads the shape, not the meaning. A field a program
-	// decides on - whether a rollback can be ordered, and on how many
-	// hosts - gets its sentence here, next to the type it belongs to.
+	// The reflection reads the shape, not the meaning.
 	describe(schemas, "Campaign", "revision",
 		"Grows with every state change; a client that read the campaign at one revision and orders a transition at another is answered with 409 concurrent_transition.")
 	describe(schemas, "CampaignTarget", "cancel_outcome",
@@ -168,9 +158,8 @@ func (s *Server) openAPI() map[string]any {
 			"(in the reboot or the verification). A host that reported no change is not counted. "+
 			"These are the hosts a compensation runs on. "+
 			"Zero until the campaign has settled - a compensation is refused before that.")
-	// The states are the contract a client filters and colours by; the
-	// reflection sees a string. The list here is the list the database
-	// checks, in the order a campaign moves through them.
+	// The states are the contract a client filters and colours by; the reflection
+	// sees a string.
 	describe(schemas, "Campaign", "state",
 		"planning (every host computes its plan), planned, awaiting_approval, canary, manual_gate, running, "+
 			"pausing (a pause ordered while hosts still carry their tasks; paused once they settle), paused, "+
@@ -186,9 +175,9 @@ func (s *Server) openAPI() map[string]any {
 			"desired state; a success without a mutation), failed, unknown (the task ended without a result - the "+
 			"session broke or the agent restarted mid-task; not a success, counted as a failure by the threshold, "+
 			"read the host before ordering again), skipped, canceled.")
-	// The budget row grew additively: a client of the first shape reads
-	// the same five fields, and the new ones say who holds the tokens and
-	// who waits for them, which the numbers alone never did.
+	// The budget row grew additively: a client of the first shape reads the same
+	// five fields, and the new ones say who holds the tokens and who waits for
+	// them, which the numbers alone never did.
 	describe(schemas, "Budget", "used", "The weight of the tokens under live leases of this exact key.")
 	describe(schemas, "Budget", "claimants",
 		"How many campaigns and job authors hold tokens of this key or wait for them; the fair share divides the capacity between them.")
@@ -213,10 +202,9 @@ func (s *Server) openAPI() map[string]any {
 			"unknown when the holder is neither a job, a campaign target nor a fan-out.")
 	describe(schemas, "BudgetHolder", "tokens", "The weight of the lease.")
 	describe(schemas, "BudgetHolder", "since", "When the lease was first taken; renewals keep it.")
-	// The fleet summary grew additively as well: the attention counters
-	// of the lifecycle document are computed in the database, and a
-	// counter the server cannot answer honestly for the reader's view is
-	// left out rather than sent as zero.
+	// The fleet summary grew additively as well: the attention counters of the
+	// lifecycle document are computed in the database, and a counter the server
+	// cannot answer honestly for the reader's view is left out rather than sent
 	register("FleetSummary", FleetSummary{})
 	describe(schemas, "FleetSummary", "relays_buffer_high",
 		"Relays whose buffer of results waiting for the centre is at least 70 % full by their latest heartbeat. "+
@@ -371,11 +359,7 @@ var pagingParameters = []queryParameter{
 	{"cursor", "string", "The next_cursor of the previous page; empty for the first page."},
 }
 
-// The query parameters of the lists. A list filters on the server, so its
-// filters are part of the contract: a CMDB asking for the hosts of one
-// owner must not have to fetch the fleet and filter it itself.
-// campaignScheduleSchema is the body of a schedule: the order as the
-// campaign door takes it, and when to place it.
+// The query parameters of the lists.
 var campaignScheduleSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{
@@ -462,11 +446,9 @@ var queryParameters = map[string][]queryParameter{
 		{"cursor", "string", "The next_cursor of the previous page; empty for the first page. A cursor issued under one order is refused under another."},
 		{"offset", "integer", "Rows to skip; the cursor wins when both are given."},
 	},
-	// The fleet views count over every host in scope and hand the detail
-	// out a page at a time, so each of them takes the paging controls
-	// besides its own filters. Every one of them answers total_hosts,
-	// evaluated_hosts and unknown_hosts, and says partial with a
-	// partial_reason when the answer does not cover the whole fleet.
+	// The fleet views count over every host in scope and hand the detail out a
+	// page at a time, so each of them takes the paging controls besides its own
+	// filters.
 	"GET /api/v1/security": {
 		{"check", "string", "The identifier of one check; the answer is then one page of the hosts failing it rather than the whole profile."},
 		{"limit", "integer", "The page size of the host list of a check: 100 by default, 500 at most."},
@@ -588,9 +570,7 @@ var queryParameters = map[string][]queryParameter{
 	}, pagingParameters...),
 }
 
-// describe adds the sentence of one property to a schema already
-// reflected. A schema without the property is a mistake in this file, not
-// in the type, so it fails loudly at the first read of the contract.
+// describe adds the sentence of one property to a schema already reflected.
 func describe(schemas map[string]any, schema, property, description string) {
 	properties := schemas[schema].(map[string]any)["properties"].(map[string]any)
 	field, ok := properties[property].(map[string]any)
@@ -696,9 +676,7 @@ func pagedCollection(name string) map[string]any {
 }
 
 var requestSchemas = map[string]map[string]any{
-	// The hand-recorded facts of a host. The writes honour If-Match with
-	// the ETag of GET /api/v1/hosts/{id}, which names the version of the
-	// owner, the management address and the failure domain together.
+	// The hand-recorded facts of a host.
 	"PUT /api/v1/hosts/{id}/owner": {
 		"type": "object",
 		"properties": map[string]any{
@@ -767,9 +745,8 @@ var requestSchemas = map[string]map[string]any{
 		},
 		"required": []string{"failure_domain"},
 	},
-	// A directory change: the plan is computed at once, the execution
-	// waits for a second person. The one-time value of a password reset
-	// never enters the change; the requester reads it once at /reveal.
+	// A directory change: the plan is computed at once, the execution waits for a
+	// second person.
 	"POST /api/v1/identity/changes": {
 		"type": "object",
 		"properties": map[string]any{
@@ -883,8 +860,6 @@ var requestSchemas = map[string]map[string]any{
 }
 
 // policySpecSchema is the draft a policy is created and rewritten with.
-// The rules are typed; the publication holds them to their kinds, and a
-// kind this version does not know is refused already here.
 var policySpecSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{

@@ -8,13 +8,8 @@ import (
 	"time"
 )
 
-// Carrying a plan out.
-//
-// Every change recomputes its plan first and compares the digest with the
-// one the operator approved. A host that moved on since the approval gets
-// no change: the operator approved one change from one base, not whatever
-// the host happens to hold now. That is the same rule a Compose deployment
-// follows, for the same reason.
+// Carrying a plan out. Every change recomputes its plan first and compares the
+// digest with the one the operator approved.
 
 // EnsureResult is what a declared change did.
 type EnsureResult struct {
@@ -23,9 +18,8 @@ type EnsureResult struct {
 	// read on its own says what happened without the plan beside it.
 	Outcome string `json:"outcome"`
 	Changed bool   `json:"changed"`
-	// Container is the state of the container after the change, as the
-	// engine reports it. Empty after a removal: a container that is gone
-	// has no state, and inventing one would be worse than silence.
+	// Container is the state of the container after the change, as the engine
+	// reports it.
 	Container *Container `json:"container,omitempty"`
 	// Removed lists what vanished on the way - the container that was
 	// replaced, the containers a network replacement disconnected.
@@ -34,12 +28,6 @@ type EnsureResult struct {
 
 // EnsureContainer brings the container to the state the specification
 // describes.
-//
-// A container that differs is replaced rather than changed: the engine can
-// alter a handful of a running container's settings and refuses the rest,
-// so an operation that promised to change any setting would work
-// sometimes and leave a half-changed container the rest of the time. The
-// plan said replace before the operator approved it.
 func EnsureContainer(ctx context.Context, client *Client, spec ContainerSpec,
 	secrets map[string][]byte, approved string) (EnsureResult, error) {
 	result := EnsureResult{}
@@ -78,11 +66,8 @@ func EnsureContainer(ctx context.Context, client *Client, spec ContainerSpec,
 		return result, nil
 	}
 
-	// A replacement removes the old container first: the engine keeps the
-	// name unique, so the new one cannot be created beside it. The image
-	// is pulled before anything is removed - a replacement that took the
-	// service down and then found out the image is not there would leave
-	// the host without it.
+	// A replacement removes the old container first: the engine keeps the name
+	// unique, so the new one cannot be created beside it.
 	if err := ensureImage(ctx, client, spec); err != nil {
 		return result, err
 	}
@@ -104,9 +89,7 @@ func EnsureContainer(ctx context.Context, client *Client, spec ContainerSpec,
 	result.Changed = true
 	if !spec.Stopped {
 		if err := client.StartContainer(ctx, id); err != nil {
-			// The container exists and does not run. Saying so is the
-			// truth of the moment; removing it would take away the only
-			// thing the operator can look at to find out why.
+			// The container exists and does not run.
 			result.Container = containerByName(ctx, client, spec.Name)
 			return result, fmt.Errorf("the container was created and did not start: %w", err)
 		}
@@ -115,11 +98,8 @@ func EnsureContainer(ctx context.Context, client *Client, spec ContainerSpec,
 	return result, nil
 }
 
-// ensureImage makes sure the digest the plan bound is on the host.
-//
-// The pull is by digest, so it fetches exactly what was approved. An image
-// already there is not fetched again: a replacement of a container on a
-// host without a registry has to work.
+// ensureImage makes sure the digest the plan bound is on the host. The pull is
+// by digest, so it fetches exactly what was approved.
 func ensureImage(ctx context.Context, client *Client, spec ContainerSpec) error {
 	reference := ImageOf(spec)
 	if images, err := client.Images(ctx); err == nil {
@@ -200,10 +180,7 @@ func RemoveNetworkPlanned(ctx context.Context, client *Client, name string,
 	return result, nil
 }
 
-// detachAll disconnects every container the plan listed. The engine
-// refuses to remove a network with a live endpoint, so a removal the plan
-// allowed has to take the endpoints away first - and the plan named each
-// of them, so nothing is disconnected that the operator did not see.
+// detachAll disconnects every container the plan listed.
 func detachAll(ctx context.Context, client *Client, plan Plan) error {
 	for _, name := range plan.Detaches {
 		if err := client.DisconnectNetwork(ctx, plan.CurrentID, name, true); err != nil &&
@@ -273,10 +250,6 @@ func RemoveVolumePlanned(ctx context.Context, client *Client, name string,
 }
 
 // checkApproval compares the plan computed now with the one approved.
-//
-// An order without a digest is one that carries no approval to compare -
-// the operation registry decides which operations may be ordered that way,
-// and a container is not one of them.
 func checkApproval(plan Plan, approved string) error {
 	if approved == "" {
 		return nil
@@ -288,9 +261,7 @@ func checkApproval(plan Plan, approved string) error {
 		ErrPlanMismatch, shortID(approved), shortID(plan.Digest), plan.Action)
 }
 
-// containerByName reads the container back after a change. A read that
-// fails leaves the state unknown rather than invented: the verifier goes
-// to the host itself anyway.
+// containerByName reads the container back after a change.
 func containerByName(ctx context.Context, client *Client, name string) *Container {
 	readCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

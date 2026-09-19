@@ -16,27 +16,13 @@ import (
 )
 
 // ErrInterrupted means an operation interrupted before the end.
-//
-// An interrupted backup is neither a failed nor a successful backup: it is
-// a state that has to be stated directly. The repository may have writes
-// started, and the restore directory - half the files.
 var ErrInterrupted = errors.New("the operation was interrupted before completion")
 
-// ErrRepositoryAbsent means the repository is not there yet: the tool
-// found nothing to open at the address it was given.
-//
-// This is a state, not a failure to read one. A repository that does not
-// exist holds no copies, which is a different answer from "the copies
-// could not be listed" - and the difference decides whether the first
-// backup into a fresh repository can be confirmed afterwards. Everything
-// else the tool says about an address it could not open - a wrong
-// password, a refused connection, a broken lock - stays unknown.
+// ErrRepositoryAbsent means the repository is not there yet: the tool found
+// nothing to open at the address it was given.
 var ErrRepositoryAbsent = errors.New("the repository does not exist yet")
 
 // repositoryAbsent reads the tool's own words for "there is nothing here".
-// Neither restic nor borg gives this a code of its own, so the sentence is
-// what there is; the phrases below are the ones each tool prints, and a
-// sentence that is not one of them stays an unknown state.
 func repositoryAbsent(output string) bool {
 	text := strings.ToLower(output)
 	for _, phrase := range []string{
@@ -57,10 +43,6 @@ func repositoryAbsent(output string) bool {
 }
 
 // toolEnvironment assembles the variables for the tool process.
-//
-// The credentials go exactly this way, not in the arguments: the command
-// line is readable in /proc by every user of the host, and the environment
-// - only by the process owner.
 func toolEnvironment(order Order, passwordVariable string) []string {
 	environment := []string{
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -99,10 +81,6 @@ type commandResult struct {
 }
 
 // Reason describes a failure in a way readable in the task result.
-//
-// The credentials are already masked by whoever runs the command: the
-// reason goes into the task result, and from there into the panel
-// database.
 func (r commandResult) Reason() string {
 	if r.Err != nil && !r.Ran {
 		return r.Err.Error()
@@ -124,26 +102,17 @@ func (r commandResult) Reason() string {
 }
 
 // run executes the tool and returns its output.
-//
-// Never through a shell and always as an argument array: a path name in a
-// backup definition cannot become a command. The stdout lines go to the
-// progress receiver as they come, because a backup takes long, and the
-// operator is meant to see that something is happening - not the end alone.
 func run(ctx context.Context, path string, arguments []string,
 	environment []string, secrets [][]byte, lineFunc func(string)) commandResult {
 	return runInDir(ctx, "", path, arguments, environment, secrets, lineFunc)
 }
 
 // runInDir runs the tool in the given working directory.
-//
-// Borg unpacks an archive into the current directory of the process, not
-// into a directory given as an argument - so the restore target directory
-// is part of the invocation here, not of the command text.
 func runInDir(ctx context.Context, dir, path string, arguments []string,
 	environment []string, secrets [][]byte, lineFunc func(string)) commandResult {
 	// The tool runs behind the resource scope the context asks for, when the
-	// helper put one there; the working directory and the environment are
-	// those of the tool either way, the scope adds nothing of its own.
+	// helper put one there; the working directory and the environment are those
+	// of the tool either way, the scope adds nothing of its own.
 	argv := runscope.Apply(ctx, append([]string{path}, arguments...))
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Env = environment
@@ -201,9 +170,9 @@ func runInDir(ctx context.Context, dir, path string, arguments []string,
 			result.Err = err
 		}
 	}
-	// An interruption has its own reason: a process killed by the time
-	// limit or by cancelling the task leaves a state nobody knows, and
-	// silence here would look like an ordinary tool failure.
+	// An interruption has its own reason: a process killed by the time limit or
+	// by cancelling the task leaves a state nobody knows, and silence here would
+	// look like an ordinary tool failure.
 	if ctx.Err() != nil {
 		result.Err = fmt.Errorf("%w: %v", ErrInterrupted, ctx.Err())
 	}

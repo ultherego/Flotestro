@@ -11,12 +11,11 @@ import (
 )
 
 // The plans of the lifecycle changes: what an expiration, a POSIX edit, a
-// preservation, a password reset or a host group change does to the
-// directory and to the fleet, read before a second person approves it.
+// preservation, a password reset or a host group change does to the directory
+// and to the fleet, read before a second person approves it.
 
-// findUser looks an account up in the directory's list. The list is the
-// cached read the rest of the plan uses, so the plan is consistent with
-// itself.
+// findUser looks an account up in the directory's list. The list is the cached
+// read the rest of the plan uses, so the plan is consistent with itself.
 func (p *Planner) findUser(ctx context.Context, uid string) (*freeipa.User, error) {
 	users, err := p.directory.Users(ctx)
 	if err != nil {
@@ -91,9 +90,7 @@ func expiryStep(what string, at *time.Time) []string {
 	}
 }
 
-// planUserPOSIX shows the attributes before and after. A new UID or GID
-// number changes whom the files on every host belong to, and that is the
-// warning the second person reads.
+// planUserPOSIX shows the attributes before and after.
 func (p *Planner) planUserPOSIX(ctx context.Context, spec *POSIXPayload) (Plan, error) {
 	plan := Plan{
 		Summary:       fmt.Sprintf("Changing the POSIX attributes of the account %s", spec.UID),
@@ -128,9 +125,8 @@ func (p *Planner) planUserPOSIX(ctx context.Context, spec *POSIXPayload) (Plan, 
 	if wanted.UIDNumber != "" && wanted.UIDNumber != user.UIDNumber {
 		plan.Warnings = append(plan.Warnings,
 			"a new UID number changes whom the account's files belong to on every host; the files keep the old number")
-		// Another account with the number would make two people own the
-		// same files. The directory refuses a duplicate too; the plan says
-		// it first.
+		// Another account with the number would make two people own the same files.
+		// The directory refuses a duplicate too; the plan says it first.
 		users, err := p.directory.Users(ctx)
 		if err != nil {
 			return plan, err
@@ -154,9 +150,7 @@ func (p *Planner) planUserPOSIX(ctx context.Context, spec *POSIXPayload) (Plan, 
 	return plan, nil
 }
 
-// planUserPreserve shows what a removal takes away. The entry stays as a
-// preserved account, so the UID and the history survive; the access, the
-// sessions and the memberships do not.
+// planUserPreserve shows what a removal takes away.
 func (p *Planner) planUserPreserve(ctx context.Context, uid string) (Plan, error) {
 	plan := Plan{
 		Summary:       fmt.Sprintf("Preserving the account %s", uid),
@@ -200,24 +194,20 @@ func (p *Planner) planUserPreserve(ctx context.Context, uid string) (Plan, error
 			"the account "+uid+" is the directory administrator or the panel's own account; it is not removed from here")
 	}
 
-	// The entry the change would move, read now rather than at execution
-	// time: the operator approves this entry, and an entry that moved in
-	// between is refused instead of preserved a second time.
+	// The entry the change would move, read now rather than at execution time:
+	// the operator approves this entry, and an entry that moved in between is
+	// refused instead of preserved a second time.
 	entry, err := p.directory.UserEntry(ctx, uid)
 	if err != nil {
 		return plan, err
 	}
 	plan.PreserveEntry = &entry
-	// The plan says which of the three values it is bound to. The strength
-	// of the check differs between directories: one that reports no modify
-	// timestamp cannot tell an entry somebody edited in the meantime from
-	// one nobody touched, and the operator approving this is entitled to
-	// know that.
+	// The plan says which of the three values it is bound to.
 	plan.Warnings = append(plan.Warnings, "the plan is "+entry.Binding())
 
 	// A directory that proved it cannot move this entry blocks the preserve
-	// before the operator approves anything, and the conflict carries what
-	// lifts it.
+	// before the operator approves anything, and the conflict carries what lifts
+	// it.
 	capabilities, err := p.directory.CapabilitiesFor(ctx, uid)
 	if err == nil {
 		if reason, blocked := capabilities.PreserveBlocked(); blocked {
@@ -258,9 +248,9 @@ func (p *Planner) planPasswordReset(ctx context.Context, uid string) (Plan, erro
 	return plan, nil
 }
 
-// planHostGroupMembers shows which rules the group carries: a host joining
-// it comes under every access and sudo rule that names the group, and a
-// host leaving it drops out of them.
+// planHostGroupMembers shows which rules the group carries: a host joining it
+// comes under every access and sudo rule that names the group, and a host
+// leaving it drops out of them.
 func (p *Planner) planHostGroupMembers(ctx context.Context, spec *HostGroupPayload) (Plan, error) {
 	plan := Plan{
 		Summary: fmt.Sprintf("Changing the membership of the host group %s", spec.Group),
@@ -338,9 +328,8 @@ func (p *Planner) planHostGroupMembers(ctx context.Context, spec *HostGroupPaylo
 			fmt.Sprintf("%d users gain access to the added hosts through the group", len(plan.AffectedUsers)))
 	}
 	if len(spec.Remove) > 0 {
-		// A host leaving the group may leave the reach of the last rule that
-		// lets an administrator in. The same guard as on a rule change: the
-		// hosts are read as they will be once they have left the group.
+		// A host leaving the group may leave the reach of the last rule that lets an
+		// administrator in.
 		after := *view
 		after.hosts = hostsLeavingGroup(view.hosts, spec.Remove, spec.Group)
 		for _, account := range p.guardedAccounts() {

@@ -24,9 +24,9 @@ import (
 // the result of a job.
 const (
 	ErrorLocked = "package_manager_locked"
-	// ErrorPlanMismatch is the code of a plan the host no longer computes:
-	// the shared code of the plan envelope, so a package transaction and
-	// every other planned change refuse a moved plan with one word.
+	// ErrorPlanMismatch is the code of a plan the host no longer computes: the
+	// shared code of the plan envelope, so a package transaction and every other
+	// planned change refuse a moved plan with one word.
 	ErrorPlanMismatch   = plan.ErrorStalePlan
 	ErrorTransaction    = "transaction_failed"
 	ErrorUnsupported    = "unsupported_manager"
@@ -35,15 +35,11 @@ const (
 	ErrorNoSpace        = "insufficient_space"
 )
 
-// ErrLocked means the lock of the package manager is held. We do not work
-// around the lock: a second transaction on the same package database can
-// damage it.
+// ErrLocked means the lock of the package manager is held.
 var ErrLocked = errors.New("the package manager is busy")
 
 // ErrModulesHidden means the process of the transaction does not see the
-// module tree of the running kernel. A transaction in such an environment is
-// dangerous: the scripts of the packages rebuild the initramfs without the
-// drivers and the host does not come up after a restart.
+// module tree of the running kernel.
 var ErrModulesHidden = errors.New("the module tree of the kernel is not visible")
 
 // ErrProtectedPackage means an attempt to remove a package without which the
@@ -54,10 +50,7 @@ var ErrProtectedPackage = errors.New("a protected package")
 // plan was approved.
 var ErrPlanChanged = errors.New("the removal plan has changed since it was approved")
 
-// ErrorCodeOf maps the errors of the adapters to their stable codes. The
-// agent and the helper both translate errors into codes, and one table keeps
-// them from translating the same error two ways. An error without a code of
-// its own is a transaction failure, which the callers settle themselves.
+// ErrorCodeOf maps the errors of the adapters to their stable codes.
 func ErrorCodeOf(err error) (string, bool) {
 	switch {
 	case errors.Is(err, ErrLocked):
@@ -86,8 +79,8 @@ func ErrorCodeOf(err error) (string, bool) {
 }
 
 // Refused says whether the error is a refusal of the host rather than a
-// failure of a transaction: the operation asked for something this host
-// cannot do or its distribution does not allow, and nothing was attempted.
+// failure of a transaction: the operation asked for something this host cannot
+// do or its distribution does not allow, and nothing was attempted.
 func Refused(err error) bool {
 	return errors.Is(err, ErrLocked) || errors.Is(err, ErrPlanMetadataMissing) ||
 		errors.Is(err, ErrVersionlockMissing) ||
@@ -97,9 +90,7 @@ func Refused(err error) bool {
 }
 
 // compareSets returns a description of the difference, or nothing when the
-// sets are equal. An empty expected set means there is no approved plan and is
-// a difference as well: an irreversible operation must not go without a
-// basis.
+// sets are equal.
 func compareSets(expected, current []string) string {
 	if len(expected) == 0 {
 		return "there is no approved removal plan"
@@ -134,13 +125,8 @@ func compareSets(expected, current []string) string {
 	return ""
 }
 
-// Change describes one element of a plan: what happens to one package.
-//
-// The name and the versions alone are not what the operator approves. The
-// same name can come from another repository or in another architecture,
-// and "openssl changes" does not say whether it goes up, down or away - so
-// every element names its origin, its architecture and its direction, and
-// all of that enters the plan digest.
+// Change describes one element of a plan: what happens to one package. The
+// name and the versions alone are not what the operator approves.
 type Change struct {
 	Name             string `json:"name"`
 	CurrentVersion   string `json:"current_version,omitempty"`
@@ -154,10 +140,8 @@ type Change struct {
 	Architecture string `json:"architecture,omitempty"`
 	// Action is the direction: install, upgrade, downgrade or remove.
 	Action string `json:"action,omitempty"`
-	// Reason says why the element is in the plan: requested by the order,
-	// pulled in as a dependency, or an orphan the manager drops along the
-	// way. A removal of a dependency is what the operator most needs to
-	// see before the consent.
+	// Reason says why the element is in the plan: requested by the order, pulled
+	// in as a dependency, or an orphan the manager drops along the way.
 	Reason string `json:"reason,omitempty"`
 	// Blocked marks a package that stops every transaction on the host;
 	// Protected marks one the policy does not let go away.
@@ -168,8 +152,7 @@ type Change struct {
 	InstalledDeltaBytes int64 `json:"installed_delta_bytes,omitempty"`
 	InstalledDeltaKnown bool  `json:"installed_delta_known,omitempty"`
 	// Digest is the checksum of the archive as the index publishes it,
-	// hexadecimal with the algorithm in front ("sha256:..."). Empty means
-	// the index carries none.
+	// hexadecimal with the algorithm in front ("sha256:.
 	Digest string `json:"digest,omitempty"`
 }
 
@@ -188,33 +171,25 @@ type Plan struct {
 	// DiskAvailableBytes is the free space of "/". It stays for the callers
 	// that read one number; the per-file-system facts are in Space.
 	DiskAvailableBytes uint64 `json:"disk_available_bytes"`
-	// Space says, file system by file system, what the change needs and what
-	// is there: the cache the archives land in, /usr where the files go, /boot
-	// when a kernel is among the changes. A separate /var or /boot can be
-	// full while "/" has room, and a transaction that runs out of space
-	// halfway through is the failure this plan exists to prevent.
+	// Space says, file system by file system, what the change needs and what is
+	// there: the cache the archives land in, /usr where the files go, /boot when
+	// a kernel is among the changes.
 	Space             []SpaceFact `json:"space,omitempty"`
 	MetadataRefreshed bool        `json:"metadata_refreshed"`
 	RebootPredicted   bool        `json:"reboot_predicted"`
-	// Blocked describes the packages that make carrying the plan out
-	// impossible. The plan itself goes through, because it changes nothing,
-	// but a transaction on such a host will fail - the operator is to know
-	// that before ordering it.
+	// Blocked describes the packages that make carrying the plan out impossible.
 	Blocked []Blocked `json:"blocked,omitempty"`
 	// Mode says what kind of plan this is.
 	Mode string `json:"mode,omitempty"`
-	// Removals lists the packages that would disappear along with the named
-	// ones. Removing one package can pull dozens of dependent ones - the
-	// operator is to see that before the approval rather than after.
+	// Removals lists the packages that would disappear along with the named ones.
 	Removals []string `json:"removals,omitempty"`
 	// Protected lists the protected packages that ended up in the plan. Their
 	// presence means the operation will not be carried out.
 	Protected []string `json:"protected,omitempty"`
 
-	// The header of the plan envelope (package plan): who made the plan,
-	// for which host and picture of it, against which repository metadata,
-	// and until when it holds. The execution rebuilds the same header from
-	// the approved reference and compares the digest of the whole.
+	// The header of the plan envelope (package plan): who made the plan, for
+	// which host and picture of it, against which repository metadata, and until
+	// when it holds.
 	SchemaVersion     uint32    `json:"schema_version,omitempty"`
 	PlannerVersion    string    `json:"planner_version,omitempty"`
 	HostID            string    `json:"host_id,omitempty"`
@@ -242,29 +217,17 @@ type Apply struct {
 	ServicesNeedingRestart []string `json:"services_needing_restart,omitempty"`
 	DatabaseBroken         bool     `json:"package_database_broken"`
 	// EffectsAchieved and EffectsMissed settle the expected effects of the
-	// approved plan against the state read after the transaction. A
-	// transaction that ran and left an effect unreached is a partial
-	// result, and the operator reads here which effect.
+	// approved plan against the state read after the transaction.
 	EffectsAchieved []plan.Outcome `json:"effects_achieved,omitempty"`
 	EffectsMissed   []plan.Outcome `json:"effects_missed,omitempty"`
 	// PackagesNeedingAttention names the packages that block the transaction.
-	// Without them the message about repairing the database does not say what
-	// to repair.
 	PackagesNeedingAttention []string `json:"packages_needing_attention,omitempty"`
-	// SelfRepair describes what the adapter repaired on its own before the
-	// retry. A silent repair would be worse than none: the operator has to
-	// know the host was touched in a way they did not order.
+	// SelfRepair describes what the adapter repaired on its own before the retry.
 	SelfRepair []string `json:"self_repair,omitempty"`
-	// ScriptletErrors names the packages whose maintainer scriptlet failed
-	// in a transaction the manager still finished. rpm treats a failed
-	// %post as non-fatal - the package is installed, the script did not do
-	// its part - so the transaction is a success with a defect, and the
-	// defect is named here instead of being buried in the output.
+	// ScriptletErrors names the packages whose maintainer scriptlet failed in a
+	// transaction the manager still finished.
 	ScriptletErrors []string `json:"scriptlet_errors,omitempty"`
-	// Output is the tail of the output of the tool on a failure. One sentence
-	// describing the error is enough to know something failed; to know why one
-	// sometimes has to see the context - and logging into the host after every
-	// failed transaction is exactly what the panel is to spare.
+	// Output is the tail of the output of the tool on a failure.
 	Output []string `json:"output,omitempty"`
 }
 
@@ -285,9 +248,7 @@ func tailLines(stderr, stdout string, count int) []string {
 // operation.
 const maxResultLines = 40
 
-// The modes of planning. An upgrade plan and a removal plan compute different
-// things but answer the same question: what will this operation change on the
-// host.
+// The modes of planning.
 const (
 	ModeUpgrade = "upgrade"
 	ModeRemove  = "remove"
@@ -303,15 +264,10 @@ type Options struct {
 	// Progress receives the progress of a long transaction. Nil means there is
 	// no receiver and the tool then works as before.
 	Progress ProgressFunc
-	// AllowDowngrade agrees to a version older than the installed one. It is
-	// off by default: package managers refuse it for a good reason, because
-	// going back a version is sometimes irreversible for the data format.
+	// AllowDowngrade agrees to a version older than the installed one.
 	AllowDowngrade bool
-	// Header is the part of the plan envelope the planner does not compute
-	// from the host: the host identity, the inventory picture and the
-	// expiry. The agent fills it when it plans; the helper fills it from
-	// the approved reference when it plans again before the transaction,
-	// so the two compute the same envelope over the same state.
+	// Header is the part of the plan envelope the planner does not compute from
+	// the host: the host identity, the inventory picture and the expiry.
 	Header PlanHeader
 }
 
@@ -342,18 +298,14 @@ type Manager interface {
 	DatabaseBroken(ctx context.Context) bool
 }
 
-// Lifecycle describes an adapter that can do the whole life cycle of
-// packages rather than upgrading alone. An interface rather than a concrete
-// type: the helper is to ask "can this manager do it" rather than "is this
-// apt".
+// Lifecycle describes an adapter that can do the whole life cycle of packages
+// rather than upgrading alone.
 type Lifecycle interface {
 	Install(ctx context.Context, options Options) (Apply, error)
 	Remove(ctx context.Context, options Options, expected []string) (Apply, error)
 	SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, error)
-	// Holds returns the packages held on the host and, when the list could
-	// not be read, the reason. A hold that was not read is not a host
-	// without holds: the inventory shows the count as unknown, and a
-	// package that is held will not take a security fix either.
+	// Holds returns the packages held on the host and, when the list could not be
+	// read, the reason.
 	Holds(ctx context.Context) ([]string, string)
 }
 
@@ -388,10 +340,7 @@ func (r commandResult) Reason() string {
 	return fmt.Sprintf("code %d", r.ExitCode)
 }
 
-// runtimeDir is a directory writable by the user of the process. The package
-// tools create files in HOME and in the XDG directories; the agent has no home
-// directory, so without this dnf ends with a permission error that is easy to
-// mistake for a lack of updates.
+// runtimeDir is a directory writable by the user of the process.
 var runtimeDir = os.TempDir()
 
 // SetRuntimeDir names the working directory for the tools that are run.
@@ -410,11 +359,7 @@ func SetRuntimeDir(dir string) error {
 }
 
 // run starts a tool with a fixed path and an array of arguments. We never use
-// sh -c, so the name of a package cannot become a command. LC_ALL=C stabilises
-// the output we have to parse.
-// ErrInvalidAnswer rejects an answer with a newline character: every line of
-// the input of debconf is a separate setting, so such a value would allow
-// adding settings nobody asked for.
+// sh -c, so the name of a package cannot become a command.
 var ErrInvalidAnswer = errors.New("the answer contains a newline character")
 
 func errorf(format string, args ...any) error {
@@ -478,24 +423,17 @@ func environment() []string {
 		// The non-interactive mode is forced: a prompt in a transaction would
 		// mean a hung job rather than a success.
 		"DEBIAN_FRONTEND=noninteractive",
-		// needrestart on Debian and Ubuntu restarts the services whose
-		// libraries have changed on its own. In a transaction run by the
-		// helper that hits the helper itself: it disappears halfway through
-		// its own work and the job ends with "the answer of the helper: EOF".
-		// A restart is a decision of the panel - the restart policy of a
-		// campaign or a separate operation - so the tool is only to note it.
+		// needrestart on Debian and Ubuntu restarts the services whose libraries
+		// have changed on its own.
 		"NEEDRESTART_MODE=l",
 		"NEEDRESTART_SUSPEND=flotestro",
-		// Dnf cuts its own messages to the width of the terminal, and without
-		// a terminal it assumes eighty columns - the cause of an error was
-		// then lost in the middle of a sentence ("scriptlet failed, exit
-		// stat").
+		// Dnf cuts its own messages to the width of the terminal, and without a
+		// terminal it assumes eighty columns - the cause of an error was then lost
+		// in the middle of a sentence ("scriptlet failed, exit stat").
 		"COLUMNS=200",
 		"HOME=" + runtimeDir,
-		// checkupdates syncs a copy of the pacman database in a directory of
-		// its own. Named here, the copy lands in the working directory of the
-		// process rather than in /tmp, and the plan reads the same copy it
-		// asked for.
+		// checkupdates syncs a copy of the pacman database in a directory of its
+		// own.
 		"CHECKUPDATES_DB=" + checkupdatesDB(),
 		"XDG_STATE_HOME=" + filepath.Join(runtimeDir, "state"),
 		"XDG_CACHE_HOME=" + filepath.Join(runtimeDir, "cache"),
@@ -503,9 +441,7 @@ func environment() []string {
 	}
 }
 
-// lockHeld checks the lock of a file without starting a process. It returns
-// false when the file cannot be opened: no access is not proof that there is
-// no lock, but it must not block the operation for good either.
+// lockHeld checks the lock of a file without starting a process.
 func lockHeld(path string) (bool, bool) {
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
@@ -523,10 +459,7 @@ func lockHeld(path string) (bool, bool) {
 }
 
 // modulesHidden checks whether the module tree of the running kernel is
-// visible to the process of the transaction. A namespace with
-// ProtectKernelModules=yes puts an empty directory in its place;
-// update-initramfs then builds an image without the disk driver and the host
-// stops booting.
+// visible to the process of the transaction.
 func modulesHidden() (bool, string) {
 	var uts unix.Utsname
 	if err := unix.Uname(&uts); err != nil {
@@ -536,10 +469,7 @@ func modulesHidden() (bool, string) {
 	return modulesHiddenAt("/proc/modules", "/lib/modules", release)
 }
 
-// modulesHiddenAt is the check separated from the system paths. A monolithic
-// kernel - without a single loaded module - is not a suspicious case and does
-// not block a transaction. A directory that cannot be read is not treated as
-// hidden either: ignorance must not stop the upgrade of a whole fleet.
+// modulesHiddenAt is the check separated from the system paths.
 func modulesHiddenAt(procModules, modulesRoot, release string) (bool, string) {
 	if release == "" || !kernelIsModular(procModules) {
 		return false, ""
@@ -598,13 +528,9 @@ func matchesFilter(change Change, options Options) bool {
 	return false
 }
 
-// Hash computes the digest of a plan: the digest of its envelope, over
-// every artifact with its version, architecture and origin, every step,
-// every expected effect and the header. The execution computes the same
-// envelope right before the transaction and compares, so a repository, a
-// version, an architecture or an origin that moved between the approval
-// and the transaction is a stale plan. The order of the changes does not
-// influence the result.
+// Hash computes the digest of a plan: the digest of its envelope, over every
+// artifact with its version, architecture and origin, every step, every
+// expected effect and the header.
 func (p Plan) Hash() []byte {
 	return p.Envelope().Hash()
 }

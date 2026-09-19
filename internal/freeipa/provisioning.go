@@ -10,51 +10,21 @@ import (
 )
 
 // The provisioning of the one directory right a preserve needs.
-//
-// Preserving an account moves its entry from the container of active
-// accounts into the container of preserved ones. In the directory that is a
-// moddn, and a service account allowed to write every attribute of an
-// account may still not move it: the move is granted by an ACI of its own.
-// A connector that quietly granted itself that right while carrying out a
-// user's removal would be widening its own permissions as a side effect of
-// an ordinary operation, which is exactly what must not happen. So the
-// right is provisioned here, by a step somebody runs deliberately, which
-// changes nothing the second time it runs and says so.
-//
-// What the step grants is the move and nothing else: one privilege holding
-// one permission, one role holding that privilege, and the connector's own
-// service account as the role's only member.
 
 const (
-	// PreservePermission is the directory's own permission that carries the
-	// ACI allowing the move from the active accounts into the container of
-	// preserved ones. It is not created here and cannot be: the permission
-	// plugin knows the rights read, search, compare, write, add and delete,
-	// and has no way to express moddn at all. The ACI behind this name is
-	// installed with the directory itself, and a directory that does not
-	// have it needs an administrator with an LDAP client - which the step
-	// reports rather than attempts.
+	// PreservePermission is the directory's own permission that carries the ACI
+	// allowing the move from the active accounts into the container of preserved
+	// ones.
 	PreservePermission = "System: Preserve User"
-	// A preserve needs three rights, not one, and the laboratory proved
-	// each of them the hard way. The move itself is a moddn, which is what
-	// PreservePermission carries. Changing the entry's relative name as it
-	// moves is a second right. And the directory's own command re-reads
-	// the entry it has just moved to build its answer, so without the read
-	// on the container of preserved accounts the move succeeds and the
-	// call still comes back "no matching entry" - a change made and
-	// reported as a failure, which is the worst of both.
+	// A preserve needs three rights, not one, and the laboratory proved each of
+	// them the hard way.
 	PreserveRDNPermission  = "System: Modify User RDN"
 	PreserveReadPermission = "System: Read Preserved Users"
-	// And the fourth: the directory's own command clears the password of
-	// the entry it preserves, so without the write on the container the
-	// move happens and the call fails afterwards - the account ends up
-	// preserved while the panel reports a failure and leaves the local
-	// one untouched.
+	// And the fourth: the directory's own command clears the password of the
+	// entry it preserves, so without the write on the container the move happens
+	// and the call fails afterwards - the account ends up preserved while the
 	PreserveModifyPermission = "System: Modify Preserved Users"
-	// PreservePrivilege is the privilege the connector's role holds. It
-	// carries that one permission, so the role grants the move and not the
-	// rest of the user administration that the directory's own privilege
-	// for it carries.
+	// PreservePrivilege is the privilege the connector's role holds.
 	PreservePrivilege = "Flotestro Preserve Users"
 	// PreserveRole is the role the connector's own service account is a
 	// member of.
@@ -64,35 +34,23 @@ const (
 	roleDescription      = "The Flotestro panel's directory connector"
 )
 
-// What one step of the provisioning found or did. The four are apart
-// because they mean four different things to the operator reading the
-// report: two of them are the wanted state, one is work somebody else has
-// to do, and one is a directory that answered something nobody planned for.
+// What one step of the provisioning found or did.
 const (
 	// ProvisionCreated: the step created the object or the membership now.
 	ProvisionCreated = "created"
 	// ProvisionAlreadyPresent: the directory already held it, and the step
 	// changed nothing. A second run reports this for every step.
 	ProvisionAlreadyPresent = "already_present"
-	// ProvisionNotPermitted: the directory refused the connector's own
-	// account this change. The report then names the command an
-	// administrator runs instead.
+	// ProvisionNotPermitted: the directory refused the connector's own account
+	// this change.
 	ProvisionNotPermitted = "not_permitted"
 	// ProvisionMissing: the directory does not hold something the step
 	// needs and cannot create it through the API.
 	ProvisionMissing = "missing"
 )
 
-// provisioningMethods are the directory commands that change the
-// directory's own configuration. They are deliberately outside
-// allowedMethods, so no ordinary operation can reach them: the only caller
-// is the provisioning step below, through provision.
-//
-// The list is as narrow as the step: it reads a permission, it creates a
-// privilege and a role of the panel's own and fills them. There is no
-// permission_add, no permission_mod and no command that removes anything -
-// the step cannot widen an existing permission or take one away, only bind
-// the connector to one the directory already publishes.
+// provisioningMethods are the directory commands that change the directory's
+// own configuration.
 var provisioningMethods = map[string]bool{
 	"permission_show":          true,
 	"privilege_show":           true,
@@ -131,21 +89,16 @@ type ProvisioningReport struct {
 	Role       string `json:"role"`
 
 	Steps []ProvisioningStep `json:"steps"`
-	// Changed says whether this run changed anything in the directory. A
-	// second run reports false, which is the proof that the step is
-	// repeatable: the same report, the same objects, nothing written.
+	// Changed says whether this run changed anything in the directory.
 	Changed bool `json:"changed"`
 	// Complete says whether the connector's account now holds the right
 	// through the objects named above.
 	Complete bool `json:"complete"`
-	// OperatorActions are the commands a directory administrator runs when
-	// the connector's own account may not do it. They are the same objects
-	// in the same order, spelled for the directory's command line.
+	// OperatorActions are the commands a directory administrator runs when the
+	// connector's own account may not do it.
 	OperatorActions []string `json:"operator_actions,omitempty"`
-	// Verified is the directory's own answer about the move afterwards,
-	// read with the same preflight a preserve runs. A step that completed
-	// and a directory that then reports the right are two statements, and
-	// only the second one is the directory's.
+	// Verified is the directory's own answer about the move afterwards, read with
+	// the same preflight a preserve runs.
 	Verified     bool      `json:"verified"`
 	VerifyDetail string    `json:"verify_detail,omitempty"`
 	RanAt        time.Time `json:"ran_at"`
@@ -222,16 +175,8 @@ func (r ProvisioningReport) Summary() string {
 	}
 }
 
-// ProvisionPreserveRights gives the connector's own service account the
-// right to move an entry into the container of preserved accounts, and
-// nothing more.
-//
-// It is idempotent by construction: every object is read before it is
-// written, every membership is added with the directory's own "already a
-// member" answer treated as the wanted state, and a run that finds
-// everything in place writes nothing and reports each step as already
-// present. It never touches an existing permission and never removes
-// anything.
+// ProvisionPreserveRights gives the connector's own service account the right
+// to move an entry into the container of preserved accounts, and nothing more.
 func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningReport, error) {
 	report := ProvisioningReport{
 		Principal:  c.config.Principal,
@@ -243,16 +188,7 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	}
 	commands := operatorCommands(c.config.Principal)
 
-	// The permission is the directory's own and carries the ACI. It is read
-	// first, because everything below binds to it and because a directory
-	// without it needs a different remedy altogether.
-	//
-	// The name is not one word in every release: FreeIPA has shipped this
-	// permission as "System: Preserve User" and as "System: Preserve
-	// Users", and a step that knew only one of them would tell half the
-	// installations that their directory does not publish it at all. The
-	// spellings are tried in order and the one that answered is what the
-	// report names and what everything below binds to.
+	// The permission is the directory's own and carries the ACI.
 	found, showErr := c.findPreservePermission(ctx)
 	if found != "" {
 		report.Permission = found
@@ -261,31 +197,22 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	if err := showErr; err != nil {
 		switch {
 		case isNotFound(err):
-			// A directory hides what a bind may not read, so "there is no
-			// such permission" and "this account may not see it" arrive as
-			// the same answer. The report says both, because the two have
-			// different remedies and the operator knows which directory
-			// they are looking at.
+			// A directory hides what a bind may not read, so "there is no such
+			// permission" and "this account may not see it" arrive as the same answer.
 			report.record(permission, ProvisionMissing,
 				"the connector cannot read it: either the directory does not publish it, "+
 					"or this service account may not read permissions. It cannot be created "+
 					"through the API either way: a permission knows the rights read, search, "+
 					"compare, write, add and delete, and the move is a moddn")
 			report.action(manualACI(c.config.Principal, c.config.Realm))
-			// The step goes on rather than stopping here. Reading a
-			// permission is an administrator's right, and a connector that
-			// may not read one may still have been bound to it by an
-			// administrator who ran the commands below: the closing
-			// verification asks the directory whether the move is allowed,
-			// which is the question that decides, and it must be asked
-			// even when the first read said nothing.
+			// The step goes on rather than stopping here.
 			for _, command := range commands {
 				report.action(command)
 			}
 		case isAccessDenied(err):
-			// An account that may not even read the permission will not be
-			// able to bind anything to it either, so the whole sequence
-			// goes to the administrator rather than the first command.
+			// An account that may not even read the permission will not be able to bind
+			// anything to it either, so the whole sequence goes to the administrator
+			// rather than the first command.
 			report.refuse(permission, err, "")
 			for _, command := range commands {
 				report.action(command)
@@ -355,9 +282,9 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 	return report, nil
 }
 
-// ensureObject settles one named object: it is read first, created only
-// where the directory says it is not there, and a directory that refuses
-// the creation is reported with the command an administrator runs instead.
+// ensureObject settles one named object: it is read first, created only where
+// the directory says it is not there, and a directory that refuses the
+// creation is reported with the command an administrator runs instead.
 func (c *Client) ensureObject(ctx context.Context, report *ProvisioningReport,
 	kind, name, show, add string, options map[string]any, command string) bool {
 	object := "the " + kind + " " + name
@@ -372,9 +299,8 @@ func (c *Client) ensureObject(ctx context.Context, report *ProvisioningReport,
 	}
 	if _, err := c.provision(ctx, add, []string{name}, options); err != nil {
 		if isDuplicate(err) {
-			// Two runs at once: the object exists, which is the wanted
-			// state, and the one that lost the race says so rather than
-			// failing.
+			// Two runs at once: the object exists, which is the wanted state, and the
+			// one that lost the race says so rather than failing.
 			report.record(object, ProvisionAlreadyPresent, "another run created it first")
 			return true
 		}
@@ -385,11 +311,8 @@ func (c *Client) ensureObject(ctx context.Context, report *ProvisioningReport,
 	return true
 }
 
-// ensureMember puts one member into one holder and reads the directory's
-// own account of what happened. The directory answers a membership command
-// with a count of what it completed and a list of what it did not, and
-// "this entry is already a member" in that list is the wanted state rather
-// than a failure - which is what makes a second run a no-op.
+// ensureMember puts one member into one holder and reads the directory's own
+// account of what happened.
 func (c *Client) ensureMember(ctx context.Context, report *ProvisioningReport,
 	object, method, holder, kind, member, command string) bool {
 	result, err := c.provision(ctx, method, []string{holder}, map[string]any{kind: []string{member}})
@@ -446,9 +369,8 @@ func isDuplicate(err error) bool {
 	return strings.Contains(err.Error(), "already exists")
 }
 
-// principalMember says how the directory knows the connector's own
-// account: a principal with a host in it is a service, anything else is a
-// user. The member kind decides the option the role membership takes.
+// principalMember says how the directory knows the connector's own account: a
+// principal with a host in it is a service, anything else is a user.
 func principalMember(principal string) (string, string) {
 	name, _, _ := strings.Cut(principal, "@")
 	if strings.Contains(name, "/") {
@@ -458,9 +380,7 @@ func principalMember(principal string) (string, string) {
 }
 
 // ProvisioningInstruction is the sentence every refusal about the move
-// carries: what to run, and what it grants. It names the operation rather
-// than a screen, because the same words go into a job log, an error guide
-// entry and the panel.
+// carries: what to run, and what it grants.
 func ProvisioningInstruction() string {
 	return "run the directory provisioning step for preserving accounts " +
 		"(the identity screen, \"prepare the directory for preserving accounts\"), " +
@@ -469,10 +389,8 @@ func ProvisioningInstruction() string {
 		", and nothing else. It is safe to repeat: a second run changes nothing."
 }
 
-// operatorCommands are the five commands a directory administrator runs
-// when the connector's own account may not create these objects. They are
-// in the order the step takes them, so the one that failed is the one to
-// start from.
+// operatorCommands are the five commands a directory administrator runs when
+// the connector's own account may not create these objects.
 func operatorCommands(principal string) []string {
 	kind, member := principalMember(principal)
 	flag := "--services="
@@ -490,11 +408,9 @@ func operatorCommands(principal string) []string {
 	}
 }
 
-// manualACI is what an administrator adds when the directory does not
-// publish the permission at all - an older directory, or one whose
-// permission was removed. The move cannot be granted through the API in
-// that case, so the ACI is written directly, against the connector's own
-// account and against the two containers alone.
+// manualACI is what an administrator adds when the directory does not publish
+// the permission at all - an older directory, or one whose permission was
+// removed.
 func manualACI(principal, realm string) string {
 	base := baseDN(principal, realm)
 	kind, member := principalMember(principal)
@@ -516,10 +432,7 @@ func manualACI(principal, realm string) string {
 		"EOF"
 }
 
-// baseDN writes the directory's base the way the realm spells it. A realm
-// is not a base DN and the directory is free to disagree, so what this
-// returns is a proposal an administrator checks, never something the
-// connector writes to.
+// baseDN writes the directory's base the way the realm spells it.
 func baseDN(principal, realm string) string {
 	if realm == "" {
 		if _, after, found := strings.Cut(principal, "@"); found {
@@ -537,24 +450,20 @@ func baseDN(principal, realm string) string {
 }
 
 // preservePermissionNames are the spellings FreeIPA has published this
-// permission under. They are tried in order; the first the directory
-// answers for is the one the provisioning binds to.
+// permission under.
 var preservePermissionNames = []string{"System: Preserve User", "System: Preserve Users"}
 
-// findPreservePermission reads the directory's own preserve permission
-// under whichever name this release publishes it. It returns the name that
-// answered, or the refusal of the last attempt - a directory that has none
-// of them answers NotFound, which the caller turns into the instruction to
-// add the ACI by hand.
+// findPreservePermission reads the directory's own preserve permission under
+// whichever name this release publishes it.
 func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
 	var lastErr error
 	for _, name := range preservePermissionNames {
 		if _, err := c.provision(ctx, "permission_show", []string{name}, map[string]any{}); err == nil {
 			return name, nil
 		} else if !isNotFound(err) {
-			// A refusal that is not "there is no such permission" is about
-			// this connector's rights, not about the spelling, so it stops
-			// the search and is reported as it came.
+			// A refusal that is not "there is no such permission" is about this
+			// connector's rights, not about the spelling, so it stops the search and is
+			// reported as it came.
 			return "", err
 		} else {
 			lastErr = err
@@ -564,10 +473,8 @@ func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
 }
 
 // preserveCompanions are the three rights the move needs beside the moddn
-// itself: the change of the entry's relative name, the read of the
-// container it lands in, and the write on that container - the directory's
-// own command renames, clears and re-reads the entry it moves, and a
-// missing one of those turns a move that happened into a call that failed.
+// itself: the change of the entry's relative name, the read of the container
+// it lands in, and the write on that container - the directory's own command
 var preserveCompanions = []string{
 	PreserveRDNPermission, PreserveReadPermission, PreserveModifyPermission,
 }

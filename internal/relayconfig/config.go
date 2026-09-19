@@ -1,19 +1,5 @@
-// Package relayconfig reads the configuration of a relay from a YAML file.
-//
-// A relay is a separate trust boundary and has a separate file. A file shared
-// with the agent would look more economical and would mean that one setting
-// describes two roles with different permissions - and that a mistake in one
-// of them touches the other.
-//
-// The parser is strict just like the parser of the agent: a typo in the name
-// of a field must not end with a silent start on a default setting. A relay
-// listening on a port other than the operator thinks is worse than a relay
-// that did not come up.
-//
-// What is not in this file: the enrollment token and the identity. The token
-// is a one-time secret and must not survive an upgrade of the package; the
-// identity of a relay comes from its certificate rather than from text in a
-// file.
+// Package relayconfig reads the configuration of a relay from a YAML file. A
+// relay is a separate trust boundary and has a separate file.
 package relayconfig
 
 import (
@@ -47,9 +33,8 @@ type Config struct {
 	Spool         Spool    `yaml:"spool"`
 }
 
-// Spool bounds the durable spool of the relay: the messages of the
-// agents the centre has not yet confirmed it consumed. Every limit is a
-// pointer so that a missing entry can be told from an explicit value.
+// Spool bounds the durable spool of the relay: the messages of the agents the
+// centre has not yet confirmed it consumed.
 type Spool struct {
 	// Path is the directory of the segment files; empty means the spool
 	// directory under state_dir. Root-owned and private.
@@ -73,30 +58,18 @@ type Spool struct {
 // Relay describes the node of the site itself.
 type Relay struct {
 	Name string `yaml:"name"`
-	// Site is an expected value rather than a granted one: the scope of a
-	// relay is granted by the enrollment token and it is the token that
-	// settles it. A divergence between the file and the certificate is a
-	// configuration error and is to be visible.
+	// Site is an expected value rather than a granted one: the scope of a relay
+	// is granted by the enrollment token and it is the token that settles it.
 	Site            string   `yaml:"site"`
 	Listen          string   `yaml:"listen"`
 	AdvertisedNames []string `yaml:"advertised_names"`
 	StateDir        string   `yaml:"state_dir"`
-	// HealthListen is the address of the health listener: plain HTTP,
-	// without a client certificate, answering liveness and readiness so
-	// that a container runtime can ask them without a shell in the image.
-	// It is deliberately not the listener of the agents: that one
-	// terminates TLS and demands a certificate of the fleet, which a
-	// health check inside the container does not have.
-	//
-	// A pointer so that a missing entry can be told from an explicit
-	// empty one: no entry means the default on the loopback, an empty
-	// string means the operator turned the listener off.
+	// HealthListen is the address of the health listener: plain HTTP, without a
+	// client certificate, answering liveness and readiness so that a container
+	// runtime can ask them without a shell in the image.
 	HealthListen *string `yaml:"health_listen"`
-	// BufferMaxBytes is the limit of the memory buffer of the releases
-	// before the spool. It is still read: a file that names it and says
-	// nothing under spool.max_bytes gets the same limit for the spool, so
-	// an upgraded relay keeps the room the operator gave it. A pointer so
-	// that a missing entry can be told from an explicit zero.
+	// BufferMaxBytes is the limit of the memory buffer of the releases before the
+	// spool.
 	BufferMaxBytes *int64 `yaml:"buffer_max_bytes"`
 }
 
@@ -107,9 +80,7 @@ type Upstream struct {
 	BootstrapCA   string   `yaml:"bootstrap_ca_file"`
 }
 
-// The error codes of the configuration of a relay. Just as with the agent
-// they are part of the contract with the operator: they are what shows up on a
-// machine without a connection to the panel.
+// The error codes of the configuration of a relay.
 var (
 	ErrOpen              = errors.New("relay_config_open")
 	ErrDecode            = errors.New("relay_config_decode")
@@ -129,31 +100,19 @@ var (
 	ErrHealthListen      = errors.New("relay_config_health_listen_invalid")
 )
 
-// DefaultHealthListen is where the health listener stands when the file
-// says nothing: the loopback of the machine, on the port next to the one
-// the agents use.
-//
-// The loopback rather than every address, because the answer says how
-// full the spool is and when the certificate ends - facts for the
-// operator of the machine and for the runtime that starts the container,
-// not for the network of the site. An installation whose probe comes
-// from outside the container, a kubelet for instance, names an address
-// of its own in health_listen.
+// DefaultHealthListen is where the health listener stands when the file says
+// nothing: the loopback of the machine, on the port next to the one the agents
+// use.
 const DefaultHealthListen = "127.0.0.1:8454"
 
-// The limits of the buffer. The bottom is deliberately zero: a relay without
-// a buffer is a choice as well. The top protects the machine of the site - a
-// buffer growing without end turns a failure of the link into a failure of the
-// relay.
+// The limits of the buffer. The bottom is deliberately zero: a relay without a
+// buffer is a choice as well.
 const (
 	DefaultBuffer int64 = 256 << 20
 	MaxBuffer     int64 = 4 << 30
 )
 
-// The defaults of the spool. The floor of free space is what the state
-// directory needs for the identity and the segment being written; the
-// reserve is what a site's results take over an outage of a day while
-// its samples are dropped. Both are configurable in relay.yaml.
+// The defaults of the spool.
 const (
 	DefaultSpoolMaxBytes        int64 = 1 << 30
 	DefaultSpoolCriticalReserve int64 = 128 << 20
@@ -235,11 +194,7 @@ func fillDefaults(cfg *Config) {
 	fillSpoolDefaults(cfg)
 }
 
-// fillSpoolDefaults completes the spool section. A file from before the
-// spool names buffer_max_bytes alone: that limit becomes the spool's, so
-// the upgrade keeps the room the operator gave the site. The reserve is
-// capped at the limit, so a small limit still leaves room for control
-// and results.
+// fillSpoolDefaults completes the spool section.
 func fillSpoolDefaults(cfg *Config) {
 	if cfg.Spool.MaxBytes == nil {
 		limit := DefaultSpoolMaxBytes
@@ -286,9 +241,9 @@ func (c Config) SpoolLimits() (maxBytes, reserve, minFree int64, ackTimeout time
 		*cfg.Spool.AckTimeout, *cfg.Spool.MaxInflightPerHost
 }
 
-// HealthListen returns the address of the health listener: the default
-// for a file that says nothing, and an empty string for one that turned
-// the listener off.
+// HealthListen returns the address of the health listener: the default for a
+// file that says nothing, and an empty string for one that turned the listener
+// off.
 func (c Config) HealthListen() string {
 	if c.Relay.HealthListen == nil {
 		return DefaultHealthListen
@@ -317,7 +272,6 @@ func (c Config) Check() error {
 	}
 	// Without a name the relay is visible under, its server certificate has
 	// nothing to attest and the agents reject a connection to an unknown name.
-	// Better to say so at the start than with every agent separately.
 	if len(c.Relay.AdvertisedNames) == 0 {
 		return ErrAdvertisedMissing
 	}
@@ -359,12 +313,7 @@ func (c Config) Check() error {
 	return c.checkSpool()
 }
 
-// checkHealthListen guards the address of the health listener. It shares
-// the port rule of the listener of the agents - a relay takes no
-// privileged port - and it must not be the port of that listener: the
-// health answer goes out without a client certificate, and putting it on
-// the port of the fleet would hand the state of the site to anybody who
-// reaches it.
+// checkHealthListen guards the address of the health listener.
 func (c Config) checkHealthListen() error {
 	address := c.HealthListen()
 	if address == "" {
@@ -384,9 +333,7 @@ func (c Config) checkHealthListen() error {
 	return nil
 }
 
-// checkSpool guards the spool section. The limits have a floor of one
-// megabyte: a spool smaller than a single inventory report would refuse
-// every result and say critical from the first minute.
+// checkSpool guards the spool section.
 func (c Config) checkSpool() error {
 	if c.Spool.Path != "" && !filepath.IsAbs(c.Spool.Path) {
 		return fmt.Errorf("%w: %s", ErrSpoolPath, c.Spool.Path)
@@ -410,12 +357,8 @@ func (c Config) checkSpool() error {
 	return nil
 }
 
-// listenAddress guards that the listen address is an address and that the
-// port does not require root.
-//
-// A relay runs without root privileges and is to stay that way: a process
-// terminating the TLS of a whole site is not the place for extra
-// permissions.
+// listenAddress guards that the listen address is an address and that the port
+// does not require root.
 func listenAddress(address string) error {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {

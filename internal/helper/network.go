@@ -22,9 +22,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/network"
 )
 
-// The range of the rollback clock. Too short gives the agent no chance to
-// confirm connectivity, too long leaves the host cut off for quarters of an
-// hour.
+// The range of the rollback clock.
 const (
 	rollbackDefault = 120 * time.Second
 	rollbackMin     = 30 * time.Second
@@ -36,12 +34,6 @@ const (
 const rollbackToolLimit = 5 * time.Minute
 
 // applyNetwork handles changes of the network configuration.
-//
-// Every change is armed with a rollback before the host feels it: the helper
-// saves the state from before the change and starts a transient systemd timer
-// that restores that state. The timer is disarmed only by a confirmation from
-// the agent that the host still talks to the panel. The opposite order would
-// leave a window in which the host is already cut off and nothing saves it.
 func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
 	release, busy := s.hold(networkGuard(action.GetOperation()), request)
@@ -93,9 +85,7 @@ func (s *Server) applyNetwork(ctx context.Context, request *helperv1.HelperReque
 	return reject(ErrorUnknownAction, "unknown network operation")
 }
 
-// networkGuard names the guard of a network operation. A read and a plan take
-// none; a confirmation and a rollback change the armed timer and take it like
-// the change itself.
+// networkGuard names the guard of a network operation.
 func networkGuard(operation helperv1.NetworkRequest_Operation) string {
 	switch operation {
 	case helperv1.NetworkRequest_OPERATION_READ, helperv1.NetworkRequest_OPERATION_PLAN:
@@ -105,16 +95,13 @@ func networkGuard(operation helperv1.NetworkRequest_Operation) string {
 }
 
 // planNetwork computes the difference between the profile found and the one
-// requested, without touching the host. It recognizes the kind of change by
-// the fields of the order.
+// requested, without touching the host.
 func (s *Server) planNetwork(ctx context.Context, adapter string,
 	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
 	profiles := s.adapterProfiles(ctx, adapter)
 	// A layered plan is computed against the whole host and not against one
-	// profile: every one of its refusals is about a relation to something
-	// else - a member another layer owns, a parent that is not there, the
-	// interface the panel itself talks over - and a profile shows none of
-	// them.
+	// profile: every one of its refusals is about a relation to something else -
+	// a member another layer owns, a parent that is not there, the interface the
 	if kind := networkChangeKind(action); kind == network.PlanLink || kind == network.PlanLinkRemove {
 		snapshot, err := s.networkSnapshot(ctx, action.GetManagementAddress())
 		if err != nil {
@@ -133,14 +120,11 @@ func (s *Server) planNetwork(ctx context.Context, adapter string,
 // adapterPlan computes the plan and attaches to it what the mechanism will
 // apply: nothing for NetworkManager, which takes arguments, the nmstate
 // document of the touched interface, or the panel's netplan file after the
-// merge. The same function runs at planning and before the change, so the
-// two fingerprints compare the same thing.
 func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helperv1.NetworkRequest,
 	profile network.Profile) network.Plan {
-	// The second family's switches come from the kernel, not from the
-	// profile: a mechanism will happily write an IPv6 address onto an
-	// interface whose disable_ipv6 is set, and the address then exists
-	// nowhere the verifier can find it.
+	// The second family's switches come from the kernel, not from the profile: a
+	// mechanism will happily write an IPv6 address onto an interface whose
+	// disable_ipv6 is set, and the address then exists nowhere the verifier can
 	ipv6 := network.CombineIPv6(
 		network.ReadIPv6Settings(network.IPv6ConfDir, "all"),
 		network.ReadIPv6Settings(network.IPv6ConfDir, action.GetInterface()))
@@ -153,12 +137,9 @@ func (s *Server) adapterPlan(ctx context.Context, adapter string, action *helper
 	var err error
 	switch adapter {
 	case network.AdapterNetworkManager:
-		// NetworkManager takes arguments rather than a document, so there
-		// is nothing to show; what it cannot express is still its answer,
-		// and the operator is to read it in the plan rather than in a
-		// failed job. Only an address profile is asked: the other changes
-		// go through settings of their own and would be judged here against
-		// a profile the order never touched.
+		// NetworkManager takes arguments rather than a document, so there is nothing
+		// to show; what it cannot express is still its answer, and the operator is
+		// to read it in the plan rather than in a failed job.
 		if plan.Operation == network.PlanProfile {
 			_, err = network.ProfileArguments(*plan.Desired)
 		}
@@ -209,9 +190,7 @@ func networkPlan(action *helperv1.NetworkRequest, profile network.Profile,
 }
 
 // linkSpecOf turns the layered order into the description the module plans
-// against. It is a plain copy: the shape was checked by the panel and is
-// checked again by ValidateLinkSpec inside the plan, so nothing is filled
-// in here that the operator did not say.
+// against.
 func linkSpecOf(link *helperv1.NetworkLink) network.LinkSpec {
 	return network.LinkSpec{
 		Name: link.GetName(), Kind: link.GetKind(), Members: link.GetMembers(),
@@ -223,9 +202,7 @@ func linkSpecOf(link *helperv1.NetworkLink) network.LinkSpec {
 	}
 }
 
-// networkChangeKind says which change the order describes. Mutating operations
-// name it directly; the plan recognizes it by the fields, because one planning
-// operation covers three kinds of change.
+// networkChangeKind says which change the order describes.
 func networkChangeKind(action *helperv1.NetworkRequest) string {
 	switch action.GetOperation() {
 	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
@@ -289,10 +266,8 @@ func (s *Server) changeNetwork(ctx context.Context, adapter string,
 		return reject(ErrorUnsupported, err.Error())
 	}
 
-	// A change approved on the basis of a plan is to enter the state the
-	// operator looked at. A plan computed now with a different digest means the
-	// profile changed since the planning - and that is a refusal, not a
-	// warning.
+	// A change approved on the basis of a plan is to enter the state the operator
+	// looked at.
 	now := s.adapterPlan(ctx, adapter, action, profile)
 	if expected := action.GetPlanHash(); expected != "" && now.PlanHash != expected {
 		return reject(ErrorPreconditionFailed,
@@ -316,9 +291,7 @@ func (s *Server) changeNetwork(ctx context.Context, adapter string,
 		return reject(ErrorMalformed, err.Error())
 	}
 
-	// The rollback plan is built from the state read before the change. It is
-	// written to disk, because the helper ends its work after an idle period -
-	// a timer in its memory would disappear together with the process.
+	// The rollback plan is built from the state read before the change.
 	plan := network.RollbackPlan{
 		ID:         rollbackIdentifier(),
 		Profile:    profile,
@@ -363,16 +336,14 @@ func changeSteps(action *helperv1.NetworkRequest, connection string,
 	case helperv1.NetworkRequest_OPERATION_SET_MTU:
 		return network.MTUArguments(connection, action.GetMtu())
 	case helperv1.NetworkRequest_OPERATION_ENSURE_ROUTES:
-		// The order carries one list and the two families are written into
-		// two settings: NetworkManager drops an IPv6 route put into
-		// ipv4.routes without a word.
+		// The order carries one list and the two families are written into two
+		// settings: NetworkManager drops an IPv6 route put into ipv4.
 		routes, routes6 := network.SplitRouteFamilies(action.GetRoutes())
 		return network.RouteArguments(connection, routes, routes6)
 	case helperv1.NetworkRequest_OPERATION_APPLY_PROFILE:
-		// Routes, MTU and the rest of the resolver stay as they were: the
-		// address profile is a separate operation and must not silently
-		// erase settings the operator was never asked about. The same holds
-		// for a whole family the order left out.
+		// Routes, MTU and the rest of the resolver stay as they were: the address
+		// profile is a separate operation and must not silently erase settings the
+		// operator was never asked about.
 		desired := network.Profile{
 			Connection:    connection,
 			Method:        current.Method,
@@ -413,16 +384,11 @@ func changeSteps(action *helperv1.NetworkRequest, connection string,
 }
 
 // confirmChange disarms the rollback after the agent confirmed connectivity.
-//
-// Each mechanism disarms its own watchdog: NetworkManager the transient
-// timer, nmstate its checkpoint with a commit, netplan the waiting "netplan
-// try" with the confirmation on its standard input.
 func (s *Server) confirmChange(ctx context.Context, id string) *helperv1.HelperResponse {
 	plan, err := network.LoadPlan(network.RollbackDir, id)
 	if err != nil {
 		// A missing plan means the rollback was already performed or already
-		// disarmed. This is not an error of the order, but the operator is to
-		// know about it.
+		// disarmed.
 		if trial := netplanTrials.get(id); trial != nil && trial.wasReverted() {
 			return reject(ErrorExecFailed,
 				"the change was reverted by netplan before the confirmation arrived")
@@ -485,21 +451,12 @@ func (s *Server) rollbackNow(ctx context.Context, id string) *helperv1.HelperRes
 }
 
 // armRollback starts a transient systemd timer.
-//
-// The timer lives outside the helper: the helper ends its work after an idle
-// period, and the rollback has to fire also when nobody talks to it any more.
-// The unit calls this same helper binary in rollback mode - the command does
-// not come from the plan, so the plan cannot express anything else.
 func (s *Server) armRollback(ctx context.Context, plan network.RollbackPlan, window time.Duration) error {
 	return s.armTimer(ctx, network.RollbackUnitName(plan.ID), window, "-rollback", plan.ID)
 }
 
 // armTimer starts a transient unit that, after the given time, calls the
 // helper in rollback mode.
-//
-// The unit calls the same binary that started the change and passes it only the
-// identifier of the plan: the content of the rollback comes from the plan file,
-// and a plan describes a state, not commands.
 func (s *Server) armTimer(ctx context.Context, unit string, window time.Duration,
 	flag, id string) error {
 	systemdRun, err := exec.LookPath("systemd-run")
@@ -545,9 +502,7 @@ func validPlanIdentifier(id string) bool {
 	return network.ValidPlanID(id)
 }
 
-// adapterProfiles collects the profiles the given mechanism describes. An
-// empty adapter means NetworkManager: the resolver module and older plans
-// know no other.
+// adapterProfiles collects the profiles the given mechanism describes.
 func (s *Server) adapterProfiles(ctx context.Context, adapter string) []network.Profile {
 	switch adapter {
 	case network.AdapterNmstate:
@@ -567,8 +522,6 @@ func (s *Server) adapterProfiles(ctx context.Context, adapter string) []network.
 }
 
 // adapterProfile finds the profile of an interface in the given mechanism.
-// The name returned is what the messages call the profile: the connection
-// name for NetworkManager, the interface itself elsewhere.
 func (s *Server) adapterProfile(ctx context.Context, adapter, iface string) (string, network.Profile, error) {
 	if iface == "" {
 		return "", network.Profile{}, fmt.Errorf("the operation needs an interface name")
@@ -664,8 +617,6 @@ func rollbackWindow(seconds uint32) time.Duration {
 }
 
 // rollbackIdentifier builds the name of a plan from the moment it was created.
-// The name is part of a file name and of a systemd unit name, so it has a
-// narrow set of characters.
 func rollbackIdentifier() string {
 	return "w" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
 }
@@ -725,9 +676,6 @@ func networkErrorResponse(plan network.RollbackPlan, message string) *helperv1.H
 }
 
 // helperPath returns the path of the helper's own binary.
-//
-// The rollback unit has to call exactly the same program that started the
-// change: a path looked up in PATH could point somewhere else in the meantime.
 func helperPath() (string, error) {
 	path, err := os.Executable()
 	if err != nil {
@@ -736,12 +684,7 @@ func helperPath() (string, error) {
 	return filepath.EvalSymlinks(path)
 }
 
-// RollbackFromPlan restores the state from before a network change. Called by
-// the transient systemd unit when nobody confirmed connectivity within the
-// given window.
-//
-// The function works without the agent and without the panel: it is the last
-// thing that works when a change cuts the host off from the world.
+// RollbackFromPlan restores the state from before a network change.
 func RollbackFromPlan(ctx context.Context, id string) error {
 	plan, err := network.LoadPlan(network.RollbackDir, id)
 	if err != nil {
@@ -759,9 +702,9 @@ func RollbackFromPlan(ctx context.Context, id string) error {
 		}
 		return network.RemovePlan(network.RollbackDir, id)
 	case network.AdapterNetplan:
-		// The trial, if it still runs, is not held by this process: the
-		// file is restored and the configuration on disk applied, which is
-		// the state netplan's own revert also returns to.
+		// The trial, if it still runs, is not held by this process: the file is
+		// restored and the configuration on disk applied, which is the state
+		// netplan's own revert also returns to.
 		if err := restoreNetplanFile(ctx, plan, true); err != nil {
 			_ = network.SetAsideFailedPlan(network.RollbackDir, id)
 			return err
@@ -775,9 +718,8 @@ func RollbackFromPlan(ctx context.Context, id string) error {
 	}
 	for _, step := range steps {
 		if output, err := runNmcli(ctx, step); err != nil {
-			// A plan whose timer has already fired is dead also when the
-			// rollback failed. Left in the directory it would look like a
-			// rollback still waiting for its moment.
+			// A plan whose timer has already fired is dead also when the rollback
+			// failed.
 			_ = network.SetAsideFailedPlan(network.RollbackDir, id)
 			return fmt.Errorf("%s: %w: %s", strings.Join(step, " "), err, output)
 		}
@@ -786,14 +728,6 @@ func RollbackFromPlan(ctx context.Context, id string) error {
 }
 
 // The nmstate path.
-//
-// nmstate brings its own watchdog: "apply --no-commit --timeout N" opens a
-// NetworkManager checkpoint that NetworkManager itself rolls back after N
-// seconds unless somebody commits. Nothing of the helper has to survive for
-// that, so no transient timer is armed here. The commit is the panel's
-// confirmation of connectivity; the state from before the change is kept
-// as a document next to the plan for the rollback on request after the
-// checkpoint is gone.
 
 // readNmstate reads the whole nmstate state.
 func (s *Server) readNmstate(ctx context.Context) (network.NmstateState, error) {
@@ -869,9 +803,9 @@ func (s *Server) commitNmstate(ctx context.Context, plan network.RollbackPlan) *
 		return reject(ErrorUnsupported, "this host has no nmstatectl")
 	}
 	if output, err := runTool(ctx, network.NmstateCommitArguments(binary)); err != nil {
-		// A commit that finds no checkpoint arrives after nmstate rolled the
-		// change back: the host is in the state from before, and the plan
-		// has nothing left to guard.
+		// A commit that finds no checkpoint arrives after nmstate rolled the change
+		// back: the host is in the state from before, and the plan has nothing left
+		// to guard.
 		_ = network.RemovePlan(network.RollbackDir, plan.ID)
 		return reject(ErrorExecFailed, fmt.Sprintf(
 			"nmstatectl commit: %s: %s; the change was rolled back by nmstate's checkpoint", err, output))
@@ -903,30 +837,15 @@ func rollbackNmstate(ctx context.Context, plan network.RollbackPlan) error {
 }
 
 // The netplan path.
-//
-// netplan brings its own revert: "netplan try --timeout N" applies the
-// configuration and, without a confirmation on its standard input within N
-// seconds, returns the host to the running state from before. The helper
-// keeps the trial process and hands it the confirmation after the agent
-// checked the path to the panel. netplan's revert restores the running
-// state, not the files: the panel's file is restored by the helper when the
-// trial ends without a confirmation, and by the transient timer when the
-// helper is no longer there to do it.
-//
-// The trial talks to a terminal, not to pipes: "netplan try" puts its
-// standard input into character mode before it applies anything, and on a
-// pipe that call fails and nothing is tried. The helper opens a
-// pseudo-terminal, reads the prompt from one end and writes the newline of
-// the confirmation to the same end.
 
 // netplanRevertMargin is how much later than netplan's own revert the
-// transient timer restores the file: the timer is the second line, not a
-// race with the first.
+// transient timer restores the file: the timer is the second line, not a race
+// with the first.
 const netplanRevertMargin = 30 * time.Second
 
-// netplanPromptWait bounds the wait for the confirmation prompt: the change
-// is on the host when it appears, and the connectivity check makes sense
-// only from then.
+// netplanPromptWait bounds the wait for the confirmation prompt: the change is
+// on the host when it appears, and the connectivity check makes sense only
+// from then.
 const netplanPromptWait = 45 * time.Second
 
 // netplanTrial is a running "netplan try" together with what the helper
@@ -934,10 +853,8 @@ const netplanPromptWait = 45 * time.Second
 type netplanTrial struct {
 	id  string
 	cmd *exec.Cmd
-	// terminal is the helper's end of the trial's terminal: the prompt is
-	// read from it and the confirmation written to it. It stays open until
-	// the trial exits - closing it earlier hangs the terminal up under the
-	// trial, and the trial dies before it reads the confirmation.
+	// terminal is the helper's end of the trial's terminal: the prompt is read
+	// from it and the confirmation written to it.
 	terminal *os.File
 	started  time.Time
 	// prompt is closed when netplan asks for the confirmation, or when its
@@ -963,9 +880,7 @@ func (t *netplanTrial) wasReverted() bool {
 	return t.reverted
 }
 
-// netplanTrialSet holds the trials of this process. The helper has no field
-// for them: they are as long-lived as the process, and a trial the process
-// no longer holds is handled by the timer, not by memory.
+// netplanTrialSet holds the trials of this process.
 type netplanTrialSet struct {
 	sync.Mutex
 	byID map[string]*netplanTrial
@@ -993,8 +908,7 @@ func (r *netplanTrialSet) put(trial *netplanTrial) {
 }
 
 // readNetplanConfig reads the merged configuration: through "netplan get"
-// where netplan has it, otherwise by merging the files the way netplan
-// does.
+// where netplan has it, otherwise by merging the files the way netplan does.
 func (s *Server) readNetplanConfig(ctx context.Context) (network.NetplanConfig, error) {
 	if !network.Exists(network.NetplanPath) {
 		return network.NetplanConfig{}, fmt.Errorf("this host has no netplan")
@@ -1068,8 +982,8 @@ func (s *Server) changeNetplan(ctx context.Context, action *helperv1.NetworkRequ
 	}
 
 	// The timer is the second line: it restores the file and applies the
-	// configuration on disk after netplan's own revert had its turn, also
-	// when this process is gone by then.
+	// configuration on disk after netplan's own revert had its turn, also when
+	// this process is gone by then.
 	if err := s.armTimer(ctx, network.RollbackUnitName(plan.ID), window+netplanRevertMargin,
 		"-rollback", plan.ID); err != nil {
 		_ = restoreNetplanFile(ctx, plan, false)
@@ -1087,9 +1001,8 @@ func (s *Server) changeNetplan(ctx context.Context, action *helperv1.NetworkRequ
 	if !trial.awaitPrompt(netplanPromptWait) {
 		select {
 		case <-trial.done:
-			// The trial ended before asking: netplan could not apply the
-			// configuration and reverted. The exit handler puts the file
-			// back and disarms the timer.
+			// The trial ended before asking: netplan could not apply the configuration
+			// and reverted.
 			<-trial.settled
 			return reject(ErrorExecFailed, fmt.Sprintf("netplan try ended before the change was applied: %v", trial.exitErr))
 		default:
@@ -1140,15 +1053,13 @@ func (s *Server) startNetplanTrial(plan network.RollbackPlan, window time.Durati
 		return nil, err
 	}
 	// The trial outlives the request that started it, so it runs without the
-	// request context: cancelling that would kill the trial mid-way. Its
-	// clock is netplan's own timeout, and a watchdog below for a trial that
-	// does not keep it.
+	// request context: cancelling that would kill the trial mid-way.
 	cmd := exec.Command(arguments[0], arguments[1:]...)
 	cmd.Env = toolEnvironment()
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
-	// The trial leads a session of its own with the terminal as its
-	// controlling one: that is what makes the terminal its standard input in
-	// the sense netplan checks, and what carries the signal of Ctrl-C to it.
+	// The trial leads a session of its own with the terminal as its controlling
+	// one: that is what makes the terminal its standard input in the sense
+	// netplan checks, and what carries the signal of Ctrl-C to it.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
 	if err := cmd.Start(); err != nil {
 		_ = slave.Close()
@@ -1182,10 +1093,8 @@ func (s *Server) startNetplanTrial(plan network.RollbackPlan, window time.Durati
 		}
 	}()
 
-	// The watchdog: netplan reverts and exits on its own clock, and a trial
-	// still there long after that clock is a trial that lost it. It is
-	// killed, and the exit handler then applies the configuration on disk,
-	// because a killed trial reverted nothing.
+	// The watchdog: netplan reverts and exits on its own clock, and a trial still
+	// there long after that clock is a trial that lost it.
 	go func() {
 		select {
 		case <-trial.done:
@@ -1216,11 +1125,8 @@ func (s *Server) startNetplanTrial(plan network.RollbackPlan, window time.Durati
 		if confirmed {
 			return
 		}
-		// netplan reverted the running state; the file on disk still says
-		// the new configuration and would come back at the next apply or
-		// reboot. A trial that had to be killed reverted nothing, so the
-		// configuration on disk is applied too. The timer is disarmed only
-		// after the file is back.
+		// netplan reverted the running state; the file on disk still says the new
+		// configuration and would come back at the next apply or reboot.
 		background, cancel := context.WithTimeout(context.Background(), rollbackToolLimit)
 		defer cancel()
 		err := restoreNetplanFile(background, plan, killed)
@@ -1262,9 +1168,7 @@ func (t *netplanTrial) awaitPrompt(limit time.Duration) bool {
 func (s *Server) confirmNetplan(ctx context.Context, plan network.RollbackPlan) *helperv1.HelperResponse {
 	trial := netplanTrials.get(plan.ID)
 	if trial == nil {
-		// The trial belongs to a helper process that is gone. Nothing here
-		// can reach its standard input: netplan reverts on its own and the
-		// timer restores the file.
+		// The trial belongs to a helper process that is gone.
 		return reject(ErrorExecFailed,
 			"the netplan trial is no longer held by the helper; netplan reverts the change on its own")
 	}
@@ -1276,10 +1180,7 @@ func (s *Server) confirmNetplan(ctx context.Context, plan network.RollbackPlan) 
 		trial.mu.Unlock()
 		return reject(ErrorExecFailed, "the change was reverted by netplan before the confirmation arrived")
 	}
-	// The confirmation is one newline on the trial's terminal. The lock is
-	// held across the write and the mark, so the exit handler cannot take an
-	// accepted trial for a reverted one. The terminal stays open: the exit
-	// handler closes it once the trial is gone.
+	// The confirmation is one newline on the trial's terminal.
 	_, err := io.WriteString(trial.terminal, "\n")
 	if err == nil {
 		trial.confirmed = true
@@ -1303,10 +1204,6 @@ func (s *Server) confirmNetplan(ctx context.Context, plan network.RollbackPlan) 
 }
 
 // rollbackNetplan returns to the state from before the change on request.
-//
-// A trial still waiting gets the signal Ctrl-C sends and reverts on it; its
-// exit handler then restores the file. Without a trial in this process the
-// file is restored and the configuration on disk applied.
 func (s *Server) rollbackNetplan(ctx context.Context, plan network.RollbackPlan) error {
 	trial := netplanTrials.get(plan.ID)
 	if trial == nil {
@@ -1338,9 +1235,9 @@ func (s *Server) rollbackNetplan(ctx context.Context, plan network.RollbackPlan)
 	return restoreNetplanFile(ctx, plan, true)
 }
 
-// restoreNetplanFile puts the panel's file back as it was before the change
-// - or removes it, when there was none - and regenerates the configuration
-// for the layer below. With apply it also applies it.
+// restoreNetplanFile puts the panel's file back as it was before the change -
+// or removes it, when there was none - and regenerates the configuration for
+// the layer below.
 func restoreNetplanFile(ctx context.Context, plan network.RollbackPlan, apply bool) error {
 	previousPath, err := network.PreviousStatePath(network.RollbackDir, plan.ID)
 	if err != nil {
@@ -1369,22 +1266,9 @@ func restoreNetplanFile(ctx context.Context, plan network.RollbackPlan, apply bo
 }
 
 // The layered path: a bond, a bridge or a VLAN.
-//
-// A layered change is planned against the whole host rather than against
-// one profile, because every refusal it can give is about a relation to
-// something else on that host. Once planned, it travels the same road as an
-// address change: the same rescue plan armed before anything is written,
-// the same disarming only after the agent proved the host still talks to
-// the panel. The only mechanisms that carry it are the ones that describe a
-// whole interface; one that would have to be driven profile by profile says
-// so instead of writing half a bond.
 
 // networkSnapshot reads the state a layered plan is computed against: the
 // interfaces, their layering and the channel the panel comes through.
-//
-// The management address comes from the agent, which is the only side that
-// knows it. Guessing it here would end with the host enslaving the very
-// interface the order arrived through.
 func (s *Server) networkSnapshot(ctx context.Context, managementAddress string) (network.Snapshot, error) {
 	binary := network.ToolPath(network.IPPaths, network.Exists)
 	if binary == "" {
@@ -1415,9 +1299,7 @@ func (s *Server) networkSnapshot(ctx context.Context, managementAddress string) 
 }
 
 // adapterLinkPlan computes the layered plan and attaches the document the
-// mechanism will apply, the way adapterPlan does for an address change. The
-// same function runs at planning and again before the change, so the two
-// fingerprints compare the same thing.
+// mechanism will apply, the way adapterPlan does for an address change.
 func (s *Server) adapterLinkPlan(ctx context.Context, adapter string,
 	action *helperv1.NetworkRequest, snapshot network.Snapshot) network.Plan {
 	var plan network.Plan
@@ -1462,12 +1344,6 @@ func (s *Server) adapterLinkPlan(ctx context.Context, adapter string,
 }
 
 // changeNetworkLink builds, changes or removes a layered interface.
-//
-// The order of the steps is the same as for an address change and is the
-// whole safety of it: the plan is computed again against the host, the
-// fingerprint is compared, the rescue plan is armed, and only then is
-// anything written. The agent disarms it afterwards, and only after the
-// panel has acknowledged a call the host made as itself.
 func (s *Server) changeNetworkLink(ctx context.Context, adapter string,
 	action *helperv1.NetworkRequest) *helperv1.HelperResponse {
 	if action.GetOperation() == helperv1.NetworkRequest_OPERATION_APPLY_LINK &&
@@ -1503,9 +1379,9 @@ func (s *Server) changeNetworkLink(ctx context.Context, adapter string,
 	case network.AdapterNetplan:
 		return s.changeNetplan(ctx, action, now)
 	}
-	// The mechanism was already refused inside the plan; this is the case
-	// the plan itself could not reach, and it refuses rather than falling
-	// back to a profile-by-profile write.
+	// The mechanism was already refused inside the plan; this is the case the
+	// plan itself could not reach, and it refuses rather than falling back to a
+	// profile-by-profile write.
 	refusal := network.LayerAdapterRefusal(adapter)
 	if refusal == nil {
 		return reject(ErrorUnsupported, "this host has no mechanism that writes layered interfaces")
@@ -1513,10 +1389,9 @@ func (s *Server) changeNetworkLink(ctx context.Context, adapter string,
 	return reject(refusal.Code, refusal.Reason)
 }
 
-// nmstatePreviousDocument assembles the document that carries the host back
-// to the state from before the change: the same function the change used,
-// with the two states swapped. A layered change swaps link states, an
-// address change swaps profiles.
+// nmstatePreviousDocument assembles the document that carries the host back to
+// the state from before the change: the same function the change used, with
+// the two states swapped.
 func nmstatePreviousDocument(change network.Plan) (string, error) {
 	if change.CurrentLink != nil && change.DesiredLink != nil {
 		return network.NmstateLinkDocument(*change.DesiredLink, *change.CurrentLink)
@@ -1527,9 +1402,7 @@ func nmstatePreviousDocument(change network.Plan) (string, error) {
 	return network.NmstateDocument(change.Operation, *change.Desired, *change.Current)
 }
 
-// rollbackProfile is the profile a rollback plan carries. A layered change
-// has none: what it changes is what an interface is made of, and the way
-// back for it is the state document kept next to the plan.
+// rollbackProfile is the profile a rollback plan carries.
 func rollbackProfile(change network.Plan) network.Profile {
 	if change.Current == nil {
 		return network.Profile{}
@@ -1537,9 +1410,7 @@ func rollbackProfile(change network.Plan) network.Profile {
 	return *change.Current
 }
 
-// changedInterface names the interface a rollback plan is about. A layered
-// order names it in the layer being built, which is not always the
-// interface field of the request.
+// changedInterface names the interface a rollback plan is about.
 func changedInterface(action *helperv1.NetworkRequest, change network.Plan) string {
 	if change.Interface != "" {
 		return change.Interface

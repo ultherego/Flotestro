@@ -20,10 +20,7 @@ const (
 	rpmDatabaseDir = "/var/lib/rpm"
 )
 
-// dnfCacheDir is where the archives land. Dnf5 downloads into
-// /var/cache/libdnf5 and dnf4 into /var/cache/dnf; the one that exists is the
-// one in use, and a host with neither has never downloaded anything - then
-// the directory of dnf5, the current tool, stands for both.
+// dnfCacheDir is where the archives land.
 func dnfCacheDir() string {
 	for _, dir := range []string{"/var/cache/libdnf5", "/var/cache/dnf"} {
 		if info, err := os.Stat(dir); err == nil && info.IsDir() {
@@ -58,9 +55,7 @@ func (d *DNF) LockHeld() (bool, string) {
 	return false, ""
 }
 
-// Plan computes the upgrade from the local cache. check-update returns 100
-// when there are updates and 0 when there are none; every other code is an
-// error.
+// Plan computes the upgrade from the local cache.
 func (d *DNF) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan, err := d.plan(ctx, options)
 	if err != nil {
@@ -73,8 +68,8 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 	plan := Plan{Manager: d.Name(), DiskAvailableBytes: diskAvailable("/"), Mode: options.Mode}
 
 	// A removal plan and an installation plan answer a question other than an
-	// upgrade plan: not "what will change on its own" but "what will disappear
-	// or arrive along with what I am asking for".
+	// upgrade plan: not "what will change on its own" but "what will disappear or
+	// arrive along with what I am asking for".
 	switch options.Mode {
 	case ModeRemove:
 		return d.planRemove(ctx, plan, options)
@@ -93,18 +88,14 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 		if !ok || !matchesFilter(change, options) {
 			continue
 		}
-		// check-update names the candidate and nothing about what is there
-		// now; the rpm database does, and the direction of the change
-		// follows from the two.
+		// check-update names the candidate and nothing about what is there now; the
+		// rpm database does, and the direction of the change follows from the two.
 		change.CurrentVersion = installed[change.Name]
 		change.Action = ActionUpgrade
 		plan.Changes = append(plan.Changes, change)
 	}
 	plan.RebootPredicted = d.rebootPredicted(plan.Changes)
-	// check-update lists the versions and nothing about their size. The
-	// resolver knows: a transaction dnf refuses to run with --assumeno ends
-	// with the summary of what it would download and install, read from the
-	// same cache.
+	// check-update lists the versions and nothing about their size.
 	plan.DownloadBytes, plan.Space = d.planSpace(ctx, plan.Changes, func() string {
 		args := []string{"--assumeno", "--cacheonly", "upgrade"}
 		if options.SecurityOnly {
@@ -120,9 +111,8 @@ func (d *DNF) plan(ctx context.Context, options Options) (Plan, error) {
 }
 
 // planSpace measures where the bytes of the plan go: the archives and the
-// installed size from the summary of the transaction, the growth of /boot
-// from the kernel of the plan. The summary is asked for lazily, because an
-// empty plan has nothing to size and the resolver pass is not free.
+// installed size from the summary of the transaction, the growth of /boot from
+// the kernel of the plan.
 func (d *DNF) planSpace(ctx context.Context, changes []Change, summary func() string) (uint64, []SpaceFact) {
 	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
 	if len(changes) == 0 {
@@ -136,8 +126,7 @@ func (d *DNF) planSpace(ctx context.Context, changes []Change, summary func() st
 }
 
 // DNFTransactionSizes is what the summary of a transaction says about its
-// size. Either number can be missing: dnf4 prints the installed size of an
-// installation and not of an upgrade.
+// size.
 type DNFTransactionSizes struct {
 	Download      uint64
 	DownloadKnown bool
@@ -146,19 +135,7 @@ type DNFTransactionSizes struct {
 }
 
 // ParseDNFTransactionSizes reads the size lines of a transaction summary in
-// both spellings. Dnf4:
-//
-//	Total download size: 12 M
-//	Installed size: 40 M
-//
-// or "Total size: 12 M" when every archive is in the cache already, which
-// means there is nothing to download. Dnf5:
-//
-//	Total size of inbound packages is 12 MiB. Need to download 12 MiB.
-//	After this operation, 40 MiB extra will be used (install 45 MiB, remove 5 MiB).
-//
-// The installed size is what the new files take; what the removed ones free
-// is not credited, because they are gone only when the transaction is over.
+// both spellings.
 func ParseDNFTransactionSizes(output string) DNFTransactionSizes {
 	var sizes DNFTransactionSizes
 	for _, line := range strings.Split(output, "\n") {
@@ -183,9 +160,8 @@ func ParseDNFTransactionSizes(output string) DNFTransactionSizes {
 	return sizes
 }
 
-// parseDNFUpdateLine reads a line of the form:
-//
-//	NetworkManager.x86_64   1:1.52.2-1.fc42   updates
+// parseDNFUpdateLine reads a line of the form: NetworkManager. x86_64 1:1. 52.
+// 2-1.
 func parseDNFUpdateLine(line string) (Change, bool) {
 	if strings.HasPrefix(line, " ") || strings.TrimSpace(line) == "" {
 		return Change{}, false
@@ -203,9 +179,9 @@ func parseDNFUpdateLine(line string) (Change, bool) {
 		Architecture:     arch,
 		CandidateVersion: fields[1],
 		Origin:           fields[2],
-		// Fedora does not publish consistent security metadata for every
-		// repository, so we do not mark changes as security on the basis of
-		// the name of the repository alone.
+		// Fedora does not publish consistent security metadata for every repository,
+		// so we do not mark changes as security on the basis of the name of the
+		// repository alone.
 		Security: false,
 	}, true
 }
@@ -231,9 +207,7 @@ func (d *DNF) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// Upgrade carries the transaction out. The mode is non-interactive, and the
-// versions before and after are always recorded, also when the transaction
-// fails.
+// Upgrade carries the transaction out.
 func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 
@@ -254,11 +228,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	if options.SecurityOnly {
 		args = append(args, "--security")
 	}
-	// An ordinary upgrade does not touch the agent. Replacing the agent in the
-	// middle of a transaction it carries out itself ends with a host cut off
-	// from management halfway through the work - and a result nobody collects.
-	// There is a separate operation for that, which skips this protection
-	// deliberately.
+	// An ordinary upgrade does not touch the agent.
 	if len(options.Packages) == 0 {
 		args = append(args, "--exclude="+AgentPackage)
 	}
@@ -267,9 +237,7 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	// Dnf numbers the steps in its output; the progress is read out of them.
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
 
-	// A damaged file in the cache has exactly one correct answer: fetch it
-	// again. Waiting for a person with that adds no safety and costs an
-	// interrupted campaign.
+	// A damaged file in the cache has exactly one correct answer: fetch it again.
 	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
 		cleaning := run(ctx, 5*time.Minute, dnfPath, "--assumeyes", "--quiet", "clean", "packages")
 		if cleaning.Ran && cleaning.ExitCode == 0 {
@@ -292,16 +260,10 @@ func (d *DNF) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	return apply, nil
 }
 
-// installedVersions returns a map of package -> version. A package
-// installed in several versions at once - a kernel, which rpm keeps
-// alongside its predecessors - is represented by its newest one: that is
-// the version a transaction moves the host to, and the one an expected
-// effect is read against.
+// installedVersions returns a map of package -> version.
 func (d *DNF) installedVersions(ctx context.Context) map[string]string {
-	// The architecture is recorded next to the bare name: a plan that
-	// names kernel-core.x86_64 and a database that holds kernel-core have
-	// to find each other, and a package installed for two architectures
-	// keeps both spellings exact.
+	// The architecture is recorded next to the bare name: a plan that names
+	// kernel-core.
 	result := run(ctx, 2*time.Minute, rpmPath, "-qa", "--qf", "%{NAME} %{ARCH} %{EVR}\n")
 	if !result.Ran || result.ExitCode != 0 {
 		return nil
@@ -327,9 +289,7 @@ func parseInstalledRPM(output string) map[string]string {
 	return versions
 }
 
-// rebootRequired asks dnf about the need for a restart. We trust the code 1
-// only when the tool printed something: an execution error ends with the same
-// code.
+// rebootRequired asks dnf about the need for a restart.
 func (d *DNF) rebootRequired(ctx context.Context) bool {
 	result := run(ctx, time.Minute, dnfPath, "needs-restarting", "-r")
 	return result.Ran && result.ExitCode == 1 && strings.TrimSpace(result.Stdout) != ""
@@ -342,44 +302,26 @@ func (d *DNF) DatabaseBroken(ctx context.Context) bool {
 }
 
 // The full life cycle of packages for dnf.
-//
-// Installing, removing and holding are separate decisions here just as in apt,
-// but the tool answers differently: dnf has no simulation that would print the
-// set of changes alone, so the plan is read from its own table of a
-// transaction interrupted before execution. That is the answer of dnf rather
-// than our reconstruction of its dependencies - and only such an answer may be
-// shown to a person who is about to remove something.
 
 // dnfVersionlock is the name of the command of the plugin that locks
 // versions.
 const dnfVersionlock = "versionlock"
 
 // ErrorVersionlockMissing means the host cannot hold a package version,
-// because the plugin that does it is not installed. It is a refusal of the
-// host rather than a failed transaction: nothing was attempted, and a
-// package taken for held and upgraded in the next campaign is worse than an
-// outright refusal.
+// because the plugin that does it is not installed.
 const ErrorVersionlockMissing = "versionlock_missing"
 
-// versionlockPackage names what restores the feature. The two generations of
-// the tool ship it under different names, and the panel shows the name of
-// the package rather than the name of the plugin, because that is what an
-// operator installs.
+// versionlockPackage names what restores the feature.
 const versionlockPackage = "python3-dnf-plugin-versionlock on dnf4, dnf5-plugin-versionlock on dnf5"
 
 // ErrVersionlockMissing means the hold was refused before anything was
-// attempted. It is a sentinel rather than a sentence, so the refusal reaches
-// the panel as the code ErrorVersionlockMissing instead of as a failed
-// transaction.
+// attempted.
 var ErrVersionlockMissing = errors.New("this host has no dnf versionlock plugin, so a package " +
 	"version cannot be held; install " + versionlockPackage)
 
-// versionlockPaths are the files a distribution installs the plugin as:
-// dnf4 loads it as a Python module next to the other commands of
-// dnf-plugins-core, dnf5 as a shared library of libdnf5, and both keep the
-// configuration of the plugin in the same file. The list is a variable so a
-// test can point it at a directory of its own; it is read and no process is
-// started, because capability detection must not run dnf.
+// versionlockPaths are the files a distribution installs the plugin as: dnf4
+// loads it as a Python module next to the other commands of dnf-plugins-core,
+// dnf5 as a shared library of libdnf5, and both keep the configuration of the
 var versionlockPaths = []string{
 	"/usr/lib/python3*/site-packages/dnf-plugins/versionlock.py",
 	"/usr/lib64/python3*/site-packages/dnf-plugins/versionlock.py",
@@ -391,8 +333,7 @@ var versionlockPaths = []string{
 }
 
 // VersionlockInstalled says whether the host has the plugin that holds a
-// package version. The answer is read from the file system, so the
-// capability registry can carry it without starting dnf.
+// package version.
 func VersionlockInstalled() bool {
 	for _, pattern := range versionlockPaths {
 		matches, err := filepath.Glob(pattern)
@@ -403,15 +344,11 @@ func VersionlockInstalled() bool {
 	return false
 }
 
-// DNFFeatures are the parts of the dnf adapter the host has. The hold is a
-// feature of its own: a host without the versionlock plugin cannot hold a
-// package, and the panel is to see that before it offers the operation
-// rather than after the order fails.
+// DNFFeatures are the parts of the dnf adapter the host has.
 func DNFFeatures(dnf, versionlock bool) map[string]bool {
 	return map[string]bool{
-		// An rpm database lock looks different from a debconf question, and
-		// the repair would look different too, so the adapter does not have
-		// it.
+		// An rpm database lock looks different from a debconf question, and the
+		// repair would look different too, so the adapter does not have it.
 		"repair": false,
 		"hold":   dnf && versionlock,
 	}
@@ -424,9 +361,8 @@ func DNFReason(dnf, versionlock bool) string {
 		return "dnf is not installed on this host"
 	}
 	if !versionlock {
-		// The same sentence the refusal of the operation carries, so the
-		// panel shows one explanation whether it hides the hold or refuses
-		// an order for it.
+		// The same sentence the refusal of the operation carries, so the panel shows
+		// one explanation whether it hides the hold or refuses an order for it.
 		return ErrVersionlockMissing.Error()
 	}
 	return ""
@@ -437,11 +373,8 @@ func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan,
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("a removal plan requires a list of packages")
 	}
-	// --assumeno ends with the code 1 and a message about the interruption:
-	// that is how dnf shows a transaction it does not carry out. The plan
-	// is read from the cache, like the upgrade plan: what the transaction
-	// runs against later is the metadata the plan was read from, and the
-	// refresh step of the plan is where the cache is brought up to date.
+	// --assumeno ends with the code 1 and a message about the interruption: that
+	// is how dnf shows a transaction it does not carry out.
 	args := append([]string{"--assumeno", "--cacheonly", "remove"}, options.Packages...)
 	result := run(ctx, 10*time.Minute, dnfPath, args...)
 	if !result.Ran {
@@ -453,9 +386,7 @@ func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan,
 		// nothing to remove.
 		return plan, nil
 	}
-	// A transaction dnf cannot resolve is not an empty plan. An empty plan
-	// would read as "nothing will disappear" - and that is the answer to a
-	// question other than "this cannot be removed".
+	// A transaction dnf cannot resolve is not an empty plan.
 	if reason := DNFUnresolvable(output); reason != "" {
 		return plan, fmt.Errorf("dnf cannot resolve this transaction: %s", reason)
 	}
@@ -498,9 +429,9 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	if reason := DNFUnresolvable(output); reason != "" {
 		return plan, fmt.Errorf("dnf cannot resolve this transaction: %s", reason)
 	}
-	// Dnf ends a transaction interrupted before execution with a non-zero
-	// code; a zero code means here that there was nothing to install or that
-	// the tool answered other than we assume.
+	// Dnf ends a transaction interrupted before execution with a non-zero code; a
+	// zero code means here that there was nothing to install or that the tool
+	// answered other than we assume.
 	changes := ParseDNFInstallPlan(output)
 	if len(changes) == 0 {
 		if result.ExitCode == 0 && WholeTransactionReady(output) {
@@ -518,8 +449,8 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 	}
 	plan.Changes = append(plan.Changes, changes...)
 	// An installation can drop packages too - a conflict resolved by a
-	// replacement, or a dependency nothing needs any more - and they go
-	// into the plan as removals the operator sees before the consent.
+	// replacement, or a dependency nothing needs any more - and they go into the
+	// plan as removals the operator sees before the consent.
 	removals, _, _ := ParseDNFRemovalPlan(output)
 	plan.Removals = append(plan.Removals, removals...)
 	plan.Protected = ProtectedInSet(plan.Removals)
@@ -529,9 +460,7 @@ func (d *DNF) planInstall(ctx context.Context, plan Plan, options Options) (Plan
 }
 
 // removalHeadings list the sections of the transaction table that mean a
-// removal. Each of them means something else to a person - a named package, a
-// dependent package and a package left without a user - but all of them
-// disappear.
+// removal.
 var removalHeadings = []string{
 	"removing:",
 	"removing dependent packages:",
@@ -539,9 +468,7 @@ var removalHeadings = []string{
 	"removing dependencies:",
 }
 
-// The summary of a transaction. Dnf5 writes "Removing: 3 packages", dnf4 -
-// "Remove  3 Packages"; that number is the only guard against an incomplete
-// read of the table, so we read both spellings.
+// The summary of a transaction.
 var (
 	removalSummaries = []string{"removing:", "remove "}
 	installSummaries = []string{"installing:", "install "}
@@ -582,11 +509,6 @@ func dnfSectionReason(heading string) string {
 
 // ParseDNFRemovalPlan reads the table of a transaction interrupted before
 // execution.
-//
-// It returns the names of the packages and the number dnf itself announced in
-// the summary. A divergence between them is an error rather than a detail: it
-// means the format of the output has changed and the list shown to a person
-// would be incomplete.
 func ParseDNFRemovalPlan(output string) ([]string, int, error) {
 	entries, announced := dnfTransactionSections(output, removalHeadings, removalSummaries)
 	names := make([]string, 0, len(entries))
@@ -596,9 +518,9 @@ func ParseDNFRemovalPlan(output string) ([]string, int, error) {
 	return names, announced, nil
 }
 
-// ParseDNFInstallPlan reads from the transaction table what will arrive:
-// every entry with its architecture, its version and the repository it
-// comes from, and the direction its section means.
+// ParseDNFInstallPlan reads from the transaction table what will arrive: every
+// entry with its architecture, its version and the repository it comes from,
+// and the direction its section means.
 func ParseDNFInstallPlan(output string) []Change {
 	entries, _ := dnfTransactionSections(output, installHeadings, installSummaries)
 	changes := make([]Change, 0, len(entries))
@@ -619,11 +541,6 @@ type dnfEntry struct {
 }
 
 // dnfTransactionSections reads the packages from the transaction table.
-//
-// The table has section headings at the left edge and indented entries; the
-// columns are the name, the architecture, the version, the repository and the
-// size. The summary at the end gives the numbers - and they serve to check
-// whether the read is complete.
 func dnfTransactionSections(output string, headings, summaries []string) ([]dnfEntry, int) {
 	var entries []dnfEntry
 	seen := map[string]bool{}
@@ -643,9 +560,8 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 			continue
 		}
 		if inSummary {
-			// Dnf5 writes "Removing: 3 packages", dnf4 - "Remove  3 Packages".
-			// We read both, because it is that number that guards whether the
-			// read is complete.
+			// Dnf5 writes "Removing: 3 packages", dnf4 - "Remove 3 Packages". We read
+			// both, because it is that number that guards whether the read is complete.
 			if matchesSummary(lower, summaries) {
 				for _, field := range strings.Fields(lower) {
 					if number, err := strconv.Atoi(field); err == nil {
@@ -679,9 +595,7 @@ func dnfTransactionSections(output string, headings, summaries []string) ([]dnfE
 		}
 		seen[name] = true
 		entry := dnfEntry{Name: name, Section: section}
-		// The columns after the name: architecture, version, repository,
-		// size. A row that lacks the tail (a replaced package printed with
-		// the name alone) keeps what it has.
+		// The columns after the name: architecture, version, repository, size.
 		if len(fields) > 3 {
 			entry.Architecture, entry.Version, entry.Repository = fields[1], fields[2], fields[3]
 		}
@@ -718,9 +632,6 @@ func DNFPackageMissing(output string) bool {
 }
 
 // WholeTransactionReady recognises the answer "there is nothing to do".
-//
-// It is the only case where an empty installation plan is true: everything
-// from the order is already installed in a version dnf does not change.
 func WholeTransactionReady(output string) bool {
 	lower := strings.ToLower(output)
 	return strings.Contains(lower, "nothing to do") ||
@@ -744,9 +655,8 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 	before := d.installedVersions(ctx)
 	args := append([]string{"--assumeyes", "--quiet", "install"}, options.Packages...)
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, args...)
-	// dnf does not go back a version with the "install" command and has no
-	// switch for it: a separate command serves a version older than the
-	// installed one. We try it only when the operation explicitly allows it.
+	// dnf does not go back a version with the "install" command and has no switch
+	// for it: a separate command serves a version older than the installed one.
 	if options.AllowDowngrade && (!result.Ran || result.ExitCode != 0) {
 		downgrade := append([]string{"--assumeyes", "--quiet", "downgrade"}, options.Packages...)
 		result = runWithProgress(ctx, 45*time.Minute, options.Progress, false, dnfPath, downgrade...)
@@ -765,10 +675,6 @@ func (d *DNF) Install(ctx context.Context, options Options) (Apply, error) {
 }
 
 // Remove removes the named packages along with what disappears with them.
-//
-// The set is computed again right before the operation and compared with what
-// the operator approved: a difference means the host has changed since the
-// plan.
 func (d *DNF) Remove(ctx context.Context, options Options, expected []string) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	if len(options.Packages) == 0 {
@@ -804,22 +710,16 @@ func (d *DNF) Remove(ctx context.Context, options Options, expected []string) (A
 	return apply, nil
 }
 
-// SetHold holds or releases the upgrades of packages.
-//
-// Dnf does that with the versionlock plugin. A host without it cannot hold a
-// package - and that is an answer rather than a silent consent: a package
-// considered held and upgraded in the next campaign is worse than an outright
-// refusal.
+// SetHold holds or releases the upgrades of packages. Dnf does that with the
+// versionlock plugin.
 func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, error) {
 	apply := Apply{Manager: d.Name()}
 	if len(pkgs) == 0 {
 		return apply, fmt.Errorf("a hold requires a list of packages")
 	}
 	// The preflight of the hold: the plugin is looked for on the file system
-	// first, so a host without it is refused without starting dnf at all,
-	// with the same answer the capability registry gave the panel before the
-	// order. Only a host that has the files is asked whether the command
-	// really loads, which catches a plugin present but disabled.
+	// first, so a host without it is refused without starting dnf at all, with
+	// the same answer the capability registry gave the panel before the order.
 	if !VersionlockInstalled() || !d.HasVersionlock(ctx) {
 		return apply, ErrVersionlockMissing
 	}
@@ -839,9 +739,8 @@ func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, err
 // Holds returns the packages held on the host. A host without the
 // versionlock plugin cannot hold, and says so instead of reporting no holds.
 func (d *DNF) Holds(ctx context.Context) ([]string, string) {
-	// A host without the plugin has an unknown list of holds rather than an
-	// empty one, and the answer names what is missing instead of a failed
-	// command line.
+	// A host without the plugin has an unknown list of holds rather than an empty
+	// one, and the answer names what is missing instead of a failed command line.
 	if !VersionlockInstalled() {
 		return nil, "this host has no dnf versionlock plugin, so the held packages are unknown; " +
 			"install " + versionlockPackage
@@ -865,11 +764,8 @@ func (d *DNF) HasVersionlock(ctx context.Context) bool {
 	return result.Ran && result.ExitCode == 0
 }
 
-// ParseVersionlock reads the list of locks in both formats dnf prints.
-//
-// Dnf5 writes "Package name: <name>", dnf4 - the pattern "name-0:version.*"
-// alone. We read both, because the panel is to work with both generations of
-// the tool.
+// ParseVersionlock reads the list of locks in both formats dnf prints. Dnf5
+// writes "Package name: <name>", dnf4 - the pattern "name-0:version.
 func ParseVersionlock(output string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -890,10 +786,8 @@ func ParseVersionlock(output string) []string {
 			add(name)
 			continue
 		}
-		// A dnf4 entry is a NEVRA pattern: name-epoch:version-release.arch or
-		// name-epoch:version-*. Anything else - a line about metadata, a
-		// heading, a message - is not a lock and must not pretend to be the
-		// name of a package on the list of held ones.
+		// A dnf4 entry is a NEVRA pattern: name-epoch:version-release. arch or
+		// name-epoch:version-*.
 		if name := nameFromNEVRAPattern(trimmed); name != "" {
 			add(name)
 		}
@@ -902,11 +796,6 @@ func ParseVersionlock(output string) []string {
 }
 
 // nevraPattern recognises a lock entry in the dnf4 format.
-//
-// The pattern is deliberately strict: a line that is not a lock is to be
-// skipped rather than land on the list of held packages. A list with the entry
-// "Last metadata expiration check" would tell the operator that a package that
-// does not exist has been held.
 var nevraPattern = regexp.MustCompile(`^([a-zA-Z0-9][a-zA-Z0-9._+-]*?)-([0-9]+:)?[0-9][^\s-]*-[^\s-]+$`)
 
 // nameFromNEVRAPattern extracts the name of a package out of a lock pattern,
@@ -921,11 +810,6 @@ func nameFromNEVRAPattern(pattern string) string {
 
 // DNFUnresolvable recognises a transaction dnf cannot resolve and returns the
 // reason the tool gave.
-//
-// The most common case is a package without which the system cannot be left
-// consistent - dnf then refuses the whole transaction. A refusal with a reason
-// is the only correct answer here: an empty list would mean "nothing will
-// disappear".
 func DNFUnresolvable(output string) string {
 	lower := strings.ToLower(output)
 	markers := []string{
@@ -966,11 +850,7 @@ func DNFUnresolvable(output string) string {
 }
 
 // scriptletFailures reads the packages whose scriptlet failed out of the
-// output of a transaction dnf finished. dnf5 prints "Non-critical error in
-// %post scriptlet: name-0:1.0-1.noarch", dnf4 "Error in POSTIN scriptlet in
-// rpm package name"; rpm itself adds "%post(name-1.0-1.noarch) scriptlet
-// failed". The package name is what is kept: the version is in the applied
-// changes already.
+// output of a transaction dnf finished.
 func scriptletFailures(output string) []string {
 	var names []string
 	seen := map[string]bool{}
@@ -994,9 +874,7 @@ func scriptletFailures(output string) []string {
 	return names
 }
 
-// packageNameOfNEVRA cuts the name out of "name-[epoch:]version-release.arch"
-// - the name is everything before the last two dashes, and a name alone is
-// returned as it is.
+// packageNameOfNEVRA cuts the name out of "name-[epoch:]version-release.
 func packageNameOfNEVRA(nevra string) string {
 	nevra = strings.TrimSpace(strings.Fields(nevra + " ")[0])
 	parts := strings.Split(nevra, "-")

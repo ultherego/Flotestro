@@ -1,9 +1,5 @@
 // Package freeipa is the adapter for the FreeIPA directory. It uses the
 // documented JSON-RPC over HTTPS with Kerberos authentication.
-//
-// Writing straight to LDAP is deliberately impossible in this package: it
-// would bypass FreeIPA's validation, plugins and semantics, and the panel
-// would create objects the directory itself would consider inconsistent.
 package freeipa
 
 import (
@@ -42,9 +38,7 @@ type Config struct {
 	KRB5ConfPath string
 	// CACertPath is the CA certificate of the directory.
 	CACertPath string
-	// CacheTTL is the short lifetime of an answer. The panel does not
-	// replicate the directory, so the cache only protects the IPA server from
-	// an excess of queries.
+	// CacheTTL is the short lifetime of an answer.
 	CacheTTL time.Duration
 }
 
@@ -65,18 +59,13 @@ type Client struct {
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
-	// generation counts the invalidations. A read that started before a
-	// write and finished after it must not put the state from before the
-	// write back into the cache; it compares the generation it started in.
+	// generation counts the invalidations.
 	generation uint64
-	// logged says whether the directory session is believed alive. It is
-	// read and written by every caller of the client at once, so it goes
-	// under the same mutex as the cache.
+	// logged says whether the directory session is believed alive.
 	logged bool
-	// The health of the connection, read from the calls themselves rather
-	// than from a probe of its own: the last time the directory answered,
-	// the last time it could not be reached, and the last command it
-	// refused. An operator reading "unreachable" wants to know since when.
+	// The health of the connection, read from the calls themselves rather than
+	// from a probe of its own: the last time the directory answered, the last
+	// time it could not be reached, and the last command it refused.
 	lastSuccessAt time.Time
 	lastError     string
 	lastErrorAt   time.Time
@@ -108,15 +97,13 @@ func (c *Client) noteRefusal(message string) {
 type KeytabEntry struct {
 	Principal string `json:"principal"`
 	KVNO      uint32 `json:"kvno"`
-	// Timestamp is when the key was written into the keytab. A keytab
-	// carries no expiry: the directory decides when a key stops working,
-	// and the file does not know it.
+	// Timestamp is when the key was written into the keytab.
 	Timestamp *time.Time `json:"timestamp,omitempty"`
 }
 
-// Health is the state of the connector as the panel can know it without
-// asking the directory: the identity it uses, what its keytab holds, when
-// the directory last answered and last failed, and how old the cache is.
+// Health is the state of the connector as the panel can know it without asking
+// the directory: the identity it uses, what its keytab holds, when the
+// directory last answered and last failed, and how old the cache is.
 type Health struct {
 	Principal string `json:"principal"`
 	// KeytabReadable says whether the keytab file was read at start; the
@@ -138,9 +125,7 @@ type Health struct {
 	CacheTTLSeconds int        `json:"cache_ttl_seconds"`
 }
 
-// Health reports the connector's state. No call reaches the directory
-// here; the reachability check is a separate Ping, so a health view of a
-// directory that is down still comes back at once.
+// Health reports the connector's state.
 func (c *Client) Health() Health {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -281,9 +266,8 @@ func (c *Client) login(ctx context.Context) error {
 	krbClient := client.NewWithKeytab(username, realm, c.krbKeytab, c.krbConfig,
 		client.DisablePAFXFAST(true))
 	if err := krbClient.Login(); err != nil {
-		// Fail closed: without a ticket we fall back to no other
-		// authentication method, in particular not to an administrator
-		// password.
+		// Fail closed: without a ticket we fall back to no other authentication
+		// method, in particular not to an administrator password.
 		return fmt.Errorf("Kerberos login as %s: %w", c.config.Principal, err)
 	}
 	defer krbClient.Destroy()
@@ -321,11 +305,8 @@ type rpcError struct {
 	Name    string `json:"name"`
 }
 
-// DirectoryError is an answer of the directory that refuses a call: the
-// name is the directory's own class (ValidationError, NotFound,
-// DuplicateEntry...). It is kept as a type, because a refusal is not the
-// same thing as a directory that cannot be reached: the first does not
-// change with a retry, the second may.
+// DirectoryError is an answer of the directory that refuses a call: the name
+// is the directory's own class (ValidationError, NotFound, DuplicateEntry.
 type DirectoryError struct {
 	Name    string
 	Message string
@@ -335,9 +316,7 @@ func (e *DirectoryError) Error() string {
 	return "the directory: " + e.Message + " (" + e.Name + ")"
 }
 
-// Permanent says that repeating the same call gives the same answer. The
-// scheduler settles a task on such an error instead of trying again until
-// the deadline.
+// Permanent says that repeating the same call gives the same answer.
 func (e *DirectoryError) Permanent() bool {
 	switch e.Name {
 	case "ValidationError", "NotFound", "DuplicateEntry", "ACIError", "RequirementError", "ConversionError":
@@ -351,9 +330,7 @@ type rpcResponse struct {
 	Error  *rpcError       `json:"error"`
 }
 
-// errSessionExpired says the directory no longer accepts the session
-// cookie. It is the one error after which a call logs in again; a refused
-// command or a broken connection comes back as it is, whatever its text.
+// errSessionExpired says the directory no longer accepts the session cookie.
 var errSessionExpired = errors.New("the directory refused the session")
 
 // call runs a directory command. The command name comes solely from the
@@ -365,11 +342,8 @@ func (c *Client) call(ctx context.Context, method string, args []string, options
 	return c.invoke(ctx, method, args, options)
 }
 
-// invoke sends a command that one of the two doors - the ordinary call or
-// the deliberate provisioning step - has already admitted. It exists so
-// that the admission is a decision of its own: a command reaches the
-// directory through a named list, and there is no path that takes a method
-// nobody vouched for.
+// invoke sends a command that one of the two doors - the ordinary call or the
+// deliberate provisioning step - has already admitted.
 func (c *Client) invoke(ctx context.Context, method string, args []string, options map[string]any) (json.RawMessage, error) {
 	if options == nil {
 		options = map[string]any{}
@@ -448,16 +422,14 @@ func (c *Client) post(ctx context.Context, payload []byte) (json.RawMessage, err
 		return nil, fmt.Errorf("the directory response: %w", err)
 	}
 	// FLOTESTRO_IPA_TRACE prints every exchange with the directory; for
-	// troubleshooting a connector, never for normal operation - the
-	// records carry personal data.
+	// troubleshooting a connector, never for normal operation - the records carry
+	// personal data.
 	if os.Getenv("FLOTESTRO_IPA_TRACE") != "" {
 		fmt.Fprintf(os.Stderr, "ipa-trace request=%s\nipa-trace result=%s\n", truncateTrace(payload), truncateTrace(decoded.Result))
 	}
 	if decoded.Error != nil {
-		// A refused command is an answer of a reachable directory: the
-		// connector works, the request did not. The health view keeps the
-		// last refusal too, because an operator asking "why did the change
-		// fail" reads it there.
+		// A refused command is an answer of a reachable directory: the connector
+		// works, the request did not.
 		c.noteSuccess()
 		c.noteRefusal(decoded.Error.Name + ": " + decoded.Error.Message)
 		return nil, &DirectoryError{Name: decoded.Error.Name, Message: decoded.Error.Message}
@@ -491,51 +463,37 @@ var allowedMethods = map[string]bool{
 	"sudorule_find":  true,
 	"sudorule_show":  true,
 	"ping":           true,
-	// The Kerberos service principals of the hosts, read only: the panel
-	// shows which principal has a keytab and who manages it. The keytab
-	// itself never leaves the directory - there is no service_add,
-	// service_del or any command that issues or exports key material.
+	// The Kerberos service principals of the hosts, read only: the panel shows
+	// which principal has a keytab and who manages it.
 	"service_find": true,
 	"service_show": true,
 	// hbactest is the directory's own simulation of an access rule: the
 	// verdict the host will apply, not a reconstruction by the panel.
 	"hbactest": true,
 
-	// The write operations. Each is carried out solely by the control plane
-	// after the plan is approved; the adapter exposes no commands that delete
-	// an account or change the configuration of the directory itself.
+	// The write operations.
 	"user_add":            true,
 	"user_mod":            true,
 	"user_disable":        true,
 	"user_enable":         true,
 	"group_add_member":    true,
 	"group_remove_member": true,
-	// Host group membership. An HBAC or sudo rule reaches a host through
-	// its host groups, so moving a host between groups changes who may sign
-	// in where; it is carried out like a user group change - plan, second
-	// person, execution - and never creates or deletes the group itself.
+	// Host group membership.
 	"hostgroup_add_member":    true,
 	"hostgroup_remove_member": true,
-	// The host entry and the one-time enrollment password. Deleting a host
-	// from the directory is not available here: it would cut off the
-	// administrators' access.
+	// The host entry and the one-time enrollment password.
 	"host_add": true,
 	"host_mod": true,
 	// A host whose keytab is on record cannot be given a new join password;
-	// disabling the entry revokes the keytab and the certificates, and the
-	// entry stays. It is used only for a host the operator is joining anew.
+	// disabling the entry revokes the keytab and the certificates, and the entry
+	// stays.
 	"host_disable": true,
-	// A service principal's keytab is retired the same way: disabling the
-	// entry revokes the keytab and the certificates issued to the service,
-	// and the entry stays. It never issues a keytab - the host fetches its
-	// own new one with ipa-getkeytab, through the typed operation, with the
-	// credentials it already holds. There is no service_add, service_del or
-	// any command that exports key material.
+	// A service principal's keytab is retired the same way: disabling the entry
+	// revokes the keytab and the certificates issued to the service, and the
+	// entry stays.
 	"service_disable": true,
 
-	// The access and sudo rules. A rule is declared as a whole and brought to
-	// that state member kind by member kind; the panel writes only the rules
-	// it manages and never touches the services, commands or hosts they name.
+	// The access and sudo rules.
 	"hbacrule_add":                  true,
 	"hbacrule_mod":                  true,
 	"hbacrule_del":                  true,
@@ -565,10 +523,8 @@ var allowedMethods = map[string]bool{
 	"sudorule_add_option":           true,
 	"sudorule_remove_option":        true,
 
-	// Directory DNS. Reading zones and records plus adding and removing a
-	// single value. Commands that change the zone itself - its name servers,
-	// SOA or DNSSEC - the adapter does not expose: that is the directory's
-	// configuration rather than the content the fleet panel runs.
+	// Directory DNS. Reading zones and records plus adding and removing a single
+	// value.
 	"dnszone_find":   true,
 	"dnsrecord_find": true,
 	"dnsrecord_show": true,
@@ -576,21 +532,12 @@ var allowedMethods = map[string]bool{
 	"dnsrecord_del":  true,
 }
 
-// allowedMethod says whether an ordinary operation may run the command. The
-// commands that change the directory's own configuration are not here and
-// never will be: they live in provisioningMethods, behind a step somebody
-// runs deliberately, so that carrying out a user's operation can never
-// widen the connector's own permissions on the way.
+// allowedMethod says whether an ordinary operation may run the command.
 func allowedMethod(method string) bool { return allowedMethods[method] }
 
-// guardedMethods are the commands the adapter runs only with a fixed
-// option in the request, because the same command without it does
-// something the panel must never do. The one entry is user_del with
-// preserve: the directory then keeps the entry, its UID and its history as
-// a preserved account, which the document names as the default stage of a
-// removal. A plain user_del erases the account; it stays out of
-// allowedMethods, and this guard refuses it too - a second check, not a
-// way around the first.
+// guardedMethods are the commands the adapter runs only with a fixed option in
+// the request, because the same command without it does something the panel
+// must never do.
 var guardedMethods = map[string]func(options map[string]any) bool{
 	"user_del": func(options map[string]any) bool {
 		preserve, _ := options["preserve"].(bool)
@@ -616,8 +563,7 @@ func splitPrincipal(principal, defaultRealm string) (string, string) {
 }
 
 // cached returns a result from the short cache or fetches it from the
-// directory. The panel does not replicate the directory; the cache protects
-// the IPA server from an excess of queries when a view is refreshed.
+// directory.
 func cached[T any](ctx context.Context, c *Client, key string, load func() (T, error)) (T, error) {
 	c.mu.Lock()
 	entry, ok := c.cache[key]
@@ -643,17 +589,13 @@ func cached[T any](ctx context.Context, c *Client, key string, load func() (T, e
 	return value, nil
 }
 
-// The patterns of directory object names. A name never reaches a shell
-// command, but validation is a second line of defence and rejects shapes
-// that can be neither an account nor a group name.
+// The patterns of directory object names.
 var (
 	userNamePattern  = regexp.MustCompile(`^[a-z_][a-z0-9_.-]{0,31}\$?$`)
 	groupNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_][a-zA-Z0-9_.-]{0,63}$`)
 	hostNamePattern  = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$`)
-	// servicePrincipalPattern is service/host.fqdn with an optional realm:
-	// the shape ipa-getkeytab and service_disable both take. A host
-	// principal is a service principal in form and is refused apart, by
-	// name, because retiring it is a re-join and not a rotation.
+	// servicePrincipalPattern is service/host. fqdn with an optional realm: the
+	// shape ipa-getkeytab and service_disable both take.
 	servicePrincipalPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}/[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+(@[A-Za-z0-9.-]+)?$`)
 )
 
@@ -670,10 +612,8 @@ func ValidateServicePrincipal(principal string) error {
 }
 
 // RetireServiceKeytab asks the directory to retire the keytab of a service
-// principal: service_disable revokes the keytab and the certificates issued
-// to the service, and the entry stays. Nothing is issued here - the host
-// fetches its own new keytab with ipa-getkeytab, and until it does the
-// service cannot authenticate. That gap is the caller's to plan for.
+// principal: service_disable revokes the keytab and the certificates issued to
+// the service, and the entry stays.
 func (c *Client) RetireServiceKeytab(ctx context.Context, principal string) error {
 	if err := ValidateServicePrincipal(principal); err != nil {
 		return err

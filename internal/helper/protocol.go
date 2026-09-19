@@ -1,6 +1,4 @@
-// Package helper holds the protocol and the server of the root helper. The
-// helper listens only on a unix socket, is activated by systemd on demand and
-// never talks to the control plane.
+// Package helper holds the protocol and the server of the root helper.
 package helper
 
 import (
@@ -12,16 +10,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// ProtocolVersion changes with every incompatible change of the contract. The
-// helper rejects a version it does not know instead of guessing the meaning of
-// the fields.
+// ProtocolVersion changes with every incompatible change of the contract.
 const ProtocolVersion = 1
 
 // maxFrameBytes limits a single message. The helper runs as root, so it must
-// not let the peer allocate an arbitrary amount of memory. The bound is
-// four times the largest managed file: a request carries the content once
-// in the operation and once more in the canonical payload the capability
-// binds, JSON-escaped, and that has to fit under the same ceiling.
+// not let the peer allocate an arbitrary amount of memory.
 const maxFrameBytes = 4 << 20
 
 // ErrFrameTooLarge means a frame exceeding the limit.
@@ -42,18 +35,12 @@ const (
 	// refusal is better than pretending the operation ran.
 	ErrorUnsupported = "unsupported"
 	ErrorMalformed   = "malformed_request"
-	// ErrorRepositoryAbsent means a backup repository that is not there
-	// yet. A read of it is still a refusal - there is nothing to report -
-	// but it is a different refusal from one that leaves the state unknown,
-	// because a repository nobody has created holds no copies.
+	// ErrorRepositoryAbsent means a backup repository that is not there yet.
 	ErrorRepositoryAbsent = "repository_absent"
 	// ErrorPreconditionFailed means an order placed against a host state other
-	// than the one the host has now. This is neither a flaw of the order nor a
-	// failure of the execution: it is a change that happened in between.
+	// than the one the host has now.
 	ErrorPreconditionFailed = "precondition_failed"
-	// Refusals of container engine cleanup. Different reasons, because the
-	// conclusions differ: an object in use is not removed until the service is
-	// stopped, and a built-in network is never removed.
+	// Refusals of container engine cleanup.
 	ErrorDockerInUse         = "docker_object_in_use"
 	ErrorDockerPredefined    = "docker_network_predefined"
 	ErrorDockerObjectMissing = "docker_object_missing"

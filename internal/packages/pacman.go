@@ -21,16 +21,12 @@ const (
 	pacmanKeyPath    = "/usr/bin/pacman-key"
 	vercmpPath       = "/usr/bin/vercmp"
 	checkupdatesPath = "/usr/bin/checkupdates"
-	// PacmanConfPath is the one configuration file of pacman. There is no
-	// conf.d: the sources, the held packages and the options all live here,
-	// so the panel edits it in place and marks every line it owns.
+	// PacmanConfPath is the one configuration file of pacman. There is no conf.
 	PacmanConfPath = "/etc/pacman.conf"
 	// PacmanConfDir holds the mirror lists and the files the panel writes
 	// next to them: the keys of the sources it manages.
 	PacmanConfDir = "/etc/pacman.d"
-	// pacmanLockPath is the lock of the package database. It is not a flock:
-	// the file itself is the lock, created exclusively and removed at the end
-	// of a transaction. A crash leaves it behind.
+	// pacmanLockPath is the lock of the package database.
 	pacmanLockPath    = "/var/lib/pacman/db.lck"
 	pacmanCacheDir    = "/var/cache/pacman/pkg"
 	pacmanDatabaseDir = "/var/lib/pacman"
@@ -41,16 +37,11 @@ const (
 // PacmanName is the name the adapter reports and the panel enumerates.
 const PacmanName = "pacman"
 
-// The error codes of the pacman adapter. They join the shared codes of the
-// package module: an operation refused by the policy of the distribution is
-// to be recognisable by the panel rather than read out of a sentence.
+// The error codes of the pacman adapter.
 const (
 	// ErrorPlanMetadataMissing means the host has nothing to plan an upgrade
-	// from: neither the copy of the sync database the helper keeps nor a
-	// system database that was ever synced. checkupdates is not in the name
-	// of the code, because the plan does not need it - a host without
-	// pacman-contrib plans from the copy, and only a host without any
-	// repository metadata at all cannot plan.
+	// from: neither the copy of the sync database the helper keeps nor a system
+	// database that was ever synced.
 	ErrorPlanMetadataMissing = "plan_metadata_missing"
 	// ErrorPartialUpgrade means an upgrade of named packages was ordered on
 	// a distribution that does not support partial upgrades.
@@ -61,24 +52,14 @@ const (
 )
 
 // ErrPlanMetadataMissing means an upgrade cannot be planned on this host.
-// Planning must not modify the system, so the plan reads repository
-// metadata that is already there: the copy of the sync database the helper
-// keeps, or the host's own sync database when there is no copy. A host on
-// which neither exists has an unknown set of pending updates - and says so
-// instead of answering with an empty plan.
 var ErrPlanMetadataMissing = errors.New("this host has no repository metadata to plan from: " +
 	"no copy of the sync database at " + SyncCopyDir + " and a system database that was never synced")
 
 // ErrPartialUpgrade means an upgrade narrowed to named packages was ordered.
-// Arch supports no partial upgrades: a package raised alone links against
-// libraries the rest of the system does not have yet, and the host stops
-// working in ways nobody planned. The whole system upgrades at once.
 var ErrPartialUpgrade = errors.New("partial upgrades are unsupported on Arch: the whole " +
 	"system upgrades at once")
 
-// ErrSecurityUnknown means the classification cannot be made. It is an
-// answer rather than zero: a host with no security metadata has an unknown
-// number of security updates, not none.
+// ErrSecurityUnknown means the classification cannot be made.
 var ErrSecurityUnknown = errors.New("the Arch repositories carry no security metadata")
 
 // ErrDatabaseBroken means the package database needs repairing before any
@@ -95,10 +76,7 @@ func (p *Pacman) Available() bool {
 	return err == nil && !info.IsDir()
 }
 
-// LockHeld reports the database lock. The file is the lock, so its presence
-// is the answer; whether the process that created it still runs is settled
-// by the repair rather than by a transaction, which must not remove the lock
-// of somebody else's running pacman.
+// LockHeld reports the database lock.
 func (p *Pacman) LockHeld() (bool, string) {
 	if fileExists(pacmanLockPath) {
 		return true, pacmanLockPath
@@ -106,23 +84,13 @@ func (p *Pacman) LockHeld() (bool, string) {
 	return false, ""
 }
 
-// checkupdatesDB is the directory of the temporary sync database. It is
-// named explicitly, so the plan and its enrichment read the same copy and
-// the copy lands in the working directory of the process rather than in
-// /tmp.
+// checkupdatesDB is the directory of the temporary sync database.
 func checkupdatesDB() string {
 	return filepath.Join(runtimeDir, "cache", "checkupdates")
 }
 
-// SyncCopyDir is where the helper keeps the copy of the sync database
-// that a plan reads when checkupdates is not installed. The helper writes
-// it as root and the agent reads it; pacman refuses a sync to anybody but
-// root even into a copy, so the two halves of what checkupdates does with
-// fakeroot are split between the two processes here. The copy is world
-// readable and lives outside the agent's private state directory, because
-// pacman hands the downloads to its own unprivileged user (DownloadUser,
-// alpm), which has to write there too. A copy of public repository
-// indexes is nothing to hide.
+// SyncCopyDir is where the helper keeps the copy of the sync database that a
+// plan reads when checkupdates is not installed.
 const SyncCopyDir = "/var/cache/flotestro/pacman-sync"
 
 // pacmanDownloadUser is the account pacman drops to for downloads; the
@@ -155,12 +123,6 @@ func SyncCopyAge() (time.Duration, bool) {
 }
 
 // Plan computes the changes without touching the system database.
-//
-// An upgrade plan comes from checkupdates, which syncs a copy of the
-// database in a directory of its own. "pacman -Sy --print" would answer the
-// same question and is deliberately not used: it refreshes the system sync
-// database, and a refresh without an upgrade is exactly the state Arch warns
-// against.
 func (p *Pacman) Plan(ctx context.Context, options Options) (Plan, error) {
 	plan, err := p.plan(ctx, options)
 	if err != nil {
@@ -205,12 +167,9 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 		}
 		pending = ParseCheckupdates(result.Stdout)
 	} else {
-		// Without pacman-contrib the plan reads the copy the helper synced
-		// (see Refresh): the pending updates against a fresh copy of the
-		// repositories, with the system database untouched, which is what
-		// checkupdates does. Without a copy it reads the database the host
-		// already has. Either way the plan is computed, so pacman-contrib
-		// is a faster path and not a requirement.
+		// Without pacman-contrib the plan reads the copy the helper synced (see
+		// Refresh): the pending updates against a fresh copy of the repositories,
+		// with the system database untouched, which is what checkupdates does.
 		var err error
 		if pending, err = p.pendingWithoutCheckupdates(ctx, database); err != nil {
 			return plan, err
@@ -236,10 +195,6 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 // pacmanPlanDatabase is the database directory a plan on this host is read
 // from: the one checkupdates syncs for itself where pacman-contrib is
 // installed, the copy the helper keeps where it is not, and the host's own
-// database when there is no copy either. An empty string is the host's own
-// database, which pacman reads with no argument. One function answers this
-// for the plan, for the download of the archives and for the digest of the
-// index the plan was read against, so the three cannot disagree.
 func pacmanPlanDatabase() string {
 	if fileExists(checkupdatesPath) {
 		return checkupdatesDB()
@@ -251,9 +206,7 @@ func pacmanPlanDatabase() string {
 }
 
 // pacmanDatabaseArgs turns the directory a plan was read from into the
-// arguments of a query against it. An empty directory is the host's own
-// database, which pacman reads with no argument at all - passing an empty
-// --dbpath would point it at the root of the file system.
+// arguments of a query against it.
 func pacmanDatabaseArgs(database string) []string {
 	if database == "" {
 		return nil
@@ -263,15 +216,6 @@ func pacmanDatabaseArgs(database string) []string {
 
 // pendingWithoutCheckupdates lists the updates pending on a host that has no
 // pacman-contrib, against the database the plan reads.
-//
-// The first source is the copy of the sync database the helper keeps
-// (SyncCopyDir): it holds the local database as a link, so pacman compares
-// fresh repositories with what is installed, and the query needs no
-// privilege. Without a copy the answer comes from the database the host
-// already has - "pacman -Qu" reads it and syncs nothing, so the plan is
-// computed rather than refused, and MetadataRefreshed says against what.
-// Only a host whose own database was never synced either has nothing to
-// answer from, and that is a refusal rather than an empty plan.
 func (p *Pacman) pendingWithoutCheckupdates(ctx context.Context, database string) ([]Change, error) {
 	if database == "" && !pacmanSystemDatabaseSynced() {
 		return nil, ErrPlanMetadataMissing
@@ -301,19 +245,13 @@ func (p *Pacman) pendingAgainst(ctx context.Context, database string) ([]Change,
 }
 
 // pacmanSystemDatabaseSynced says whether the host's own sync database holds
-// any repository at all. A database directory without a single .db file
-// means the host has never synced, so a query against it would answer "no
-// updates" for the wrong reason.
+// any repository at all.
 func pacmanSystemDatabaseSynced() bool {
 	databases, err := filepath.Glob(filepath.Join(pacmanDatabaseDir, "sync", "*.db"))
 	return err == nil && len(databases) > 0
 }
 
-// PacmanFeatures are the parts of the pacman adapter the host has. They are
-// stated here, next to the operations that carry them out, so the registry
-// the panel reads and the adapter cannot drift apart: the plan works
-// wherever pacman is, because it reads a database that is already there,
-// and the security count is unknown on Arch whatever is installed.
+// PacmanFeatures are the parts of the pacman adapter the host has.
 func PacmanFeatures(pacman bool) map[string]bool {
 	return map[string]bool{
 		"repair":   pacman,
@@ -323,9 +261,7 @@ func PacmanFeatures(pacman bool) map[string]bool {
 	}
 }
 
-// PacmanReason explains the limits of the adapter on this host. A host with
-// pacman is not told about checkupdates: the tool is a faster path to the
-// same plan, and naming it would read as a missing capability.
+// PacmanReason explains the limits of the adapter on this host.
 func PacmanReason(pacman bool) string {
 	if !pacman {
 		return "pacman is not installed on this host"
@@ -333,10 +269,8 @@ func PacmanReason(pacman bool) string {
 	return "the Arch repositories carry no security metadata, so the security count is unknown"
 }
 
-// SyncCopy refreshes the copy of the sync database at SyncCopyDir. It runs
-// as root in the helper: pacman syncs for nobody else, even into a copy.
-// The system database is not touched - a sync of it without an upgrade
-// is the half-step Arch warns against, and the upgrade syncs by itself.
+// SyncCopy refreshes the copy of the sync database at SyncCopyDir. It runs as
+// root in the helper: pacman syncs for nobody else, even into a copy.
 func (p *Pacman) SyncCopy(ctx context.Context) error {
 	syncDir := filepath.Join(SyncCopyDir, "sync")
 	if err := os.MkdirAll(syncDir, 0o755); err != nil {
@@ -370,11 +304,7 @@ func (p *Pacman) SyncCopy(ctx context.Context) error {
 	return nil
 }
 
-// planSpace measures where the bytes of the plan go. The download size is
-// already summed up from the printed targets; the growth of /usr comes from
-// the installed size pacman prints for the candidate and for what is there
-// now. The database arguments pick the sync database the candidates are
-// read from.
+// planSpace measures where the bytes of the plan go.
 func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) []SpaceFact {
 	needs := spaceNeeds{downloadKnown: true, installBasis: BasisInstalledSize}
 	if len(plan.Changes) == 0 {
@@ -391,9 +321,9 @@ func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) [
 	current := p.packageInfoSizes(ctx, append([]string{"-Qi"}, names...)...)
 	grown, measured := growth(names, candidate, current)
 	installNeeds(&needs, grown, measured)
-	// The same records give per package what the plan digest is made of:
-	// the architecture and the checksum of the archive the repository
-	// publishes, and the growth of the installed files where measured.
+	// The same records give per package what the plan digest is made of: the
+	// architecture and the checksum of the archive the repository publishes, and
+	// the growth of the installed files where measured.
 	for i := range plan.Changes {
 		change := &plan.Changes[i]
 		entry, ok := info[change.Name]
@@ -412,10 +342,8 @@ func (p *Pacman) planSpace(ctx context.Context, plan Plan, database ...string) [
 	return spaceFacts(pacmanCacheDir, pacmanDatabaseDir, needs)
 }
 
-// packageInfoSizes runs a query of pacman and reads the installed sizes out
-// of its answer. A name pacman does not know ends the query with an error
-// and the records of the known ones on the standard output; what it printed
-// is used.
+// packageInfoSizes runs a query of pacman and reads the installed sizes out of
+// its answer.
 func (p *Pacman) packageInfoSizes(ctx context.Context, args ...string) map[string]uint64 {
 	sizes := map[string]uint64{}
 	for name, entry := range p.packageInfo(ctx, args...) {
@@ -432,20 +360,17 @@ func (p *Pacman) packageInfo(ctx context.Context, args ...string) map[string]Pac
 	return ParsePacmanInfo(result.Stdout)
 }
 
-// PacmanInfo is what one record of "pacman -Si" or "pacman -Qi" says that
-// the plan needs: the size of the installed files, the architecture and,
-// for a sync record, the checksum of the archive.
+// PacmanInfo is what one record of "pacman -Si" or "pacman -Qi" says that the
+// plan needs: the size of the installed files, the architecture and, for a
+// sync record, the checksum of the archive.
 type PacmanInfo struct {
 	InstalledSize uint64
 	Architecture  string
 	SHA256        string
 }
 
-// ParsePacmanInfoSizes reads the "Name" and "Installed Size" lines of
-// "pacman -Si" and "pacman -Qi":
-//
-//	Name            : linux
-//	Installed Size  : 143.39 MiB
+// ParsePacmanInfoSizes reads the "Name" and "Installed Size" lines of "pacman
+// -Si" and "pacman -Qi": Name : linux Installed Size : 143.
 func ParsePacmanInfoSizes(output string) map[string]uint64 {
 	sizes := map[string]uint64{}
 	for name, entry := range ParsePacmanInfo(output) {
@@ -454,9 +379,7 @@ func ParsePacmanInfoSizes(output string) map[string]uint64 {
 	return sizes
 }
 
-// ParsePacmanInfo reads the records of "pacman -Si" and "pacman -Qi". A
-// record without an installed size is left out: an unknown size is not a
-// size of zero.
+// ParsePacmanInfo reads the records of "pacman -Si" and "pacman -Qi".
 func ParsePacmanInfo(output string) map[string]PacmanInfo {
 	info := map[string]PacmanInfo{}
 	name := ""
@@ -502,17 +425,11 @@ func ParsePacmanInfo(output string) map[string]PacmanInfo {
 }
 
 // checkupdatesNoUpdates is the exit code checkupdates ends with when there is
-// nothing to upgrade. A failure to fetch ends with 1 - and that is not "no
-// updates".
+// nothing to upgrade.
 const checkupdatesNoUpdates = 2
 
-// ParseCheckupdates reads lines of the form:
-//
-//	linux 6.16.5.arch1-1 -> 6.16.6.arch1-1
-//
-// Security stays false on every change: the Arch repositories carry no such
-// metadata, and the plan says so through the adapter rather than by
-// marking every update as harmless.
+// ParseCheckupdates reads lines of the form: linux 6. 16. 5. arch1-1 -> 6. 16.
+// 6.
 func ParseCheckupdates(output string) []Change {
 	var changes []Change
 	for _, line := range strings.Split(output, "\n") {
@@ -529,9 +446,7 @@ func ParseCheckupdates(output string) []Change {
 
 // enrichFromSyncCopy fills the origin and the download size in from the
 // database the plan was read against - the copy on a host without
-// pacman-contrib, the host's own where there is no copy. A failure leaves
-// the plan as it was: the size is an estimate and the origin a convenience,
-// neither is worth a failed plan.
+// pacman-contrib, the host's own where there is no copy.
 func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir string) {
 	if len(plan.Changes) == 0 {
 		return
@@ -553,8 +468,7 @@ func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir str
 }
 
 // pacmanPrintFormat asks --print for the name, the version, the repository,
-// the size and the location of every target, separated by tabs. The
-// location names the archive file the transaction installs.
+// the size and the location of every target, separated by tabs.
 const pacmanPrintFormat = "%n\t%v\t%r\t%s\t%l"
 
 // PacmanTarget is one line of a printed transaction.
@@ -589,9 +503,7 @@ func (t PacmanTarget) Architecture() string {
 	return ""
 }
 
-// ParsePacmanTargets reads the output of --print in pacmanPrintFormat. A
-// line of the older four-column format is read as well: the location is
-// then unknown.
+// ParsePacmanTargets reads the output of --print in pacmanPrintFormat.
 func ParsePacmanTargets(output string) map[string]PacmanTarget {
 	targets := map[string]PacmanTarget{}
 	for _, line := range strings.Split(output, "\n") {
@@ -612,8 +524,7 @@ func ParsePacmanTargets(output string) map[string]PacmanTarget {
 }
 
 // rebootPredicted guesses the need for a restart from the packages being
-// upgraded. The kernel packages of Arch are named "linux" and its variants;
-// the headers, the firmware and the documentation are not kernels.
+// upgraded.
 func (p *Pacman) rebootPredicted(changes []Change) bool {
 	for _, change := range changes {
 		name := change.Name
@@ -641,15 +552,6 @@ func pacmanKernelPackage(name string) bool {
 }
 
 // Refresh syncs the system database. It requires root and the lock.
-//
-// This is the one place the system sync database is touched outside a full
-// upgrade: the panel orders it deliberately, as the refresh step of a plan
-// or before an installation.
-//
-// On Arch a refresh of the system database without an upgrade is the
-// partial state the distribution warns against, so the refresh feeds the
-// copy the plans read instead; the upgrade syncs the system database in
-// the same transaction that raises the packages.
 func (p *Pacman) Refresh(ctx context.Context) error {
 	if held, path := p.LockHeld(); held {
 		return fmt.Errorf("%w: %s", ErrLocked, path)
@@ -658,13 +560,6 @@ func (p *Pacman) Refresh(ctx context.Context) error {
 }
 
 // Upgrade carries the full system upgrade out.
-//
-// There is no narrowing here: Arch supports no partial upgrades, so a
-// transaction on named packages is refused with a code rather than carried
-// out with a warning. The agent package is the one exception - it is skipped,
-// because raised in the middle of a transaction it runs itself it would cut
-// the host off halfway through. Replacing the agent has an operation of its
-// own.
 func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: p.Name()}
 	if options.SecurityOnly {
@@ -687,9 +582,7 @@ func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 	args := []string{"-Syu", "--noconfirm", "--noprogressbar", "--ignore", AgentPackage}
 	result := runWithProgress(ctx, 45*time.Minute, options.Progress, false, pacmanPath, args...)
 
-	// A damaged file in the cache has exactly one correct answer: fetch it
-	// again. The retry covers that alone; a signature nobody trusts is a
-	// decision of the operator.
+	// A damaged file in the cache has exactly one correct answer: fetch it again.
 	if (!result.Ran || result.ExitCode != 0) && BrokenDownload(result.Stderr, result.Stdout) {
 		if removed := p.dropDamagedArchives(result.Stderr + "\n" + result.Stdout); len(removed) > 0 {
 			apply.SelfRepair = append(apply.SelfRepair,
@@ -714,8 +607,7 @@ func (p *Pacman) Upgrade(ctx context.Context, options Options) (Apply, error) {
 var damagedArchive = regexp.MustCompile(`([A-Za-z0-9@._+-]+\.pkg\.tar(?:\.[a-z0-9]+)?)`)
 
 // dropDamagedArchives removes the named package files from the cache along
-// with their signatures. It returns what it removed: a silent repair would be
-// worse than none.
+// with their signatures.
 func (p *Pacman) dropDamagedArchives(output string) []string {
 	var removed []string
 	seen := map[string]bool{}
@@ -759,10 +651,6 @@ func (p *Pacman) DatabaseBroken(ctx context.Context) bool {
 }
 
 // planRemove computes what will disappear along with the named packages.
-//
-// "--print" answers without root and without the lock, and it is pacman's
-// own resolution of the dependencies rather than our reconstruction: only
-// such an answer may be shown to a person about to remove something.
 func (p *Pacman) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("a removal plan requires a list of packages")
@@ -796,12 +684,8 @@ func (p *Pacman) planRemove(ctx context.Context, plan Plan, options Options) (Pl
 	return plan, nil
 }
 
-// planInstall computes what will arrive along with the named packages.
-//
-// The plan reads the sync database as it is. Installing does not refresh it
-// on its own, so a plan made against an old database is a plan of an old
-// version: the refresh step of the plan is where the operator brings it up
-// to date, and MetadataRefreshed says whether that happened.
+// planInstall computes what will arrive along with the named packages. The
+// plan reads the sync database as it is.
 func (p *Pacman) planInstall(ctx context.Context, plan Plan, options Options) (Plan, error) {
 	if len(options.Packages) == 0 {
 		return plan, fmt.Errorf("an installation plan requires a list of packages")
@@ -923,12 +807,6 @@ func without(list, drop []string) []string {
 }
 
 // Install adds packages along with their dependencies.
-//
-// Without a sync: "-Sy" followed by "-S" is the partial upgrade Arch warns
-// against, so the installation takes the database as it is. A database
-// nobody refreshed installs the versions it knows about - and a mirror that
-// no longer has them answers with a fetch error rather than with a silent
-// substitute.
 func (p *Pacman) Install(ctx context.Context, options Options) (Apply, error) {
 	apply := Apply{Manager: p.Name()}
 	if len(options.Packages) == 0 {
@@ -942,10 +820,8 @@ func (p *Pacman) Install(ctx context.Context, options Options) (Apply, error) {
 	}
 
 	before := p.installedVersions(ctx)
-	// pacman installs the version the sync database has, also when it is
-	// older than the installed one, and has no switch that would refuse it.
-	// The refusal is ours: going back a version is sometimes irreversible for
-	// the data format and needs a deliberate consent.
+	// pacman installs the version the sync database has, also when it is older
+	// than the installed one, and has no switch that would refuse it.
 	if !options.AllowDowngrade {
 		if downgrade, err := p.wouldDowngrade(ctx, options.Packages, before); err != nil {
 			return apply, err
@@ -994,10 +870,6 @@ func (p *Pacman) wouldDowngrade(ctx context.Context, pkgs []string,
 }
 
 // Remove removes the named packages along with what disappears with them.
-//
-// The set is computed again right before the operation and compared with what
-// the operator approved: a difference means the host has changed since the
-// plan.
 func (p *Pacman) Remove(ctx context.Context, options Options, expected []string) (Apply, error) {
 	apply := Apply{Manager: p.Name()}
 	if len(options.Packages) == 0 {
@@ -1033,12 +905,6 @@ func (p *Pacman) Remove(ctx context.Context, options Options, expected []string)
 }
 
 // failure classifies a failed pacman command into the errors of the module.
-//
-// pacman writes in English regardless of the locale under LC_ALL=C, so the
-// messages are stable: a lock that could not be taken is the lock error, a
-// damaged database is the database error, and the rest - a signature nobody
-// trusts, a target that does not exist, a conflict - stays a transaction
-// error with the reason in the message.
 func (p *Pacman) failure(prefix string, result commandResult) error {
 	text := strings.ToLower(result.Stderr + "\n" + result.Stdout)
 	switch {
@@ -1082,14 +948,7 @@ func PacmanTrustProblem(output string) string {
 	return ""
 }
 
-// pacmanModulesHidden checks whether the process sees any module tree at
-// all.
-//
-// The shared check looks for the tree of the running kernel, and on a
-// rolling distribution that tree is legitimately gone after a kernel upgrade
-// nobody has rebooted after: mkinitcpio builds the image for the installed
-// kernel rather than the running one. What must not be missing is the whole
-// directory - that is the sign of a namespace hiding the modules.
+// pacmanModulesHidden checks whether the process sees any module tree at all.
 func pacmanModulesHidden() (bool, string) {
 	if !kernelIsModular("/proc/modules") {
 		return false, ""
@@ -1107,9 +966,7 @@ func pacmanModulesHidden() (bool, string) {
 }
 
 // pacmanRebootRequired says whether the running kernel has been replaced on
-// disk. Arch keeps no restart marker; the idiom of the distribution is the
-// module tree of the running kernel, which the upgrade of the kernel package
-// removes.
+// disk.
 func pacmanRebootRequired() bool {
 	var uts unix.Utsname
 	if err := unix.Uname(&uts); err != nil {
@@ -1124,14 +981,7 @@ func pacmanRebootRequired() bool {
 }
 
 // PendingUpdates counts the updates for the inventory without touching the
-// system database. The count is undetermined when it cannot be computed - a
-// host without checkupdates has an unknown number of updates rather than
-// none.
-//
-// Without checkupdates the count comes from the copy of the sync database
-// the helper keeps, as old as the copy is: the inventory says so through
-// the age the copy carries, and a host that has never had a plan has no
-// copy and an unknown number of updates.
+// system database.
 func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 	if !fileExists(checkupdatesPath) {
 		pending, err := p.pendingWithoutCheckupdates(ctx, pacmanPlanDatabase())
@@ -1152,12 +1002,8 @@ func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 	return len(ParseCheckupdates(result.Stdout)), ""
 }
 
-// The hold of packages. pacman keeps it in IgnorePkg of /etc/pacman.conf
-// rather than in a state of its own, and there is no conf.d to put a file of
-// ours in. The panel therefore owns one line of the file, marked with a
-// comment, and never rewrites the lines of the administrator: a package held
-// by hand in another IgnorePkg line stays held, and the panel says so
-// instead of quietly leaving it in place.
+// The hold of packages. pacman keeps it in IgnorePkg of /etc/pacman. conf
+// rather than in a state of its own, and there is no conf.
 
 // holdMarker stands right before the IgnorePkg line the panel owns.
 const holdMarker = "# flotestro: packages held by the panel"
@@ -1191,8 +1037,7 @@ func (p *Pacman) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, 
 }
 
 // Holds returns the packages held on the host: the ones of the panel and the
-// ones of the administrator alike. A held package will not get updates
-// whoever held it, and the operator is to see that.
+// ones of the administrator alike.
 func (p *Pacman) Holds(ctx context.Context) ([]string, string) {
 	data, err := os.ReadFile(PacmanConfPath)
 	if err != nil {
@@ -1238,9 +1083,8 @@ func PacmanHolds(content string) (managed, all []string) {
 	return managed, all
 }
 
-// SetPacmanHolds rewrites the line of the panel in the content of
-// pacman.conf. The result is the same whatever the number of calls: the
-// marker and the line are replaced rather than added.
+// SetPacmanHolds rewrites the line of the panel in the content of pacman.
+// conf.
 func SetPacmanHolds(content string, pkgs []string, hold bool) (string, error) {
 	managed, all := PacmanHolds(content)
 	ours := map[string]bool{}
@@ -1350,8 +1194,7 @@ func pacmanEntry(trimmed string) (key, value string, ok bool) {
 }
 
 // replaceFile writes the content next to the file and moves it into place,
-// keeping the permissions. A half-written pacman.conf would leave the host
-// without a working package manager.
+// keeping the permissions.
 func replaceFile(path string, content []byte) error {
 	mode := os.FileMode(0o644)
 	if info, err := os.Stat(path); err == nil {
@@ -1372,12 +1215,8 @@ func replaceFile(path string, content []byte) error {
 	return nil
 }
 
-// Repair unblocks package operations on the host.
-//
-// "pacman -Sy" is not a repair. The repair on Arch removes the lock a crashed
-// pacman left behind - only when no pacman runs - and checks the local
-// database. It reports what it changed: the operator is to know the host was
-// touched in a way they did not order.
+// Repair unblocks package operations on the host. "pacman -Sy" is not a
+// repair.
 func (p *Pacman) Repair(ctx context.Context) ([]string, []Blocked, error) {
 	var steps []string
 	removed, running, err := removeStaleLock(pacmanLockPath, pacmanProcRoot)
@@ -1403,9 +1242,7 @@ func (p *Pacman) Repair(ctx context.Context) ([]string, []Blocked, error) {
 	return steps, nil, nil
 }
 
-// removeStaleLock removes the lock file when no pacman process runs. It
-// returns whether it removed anything and the description of a running
-// pacman, if there is one.
+// removeStaleLock removes the lock file when no pacman process runs.
 func removeStaleLock(lockPath, procRoot string) (bool, string, error) {
 	if !fileExists(lockPath) {
 		return false, "", nil
@@ -1419,9 +1256,7 @@ func removeStaleLock(lockPath, procRoot string) (bool, string, error) {
 	return true, "", nil
 }
 
-// pacmanProcess returns the pid of a running pacman, or nothing. The name of
-// the command is read from /proc: starting a process to look for a process
-// would be one more thing that can hang on a busy host.
+// pacmanProcess returns the pid of a running pacman, or nothing.
 func pacmanProcess(procRoot string) string {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
@@ -1470,9 +1305,7 @@ func ParsePacmanDatabaseCheck(output string) []Blocked {
 	return blocked
 }
 
-// The keys of the sources. pacman-key is the keyring of the host: a key
-// added and locally signed there is what makes a signed source usable, and a
-// key nobody signed makes every package of the source "unknown trust".
+// The keys of the sources.
 
 // ImportPacmanKey adds the key from the file to the keyring and signs it
 // locally. It requires root.
@@ -1491,9 +1324,7 @@ func ImportPacmanKey(ctx context.Context, keyPath, fingerprint string) error {
 	return nil
 }
 
-// ForgetPacmanKey removes the key from the keyring. A key that is not there
-// is not an error: the source is being removed, and the goal is a keyring
-// without it.
+// ForgetPacmanKey removes the key from the keyring.
 func ForgetPacmanKey(ctx context.Context, fingerprint string) error {
 	if fingerprint == "" {
 		return nil
@@ -1508,12 +1339,7 @@ func ForgetPacmanKey(ctx context.Context, fingerprint string) error {
 	return nil
 }
 
-// The installed list of pacman. "pacman -Q" gives the name and the version
-// of every package, "-Qm" the ones no sync database knows - built from the
-// AUR or by hand - and "-Sl" which repository carries each native one. That
-// is three processes for the whole list and everything the correlator can
-// use: Arch has no source packages the way Debian has, and the architecture
-// is one for the whole host.
+// The installed list of pacman.
 
 // archOfficialRepositories are the repositories of the distribution itself.
 // A package from any other sync repository is a third-party package.
@@ -1575,9 +1401,8 @@ func ParsePacmanQuery(output string) []InstalledPackage {
 		if pkg.Name == "" || pkg.Version == "" {
 			continue
 		}
-		// Arch builds one package from one recipe; a split package keeps
-		// the name of its base only in the local database, which the list
-		// does not read. The package itself is the closest source there is.
+		// Arch builds one package from one recipe; a split package keeps the name of
+		// its base only in the local database, which the list does not read.
 		pkg.SourceName = pkg.Name
 		pkg.SourceVersion = fields[1]
 		pkgs = append(pkgs, pkg)
@@ -1586,8 +1411,7 @@ func ParsePacmanQuery(output string) []InstalledPackage {
 }
 
 // SplitPacmanVersion breaks "epoch:version-release" into its parts. The
-// version may not contain a dash, so the release is what follows the last
-// one.
+// version may not contain a dash, so the release is what follows the last one.
 func SplitPacmanVersion(full string) (epoch, version, release string) {
 	rest := full
 	if colon := strings.Index(rest, ":"); colon > 0 {
@@ -1601,7 +1425,7 @@ func SplitPacmanVersion(full string) (epoch, version, release string) {
 
 // ParsePacmanSyncList reads "repository name version [installed]" lines and
 // returns the first repository each name is seen in - the order of the
-// repositories in pacman.conf is the order pacman chooses in.
+// repositories in pacman.
 func ParsePacmanSyncList(output string) map[string]string {
 	repositories := map[string]string{}
 	for _, line := range strings.Split(output, "\n") {

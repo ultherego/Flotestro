@@ -13,10 +13,7 @@ import (
 	"github.com/ultherego/flotestro/internal/opspec"
 )
 
-// backupGuard names the guard of a backup operation. A plan reads the
-// repository and takes none; a copy, a check and a restore hold the lock of
-// the tool and take the guard, so a second one is refused instead of waiting
-// under that lock.
+// backupGuard names the guard of a backup operation.
 func backupGuard(operation helperv1.BackupRequest_Operation) string {
 	switch operation {
 	case helperv1.BackupRequest_OPERATION_RUN,
@@ -28,12 +25,6 @@ func backupGuard(operation helperv1.BackupRequest_Operation) string {
 }
 
 // applyBackup drives the backup tool.
-//
-// The helper does not make the backup itself: it is made by the tool the host
-// already has and the administrator already trusts. Here there is only what the
-// tool will not do on its own - checking the restore target, passing the
-// credentials through the environment and turning the result into something the
-// panel can show.
 func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.BackupRequest, progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	release, busy := s.hold(backupGuard(action.GetOperation()), request)
@@ -42,15 +33,12 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 	}
 	defer release()
 
-	// A backup takes a long time and that is normal. The limit comes from the
-	// order, because it is the panel that knows how much time the operator gave
-	// this operation.
+	// A backup takes a long time and that is normal.
 	actionCtx, cancel := deadline(ctx, request, 2*time.Hour, longestOperation)
 	defer cancel()
-	// The operations that hold the guard are the ones that walk the file
-	// system and hash it, so they run in the scope of the backup family; the
-	// tool reads the scope out of the context. A plan alone reads the
-	// repository and runs bare, like the plan of a Compose deployment.
+	// The operations that hold the guard are the ones that walk the file system
+	// and hash it, so they run in the scope of the backup family; the tool reads
+	// the scope out of the context.
 	if backupGuard(action.GetOperation()) != "" {
 		actionCtx = s.scopeContext(actionCtx, request.GetTaskId(), opspec.FamilyBackups)
 	}
@@ -101,8 +89,8 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 	case helperv1.BackupRequest_OPERATION_PLAN:
 		state, err := adapter.Plan(actionCtx, order)
 		// A plan named by its kind is a plan of the copy and not a read of the
-		// repository: it computes what will really travel from this host and
-		// what it costs. The order itself looks the same in both cases.
+		// repository: it computes what will really travel from this host and what it
+		// costs.
 		if kind := action.GetPlan(); kind != "" {
 			if err != nil {
 				state.UnavailableReason = err.Error()
@@ -115,9 +103,9 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 			return reject(ErrorExecFailed, marshalErr.Error())
 		}
 		if err != nil {
-			// A repository that was not read is not an empty repository, so the
-			// state goes to the panel together with the reason - and the
-			// operation is a refusal.
+			// A repository that was not read is not an empty repository, so the state
+			// goes to the panel together with the reason - and the operation is a
+			// refusal.
 			return &helperv1.HelperResponse{
 				Accepted:  false,
 				ErrorCode: backupErrorCode(err),
@@ -140,9 +128,8 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		if err != nil {
 			return backupResponse(result, err)
 		}
-		// A copy nobody checked is not a success: a repository is sometimes
-		// damaged in exactly the way it looks like a working one. The host
-		// checks it right away and only then reports the copy.
+		// A copy nobody checked is not a success: a repository is sometimes damaged
+		// in exactly the way it looks like a working one.
 		if _, err := adapter.Verify(actionCtx, order); err != nil {
 			response := backupResponse(result, nil)
 			response.Accepted = false
@@ -171,12 +158,9 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		if err := backup.ValidateRestore(order.Restore); err != nil {
 			return reject(ErrorMalformed, err.Error())
 		}
-		// A restore is bound to its plan like a copy and a check: the
-		// operator approved unpacking out of the repository as the plan
-		// described it, and a repository that has taken another copy or
-		// lost one since is not that repository. The recomputation happens
-		// here, under the guard of the family, right before the data is
-		// written over the target.
+		// A restore is bound to its plan like a copy and a check: the operator
+		// approved unpacking out of the repository as the plan described it, and a
+		// repository that has taken another copy or lost one since is not that
 		if refusal := checkBackupPlanDigest(actionCtx, adapter, order, action, false); refusal != nil {
 			return refusal
 		}
@@ -187,12 +171,9 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 		}
 		result, err := adapter.RestoreData(actionCtx, order)
 		response := backupResponse(result, err)
-		// The helper counts what now lies under the target, because it is
-		// the part of the host that may look: a restore writes as root
-		// into a directory the agent often cannot open, and a verifier
-		// reading "permission denied" would call a restore that worked
-		// unverified. A count that could not be taken travels as no
-		// answer rather than as zero.
+		// The helper counts what now lies under the target, because it is the part
+		// of the host that may look: a restore writes as root into a directory the
+		// agent often cannot open, and a verifier reading "permission denied" would
 		if response.GetBackupResult() != nil {
 			if entries, counted := countEntries(order.Restore.Target); counted {
 				response.BackupResult.TargetEntries = entries
@@ -205,9 +186,6 @@ func (s *Server) applyBackup(ctx context.Context, request *helperv1.HelperReques
 }
 
 // backupResponse assembles the answer from the result of the operation.
-//
-// The result goes to the panel on failure as well: an interrupted copy leaves a
-// state that has to be named, not the bare words "it failed".
 func backupResponse(result backup.Result, err error) *helperv1.HelperResponse {
 	encoded, marshalErr := json.Marshal(result)
 	if marshalErr != nil {
@@ -246,9 +224,6 @@ func backupErrorCode(err error) string {
 
 // backupPlanResponse assembles the plan of the copy against the state of the
 // repository.
-//
-// The size of the scope is computed by the host: the panel does not know how
-// much data really lies there, and the operator is to see it before consenting.
 func backupPlanResponse(state backup.State, definition backup.Definition,
 	verification, readData bool) *helperv1.HelperResponse {
 	plan := backup.Compute(state, definition, verification, readData, backup.PathSize)
@@ -273,21 +248,7 @@ func backupPlanResponse(state backup.State, definition backup.Definition,
 }
 
 // checkBackupPlanDigest compares the plan computed now with the one the
-// operator consented to. A different digest means the scope or the repository
-// changed since the planning - and that is a refusal, not a warning.
-//
-// The recomputation runs under the guard of the backup family, which the
-// caller took before anything was read: between the digest computed here
-// and the copy, the check or the restore that follows, no second backup
-// operation of this host can move the repository.
-//
-// An order that carries no digest at all is the one convenience left, and
-// it is a single-host one: an operator running a copy from the host's own
-// screen may order it without planning first, and the panel's own plan
-// screens and every campaign bind the digest. The rule is therefore not
-// "a plan is optional" but "a plan that is named must still hold": a
-// digest that no longer describes the host is refused with stale_plan and
-// nothing runs.
+// operator consented to.
 func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 	order backup.Order, action *helperv1.BackupRequest, verification bool) *helperv1.HelperResponse {
 	expected := action.GetPlanHash()
@@ -301,19 +262,15 @@ func checkBackupPlanDigest(ctx context.Context, adapter backup.Adapter,
 	now := backup.Compute(state, order.Definition, verification,
 		order.ReadData, backup.PathSize)
 	if now.PlanHash != expected {
-		// The shared code of every planned family: the fingerprint computed
-		// again under the lock is not the one that was approved. The
-		// operator plans again and approves the new plan; the old consent
-		// does not carry over.
+		// The shared code of every planned family: the fingerprint computed again
+		// under the lock is not the one that was approved.
 		return reject(errorStalePlan,
 			"the scope of the copy or the repository changed since the planning; the operation needs a new plan")
 	}
 	return nil
 }
 
-// countEntries counts what lies directly under a directory. It answers
-// "not counted" for anything it cannot read, so the caller can tell an
-// empty directory from one nobody looked into.
+// countEntries counts what lies directly under a directory.
 func countEntries(path string) (int64, bool) {
 	if path == "" {
 		return 0, false

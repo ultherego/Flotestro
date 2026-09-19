@@ -28,30 +28,21 @@ type Server struct {
 	allowedUID uint32
 	log        *slog.Logger
 
-	// At most one mutation of a resource class runs at a time: a concurrent
-	// start and stop of the same unit, or two transactions on the same package
-	// database, give an unpredictable result. The classes are separate, so a
-	// package transaction that takes minutes does not hold up a unit restart.
+	// At most one mutation of a resource class runs at a time: a concurrent start
+	// and stop of the same unit, or two transactions on the same package
+	// database, give an unpredictable result.
 	guards guards
 
-	// Idleness is counted from the closing of the last connection, not from
-	// the start of the process. A clock counted from the start used to cut a
-	// package transaction or an event read in half - exactly in the fifth
-	// minute of work.
+	// Idleness is counted from the closing of the last connection, not from the
+	// start of the process.
 	IdleTimeout time.Duration
 	active      sync.WaitGroup
-	// inFlight counts the connections being handled. The wait group says
-	// when they are all done, which is what a shutdown needs; the counter
-	// says how many there are right now, which is what the idle watcher
-	// asks - and asking a wait group that question means waiting on it
-	// while new connections add to it, which is its one documented misuse.
+	// inFlight counts the connections being handled.
 	inFlight atomic.Int64
 	traffic  chan struct{}
 
-	// The account and hostname handlers reach the system through these
-	// seams, so they can be checked without an account on the machine
-	// running the tests. Nil means the real NSS lookup, the real shadow
-	// tools and the real /etc/hosts.
+	// The account and hostname handlers reach the system through these seams, so
+	// they can be checked without an account on the machine running the tests.
 	lookupAccount func(name string) (accountRecord, error)
 	accountTool   accountTool
 	hostsFile     string
@@ -62,21 +53,13 @@ type Server struct {
 	// scope. A test stands in a host without systemd-run through it.
 	scopes scopeRunner
 
-	// policy decides whether a mutating request is authorized by the
-	// panel's capability, and what to do with one that carries none.
-	// SO_PEERCRED above says who asks; the policy says whether the panel
-	// approved what is asked. A server built without a keyring runs the
-	// default mode with nothing to verify against: a request without a
-	// capability passes as a legacy one, a request with one is refused,
-	// because a capability that cannot be checked is not a verified one.
+	// policy decides whether a mutating request is authorized by the panel's
+	// capability, and what to do with one that carries none.
 	policy *helpercap.Policy
 	// trust is the root-owned keyring and host identity the trust update
 	// writes.
 	trust helpercap.TrustStore
 	// packageManager stands in for the detection of the package manager.
-	// Nil means the real one; a test puts a planner of its own here, so
-	// the binding of a plan to its execution can be checked without a
-	// package database.
 	packageManager func() (packages.Manager, error)
 }
 
@@ -214,9 +197,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	limit := timeLimit(&request, 10*time.Minute, longestOperation) + time.Minute
 	_ = conn.SetDeadline(time.Now().Add(limit))
 
-	// The progress of a long operation travels in separate messages, before
-	// the final answer arrives. A client that did not ask for it gets a single
-	// message as before - an older agent must not take progress for a result.
+	// The progress of a long operation travels in separate messages, before the
+	// final answer arrives.
 	var sendMu sync.Mutex
 	var progress func(*helperv1.TaskProgress)
 	if request.GetWantProgress() {
@@ -243,11 +225,8 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	}
 }
 
-// handle validates the request and performs the operation. Every refusal has
-// a stable machine code, so that the agent can report it without parsing text.
-// The progress receiver is passed down the calls rather than kept in the
-// server: connections are handled concurrently and a shared field would mix
-// the progress of one operation with another.
+// handle validates the request and performs the operation. Every refusal has a
+// stable machine code, so that the agent can report it without parsing text.
 func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	if request.GetProtocolVersion() != ProtocolVersion {
@@ -261,9 +240,9 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 			fmt.Sprintf("the task expired at %s", expires.AsTime().Format(time.RFC3339)))
 	}
 
-	// The keyring update proves itself with the bundle's own signature and
-	// goes before the capability check: it is how the keys the check needs
-	// reach the host in the first place.
+	// The keyring update proves itself with the bundle's own signature and goes
+	// before the capability check: it is how the keys the check needs reach the
+	// host in the first place.
 	if update, ok := request.GetAction().(*helperv1.HelperRequest_TrustUpdate); ok {
 		return s.applyTrustUpdate(request, update.TrustUpdate)
 	}
@@ -281,11 +260,7 @@ func (s *Server) handle(ctx context.Context, request *helperv1.HelperRequest,
 	return response
 }
 
-// authorize applies the capability policy to a request. It returns the
-// refusal to answer with, or nil and the identifier of the capability that
-// was verified. The log carries every path: a legacy request under prefer
-// is the telemetry of the rollout, a refusal is what the operator looks
-// for when a task ends with a capability code.
+// authorize applies the capability policy to a request.
 func (s *Server) authorize(request *helperv1.HelperRequest) (*helperv1.HelperResponse, string) {
 	if s.policy == nil {
 		return nil, ""
@@ -439,8 +414,6 @@ func (s *Server) perform(ctx context.Context, request *helperv1.HelperRequest,
 }
 
 // applyPackageAction refreshes the metadata or performs a package transaction.
-// At most one transaction runs at a time: concurrent operations on the same
-// package database can damage it.
 func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.PackageActionRequest, progress func(*helperv1.TaskProgress)) *helperv1.HelperResponse {
 	manager, err := s.detectPackages()
@@ -463,9 +436,9 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 
 	operationCtx, cancel := deadline(ctx, request, 30*time.Minute, 2*time.Hour)
 	defer cancel()
-	// Every operation of the manager - a refresh as much as a transaction -
-	// runs in the scope of the package family: the manager starts its tools
-	// itself, and reads the scope out of the context.
+	// Every operation of the manager - a refresh as much as a transaction - runs
+	// in the scope of the package family: the manager starts its tools itself,
+	// and reads the scope out of the context.
 	operationCtx = s.scopeContext(operationCtx, request.GetTaskId(), opspec.FamilyPackages)
 
 	options := packages.Options{
@@ -481,10 +454,9 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		}
 	}
 
-	// An order bound to an approved plan runs that plan and nothing else:
-	// the plan is computed again here, under the lock, and compared before
-	// the transaction. Replacing the agent itself stays on its own path,
-	// because that transaction must not run in the helper's control group.
+	// An order bound to an approved plan runs that plan and nothing else: the
+	// plan is computed again here, under the lock, and compared before the
+	// transaction.
 	if _, _, bound := approvedPlan(action); bound {
 		switch action.GetOperation() {
 		case helperv1.PackageActionRequest_OPERATION_UPGRADE, helperv1.PackageActionRequest_OPERATION_REMOVE:
@@ -496,10 +468,8 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 		}
 	}
 
-	// A change that does not fit on the disk is refused here, before the
-	// lock is taken and the first archive lands. The package manager itself
-	// finds out halfway through unpacking - and leaves a database nobody can
-	// trust and a host nobody can upgrade.
+	// A change that does not fit on the disk is refused here, before the lock is
+	// taken and the first archive lands.
 	if refusal := s.packageSpacePreflight(operationCtx, request, manager, action, options); refusal != nil {
 		return refusal
 	}
@@ -550,12 +520,8 @@ func (s *Server) applyPackageAction(ctx context.Context, request *helperv1.Helpe
 	}
 }
 
-// packageSpacePreflight computes the plan of an upgrade or an installation
-// and judges its space facts. It returns the refusal, or nil when the change
-// fits or nothing could be measured. A plan that cannot be computed is not
-// a refusal on its own: the transaction has checks of its own, and the ones
-// that apply here - the lock, a distribution that does not do partial
-// upgrades - refuse it the same way a moment later.
+// packageSpacePreflight computes the plan of an upgrade or an installation and
+// judges its space facts.
 func (s *Server) packageSpacePreflight(ctx context.Context, request *helperv1.HelperRequest,
 	manager packages.Manager, action *helperv1.PackageActionRequest,
 	options packages.Options) *helperv1.HelperResponse {
@@ -583,9 +549,7 @@ func (s *Server) packageSpacePreflight(ctx context.Context, request *helperv1.He
 	return nil
 }
 
-// applyReboot orders a delayed restart. The delay is necessary: without it
-// the host disappears before the agent manages to send the result back, and
-// the task would look broken instead of done.
+// applyReboot orders a delayed restart.
 func (s *Server) applyReboot(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.RebootRequest) *helperv1.HelperResponse {
 	delay := action.GetDelaySeconds()
@@ -694,9 +658,9 @@ func (s *Server) applyUnitAction(ctx context.Context, request *helperv1.HelperRe
 	}
 	defer release()
 
-	// The state reads before and after stay outside the limit: each has its
-	// own short one, and the state after an operation that used up its whole
-	// time is still worth reporting.
+	// The state reads before and after stay outside the limit: each has its own
+	// short one, and the state after an operation that used up its whole time is
+	// still worth reporting.
 	timeout := timeLimit(request, 60*time.Second, 10*time.Minute)
 	operationCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -796,8 +760,6 @@ func peerCredentials(conn *net.UnixConn) (uid uint32, pid int32, err error) {
 }
 
 // ListenerFromSystemd returns the socket passed through socket activation.
-// The helper does not create the socket itself, so it does not have to decide
-// about its permissions.
 func ListenerFromSystemd() (net.Listener, bool, error) {
 	if os.Getenv("LISTEN_PID") != fmt.Sprint(os.Getpid()) {
 		return nil, false, nil
@@ -815,12 +777,6 @@ func ListenerFromSystemd() (net.Listener, bool, error) {
 }
 
 // repairPackages unblocks package operations on the host.
-//
-// The answers to configuration questions come from the operator and concern
-// only the packages that actually block the transaction. The helper does not
-// invent answers for anybody: the choice of a boot device or of the way
-// configuration files are handled is a human decision, and the machine can
-// only carry it out.
 func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.PackageRepairRequest) *helperv1.HelperResponse {
 	manager, err := s.detectPackages()
@@ -834,9 +790,9 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 	}
 	apt, ok := manager.(*packages.APT)
 	if !ok {
-		// On other system families the block looks different and the repair
-		// would look different too; pretending the operation works would be
-		// worse than a clear refusal.
+		// On other system families the block looks different and the repair would
+		// look different too; pretending the operation works would be worse than a
+		// clear refusal.
 		return reject(ErrorUnsupported,
 			"package repair is supported only for the apt and pacman managers")
 	}
@@ -887,10 +843,6 @@ func (s *Server) repairPackages(ctx context.Context, request *helperv1.HelperReq
 }
 
 // repairPacman unblocks package operations on Arch.
-//
-// The steps the repair carried out come back in the field the agent reads as
-// "what was done": on Arch nothing is answered, and a repair that removed a
-// stale lock is not a repair that did nothing.
 func (s *Server) repairPacman(ctx context.Context, request *helperv1.HelperRequest,
 	pacman *packages.Pacman) *helperv1.HelperResponse {
 	release, busy := s.hold(GuardPackages, request)
@@ -941,11 +893,8 @@ func blockedToProto(blocked []packages.Blocked) []*helperv1.BlockedPackageDetail
 	return result
 }
 
-// packageLifecycle performs an installation, a removal or a hold.
-//
-// Each of these operations exists only for managers that support it. A clear
-// refusal is better than pretending the operation ran - and pretending would
-// be easy, because a "zero changes" result looks exactly like a success.
+// packageLifecycle performs an installation, a removal or a hold. Each of
+// these operations exists only for managers that support it.
 func (s *Server) packageLifecycle(ctx context.Context, manager packages.Manager,
 	action *helperv1.PackageActionRequest, options packages.Options) *helperv1.HelperResponse {
 	lifecycle, ok := manager.(packages.Lifecycle)
@@ -959,9 +908,9 @@ func (s *Server) packageLifecycle(ctx context.Context, manager packages.Manager,
 	switch action.GetOperation() {
 	case helperv1.PackageActionRequest_OPERATION_INSTALL:
 		options.AllowDowngrade = action.GetAllowDowngrade()
-		// Replacing the agent itself must not run in the helper's control group:
-		// the scripts of that package stop the helper, and with it the package
-		// manager in the middle of the transaction.
+		// Replacing the agent itself must not run in the helper's control group: the
+		// scripts of that package stop the helper, and with it the package manager
+		// in the middle of the transaction.
 		if spec, selfReplacement := agentReplacement(options.Packages); selfReplacement {
 			return s.orderAgentReplacement(ctx, manager, spec, action)
 		}

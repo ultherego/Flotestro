@@ -9,9 +9,7 @@ import (
 	"github.com/ultherego/flotestro/internal/hosts"
 )
 
-// authorize checks the permission in the target scope. Every refusal goes
-// to the audit log: a trail showing only successful operations is useless
-// in an incident analysis.
+// authorize checks the permission in the target scope.
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission authz.Permission,
 	scope authz.Scope, targetType, targetID string) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())
@@ -48,11 +46,6 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request, permission au
 
 // authorizeCollection authorises reading a collection that has no single
 // scope: the lists of hosts, tasks, campaigns or the fleet summary.
-//
-// A permission in any scope is enough, and the handlers narrow the result
-// to what the principal can actually see. Requiring the global scope turned
-// ordinary panel browsing into a refusal for everyone with a role limited
-// to one environment - that is, for a typical operator.
 func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 	permission authz.Permission, targetType string) (authz.Principal, bool) {
 	principal := authz.FromContext(r.Context())
@@ -87,15 +80,8 @@ func (s *Server) authorizeCollection(w http.ResponseWriter, r *http.Request,
 	return principal, true
 }
 
-// hostScope returns the authorisation scope of a host. A host that does
-// not exist cannot be the target of any operation.
-//
-// The scope is all three of the host's boundaries at once - its site, its
-// environment and the team it belongs to - because a binding may be drawn
-// on either vocabulary and a check that read only one of them would grant
-// what the other refuses. It is built by hosts.ScopeOf rather than field
-// by field here, so a fourth boundary added later reaches every handler
-// that asks this function the question.
+// hostScope returns the authorisation scope of a host. A host that does not
+// exist cannot be the target of any operation.
 func (s *Server) hostScope(w http.ResponseWriter, r *http.Request, hostID string) (*hosts.Host, authz.Scope, bool) {
 	host, err := s.hosts.Get(r.Context(), hostID)
 	if errors.Is(err, hosts.ErrNotFound) {

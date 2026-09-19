@@ -22,13 +22,8 @@ import (
 	"github.com/ultherego/flotestro/internal/remediation"
 )
 
-// handleHostSecurity returns the compliance findings of a host together
-// with the remediation plan.
-//
-// The assessment is made in the panel from the facts the host reports in
-// the inventory anyway: there is no fleet sweep and no script executed on
-// the host. Thanks to that the result is repeatable, and two hosts are
-// assessed by the same check in the same version.
+// handleHostSecurity returns the compliance findings of a host together with
+// the remediation plan.
 func (s *Server) handleHostSecurity(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -47,10 +42,7 @@ func (s *Server) handleHostSecurity(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, report)
 }
 
-// HostsPerCheckLimit bounds the host list at one check. The count is exact;
-// the list is a sample, so the fleet screen does not become a printout of
-// the whole inventory. The whole list of a check is read page by page
-// with the check parameter of the fleet view.
+// HostsPerCheckLimit bounds the host list at one check.
 const HostsPerCheckLimit = 50
 
 // checkView gathers one check at fleet scale.
@@ -62,9 +54,8 @@ type checkView struct {
 	Failed   int    `json:"failed"`
 	Passed   int    `json:"passed"`
 	Unknown  int    `json:"unknown"`
-	// NotApplicable counts the hosts the check does not concern. Without
-	// this column a host without SELinux would look non-compliant or
-	// compliant.
+	// NotApplicable counts the hosts the check does not concern. Without this
+	// column a host without SELinux would look non-compliant or compliant.
 	NotApplicable int `json:"not_applicable"`
 	// Hosts lists the hosts that did not pass the check.
 	Hosts []hostWithFinding `json:"hosts,omitempty"`
@@ -95,9 +86,9 @@ func complianceModules() []string {
 	return modules
 }
 
-// evaluated says whether a report judged anything at all: a host with
-// every finding unknown reported no fact a check could read, and is an
-// unknown host, not a compliant one.
+// evaluated says whether a report judged anything at all: a host with every
+// finding unknown reported no fact a check could read, and is an unknown host,
+// not a compliant one.
 func evaluated(report compliance.Report) bool {
 	for _, finding := range report.Findings {
 		if !finding.Unknown {
@@ -107,9 +98,9 @@ func evaluated(report compliance.Report) bool {
 	return false
 }
 
-// fleetSecurityView is the answer of the fleet screen: the coverage of
-// the fleet, the checks with their counts over every host the sweep
-// reached, and a sample of the failing hosts under each.
+// fleetSecurityView is the answer of the fleet screen: the coverage of the
+// fleet, the checks with their counts over every host the sweep reached, and a
+// sample of the failing hosts under each.
 type fleetSecurityView struct {
 	fleetCoverage
 	// Hosts counts the hosts the sweep judged; it equals TotalHosts unless
@@ -120,15 +111,6 @@ type fleetSecurityView struct {
 }
 
 // handleFleetSecurity returns the compliance of the whole visible fleet.
-//
-// The fleet view is the basic mode of this module: one bad setting on a
-// hundred hosts is one problem, not a hundred - and that is visible only
-// when the findings stand side by side. The checks are judged in the
-// panel from the inventory, so the fleet is swept host by host within
-// the reader's scope; the counts are over every host reached, and a
-// sweep that ran out of time says so instead of passing a part off as
-// the whole. With the check parameter the answer is instead one page of
-// the hosts failing that check, read with a cursor.
 func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRead, "fleet")
 	if !ok {
@@ -219,8 +201,8 @@ func (s *Server) handleFleetSecurity(w http.ResponseWriter, r *http.Request) {
 }
 
 // sweepCoverage describes a sweep as the head of a fleet view: the hosts
-// judged, the hosts reached but without a fact to judge, and the hosts
-// the sweep never reached - the last two unknown, each under its reason.
+// judged, the hosts reached but without a fact to judge, and the hosts the
+// sweep never reached - the last two unknown, each under its reason.
 func sweepCoverage(total int, sweep fleetSweep, judged int) fleetCoverage {
 	notReached := max(total-sweep.Swept, 0)
 	coverage := fleetCoverage{
@@ -237,10 +219,7 @@ func sweepCoverage(total int, sweep fleetSweep, judged int) fleetCoverage {
 	return coverage
 }
 
-// handleCheckHosts answers one page of the hosts failing one check. The
-// sweep starts after the host the cursor names and stops once the page
-// is full; the cursor of the next page names the last host judged, not
-// the last one listed, so no host is skipped between two pages.
+// handleCheckHosts answers one page of the hosts failing one check.
 func (s *Server) handleCheckHosts(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter,
 	checkID string, now time.Time) {
 	known := false
@@ -305,13 +284,8 @@ var findingsCSVColumns = []string{
 }
 
 // writeFindingsCSV streams every finding of the visible fleet: one row per
-// host and check, with the verdict of that pair in the status column -
-// failed, passed, unknown or not_applicable. The screen sums the checks
-// and shows a sample of the hosts behind each; the file is the whole
-// matrix, because an auditor asks which hosts, not how many. The rows go
-// from the sweep straight to the socket, a page of hosts at a time; a
-// sweep out of its time budget ends the file with the truncation row and
-// the partial trailer.
+// host and check, with the verdict of that pair in the status column - failed,
+// passed, unknown or not_applicable.
 func (s *Server) writeFindingsCSV(w http.ResponseWriter, r *http.Request, filter hosts.ListFilter, now time.Time) {
 	s.writeCSV(w, r, exportFileName("findings", now), findingsCSVColumns, func(yield func([]string) bool) error {
 		sweep, err := s.sweepFleet(r.Context(), filter, "", "", complianceModules(),
@@ -374,15 +348,7 @@ type remediationRequest struct {
 }
 
 // handleHostRemediation creates a remediation plan for the named findings.
-//
-// Remediation is not a separate operation on the host. Every step is an
-// ordinary task of the module responsible for the given thing - with its
-// permission, its risk and its approval. The remediation permission does
-// not replace the permissions of those modules, it only adds to them.
-//
-// The steps go one after another, because each assumes the state left by
-// the previous one; the plan stops after an error, and what managed to run
-// stays visible.
+// Remediation is not a separate operation on the host.
 func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -416,8 +382,6 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// The plan computed now must be the same plan the operator approved.
-	// The host state changes on its own - between viewing the plan and
-	// clicking the host may have been fixed by hand or broken further.
 	if request.PlanHash == "" || request.PlanHash != report.PlanHash {
 		problem(w, http.StatusConflict, "plan_stale",
 			"the host state changed since this plan was computed; review the findings again")
@@ -446,9 +410,9 @@ func (s *Server) handleHostRemediation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The permissions are checked for the whole plan before creating
-	// anything: half a remediation is worse than none, because it leaves the
-	// host in a state nobody planned.
+	// The permissions are checked for the whole plan before creating anything:
+	// half a remediation is worse than none, because it leaves the host in a
+	// state nobody planned.
 	requiresFreshAuth := false
 	for _, step := range arranged.Steps {
 		action := opspec.ActionType(step.ActionType)
@@ -564,10 +528,6 @@ func (s *Server) handleListRemediation(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleStopRemediation stops a plan in progress.
-//
-// A step already delivered to the host ends its own way - the panel does
-// not pretend to have revoked what the host is just executing - but its
-// task is cancelled, and the steps not started yet do not move.
 func (s *Server) handleStopRemediation(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	_, scope, ok := s.hostScope(w, r, hostID)
@@ -654,9 +614,7 @@ type fleetRemediationRequest struct {
 	IdempotencyKey  string `json:"idempotency_key,omitempty"`
 }
 
-// The ceilings of a remediation rollout. Wider waves than this are several
-// waves: every step is a change of the module that owns it, and a wave of
-// a hundred sshd rewrites is not a trial on a small group.
+// The ceilings of a remediation rollout.
 const (
 	maxRemediationWave = 20
 	// ReasonNoPlan means a host the chosen checks give no step on: they
@@ -679,12 +637,8 @@ type excludedHost struct {
 	Message  string `json:"message"`
 }
 
-// fleetRemediation is the computed shape of a fleet remediation: the
-// snapshot, every ready host's plan and the plans grouped.
-//
-// One function computes it for the preview and for the order. A drift
-// between them would be the worst kind of bug: the operator would approve a
-// different set of plans than the one they read.
+// fleetRemediation is the computed shape of a fleet remediation: the snapshot,
+// every ready host's plan and the plans grouped.
 type fleetRemediation struct {
 	CheckIDs    []string
 	Selector    campaigns.Selector
@@ -744,12 +698,6 @@ func (f fleetRemediation) plans() ([]campaigns.HostPlanSpec, error) {
 
 // planFleetRemediation computes the fleet remediation for a request. The
 // answer has already been written when the second result is false.
-//
-// The operator picks checks and hosts: an empty check list or an empty
-// selector is a refusal, not "everything". Every host that the selector
-// matched stays in the snapshot - ready with its plan, or closed with a
-// reason the approver reads - and the ready plans are grouped by their
-// steps, because a hundred hosts with the same change are one change.
 func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
 	request fleetRemediationRequest, principal authz.Principal) (*fleetRemediation, bool) {
 	checkIDs, ok := checkChoice(w, request.CheckIDs)
@@ -765,9 +713,9 @@ func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
 	if !ok {
 		return nil, false
 	}
-	// The fleet is resolved within the scopes the caller may read findings
-	// in: a preview of the remediation is a read of the findings, and the
-	// order checks the remediation right host by host below.
+	// The fleet is resolved within the scopes the caller may read findings in: a
+	// preview of the remediation is a read of the findings, and the order checks
+	// the remediation right host by host below.
 	candidates, ok := s.materialize(w, r, principal, authz.PermSecurityRead, chosen)
 	if !ok {
 		return nil, false
@@ -780,9 +728,9 @@ func (s *Server) planFleetRemediation(w http.ResponseWriter, r *http.Request,
 	now := time.Now().UTC()
 	result := &fleetRemediation{CheckIDs: checkIDs, Selector: chosen, Candidates: candidates, GeneratedAt: now}
 
-	// A host outside the reading scope is in the snapshot as closed: the
-	// preview must not describe findings the principal may not read, and
-	// the order refuses such a host outright below.
+	// A host outside the reading scope is in the snapshot as closed: the preview
+	// must not describe findings the principal may not read, and the order
+	// refuses such a host outright below.
 	visible := make([]hosts.Host, 0, len(candidates))
 	for _, host := range candidates {
 		if !principal.Can(authz.PermSecurityRead, hosts.ScopeOf(&host)) {
@@ -878,9 +826,8 @@ func describeSkipped(checkIDs []string, skipped map[string]string) string {
 	return strings.Join(parts, "; ")
 }
 
-// stepRefusal names the step a host cannot run: an irreversible operation
-// that needs its target typed, or an adapter the host lacks. An empty
-// result means every step may go.
+// stepRefusal names the step a host cannot run: an irreversible operation that
+// needs its target typed, or an adapter the host lacks.
 func stepRefusal(host hosts.Host, steps []remediation.Step) string {
 	for _, step := range steps {
 		action := opspec.ActionType(step.ActionType)
@@ -894,13 +841,8 @@ func stepRefusal(host hosts.Host, steps []remediation.Step) string {
 	return ""
 }
 
-// handleFleetRemediationPreview answers what a fleet remediation would do:
-// the per-host plans grouped by their steps, and the hosts that get none.
-//
-// A preview is a read of the findings: it needs the reading permission
-// and changes nothing. The order goes through the composite permission
-// check, which the preview does not, so the preview may show more than
-// the order will accept.
+// handleFleetRemediationPreview answers what a fleet remediation would do: the
+// per-host plans grouped by their steps, and the hosts that get none.
 func (s *Server) handleFleetRemediationPreview(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRead, "fleet")
 	if !ok {
@@ -923,14 +865,6 @@ func (s *Server) handleFleetRemediationPreview(w http.ResponseWriter, r *http.Re
 }
 
 // handleFleetRemediation orders a fleet remediation as a campaign.
-//
-// The plans are the same the preview showed, computed again now: the
-// campaign records every host's steps, and the approval fingerprint covers
-// the whole set, so the consent concerns those steps on those hosts. The
-// composite permission is checked before anything is created - the
-// remediation permission and the permission of every step's operation, in
-// the scope of every host - and refused as a whole: half a fleet
-// remediation is a fleet in a state nobody planned.
 func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) {
 	principal, ok := s.authorizeCollection(w, r, authz.PermSecurityRemediate, "fleet")
 	if !ok {
@@ -983,9 +917,8 @@ func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// A fleet remediation is the highest-risk order of the module: one
-	// consent changes many hosts through operations that may each cut off
-	// access. It requires fresh authentication like any critical campaign.
+	// A fleet remediation is the highest-risk order of the module: one consent
+	// changes many hosts through operations that may each cut off access.
 	stepUpEvidence, ok := s.requireStepUp(w, r, principal, request.Reason,
 		"security.remediation.apply", "campaign", "")
 	if !ok {
@@ -1012,9 +945,9 @@ func (s *Server) handleFleetRemediation(w http.ResponseWriter, r *http.Request) 
 		Payload:    encodedPayload,
 		Selector:   plan.Selector,
 		CanarySize: valueOrDefault(request.CanarySize, 1),
-		// The waves and the concurrency follow the module's policy and are
-		// bounded whatever the request says: every step is a change of the
-		// module that owns it.
+		// The waves and the concurrency follow the module's policy and are bounded
+		// whatever the request says: every step is a change of the module that owns
+		// it.
 		WaveSize:                min(valueOr(request.WaveSize, 5), maxRemediationWave),
 		MaxConcurrent:           min(valueOr(request.MaxConcurrent, 2), maxCampaignConcurrency),
 		FailureThresholdPercent: valueOrDefault(request.FailureThresholdPercent, 20),

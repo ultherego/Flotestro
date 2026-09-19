@@ -20,13 +20,12 @@ var (
 )
 
 // ProcBondingDir is where the bonding driver publishes what "ip" does not:
-// which member carries the traffic now and what the driver thinks of each
-// of them.
+// which member carries the traffic now and what the driver thinks of each of
+// them.
 const ProcBondingDir = "/proc/net/bonding"
 
 // ToolPath returns the first of the given paths present on the host, or an
-// empty string. An absent tool is an answer the caller reports, never a
-// reason to search the host for something that looks like it.
+// empty string.
 func ToolPath(paths []string, exists func(string) bool) string {
 	for _, path := range paths {
 		if exists(path) {
@@ -36,9 +35,7 @@ func ToolPath(paths []string, exists func(string) bool) string {
 	return ""
 }
 
-// LinkArguments reads the links with everything the kernel knows about
-// them. Without -details the bond is a link with a MAC address and nothing
-// says what it is made of.
+// LinkArguments reads the links with everything the kernel knows about them.
 func LinkArguments(binary string) []string {
 	return []string{binary, "-details", "-json", "link", "show"}
 }
@@ -55,9 +52,7 @@ type rawLink struct {
 	// Link is the lower interface of a VLAN: the one the tagged traffic
 	// runs on. The kernel calls it "link" here and "base-iface" elsewhere.
 	Link string `json:"link"`
-	// Master is the layer that owns this interface. The relation lives on
-	// this side, which is why a bond's members are collected from the
-	// members and not from the bond.
+	// Master is the layer that owns this interface.
 	Master   string `json:"master"`
 	MTU      int    `json:"mtu"`
 	LinkInfo struct {
@@ -76,9 +71,7 @@ type rawBond struct {
 	XmitHashPolicy string `json:"xmit_hash_policy"`
 }
 
-// rawBridge maps the info_data of a bridge. The kernel reports the two
-// switches as numbers, so they are read as numbers and turned into the
-// flags the panel speaks in.
+// rawBridge maps the info_data of a bridge.
 type rawBridge struct {
 	STPState      int    `json:"stp_state"`
 	VLANFiltering int    `json:"vlan_filtering"`
@@ -91,12 +84,8 @@ type rawVLAN struct {
 	Protocol string `json:"protocol"`
 }
 
-// ParseLinks reads the output of "ip -details -json link" into the layering
-// of each interface.
-//
-// The result is not a list of interfaces to show: it is what the layering
-// of the snapshot is built from, and MergeLayering puts it onto the
-// interfaces the address read already produced.
+// ParseLinks reads the output of "ip -details -json link" into the layering of
+// each interface.
 func ParseLinks(output string) ([]Interface, error) {
 	var raw []rawLink
 	if err := json.Unmarshal([]byte(output), &raw); err != nil {
@@ -130,14 +119,9 @@ func ParseLinks(output string) ([]Interface, error) {
 	return links, nil
 }
 
-// MergeLayering puts the layering onto the interfaces read from the
-// addresses, and fills in the members of every bond and bridge from the
-// interfaces that name it as their master.
-//
-// The members are collected here rather than taken from the layer, because
-// that is where the kernel keeps them: a member the bond has not accepted
-// yet still names the bond, and a bond that lists a member the kernel no
-// longer has would be a lie the plan then refuses for the wrong reason.
+// MergeLayering puts the layering onto the interfaces read from the addresses,
+// and fills in the members of every bond and bridge from the interfaces that
+// name it as their master.
 func MergeLayering(interfaces []Interface, links []Interface) {
 	byName := map[string]*Interface{}
 	for i := range interfaces {
@@ -172,11 +156,6 @@ func MergeLayering(interfaces []Interface, links []Interface) {
 }
 
 // ParseBondStatus reads one file of /proc/net/bonding.
-//
-// The driver says two things "ip" does not: which member carries the
-// traffic now, and what the bond thinks of each member. A bond whose active
-// member is not its primary is a bond that failed over, and that is
-// precisely what an operator looks at this page for.
 func ParseBondStatus(content string) BondDetails {
 	details := BondDetails{MemberStates: map[string]string{}}
 	member := ""
@@ -222,10 +201,8 @@ func ParseBondStatus(content string) BondDetails {
 	return details
 }
 
-// bondModeWord turns the driver's sentence into the mode name the kernel
-// takes when the bond is created. "IEEE 802.3ad Dynamic link aggregation"
-// and "802.3ad" are the same mode, and a plan that compared the sentence
-// would report a change on every host.
+// bondModeWord turns the driver's sentence into the mode name the kernel takes
+// when the bond is created.
 func bondModeWord(value string) string {
 	lower := strings.ToLower(value)
 	switch {
@@ -250,9 +227,7 @@ func bondModeWord(value string) string {
 }
 
 // SupplementBonds fills in from /proc/net/bonding what the kernel does not
-// report through "ip": the active member and the state of each member. What
-// the driver knows and "ip" does not is added; what both know stays as "ip"
-// reported it.
+// report through "ip": the active member and the state of each member.
 func SupplementBonds(dir string, interfaces []Interface) {
 	for i := range interfaces {
 		if interfaces[i].Bond == nil {
@@ -294,13 +269,8 @@ type rawBridgeVLAN struct {
 	} `json:"vlans"`
 }
 
-// ParseBridgeVLANs reads the output of "bridge -json vlan show" into the
-// VLANs of each port.
-//
-// A range in the output ("vlan":10,"vlanEnd":20) is expanded: the operator
-// asks which VLAN a port carries, and a range would make them work that out
-// themselves. The expansion is bounded by the VLAN space, so it cannot grow
-// beyond what a bridge can hold.
+// ParseBridgeVLANs reads the output of "bridge -json vlan show" into the VLANs
+// of each port.
 func ParseBridgeVLANs(output string) ([]BridgePortVLAN, error) {
 	var raw []rawBridgeVLAN
 	if err := json.Unmarshal([]byte(output), &raw); err != nil {
@@ -337,9 +307,8 @@ func hasFlag(flags []string, wanted string) bool {
 	return false
 }
 
-// AttachBridgeVLANs puts the VLANs of each port onto the bridge that owns
-// the port. A VLAN on a port whose bridge the snapshot does not have is
-// dropped: it belongs to a layer the panel is not looking at.
+// AttachBridgeVLANs puts the VLANs of each port onto the bridge that owns the
+// port.
 func AttachBridgeVLANs(interfaces []Interface, vlans []BridgePortVLAN) {
 	owner := map[string]string{}
 	for i := range interfaces {
@@ -364,21 +333,11 @@ func AttachBridgeVLANs(interfaces []Interface, vlans []BridgePortVLAN) {
 }
 
 // ToolRunner runs one of the host's tools and returns its output.
-//
-// The module says which tool to run and reads the answer back; the process
-// is started by the caller. That is what lets the agent and the helper make
-// exactly the same read without either of them borrowing the other's
-// privileges, and it keeps the module itself free of process handling.
 type ToolRunner func(arguments []string) (string, error)
 
 // ReadLayering fills in the layering of a snapshot whose interfaces have
-// already been read: which interface is a bond, a bridge or a VLAN, what it
-// is made of, and which VLAN every bridge port carries.
-//
-// A tool the host does not have is a named reason rather than silence: a
-// snapshot with no layering and no reason reads as a host that has none,
-// and a plan built on that would happily take a member another bond
-// already owns.
+// already been read: which interface is a bond, a bridge or a VLAN, what it is
+// made of, and which VLAN every bridge port carries.
 func ReadLayering(snapshot *Snapshot, run ToolRunner) {
 	binary := ToolPath(IPPaths, Exists)
 	if binary == "" {
@@ -398,11 +357,9 @@ func ReadLayering(snapshot *Snapshot, run ToolRunner) {
 	MergeLayering(snapshot.Interfaces, links)
 	SupplementBonds(ProcBondingDir, snapshot.Interfaces)
 
-	// The VLANs of the bridge ports come from a second tool, and its
-	// absence is not the absence of the layering: the bridges are already
-	// read, only what each port carries stays unknown. A bridge that
-	// filters VLANs says so through its own flag, so nothing here is taken
-	// for "no VLANs".
+	// The VLANs of the bridge ports come from a second tool, and its absence is
+	// not the absence of the layering: the bridges are already read, only what
+	// each port carries stays unknown.
 	bridgeBinary := ToolPath(BridgePaths, Exists)
 	if bridgeBinary == "" {
 		return
@@ -416,13 +373,8 @@ func ReadLayering(snapshot *Snapshot, run ToolRunner) {
 	}
 }
 
-// ReadIPv6 fills in what the kernel says about the second family: whether
-// the host has it at all, and what each interface does with it.
-//
-// A setting that could not be read stays a nil pointer rather than a zero,
-// and an interface about which nothing was read keeps no IPv6 section at
-// all: "the sysctls were not readable" and "the family is off" are two
-// different answers to the operator.
+// ReadIPv6 fills in what the kernel says about the second family: whether the
+// host has it at all, and what each interface does with it.
 func ReadIPv6(snapshot *Snapshot) {
 	snapshot.IPv6Disabled = HostIPv6Disabled(IPv6ConfDir)
 	all := ReadIPv6Settings(IPv6ConfDir, "all")

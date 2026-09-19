@@ -26,8 +26,8 @@ import (
 )
 
 // Authorizer resolves the publisher of a policy when its remediation is
-// ordered: the campaign is created on their authority, hours or days
-// after the publication, so their rights are read then and not assumed.
+// ordered: the campaign is created on their authority, hours or days after the
+// publication, so their rights are read then and not assumed.
 type Authorizer interface {
 	PrincipalBySubject(ctx context.Context, subject string) (*authz.Principal, error)
 }
@@ -60,9 +60,9 @@ func NewEvaluator(store *Store, hostStore *hosts.Store, inventoryStore *inventor
 	}
 }
 
-// The rollout of a remediation campaign: a canary of one, waves of five,
-// two hosts at once, the same policy the fleet remediation follows,
-// because the steps are the same operations.
+// The rollout of a remediation campaign: a canary of one, waves of five, two
+// hosts at once, the same policy the fleet remediation follows, because the
+// steps are the same operations.
 const (
 	remediationCanary        = 1
 	remediationWave          = 5
@@ -86,9 +86,9 @@ type Outcome struct {
 	Version  int            `json:"version"`
 	Hosts    int            `json:"hosts"`
 	Counts   map[string]int `json:"counts"`
-	// CampaignID names the remediation campaign the evaluation ordered,
-	// or the one already open for the same drift; empty in report mode
-	// or without a drift to fix.
+	// CampaignID names the remediation campaign the evaluation ordered, or the
+	// one already open for the same drift; empty in report mode or without a
+	// drift to fix.
 	CampaignID string `json:"campaign_id,omitempty"`
 	// Remediation says in words what happened to the drift.
 	Remediation string    `json:"remediation,omitempty"`
@@ -104,8 +104,8 @@ type hostFindings struct {
 }
 
 // Evaluate judges every host the policy selects against its published
-// document, writes the verdicts and, when the mode asks for it, orders
-// the remediation of the drift.
+// document, writes the verdicts and, when the mode asks for it, orders the
+// remediation of the drift.
 func (e *Evaluator) Evaluate(ctx context.Context, policy Policy) (*Outcome, error) {
 	if policy.Version == 0 {
 		return nil, ErrNotPublished
@@ -158,10 +158,9 @@ func (e *Evaluator) Evaluate(ctx context.Context, policy Policy) (*Outcome, erro
 	return outcome, nil
 }
 
-// resolve turns the selector into the host list the way the campaigns
-// do: the typed expression decides alone, an explicit list is read host
-// by host, the flat filters page through the fleet. The exclusion list
-// takes hosts out afterwards.
+// resolve turns the selector into the host list the way the campaigns do: the
+// typed expression decides alone, an explicit list is read host by host, the
+// flat filters page through the fleet.
 func (e *Evaluator) resolve(ctx context.Context, chosen campaigns.Selector) ([]hosts.Host, error) {
 	var list []hosts.Host
 	switch {
@@ -207,9 +206,7 @@ func (e *Evaluator) resolve(ctx context.Context, chosen campaigns.Selector) ([]h
 	return kept, nil
 }
 
-// maxPolicyHosts bounds one policy. A selector wider than this is a
-// mistake in the selector, not an intent, and the loop stops rather than
-// judging half a fleet.
+// maxPolicyHosts bounds one policy.
 const maxPolicyHosts = 10000
 
 func (e *Evaluator) page(ctx context.Context, filter hosts.ListFilter) ([]hosts.Host, error) {
@@ -302,9 +299,8 @@ func (e *Evaluator) judge(ctx context.Context, document Document, version int,
 	return judged, nil
 }
 
-// packageFacts reads the panel's copy of one host's package list. The
-// state row says whether the copy exists; the list itself is read only
-// when it does.
+// packageFacts reads the panel's copy of one host's package list. The state
+// row says whether the copy exists; the list itself is read only when it does.
 func (e *Evaluator) packageFacts(ctx context.Context, hostID string, state vuln.PackageListState) PackageFacts {
 	facts := PackageFacts{Loaded: true, Digest: state.Digest, CollectedAt: state.CollectedAt,
 		UnavailableReason: state.UnavailableReason, Installed: map[string]bool{}}
@@ -327,9 +323,8 @@ func (e *Evaluator) packageFacts(ctx context.Context, hostID string, state vuln.
 	return facts
 }
 
-// remediate turns the drift of an evaluation into a campaign, unless the
-// same drift set already has one or a campaign of the policy is still
-// open. It answers with the campaign and a sentence for the outcome.
+// remediate turns the drift of an evaluation into a campaign, unless the same
+// drift set already has one or a campaign of the policy is still open.
 func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Version, document Document,
 	judged []hostFindings) (string, string, error) {
 	action := opspec.ActionSecurityRemediate
@@ -403,10 +398,9 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 		return open, "a remediation campaign of this policy is still open; the drift is judged again after it settles", nil
 	}
 
-	// The campaign is created on the publisher's authority, and the
-	// publisher's rights are read now, not assumed from the publication:
-	// a host the publisher may not change is closed in the snapshot the
-	// way a fleet remediation closes a host out of scope.
+	// The campaign is created on the publisher's authority, and the publisher's
+	// rights are read now, not assumed from the publication: a host the publisher
+	// may not change is closed in the snapshot the way a fleet remediation closes
 	publisher, err := e.principal(ctx, version.PublishedBy)
 	if err != nil {
 		e.recordRemediation(ctx, policy, document, audit.OutcomeDenied, map[string]any{
@@ -482,10 +476,9 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 	note := fmt.Sprintf("campaign %s ordered for %d hosts; it waits for approval", campaign.ID, len(ready))
 
 	if document.RemediationMode == ModeAutomatic {
-		// The publication is the approval: the record quotes the same
-		// authentication the publisher gave then, and names the policy as
-		// the reason, so the approval chain reads the way the document
-		// describes it - approved at publication, carried out at drift.
+		// The publication is the approval: the record quotes the same authentication
+		// the publisher gave then, and names the policy as the reason, so the
+		// approval chain reads the way the document describes it - approved at
 		approval := campaigns.Approval{
 			ApprovedBy:      version.PublishedBy,
 			Authentication:  version.Authentication,
@@ -521,10 +514,8 @@ func (e *Evaluator) remediate(ctx context.Context, policy Policy, version Versio
 	return campaign.ID, note, nil
 }
 
-// refusal names why a host cannot run its plan: the quarantine, or an
-// adapter a step needs that the host lacks. An irreversible step is
-// refused outright, as the fleet remediation refuses it - none of this
-// version's rules maps to one, and the check keeps it that way.
+// refusal names why a host cannot run its plan: the quarantine, or an adapter
+// a step needs that the host lacks.
 func (e *Evaluator) refusal(host hosts.Host, steps []remediation.Step) (string, string) {
 	if host.LifecycleState == "quarantined" {
 		return ReasonQuarantined, "the host is quarantined and accepts no operations"
@@ -543,9 +534,7 @@ func (e *Evaluator) refusal(host hosts.Host, steps []remediation.Step) (string, 
 
 // scopeTargets closes the ready hosts the publisher may not change: the
 // campaign right and the remediation right in the host's scope, and the
-// permission of every step. The orchestrator checks the same at dispatch;
-// checking here keeps a host the publisher cannot touch out of the
-// approver's consent in the first place.
+// permission of every step.
 func (e *Evaluator) scopeTargets(publisher authz.Principal, ready, closed []campaigns.TargetHost,
 	byHost map[remediation.Host]remediation.Arrangement, judged []hostFindings, mode string) ([]campaigns.TargetHost, []campaigns.TargetHost) {
 	hostByID := map[string]hosts.Host{}
@@ -644,11 +633,8 @@ func describeSkips(findings []compliance.Finding, skipped map[string]string) str
 	return strings.Join(parts, "; ")
 }
 
-// DriftFingerprint identifies a drift set: the policy, the version and,
-// for every host, the digest of the steps it would run. The same hosts
-// with the same steps give the same fingerprint, so a cycle that finds
-// the drift still there does not order a second campaign; a host fixed
-// or a host added changes it.
+// DriftFingerprint identifies a drift set: the policy, the version and, for
+// every host, the digest of the steps it would run.
 func DriftFingerprint(policyID string, version int, lines []string) string {
 	sorted := append([]string(nil), lines...)
 	sort.Strings(sorted)

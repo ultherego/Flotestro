@@ -16,48 +16,29 @@ import (
 	"github.com/ultherego/flotestro/internal/canonical"
 )
 
-// The preview token binds an order to the picture of the fleet the
-// operator approved.
-//
-// A preview and a creation resolve the fleet separately, and between them
-// it moves: a host enrols into the site, a role binding is withdrawn, a
-// machine is retired. Without a binding the order would carry a set of
-// hosts nobody looked at, and the record would say nothing about the two
-// answers having differed. With one, the creation compares what it
-// resolved against what was shown and refuses when they are not the same
-// thing - naming which part changed, so the operator previews again rather
-// than guessing.
-//
-// The token is not a capability: it grants nothing on its own. Every
-// permission is checked again at the order, host by host. What it adds is
-// the promise that the hosts checked are the hosts approved.
+// The preview token binds an order to the picture of the fleet the operator
+// approved.
 
-// PreviewLifetime is how long a preview stands. Long enough to read a
-// screen and fill in a form, short enough that a fleet does not move far
-// underneath it.
+// PreviewLifetime is how long a preview stands.
 const PreviewLifetime = 15 * time.Minute
 
 // PreviewMode is the stage of the rollout, in the pattern the rest of the
-// panel uses: observe records, prefer checks a token that is given and
-// allows an order without one, enforce requires one.
+// panel uses: observe records, prefer checks a token that is given and allows
+// an order without one, enforce requires one.
 type PreviewMode string
 
 const (
 	// PreviewObserve records what the check would have decided and lets
 	// every order through, including one carrying a stale token.
 	PreviewObserve PreviewMode = "observe"
-	// PreviewPrefer refuses an order whose token does not match, and lets
-	// an order without a token through. This is the default: a client from
-	// before the feature keeps working, and a client that previews gets the
-	// binding.
+	// PreviewPrefer refuses an order whose token does not match, and lets an
+	// order without a token through.
 	PreviewPrefer PreviewMode = "prefer"
 	// PreviewEnforce additionally refuses an order that carries no token.
 	PreviewEnforce PreviewMode = "enforce"
 )
 
-// ParsePreviewMode reads the configured stage. An unknown word is a
-// misconfiguration rather than a default: an installation that meant to
-// enforce must not silently observe.
+// ParsePreviewMode reads the configured stage.
 func ParsePreviewMode(value string) (PreviewMode, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "":
@@ -74,9 +55,7 @@ func ParsePreviewMode(value string) (PreviewMode, error) {
 
 // PreviewBinding is what a preview showed and an order has to match.
 type PreviewBinding struct {
-	// PrincipalID identifies the person or token that previewed. A preview
-	// is not transferable: the identity that read the count is the identity
-	// that may order by it.
+	// PrincipalID identifies the person or token that previewed.
 	PrincipalID string
 	Principal   string
 	// Permission is the right the preview counted by, which is the right
@@ -106,9 +85,7 @@ type Preview struct {
 }
 
 // Digest is the fingerprint of the whole binding, which the client carries
-// back with the identifier. It makes a swapped identifier visible: a token
-// the panel issued for another selector has another digest, and the order
-// is refused before anything is resolved.
+// back with the identifier.
 func (b PreviewBinding) Digest() (string, error) {
 	sum, _, err := canonical.SHA256(map[string]any{
 		"principal_id":  b.PrincipalID,
@@ -126,10 +103,7 @@ func (b PreviewBinding) Digest() (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// SelectorHash fingerprints a selector. The reason for an exclusion is
-// left out on purpose: it is what the operator wrote for the record, not
-// part of which hosts are chosen, and the preview fills in a placeholder
-// where the form has none yet.
+// SelectorHash fingerprints a selector.
 func SelectorHash(chosen Selector) (string, error) {
 	normalized := Selector{
 		Site:        chosen.Site,
@@ -146,16 +120,12 @@ func SelectorHash(chosen Selector) (string, error) {
 	return "sha256:" + hex.EncodeToString(sum[:]), nil
 }
 
-// ScopeHash fingerprints the scopes an answer was computed in. The caller
-// describes each one as a line; the order of the lines does not matter,
-// because it is not part of what they grant.
+// ScopeHash fingerprints the scopes an answer was computed in.
 func ScopeHash(scopes []string) string {
 	return listHash(scopes)
 }
 
-// SnapshotHash fingerprints a set of hosts by identifier. The order does
-// not matter: two resolutions of the same fleet may page differently and
-// still be the same set.
+// SnapshotHash fingerprints a set of hosts by identifier.
 func SnapshotHash(hostIDs []string) string {
 	return listHash(hostIDs)
 }
@@ -243,12 +213,8 @@ func (s *Store) RecordPreview(ctx context.Context, binding PreviewBinding) (Prev
 	return preview, nil
 }
 
-// ConsumePreview checks an order against the preview it names and marks
-// the preview used. The check and the marking are one transaction, so two
-// orders racing on one preview leave one campaign and one refusal.
-//
-// What the caller passes is what it resolved itself: the preview is never
-// the source of the hosts, only the promise that they are the same ones.
+// ConsumePreview checks an order against the preview it names and marks the
+// preview used.
 func (s *Store) ConsumePreview(ctx context.Context, id string, order PreviewBinding, now time.Time) (Preview, error) {
 	transaction, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -329,18 +295,15 @@ func describeAction(action string) string {
 	return action
 }
 
-// AttachPreview names the campaign a preview created, once it exists. A
-// preview consumed by an order that was refused afterwards keeps no
-// campaign: it is spent either way, and the record says so.
+// AttachPreview names the campaign a preview created, once it exists.
 func (s *Store) AttachPreview(ctx context.Context, id, campaignID string) error {
 	_, err := s.pool.Exec(ctx,
 		`update campaign_previews set campaign_id = $2::uuid where id = $1::uuid`, id, campaignID)
 	return err
 }
 
-// SweepPreviews removes the previews that expired long enough ago to be of
-// no interest to anybody. A spent preview is kept for a while, because a
-// refusal saying "already used" is more use than one saying "unknown".
+// SweepPreviews removes the previews that expired long enough ago to be of no
+// interest to anybody.
 func (s *Store) SweepPreviews(ctx context.Context, before time.Time) (int64, error) {
 	tag, err := s.pool.Exec(ctx,
 		`delete from campaign_previews where expires_at < $1`, before.UTC())

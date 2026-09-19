@@ -32,6 +32,12 @@ const (
 	// CodeStateAmbiguous: no record, and what is there does not add up to
 	// either an empty installation or a complete old one.
 	CodeStateAmbiguous = "crypto_state_ambiguous"
+	// CodeInstallationMismatch: the state directory and the database
+	// describe two different installations, or one of them describes none
+	// while the other has a history. It is the deployment mistake of
+	// chapter 21 - a control plane scaled with a state volume of its own -
+	// and the reason names which of the two is the stranger.
+	CodeInstallationMismatch = "installation_state_mismatch"
 )
 
 // RunbookHint is the one line every fatal state ends with.
@@ -41,7 +47,12 @@ const RunbookHint = "do not create keys or a CA by hand; follow docs/runbooks/db
 type FatalError struct {
 	Code   string
 	Reason string
-	Err    error
+	// Stranger is set on the refusals that compare the state directory
+	// with the database: it names the half that does not belong to the
+	// installation the other half describes. It is empty on every other
+	// refusal, where there is nothing to compare.
+	Stranger Stranger
+	Err      error
 }
 
 func (e *FatalError) Error() string {
@@ -55,6 +66,12 @@ func (e *FatalError) Unwrap() error { return e.Err }
 
 func fatal(code, reason string, err error) error {
 	return &FatalError{Code: code, Reason: reason, Err: err}
+}
+
+// fatalStranger is the refusal that compares the two halves of the
+// installation and blames one of them.
+func fatalStranger(code string, stranger Stranger, reason string) error {
+	return &FatalError{Code: code, Reason: reason, Stranger: stranger}
 }
 
 // Options is what the guard works with.
@@ -132,6 +149,34 @@ func Open(ctx context.Context, o Options) (*Runtime, error) {
 // must be there and must open the sentinel, and the CA on disk must be
 // the one it names.
 func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
+	// Which installation the state directory belongs to is asked before
+	// anything else. A key that does not open a sentinel says "the key is
+	// wrong"; the marker says "these two were never one installation", and
+	// that is a different repair.
+	marker, err := readMarker(o.CADir)
+	if err != nil {
+		return err
+	}
+	switch {
+	case marker != "" && marker != record.InstallationID:
+		return fatalStranger(CodeInstallationMismatch, StrangerStateDirectory, fmt.Sprintf(
+			"the state directory %s belongs to the installation %s and the database describes the "+
+				"installation %s: two installations were mixed, and this control plane would sign with "+
+				"one fleet CA while the database records another",
+			o.CADir, marker, record.InstallationID))
+	case marker == "" && stateDirectoryEmpty(o):
+		// The shape of the mistake chapter 21 forbids: a replica with a
+		// state volume of its own next to the database of an installation
+		// that exists. It is also what a database restored without its
+		// state directory looks like, and the repair is the same one.
+		return fatalStranger(CodeInstallationMismatch, StrangerStateDirectory, fmt.Sprintf(
+			"the database describes the installation %s and %s holds no secret store key, no fleet CA "+
+				"and no marker of any installation: this is either a control plane started with a state "+
+				"volume of its own against an existing installation, or a database restored without the "+
+				"state directory that belongs to it",
+			record.InstallationID, o.CADir))
+	}
+
 	if record.Provider != o.Provider.Name() {
 		return fatal(CodeSecretsKeyUnavailable,
 			fmt.Sprintf("the installation was sealed by the provider %q and this panel runs %q",
@@ -188,6 +233,18 @@ func (r *Runtime) verify(ctx context.Context, o Options, record Record) error {
 			fmt.Sprintf("the CA on disk has the fingerprint %s and the installation records %s",
 				active.FingerprintHex(), record.IssuerFingerprint), nil)
 	}
+	// Everything matched, so a directory that carried no marker is this
+	// installation's and may now say so. An installation from before the
+	// marker gets it on its first start under this version, and from then
+	// on a directory paired with the wrong database is named as such
+	// rather than reported as a key that does not open.
+	if marker == "" {
+		if err := writeMarker(o.CADir, record.InstallationID); err != nil {
+			return fmt.Errorf("naming the installation of the state directory: %w", err)
+		}
+		r.log.Info("the state directory now names the installation it belongs to",
+			"installation_id", record.InstallationID, "marker", MarkerPath(o.CADir))
+	}
 	r.trust = trust
 	r.record = record
 	r.log.Info("the cryptographic state of the installation was verified",
@@ -203,6 +260,22 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	facts, err := o.Storage.Facts(ctx)
 	if err != nil {
 		return fmt.Errorf("reading what the database holds: %w", err)
+	}
+	// A state directory that names an installation next to a database that
+	// describes none: the database is the stranger. It is an empty or a
+	// foreign database under a directory with a history, and initialising
+	// over it would make a second installation out of one set of keys.
+	marker, err := readMarker(o.CADir)
+	if err != nil {
+		return err
+	}
+	if marker != "" {
+		return fatalStranger(CodeInstallationMismatch, StrangerDatabase, fmt.Sprintf(
+			"the state directory %s belongs to the installation %s and the database describes no "+
+				"installation at all (%d hosts, %d certificates, %d secret versions): the control plane "+
+				"was pointed at another database, or at a database restored from before this "+
+				"installation existed",
+			o.CADir, marker, facts.Hosts, facts.Certificates, facts.SecretVersions))
 	}
 	var legacyKey []byte
 	if o.LegacyKeyPath != "" {
@@ -297,6 +370,12 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 	if err != nil {
 		return fmt.Errorf("reading the installation record back: %w", err)
 	}
+	// The directory is named only once the record is safely in the
+	// database: a marker without a record would refuse the very next start
+	// of an installation that was never created.
+	if err := writeMarker(o.CADir, record.InstallationID); err != nil {
+		return fmt.Errorf("naming the installation of the state directory: %w", err)
+	}
 	r.trust = trust
 	r.record = *loaded
 	r.initialised = fresh
@@ -310,6 +389,22 @@ func (r *Runtime) establish(ctx context.Context, o Options) error {
 			"secret_versions", facts.SecretVersions, "hosts", facts.Hosts, "created_key", createdKey, "created_ca", createdCA)
 	}
 	return nil
+}
+
+// stateDirectoryEmpty says whether the state directory holds nothing that
+// could belong to any installation: no key of the provider, no CA material
+// and no legacy key file. A directory like that next to a database that
+// describes an installation is never a state to start from.
+func stateDirectoryEmpty(o Options) bool {
+	if o.Provider.HasMaterial() || pki.HasAnyMaterial(o.CADir) {
+		return false
+	}
+	if o.LegacyKeyPath != "" {
+		if _, err := os.Stat(o.LegacyKeyPath); err == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func legacyPathOrNone(path string) string {

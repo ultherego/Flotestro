@@ -1,10 +1,4 @@
-// Package network inventories the interfaces, addresses and routes of a
-// host.
-//
-// The module reads the kernel state, not the configuration files: what the
-// host really has up and what somebody once wrote into the configuration
-// can drift apart - and the operator looking at the panel asks about the
-// former.
+// Package network inventories the interfaces, addresses and routes of a host.
 package network
 
 import "time"
@@ -15,12 +9,8 @@ const (
 	FamilyIPv6 = "inet6"
 )
 
-// The layered interface kinds the module reads and writes.
-//
-// A layered interface is one that sits on other interfaces. That is the
-// whole difference from an address: an address is a property of one link, a
-// bond is a link made of several, and neither the inventory nor a plan says
-// anything useful about a host without naming which is which.
+// The layered interface kinds the module reads and writes. A layered interface
+// is one that sits on other interfaces.
 const (
 	LinkBond   = "bond"
 	LinkBridge = "bridge"
@@ -28,30 +18,21 @@ const (
 )
 
 // BondDetails is what the host reports about a bond.
-//
-// The members come from the links that name this bond as their master, not
-// from the bond itself: the kernel keeps the relation on the member side,
-// and a member the bond has not accepted would be missing if it were read
-// the other way round.
 type BondDetails struct {
 	Mode    string   `json:"mode,omitempty"`
 	Members []string `json:"members,omitempty"`
-	// MIIMonMS is the link monitoring interval in milliseconds. Zero is a
-	// state and not a missing value: it means the bond does not watch its
-	// members at all and will keep sending into a dead one.
+	// MIIMonMS is the link monitoring interval in milliseconds.
 	MIIMonMS int    `json:"miimon_ms"`
 	Primary  string `json:"primary,omitempty"`
 	// LACPRate and XmitHashPolicy mean something only for the modes that
 	// use them; the host reports them as it has them.
 	LACPRate       string `json:"lacp_rate,omitempty"`
 	XmitHashPolicy string `json:"xmit_hash_policy,omitempty"`
-	// ActiveMember is the member carrying the traffic, as
-	// /proc/net/bonding reports it. A bond whose active member is not the
-	// primary is a bond that failed over and nobody noticed.
+	// ActiveMember is the member carrying the traffic, as /proc/net/bonding
+	// reports it.
 	ActiveMember string `json:"active_member,omitempty"`
-	// MemberStates says what the bond thinks of each member (up, down). An
-	// absent entry is not "down": it is a member the driver said nothing
-	// about.
+	// MemberStates says what the bond thinks of each member (up, down). An absent
+	// entry is not "down": it is a member the driver said nothing about.
 	MemberStates map[string]string `json:"member_states,omitempty"`
 }
 
@@ -60,9 +41,8 @@ type BondDetails struct {
 type BridgePortVLAN struct {
 	Port string `json:"port"`
 	VID  int    `json:"vid"`
-	// PVID marks the VLAN untagged frames of this port land in, Untagged
-	// the VLANs leaving the port without a tag. The two answer different
-	// questions and a port can have both.
+	// PVID marks the VLAN untagged frames of this port land in, Untagged the
+	// VLANs leaving the port without a tag.
 	PVID     bool `json:"pvid,omitempty"`
 	Untagged bool `json:"untagged,omitempty"`
 }
@@ -88,11 +68,6 @@ type VLANDetails struct {
 }
 
 // IPv6Settings is what the kernel says about the second family on a link.
-//
-// It is read apart from the addresses, because a link with no IPv6 address
-// may have the family switched off or may simply have nothing to show yet,
-// and those are different answers. Every field is a pointer: an unread
-// setting is unknown, never zero.
 type IPv6Settings struct {
 	// Disabled is disable_ipv6: with it set the interface has no second
 	// family at all and an IPv6 address written to it goes into the void.
@@ -108,15 +83,12 @@ type IPv6Settings struct {
 // Address is one address assigned to an interface.
 type Address struct {
 	Family string `json:"family"`
-	// Address is written together with the mask (10.0.2.15/24): the
-	// address alone without the prefix does not say which network the host
-	// considers local.
+	// Address is written together with the mask (10. 0. 2.
 	Address string `json:"address"`
 	Scope   string `json:"scope"`
-	// Source says where the address comes from, as far as the kernel
-	// reports it: a dynamic one from DHCP behaves differently from a static
-	// one, and the operator is meant to see that before changing the
-	// configuration.
+	// Source says where the address comes from, as far as the kernel reports it:
+	// a dynamic one from DHCP behaves differently from a static one, and the
+	// operator is meant to see that before changing the configuration.
 	Source string `json:"source,omitempty"`
 	// Permanent is false for addresses with a lifetime. An address that
 	// vanishes in an hour is not the same as a permanent one.
@@ -127,15 +99,13 @@ type Address struct {
 type Interface struct {
 	Name  string `json:"name"`
 	Index int    `json:"index"`
-	// Kind distinguishes a physical interface from a bridge, veth or
-	// tunnel: a host with docker has a dozen of them and only some mean
-	// anything.
+	// Kind distinguishes a physical interface from a bridge, veth or tunnel: a
+	// host with docker has a dozen of them and only some mean anything.
 	Kind string `json:"kind,omitempty"`
 	MAC  string `json:"mac,omitempty"`
 	MTU  int    `json:"mtu"`
-	// OperState is the state from the kernel (up, down, unknown). "unknown"
-	// stays the word "unknown", because that is exactly how virtual
-	// interfaces report.
+	// OperState is the state from the kernel (up, down, unknown). "unknown" stays
+	// the word "unknown", because that is exactly how virtual interfaces report.
 	OperState string `json:"oper_state"`
 	// Carrier tells about the carrier. Unknown stays unknown: no value is
 	// not the same as no cable.
@@ -145,10 +115,8 @@ type Interface struct {
 	SpeedMbps *int      `json:"speed_mbps,omitempty"`
 	Driver    string    `json:"driver,omitempty"`
 	Addresses []Address `json:"addresses,omitempty"`
-	// Master names the layer that owns this interface: the bond or the
-	// bridge it was enslaved to. Such an interface has no addressing of its
-	// own worth speaking of - the layer above carries it - and changing it
-	// as if it had is how an operator takes a bond apart by accident.
+	// Master names the layer that owns this interface: the bond or the bridge it
+	// was enslaved to.
 	Master string `json:"master,omitempty"`
 	// Bond, Bridge and VLAN describe the layering where this interface is
 	// one of them. At most one is set; a plain link has none.
@@ -156,8 +124,7 @@ type Interface struct {
 	Bridge *BridgeDetails `json:"bridge,omitempty"`
 	VLAN   *VLANDetails   `json:"vlan,omitempty"`
 	// IPv6 carries the kernel settings of the second family. Unknown stays
-	// unknown: a host whose sysctls could not be read is not a host with
-	// IPv6 on.
+	// unknown: a host whose sysctls could not be read is not a host with IPv6 on.
 	IPv6 *IPv6Settings `json:"ipv6,omitempty"`
 	// Management marks the interface the host talks to the panel through.
 	// Changing exactly this interface is changing the branch we sit on.
@@ -184,21 +151,17 @@ type Snapshot struct {
 	Interfaces []Interface `json:"interfaces"`
 	Routes     []Route     `json:"routes"`
 	// ManagementInterface and ManagementAddress describe the channel to the
-	// panel. The panel does not guess the address from the first position
-	// of the list: it is the host that knows which interface its connection
-	// went out through.
+	// panel.
 	ManagementInterface string `json:"management_interface,omitempty"`
 	ManagementAddress   string `json:"management_address,omitempty"`
 	// WriteAdapter names the mechanism the configuration can be changed
 	// with. Empty means a host on which the panel can only read.
 	WriteAdapter string `json:"write_adapter,omitempty"`
-	// IPv6Disabled says the host turned the second family off for every
-	// interface at once, or that the kernel has no IPv6 at all. A plan that
-	// would write an IPv6 address into such a host says so instead.
+	// IPv6Disabled says the host turned the second family off for every interface
+	// at once, or that the kernel has no IPv6 at all.
 	IPv6Disabled *bool `json:"ipv6_disabled,omitempty"`
-	// LayeringUnavailableReason says why the bonds, the bridges and the
-	// VLANs could not be read. The addresses may still be there: a host
-	// that answered one question and not the other says both.
+	// LayeringUnavailableReason says why the bonds, the bridges and the VLANs
+	// could not be read.
 	LayeringUnavailableReason string    `json:"layering_unavailable_reason,omitempty"`
 	ObservedAt                time.Time `json:"observed_at"`
 	// UnavailableReason says why the state could not be determined.
@@ -215,9 +178,8 @@ func (s Snapshot) InterfaceByName(name string) *Interface {
 	return nil
 }
 
-// MembersOf lists the interfaces the given layer owns, in the order the
-// host reported them. The relation is kept on the member side, so it is
-// read from there rather than from the layer.
+// MembersOf lists the interfaces the given layer owns, in the order the host
+// reported them.
 func (s Snapshot) MembersOf(name string) []string {
 	var members []string
 	for i := range s.Interfaces {
@@ -229,8 +191,6 @@ func (s Snapshot) MembersOf(name string) []string {
 }
 
 // VLANsOn lists the VLAN interfaces whose parent is the given interface.
-// Removing a link that carries VLANs takes them with it, so the plan has to
-// know about them before anything is written.
 func (s Snapshot) VLANsOn(parent string) []string {
 	var vlans []string
 	for i := range s.Interfaces {
@@ -241,9 +201,8 @@ func (s Snapshot) VLANsOn(parent string) []string {
 	return vlans
 }
 
-// LayerKind names the layered kind of an interface, or an empty string for
-// a link that is not one. The kernel's own word is used: "bond", "bridge"
-// and "vlan" are what "ip -details" reports.
+// LayerKind names the layered kind of an interface, or an empty string for a
+// link that is not one.
 func (i Interface) LayerKind() string {
 	switch {
 	case i.Bond != nil:

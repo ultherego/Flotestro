@@ -42,9 +42,7 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
 }
 
-// SetSessionIdle sets the idle window the sessions are refreshed with. The
-// window is a policy of the installation, so the store takes it from the
-// configuration rather than keep a constant of its own.
+// SetSessionIdle sets the idle window the sessions are refreshed with.
 func (s *Store) SetSessionIdle(idle time.Duration) {
 	s.sessionIdle = idle
 }
@@ -86,17 +84,15 @@ func (s *Store) EnsurePrincipal(ctx context.Context, tx pgx.Tx,
 }
 
 // GrantRole assigns a role within a scope, until the given moment or, with
-// nil, until revoked. Assigning it again is safe: the binding keeps its
-// identity and takes the new validity, so a rotation can be extended - or
-// an open-ended grant given a date - without revoking and re-granting.
+// nil, until revoked.
 func (s *Store) GrantRole(ctx context.Context, tx pgx.Tx,
 	principalID string, role Role, scope Scope, validUntil *time.Time, createdBy string) error {
 	if !KnownRole(role) {
 		return fmt.Errorf("unknown role %q", role)
 	}
 	// A binding names a team or a site, never both: the two are different
-	// vocabularies, and the insert follows the constraint rather than
-	// letting the database explain it afterwards.
+	// vocabularies, and the insert follows the constraint rather than letting the
+	// database explain it afterwards.
 	if scope.Team != "" {
 		const teamQuery = `
 			insert into role_bindings (id, principal_id, role, site, environment, team_id, valid_until, created_by)
@@ -175,9 +171,7 @@ func (s *Store) ListTokens(ctx context.Context, principalID string) ([]Token, er
 	return tokens, rows.Err()
 }
 
-// RevokeToken ends one token of an identity. The identity is part of the
-// key so that a token identifier read off one identity cannot revoke the
-// token of another through a mistaken path.
+// RevokeToken ends one token of an identity.
 func (s *Store) RevokeToken(ctx context.Context, tx pgx.Tx, principalID, tokenID string) (bool, error) {
 	tag, err := tx.Exec(ctx, `
 		update api_tokens set revoked_at = now()
@@ -199,10 +193,8 @@ func (s *Store) RevokeTokensOf(ctx context.Context, tx pgx.Tx, principalID strin
 	return tag.RowsAffected(), nil
 }
 
-// DisablePrincipal takes the access of an identity away without deleting
-// it: the trail keeps naming it, and its bindings show what it could do.
-// The sessions and the tokens are ended in the same transaction, so there
-// is no moment when the identity is disabled and still logged in.
+// DisablePrincipal takes the access of an identity away without deleting it:
+// the trail keeps naming it, and its bindings show what it could do.
 func (s *Store) DisablePrincipal(ctx context.Context, tx pgx.Tx, principalID, reason string) error {
 	tag, err := tx.Exec(ctx, `
 		update principals set disabled_at = now(), updated_at = now()
@@ -272,9 +264,8 @@ func (s *Store) PrincipalByID(ctx context.Context, principalID string) (*Princip
 	return &principal, nil
 }
 
-// BootstrapTokenState says whether the bootstrap token still works and
-// whether anybody else holds the platform administrator role. Both at once
-// mean a token that has done its job and should be revoked.
+// BootstrapTokenState says whether the bootstrap token still works and whether
+// anybody else holds the platform administrator role.
 func (s *Store) BootstrapTokenState(ctx context.Context) (live, otherAdmins bool, err error) {
 	const query = `
 		select exists (
@@ -292,8 +283,6 @@ func (s *Store) BootstrapTokenState(ctx context.Context) (live, otherAdmins bool
 }
 
 // Authenticate turns a token into an identity together with its roles.
-// The digest comparison runs in constant time, so as not to reveal the
-// token's prefix.
 func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -342,21 +331,7 @@ func (s *Store) Authenticate(ctx context.Context, value string) (*Principal, err
 }
 
 // PrincipalBySubject resolves an identity by its subject with its current
-// bindings. It serves a check made later than the request that named the
-// subject - before a campaign dispatches to a host, hours after the
-// campaign was ordered - so a disabled or denied identity is reported as
-// ErrUnauthenticated, exactly as it would be at the door.
-//
-// The rights of a person who signs in through the identity provider come
-// from the group mapping, not from bindings of their own: a request under
-// their session maps the groups on every call. A check away from any
-// request - the orchestrator before a dispatch, a schedule placing its
-// order - has to do the same, from the freshest snapshot of the groups
-// the panel holds, or an administrator's campaign would stop at the
-// first host with "no longer holds", which is not what happened. The
-// snapshot is the newest session's, live, ended or not: the rights come from
-// the groups, not from being signed in at that moment, and a group the
-// person was taken out of drops from the snapshot at the next refresh.
+// bindings.
 func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Principal, error) {
 	const query = `
 		select id, subject, display_name, kind, coalesce(issuer, '') from principals
@@ -395,16 +370,12 @@ func (s *Store) PrincipalBySubject(ctx context.Context, subject string) (*Princi
 	return &principal, nil
 }
 
-// bindingsOf returns the bindings that grant something now. It serves the
-// authentication paths: an expired binding is not part of the identity a
-// request acts under.
+// bindingsOf returns the bindings that grant something now.
 func (s *Store) bindingsOf(ctx context.Context, principalID string) ([]Binding, error) {
 	return s.readBindings(ctx, principalID, true)
 }
 
-// allBindingsOf returns every binding on record, the expired ones
-// included. It serves the listings: an administrator reviewing access is
-// to see what has ended as well as what has not.
+// allBindingsOf returns every binding on record, the expired ones included.
 func (s *Store) allBindingsOf(ctx context.Context, principalID string) ([]Binding, error) {
 	return s.readBindings(ctx, principalID, false)
 }
@@ -464,11 +435,7 @@ func (s *Store) ListPrincipals(ctx context.Context) ([]Principal, error) {
 		if err != nil {
 			return nil, err
 		}
-		// An empty list is not the same as a missing list. Empty assignments
-		// rendered as null in JSON broke the interface that read their count;
-		// besides, an identity without assignments of its own can still have
-		// roles from the group mapping, so "none" is information here rather
-		// than missing data.
+		// An empty list is not the same as a missing list.
 		if bindings == nil {
 			bindings = []Binding{}
 		}
@@ -564,18 +531,14 @@ func (s *Store) DeleteGroupMapping(ctx context.Context, mappingID string) (bool,
 	return tag.RowsAffected() > 0, nil
 }
 
-// The thresholds of the access review. They are the customary ones of an
-// access review rather than a policy of the installation: a quarter
-// without use, two weeks before an expiry, a year for a key.
+// The thresholds of the access review.
 const (
 	ReviewUnusedAfter  = 90 * 24 * time.Hour
 	ReviewExpiringSoon = 14 * 24 * time.Hour
 	ReviewTokenMaxAge  = 365 * 24 * time.Hour
 )
 
-// The flags the review raises. A flag is a question for the reviewer, not
-// a verdict: an administrator without an expiry may be exactly what the
-// installation wants, but somebody has to have said so.
+// The flags the review raises.
 const (
 	FlagUnused90Days       = "unused_90_days"
 	FlagExpiresSoon        = "expires_soon"
@@ -602,9 +565,8 @@ type ReviewedPrincipal struct {
 	Kind        string    `json:"kind"`
 	CreatedAt   time.Time `json:"created_at"`
 	// LastLoginAt is the last sign-in through the identity provider,
-	// LastTokenUseAt the last request with one of the identity's tokens,
-	// and LastSeenAt the later of the two. DaysSinceUse counts from it;
-	// nil means never used.
+	// LastTokenUseAt the last request with one of the identity's tokens, and
+	// LastSeenAt the later of the two.
 	LastLoginAt    *time.Time `json:"last_login_at,omitempty"`
 	LastTokenUseAt *time.Time `json:"last_token_use_at,omitempty"`
 	LastSeenAt     *time.Time `json:"last_seen_at,omitempty"`
@@ -616,9 +578,8 @@ type ReviewedPrincipal struct {
 	Flags          []string          `json:"flags"`
 }
 
-// ReviewAccess lists every enabled identity with what it can do, when it
-// was last used and what the reviewer should look at. A disabled identity
-// has no access to review.
+// ReviewAccess lists every enabled identity with what it can do, when it was
+// last used and what the reviewer should look at.
 func (s *Store) ReviewAccess(ctx context.Context, now time.Time) ([]ReviewedPrincipal, error) {
 	rows, err := s.pool.Query(ctx, `
 		select p.id, p.subject, p.display_name, p.kind, p.created_at, p.last_login_at,

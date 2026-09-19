@@ -13,11 +13,6 @@ import (
 )
 
 // readDocker reads the state of the container engine.
-//
-// The Docker socket belongs to root, and membership in the docker group is
-// equivalent to root - an agent running without privileges cannot get it. That
-// is why the conversation with the engine happens here, and the helper accepts
-// only an enumerated read scope, not a path into the Engine API.
 func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerReadRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -58,11 +53,6 @@ func (s *Server) readDocker(ctx context.Context, request *helperv1.HelperRequest
 
 // readDockerEvents reads the event journal of the engine within a closed
 // window.
-//
-// The task ends on its own: the window and the limits are closed in the module
-// and not taken from the message at its word. A read "until further notice"
-// would stay on the host forever, also when the panel stopped listening to it
-// long ago.
 func (s *Server) readDockerEvents(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerEventsRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -75,9 +65,9 @@ func (s *Server) readDockerEvents(ctx context.Context, request *helperv1.HelperR
 		}
 	}
 
-	// The window of the module is the inner limit and the limit of the order
-	// the outer one: an engine that keeps the stream open past the window
-	// still lets the connection go.
+	// The window of the module is the inner limit and the limit of the order the
+	// outer one: an engine that keeps the stream open past the window still lets
+	// the connection go.
 	readCtx, cancel := deadline(ctx, request, 3*time.Minute, 10*time.Minute)
 	defer cancel()
 
@@ -111,12 +101,6 @@ func (s *Server) readDockerEvents(ctx context.Context, request *helperv1.HelperR
 }
 
 // readDockerLogs reads the tail of one container's log.
-//
-// The read is bounded twice: by the line count of the order and by the byte
-// limit the module shares with a log file read. The target may be a name -
-// this is a read, and a name that moved to another container shows the
-// wrong log and changes nothing - but it is checked again here, because it
-// lands in the path of an Engine API request.
 func (s *Server) readDockerLogs(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerLogsRequest) *helperv1.HelperResponse {
 	if err := docker.ValidateContainerReference(action.GetContainerId()); err != nil {
@@ -177,11 +161,8 @@ func (s *Server) readDockerLogs(ctx context.Context, request *helperv1.HelperReq
 	}
 }
 
-// applyDocker performs an operation on the container engine.
-//
-// The container identifier is checked again even though the panel already
-// checked it. The helper runs as root and cannot trust the content of the
-// message: the identifier lands in the query path of the Engine API.
+// applyDocker performs an operation on the container engine. The container
+// identifier is checked again even though the panel already checked it.
 func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerActionRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -229,9 +210,9 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 		digest, err = client.PullImage(actionCtx, action.GetImageReference())
 		result.ImageDigest = digest
 	case helperv1.DockerActionRequest_OPERATION_PRUNE:
-		// The names and identifiers land in the query path of the Engine API,
-		// and the helper runs as root: the panel already checked them, but the
-		// helper cannot trust the content of the message.
+		// The names and identifiers land in the query path of the Engine API, and
+		// the helper runs as root: the panel already checked them, but the helper
+		// cannot trust the content of the message.
 		if reason := checkCleanupList(action); reason != "" {
 			return reject(ErrorMalformed, reason)
 		}
@@ -263,14 +244,6 @@ func (s *Server) applyDocker(ctx context.Context, request *helperv1.HelperReques
 }
 
 // ensureDocker computes the plan of a declared object or carries it out.
-//
-// The description arrives as the module's own JSON and is read with the
-// module's own code, which refuses exactly what the panel refuses: the
-// helper runs as root and cannot take a name, a path or an address at its
-// word because the panel already looked at it. Every change computes its
-// plan again here, under the guard, and compares the digest with the one
-// the operator approved - a host that moved on since the approval gets no
-// change.
 func (s *Server) ensureDocker(ctx context.Context, request *helperv1.HelperRequest,
 	action *helperv1.DockerEnsureRequest) *helperv1.HelperResponse {
 	client, err := docker.New()
@@ -282,10 +255,8 @@ func (s *Server) ensureDocker(ctx context.Context, request *helperv1.HelperReque
 	}
 
 	// A change of a declared object shares the resource with every other
-	// container operation: a replacement and a restart of the same
-	// container at once give an unpredictable result. A plan only reads,
-	// and a read that waited behind a long pull would tell the operator
-	// nothing sooner.
+	// container operation: a replacement and a restart of the same container at
+	// once give an unpredictable result.
 	if action.GetOperation() != helperv1.DockerEnsureRequest_OPERATION_PLAN {
 		release, busy := s.hold(GuardContainers, request)
 		if busy != nil {
@@ -305,9 +276,9 @@ func (s *Server) ensureDocker(ctx context.Context, request *helperv1.HelperReque
 				DockerEnsureResult: &helperv1.DockerEnsureResult{UnavailableReason: err.Error()},
 			}
 		}
-		// What the change managed to do goes back on a refusal too:
-		// without it there is no telling whether the old container was
-		// already removed when the new one refused to start.
+		// What the change managed to do goes back on a refusal too: without it there
+		// is no telling whether the old container was already removed when the new
+		// one refused to start.
 		response := reject(declarationErrorCode(err), err.Error())
 		if encoded, marshalErr := json.Marshal(result); marshalErr == nil && result != nil {
 			response.DockerEnsureResult = &helperv1.DockerEnsureResult{Payload: encoded}
@@ -324,9 +295,7 @@ func (s *Server) ensureDocker(ctx context.Context, request *helperv1.HelperReque
 	}
 }
 
-// runDockerDeclaration is the operation itself. It returns what the module
-// produced even when it failed, so a partial change is reported rather
-// than hidden behind the error alone.
+// runDockerDeclaration is the operation itself.
 func runDockerDeclaration(ctx context.Context, client *docker.Client,
 	action *helperv1.DockerEnsureRequest) (any, error) {
 	switch action.GetOperation() {
@@ -375,8 +344,7 @@ func runDockerDeclaration(ctx context.Context, client *docker.Client,
 }
 
 // planDockerDeclaration computes the plan of whichever object the order is
-// about. A plan carrying a description is about that description; one
-// carrying only a name is the plan of a removal.
+// about.
 func planDockerDeclaration(ctx context.Context, client *docker.Client,
 	action *helperv1.DockerEnsureRequest) (docker.Plan, error) {
 	described := len(action.GetSpec()) > 0
@@ -409,10 +377,8 @@ func planDockerDeclaration(ctx context.Context, client *docker.Client,
 	return docker.Plan{}, errUnknownDeclaration
 }
 
-// containerSpecOf reads the container description back and names the
-// variables whose value came in beside it. The reference the panel bound
-// is not in the request - the values are - so the description carries the
-// variable names alone, which is what the specification digest needs.
+// containerSpecOf reads the container description back and names the variables
+// whose value came in beside it.
 func containerSpecOf(action *helperv1.DockerEnsureRequest) (docker.ContainerSpec, error) {
 	var request docker.ContainerRequest
 	if err := json.Unmarshal(action.GetSpec(), &request); err != nil {
@@ -425,15 +391,12 @@ func containerSpecOf(action *helperv1.DockerEnsureRequest) (docker.ContainerSpec
 // does not declare. A guess would create something nobody asked for.
 var errUnknownDeclaration = errors.New("unknown kind of declared object")
 
-// errorDockerConflict: the object on the host differs in a setting the
-// engine cannot change in place, so bringing it to the description means
-// destroying it and making it again - and the order did not say it accepts
-// that.
+// errorDockerConflict: the object on the host differs in a setting the engine
+// cannot change in place, so bringing it to the description means destroying
+// it and making it again - and the order did not say it accepts that.
 const errorDockerConflict = "docker_object_conflict"
 
-// declarationErrorCode names the refusal. A plan that moved since the
-// approval, an object something still holds and a tag nobody can resolve
-// are typed answers the panel acts on; the rest is a failed operation.
+// declarationErrorCode names the refusal.
 func declarationErrorCode(err error) string {
 	switch {
 	case errors.Is(err, docker.ErrPlanMismatch):
@@ -469,9 +432,7 @@ func checkCleanupList(action *helperv1.DockerActionRequest) string {
 	return ""
 }
 
-// dockerErrorCode separates a refusal from a failure. An operator who asked to
-// remove a volume in use is to see that the host refused - not that the
-// execution failed.
+// dockerErrorCode separates a refusal from a failure.
 func dockerErrorCode(err error) string {
 	switch {
 	case errors.Is(err, docker.ErrInUse):
@@ -496,18 +457,14 @@ func needsContainer(operation helperv1.DockerActionRequest_Operation) bool {
 	return false
 }
 
-// The patterns repeat the validation of the panel. The helper does not trust
-// the content of the message, because it runs as root and these values land in
-// the query path of the Engine API.
+// The patterns repeat the validation of the panel.
 var (
 	containerIdentifier = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 	imageIdentifier     = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 	volumeName          = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,127}$`)
 )
 
-// encodeContainer turns the container state into JSON. A missing container
-// stays empty: a removed container has no state after the operation and it
-// must not be invented.
+// encodeContainer turns the container state into JSON.
 func encodeContainer(container *docker.Container) []byte {
 	if container == nil {
 		return nil

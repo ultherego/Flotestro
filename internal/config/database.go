@@ -8,20 +8,10 @@ import (
 	"time"
 )
 
-// The shape of the connection pool and the migration contract.
-//
-// A pool is not a performance setting: it is a budget. Every replica of the
-// control plane opens up to MaxConns connections of its own, and a database
-// answers only max_connections of them in total, minus what the DBA, the
-// backup and the monitoring keep. A replica allowed to open more than its
-// share is an outage that waits for the next restart, and it takes the whole
-// fleet with it rather than the replica that was misconfigured. That is why
-// a value this file cannot make sense of stops the start instead of falling
-// back to a default: a typo in a budget is not a preference.
+// The shape of the connection pool and the migration contract. A pool is not a
+// performance setting: it is a budget.
 
-// The defaults of the pool. They describe one replica against a PostgreSQL
-// left at its own defaults, which is the installation the quick start
-// produces.
+// The defaults of the pool.
 const (
 	// DefaultDBMaxConns is the pool of one replica.
 	DefaultDBMaxConns int32 = 16
@@ -40,18 +30,11 @@ const (
 	DefaultDBConnectTimeout = 10 * time.Second
 )
 
-// MinimumDBMaxConns is the smallest pool a control plane can work with. The
-// event bus and the epoch watcher each hold a connection for as long as the
-// process lives - they sit in LISTEN and wait for a notification - so a pool
-// of two would serve no query at all, and a pool of three would serve one at
-// a time. Four is the floor the containerisation document names.
+// MinimumDBMaxConns is the smallest pool a control plane can work with.
 const MinimumDBMaxConns int32 = 4
 
-// DatabaseStartupTimeout is how long the control plane waits at start for
-// the database to answer. The connect timeout has to stay under it: a single
-// attempt that outlives the whole wait means the start gives up before the
-// first attempt has finished, and the log then blames the database for a
-// timeout nobody set on it.
+// DatabaseStartupTimeout is how long the control plane waits at start for the
+// database to answer.
 const DatabaseStartupTimeout = 30 * time.Second
 
 // DatabasePool is the shape of the connection pool of one replica, as the
@@ -64,10 +47,8 @@ type DatabasePool struct {
 	HealthCheckPeriod time.Duration
 	// ConnectTimeout bounds one attempt to open a connection.
 	ConnectTimeout time.Duration
-	// ConnectTimeoutSet says whether the installation named the connect
-	// timeout itself. A DSN may carry connect_timeout as well, and the two
-	// have to be told apart: the variable overrides the DSN, and the DSN
-	// stands when the variable is silent.
+	// ConnectTimeoutSet says whether the installation named the connect timeout
+	// itself.
 	ConnectTimeoutSet bool
 }
 
@@ -95,9 +76,8 @@ func DefaultDatabasePool() DatabasePool {
 	}
 }
 
-// DatabasePoolFromEnv reads the pool out of the environment and refuses
-// what it cannot make sense of. It does not judge the values against one
-// another - that is Validate, which also runs on a pool a flag built.
+// DatabasePoolFromEnv reads the pool out of the environment and refuses what
+// it cannot make sense of.
 func DatabasePoolFromEnv() (DatabasePool, error) {
 	pool := DefaultDatabasePool()
 	var err error
@@ -127,9 +107,8 @@ func DatabasePoolFromEnv() (DatabasePool, error) {
 	return pool, nil
 }
 
-// Validate refuses a pool that contradicts itself or the database it will
-// be pointed at. Every refusal names the variable and the value, because
-// that is what the operator edits.
+// Validate refuses a pool that contradicts itself or the database it will be
+// pointed at.
 func (p DatabasePool) Validate() error {
 	if p.MaxConns < MinimumDBMaxConns {
 		return fmt.Errorf("%s is %d; a replica needs at least %d connections, because the event bus "+
@@ -174,24 +153,16 @@ func (p DatabasePool) Validate() error {
 // which role, and whether a serving process may do it at all.
 type Migration struct {
 	// AutoMigrate lets a serving process bring the schema forward itself.
-	// It is the quick start, where one DSN owns the schema and serves the
-	// fleet; a deployment with separate roles runs the migrate command as
-	// its own job and sets this to false.
 	AutoMigrate bool
 	// Role is the role the migrator takes on after connecting, usually the
-	// NOLOGIN owner of the schema. Empty means the migrator stays the role
-	// it logged in as, which is the quick start.
+	// NOLOGIN owner of the schema.
 	Role string
-	// LockWait bounds how long a migrator waits for another one that holds
-	// the schema lock. Waiting is the point - two migrators must not run at
-	// once - but waiting forever hides a session somebody left open.
+	// LockWait bounds how long a migrator waits for another one that holds the
+	// schema lock.
 	LockWait time.Duration
 }
 
-// DefaultMigrationLockWait is how long a second migrator waits. A rolling
-// upgrade starts its replicas within seconds of one another, and a long
-// migration of a large fleet takes minutes; a wait shorter than the longest
-// migration would turn an orderly queue into a failed job.
+// DefaultMigrationLockWait is how long a second migrator waits.
 const DefaultMigrationLockWait = 15 * time.Minute
 
 // The names of the migration settings.
@@ -202,10 +173,7 @@ const (
 	EnvMigrationDatabaseURL = "FLOTESTRO_MIGRATION_DATABASE_URL"
 )
 
-// MigrationFromEnv reads the migration contract. An unreadable value stops
-// the start: the difference between migrating and not migrating is the
-// difference between a serving replica that holds DDL rights and one that
-// does not, and that is not a question to answer by falling back.
+// MigrationFromEnv reads the migration contract.
 func MigrationFromEnv() (Migration, error) {
 	migration := Migration{AutoMigrate: true, LockWait: DefaultMigrationLockWait}
 	if value, ok := os.LookupEnv(EnvAutoMigrate); ok && value != "" {
@@ -231,10 +199,7 @@ func MigrationFromEnv() (Migration, error) {
 	return migration, nil
 }
 
-// envInt32 reads a whole-number setting. Unlike EnvInt it refuses a value
-// it cannot read rather than keeping the default: these numbers are a
-// budget shared with the rest of the cluster, and a silently ignored typo
-// in a budget is the outage nobody can explain afterwards.
+// envInt32 reads a whole-number setting.
 func envInt32(key string, fallback int32) (int32, error) {
 	value, ok := os.LookupEnv(key)
 	if !ok || strings.TrimSpace(value) == "" {

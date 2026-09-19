@@ -16,9 +16,7 @@ import (
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
-// The names of the adapters. A name says what the host has and not what an
-// operation wants: the operation asks about "packages", the host answers
-// "packages.apt".
+// The names of the adapters.
 const (
 	CapSystemd  = "systemd"
 	CapAPT      = "packages.apt"
@@ -51,20 +49,15 @@ const (
 	// The time of the host. The read works everywhere timedatectl is; the write
 	// needs a daemon the panel has somewhere to add servers to.
 	CapTime = "time"
-	// The protection state of the host. The read works everywhere; switching the
-	// MAC mode
-	// is a separate capability, because a host without SELinux has nothing to
-	// switch.
+	// The protection state of the host.
 	CapSecurity    = "security"
 	CapSecurityMAC = "security.mac"
 	// The audit is a separate capability: a host without auditd has nothing to
 	// reload, and the reload goes through augenrules, not through a restart of
 	// the unit.
 	CapSecurityAudit = "security.audit"
-	// Certificates on hosts. The module works everywhere, because it looks at the named files
-	// and deploys new ones. The renewal is a separate capability: it is done by
-	// the daemon of the host, and a host without certmonger has nothing to renew
-	// with.
+	// Certificates on hosts. The module works everywhere, because it looks at the
+	// named files and deploys new ones.
 	CapCertificates      = "certificates"
 	CapCertificatesRenew = "certificates.renew"
 	// The configuration files. The scope of the paths is set by the
@@ -76,25 +69,15 @@ const (
 	// Backup. The module drives a tool the host already has: without the tool
 	// and without runbooks there is nothing to make a copy with.
 	CapBackup = "backup"
-	// The local accounts of the host. The read works everywhere: the
-	// accounts come from NSS and the lock states from /etc/shadow. The
-	// mutations need the shadow tools, and every one of them is a feature
-	// of its own, because a missing tool takes away one operation and not
-	// the module.
+	// The local accounts of the host. The read works everywhere: the accounts
+	// come from NSS and the lock states from /etc/shadow.
 	CapAccountsLocal = "accounts.local"
-	// CapHelperCapability says this agent forwards the panel's signed
-	// capability to the root helper. The features name the mode the helper
-	// reported - observe, prefer or enforce - one of them true once the
-	// helper has answered; all false is a helper that has not said, which
-	// the panel shows as unknown rather than as a helper without the check.
+	// CapHelperCapability says this agent forwards the panel's signed capability
+	// to the root helper.
 	CapHelperCapability = "helper.capability"
-	// CapRelayIdentity says this agent signs the inner identity envelope
-	// of every message when its session goes through a relay, and the
-	// feature names the layout: v2 is the envelope of the security
-	// document, chapter 4. The panel reads it to tell a host that cannot
-	// sign from one that did not: behind a relay under enforce the first
-	// is blocked_upgrade_required, and the fleet is ready for enforce once
-	// no relayed host lacks the feature.
+	// CapRelayIdentity says this agent signs the inner identity envelope of every
+	// message when its session goes through a relay, and the feature names the
+	// layout: v2 is the envelope of the security document, chapter 4.
 	CapRelayIdentity = "relay.identity"
 )
 
@@ -103,9 +86,8 @@ const (
 const (
 	NeedPackages      = "packages"
 	NeedPackageRepair = "packages.repair"
-	// Writing the network configuration. Reading works everywhere iproute2
-	// is, so the module alone does not yet say that anything can be changed
-	// here.
+	// Writing the network configuration. Reading works everywhere iproute2 is, so
+	// the module alone does not yet say that anything can be changed here.
 	NeedNetworkWrite  = "network.write"
 	NeedDNSWrite      = "dns.write"
 	NeedFirewallWrite = "firewall.write"
@@ -148,11 +130,6 @@ func (c Capabilities) Feature(name, feature string) bool {
 
 // FeatureState separates "it does not have this part" from "it is not known
 // whether it has it".
-//
-// An agent from before the registry sends no features at all, and its
-// registry is reconstructed from logical fields. Treating silence as a
-// refusal would take away from such a host an operation that works on it - an
-// unknown feature is not an absent feature.
 func (c Capabilities) FeatureState(name, feature string) (value bool, known bool) {
 	for _, capability := range c {
 		if capability.Name != name {
@@ -169,10 +146,7 @@ func (c Capabilities) FeatureState(name, feature string) (value bool, known bool
 	return false, true
 }
 
-// Satisfies checks an operation's requirement. Requirements are logical names
-// rather than adapter names: an upgrade operation is not to know whether the
-// host uses apt or dnf, and repairing the package database is to know that it
-// works for apt only.
+// Satisfies checks an operation's requirement.
 func (c Capabilities) Satisfies(requirement string) bool {
 	switch requirement {
 	case "":
@@ -185,9 +159,8 @@ func (c Capabilities) Satisfies(requirement string) bool {
 			if value {
 				return true
 			}
-			// The adapter is present but silent about its features: the host
-			// decides at execution time, as it did before the registry was
-			// introduced.
+			// The adapter is present but silent about its features: the host decides at
+			// execution time, as it did before the registry was introduced.
 			if !known && c.Available(adapter) {
 				return true
 			}
@@ -214,16 +187,14 @@ func (c Capabilities) Satisfies(requirement string) bool {
 		}
 		return !known && c.Available(CapDNS)
 	case NeedNetworkWrite:
-		// Writing the network requires a mechanism that persists the change
-		// and allows rolling it back. A host without one is to learn about it
-		// when the operation is ordered, not after the task is delivered.
+		// Writing the network requires a mechanism that persists the change and
+		// allows rolling it back.
 		value, known := c.FeatureState(CapNetwork, "write")
 		if value {
 			return true
 		}
-		// The adapter is present but silent about its features: the host
-		// decides at execution time, as it did before the registry was
-		// introduced.
+		// The adapter is present but silent about its features: the host decides at
+		// execution time, as it did before the registry was introduced.
 		return !known && c.Available(CapNetwork)
 	default:
 		return c.Available(requirement)
@@ -232,28 +203,19 @@ func (c Capabilities) Satisfies(requirement string) bool {
 
 // DetectCapabilities checks the presence of the adapters without starting any
 // process.
-//
-// An unavailable adapter carries a reason. Without it the interface would have
-// to guess why a tab is missing - and it would guess in the code of the
-// browser, so badly: the cause is a fact about the host and the host is to give
-// it.
 func DetectCapabilities() Capabilities {
 	systemd := isDir("/run/systemd/system")
 	apt := isExecutable("/usr/bin/apt-get")
 	dnf := isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5")
 	pacman := isExecutable("/usr/bin/pacman")
 	// Holding a package version on dnf is the versionlock plugin, and a host
-	// without it has the module without the hold. The plugin is recognised
-	// by its files, because detection must start no process.
+	// without it has the module without the hold.
 	versionlock := dnf && packages.VersionlockInstalled()
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
 	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
-	// The module reads cron and the systemd timers; either makes it worth
-	// having. A managed entry goes to /etc/cron.d or, where the order asks
-	// for it, to a pair of units under /etc/systemd/system: a host without
-	// the mechanism it was ordered with refuses the write, with the reason,
-	// while both still read.
+	// The module reads cron and the systemd timers; either makes it worth having.
+	// A managed entry goes to /etc/cron.
 	cronD := isDir("/etc/cron.d")
 	schedules := cronD || systemd
 	networkRead := exists("/usr/sbin/ip") || exists("/sbin/ip") || exists("/usr/bin/ip")
@@ -272,8 +234,7 @@ func DetectCapabilities() Capabilities {
 	fsck := exists("/usr/sbin/fsck")
 	firewalld := exists("/usr/bin/firewall-cmd") && isDir("/run/firewalld")
 	// ufw holds the rules only when enabled; its configuration file says so
-	// without starting a process. The helper asks "ufw status" for the
-	// running answer.
+	// without starting a process.
 	ufw := exists(firewall.UFWPath)
 	ufwActive := ufw && ufwEnabled()
 	timedatectl := exists(hosttime.TimedatectlPath)
@@ -285,9 +246,7 @@ func DetectCapabilities() Capabilities {
 	borg := exists("/usr/bin/borg") || exists("/usr/local/bin/borg")
 	runbooks, _ := backup.ListRunbooks()
 	chrony := exists(hosttime.ChronycPath)
-	// Timesyncd is sometimes installed and masked when the host has chrony. The
-	// presence of the unit says only that there is something to write with -
-	// which daemon really keeps the clock is decided by the state read.
+	// Timesyncd is sometimes installed and masked when the host has chrony.
 	timesyncd := exists("/usr/lib/systemd/systemd-timesyncd") ||
 		exists("/lib/systemd/systemd-timesyncd")
 
@@ -322,9 +281,7 @@ func DetectCapabilities() Capabilities {
 			Version:   adapterVersion,
 			Available: apt,
 			Reason:    reason(apt, "apt-get is not installed on this host"),
-			// Repairing the package database means answering the questions of
-			// debconf. Without its tools the operation would only break on the
-			// host, after the approval.
+			// Repairing the package database means answering the questions of debconf.
 			Features: map[string]bool{
 				"repair": apt &&
 					isExecutable("/usr/bin/debconf-show") &&
@@ -342,9 +299,9 @@ func DetectCapabilities() Capabilities {
 			Name:      CapPacman,
 			Version:   adapterVersion,
 			Available: pacman,
-			// The plan reads a database that is already on the host, so it
-			// works wherever pacman is; checkupdates is a faster path to the
-			// same answer and not a requirement.
+			// The plan reads a database that is already on the host, so it works
+			// wherever pacman is; checkupdates is a faster path to the same answer and
+			// not a requirement.
 			Reason:   packages.PacmanReason(pacman),
 			Features: packages.PacmanFeatures(pacman),
 		},
@@ -425,9 +382,7 @@ func DetectCapabilities() Capabilities {
 		{
 			Name:    CapMonitoring,
 			Version: adapterVersion,
-			// A probe needs nothing beyond the network, so the module works
-			// everywhere. The metrics and the alerts are read by the panel,
-			// not by the agent - the host gets not a single extra collector.
+			// A probe needs nothing beyond the network, so the module works everywhere.
 			Available: true,
 			Features:  map[string]bool{"probe.http": true, "probe.tcp": true},
 		},
@@ -515,11 +470,8 @@ func DetectCapabilities() Capabilities {
 			Name:      CapSchedules,
 			Version:   adapterVersion,
 			Available: schedules,
-			// managed_timers says this agent writes a managed entry as a pair
-			// of systemd units, not merely that the host has timers to read.
-			// An agent from before the feature is silent about it and would
-			// write a cron entry under the name of a timer, so the panel
-			// refuses such an order before dispatch.
+			// managed_timers says this agent writes a managed entry as a pair of
+			// systemd units, not merely that the host has timers to read.
 			Features: map[string]bool{"cron": cronD, "timers": systemd, "managed_timers": systemd},
 			Reason:   reason(schedules, "this host has neither /etc/cron.d nor systemd timers"),
 		},
@@ -527,11 +479,7 @@ func DetectCapabilities() Capabilities {
 			Name:      CapJournald,
 			Version:   adapterVersion,
 			Available: journald,
-			// boot_filter says this agent applies a boot identifier to a
-			// journal read. The panel refuses a read by boot for a host
-			// without it, because an agent from before the feature would
-			// ignore the field and answer with every boot under the name
-			// of one.
+			// boot_filter says this agent applies a boot identifier to a journal read.
 			Features: map[string]bool{"boot_filter": journald && isExecutable(journalctlPath)},
 			Reason:   reason(journald, "this host has no journald socket"),
 		},
@@ -547,8 +495,6 @@ func DetectCapabilities() Capabilities {
 			Version:   adapterVersion,
 			Available: docker,
 			// The adapter reads the engine state and runs operations on containers.
-			// Compose projects are a separate feature: an engine is sometimes
-			// without the plugin.
 			Features: map[string]bool{"read": docker, "write": docker, "compose": compose},
 			Reason:   reason(docker, "this host has no Docker socket"),
 		},
@@ -563,9 +509,7 @@ var composePluginPaths = []string{
 	"/root/.docker/cli-plugins/docker-compose",
 }
 
-// composePlugin returns the path of the plugin or an empty string. The presence
-// of the file is checked and the tool is not started: capability detection must
-// not start processes.
+// composePlugin returns the path of the plugin or an empty string.
 func composePlugin() string {
 	for _, path := range composePluginPaths {
 		if isExecutable(path) {
@@ -601,9 +545,7 @@ func networkAdapterReason(read bool, adapter string) string {
 	return network.ReadOnlyReason(adapter)
 }
 
-// firewallAdapterReason explains what the firewall module is missing. An
-// installed but inactive ufw holds nothing, so on a host without nft the
-// panel only reads - and says why.
+// firewallAdapterReason explains what the firewall module is missing.
 func firewallAdapterReason(nft, firewalld, ufw, ufwActive bool) string {
 	if nft || firewalld || ufwActive {
 		return ""

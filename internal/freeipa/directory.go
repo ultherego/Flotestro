@@ -8,9 +8,7 @@ import (
 	"time"
 )
 
-// User is a POSIX account in the directory. The panel stores neither
-// passwords nor a copy of the directory; this data is read on request and
-// cached briefly.
+// User is a POSIX account in the directory.
 type User struct {
 	UID         string   `json:"uid"`
 	FirstName   string   `json:"first_name,omitempty"`
@@ -31,15 +29,13 @@ type User struct {
 	PrincipalExpiresAt *time.Time `json:"principal_expires_at,omitempty"`
 	PasswordExpiresAt  *time.Time `json:"password_expires_at,omitempty"`
 	LastPasswordChange *time.Time `json:"last_password_change,omitempty"`
-	// Preserved marks an account removed with its entry kept: the UID and
-	// the history stay, the account cannot sign in. Such accounts are
-	// listed apart from the live ones.
+	// Preserved marks an account removed with its entry kept: the UID and the
+	// history stay, the account cannot sign in.
 	Preserved bool `json:"preserved,omitempty"`
 }
 
-// userFromRecord reads an account as the directory's find and show
-// commands describe it. The two commands share the shape, and one reader
-// keeps a field added for one of them from going missing in the other.
+// userFromRecord reads an account as the directory's find and show commands
+// describe it.
 func userFromRecord(record map[string]any, preserved bool) User {
 	return User{
 		UID:                first(record, "uid"),
@@ -62,9 +58,7 @@ func userFromRecord(record map[string]any, preserved bool) User {
 }
 
 // generalizedTime parses the LDAP time the directory returns, such as
-// 20261231235959Z. Anything else - including an empty value - is nil rather
-// than the zero time, because a missing expiration means "never", and the
-// zero time would read as the year one.
+// 20261231235959Z.
 func generalizedTime(value string) *time.Time {
 	if value == "" {
 		return nil
@@ -104,9 +98,8 @@ type Host struct {
 	ManagedBy []string `json:"managed_by,omitempty"`
 }
 
-// Service is a Kerberos service principal of a host, such as
-// HTTP/web1.example.test. The panel shows whether it has a keytab and who
-// manages it; the keytab itself never leaves the directory.
+// Service is a Kerberos service principal of a host, such as HTTP/web1.
+// example.
 type Service struct {
 	Principal string `json:"principal"`
 	// Service is the part before the slash, Host the part after it.
@@ -198,10 +191,7 @@ func (c *Client) Users(ctx context.Context) ([]User, error) {
 	})
 }
 
-// PreservedUsers returns the accounts removed with their entry kept. The
-// directory lists them only when asked, and apart from the live accounts:
-// a preserved account cannot sign in, belongs to no group and must not be
-// counted among the users a rule reaches.
+// PreservedUsers returns the accounts removed with their entry kept.
 func (c *Client) PreservedUsers(ctx context.Context) ([]User, error) {
 	return cached(ctx, c, "users-preserved", func() ([]User, error) {
 		records, err := c.findWith(ctx, "user_find", map[string]any{"preserved": true})
@@ -242,9 +232,8 @@ func (c *Client) Services(ctx context.Context) ([]Service, error) {
 					item.Aliases = append(item.Aliases, alias)
 				}
 			}
-			// has_keytab is computed by the directory in the friendly view;
-			// a krbLastPwdChange without it says the same thing. Neither
-			// present leaves the question open.
+			// has_keytab is computed by the directory in the friendly view; a
+			// krbLastPwdChange without it says the same thing.
 			if lookup(record, "has_keytab") != nil {
 				flag := boolean(record, "has_keytab")
 				item.HasKeytab = &flag
@@ -294,19 +283,16 @@ func (c *Client) Groups(ctx context.Context) ([]Group, error) {
 func (c *Client) Hosts(ctx context.Context) ([]Host, error) {
 	return cached(ctx, c, "hosts", func() ([]Host, error) {
 		// Raw mode is necessary here: krbLastPwdChange, the only indicator of
-		// enrollment available without a query per host, is filtered out of
-		// the friendly view.
+		// enrollment available without a query per host, is filtered out of the
+		// friendly view.
 		records, err := c.findRaw(ctx, "host_find")
 		if err != nil {
 			return nil, err
 		}
 		hosts := make([]Host, 0, len(records))
 		for _, record := range records {
-			// has_keytab is an attribute computed solely by host_show, so
-			// using it would require a query per host - exactly what the
-			// document forbids. krbLastPwdChange appears at the moment the
-			// host key is set, so it tells enrolled hosts from mere entries
-			// in the directory.
+			// has_keytab is an attribute computed solely by host_show, so using it
+			// would require a query per host - exactly what the document forbids.
 			enrolledAt := first(record, "krblastpwdchange")
 			hosts = append(hosts, Host{
 				FQDN:        first(record, "fqdn"),
@@ -351,9 +337,7 @@ func (c *Client) SudoRules(ctx context.Context) ([]SudoRule, error) {
 	})
 }
 
-// sudoRisk marks the rules of raised risk. NOPASSWD and ALL are named in the
-// document as critical: the first removes the confirmation of identity, the
-// second grants full root privileges.
+// sudoRisk marks the rules of raised risk.
 func sudoRisk(record map[string]any, rule SudoRule) (bool, []string) {
 	var reasons []string
 	for _, option := range rule.Options {
@@ -408,18 +392,9 @@ func (c *Client) findOptions(ctx context.Context, method string, raw bool, extra
 	return records, nil
 }
 
-// findProbe asks a bounded question - "is there at least one of these" -
-// and reads the directory's truncation flag as the expected answer rather
-// than as a failure.
-//
-// The preflight is the reason this exists. A search with a size limit of
-// one comes back marked truncated the moment the directory holds a second
-// matching entry, and findOptions refuses such an answer because a
-// truncated list taken for a complete one is the worse mistake. Here the
-// limit is the question, so the flag says nothing was hidden that the
-// caller wanted: the caller asked for one record and got one. Reading it as
-// an error is what turned a directory with preserved accounts in it into a
-// directory that appeared to have no container for them.
+// findProbe asks a bounded question - "is there at least one of these" - and
+// reads the directory's truncation flag as the expected answer rather than as
+// a failure.
 func (c *Client) findProbe(ctx context.Context, method string, extra map[string]any) ([]map[string]any, error) {
 	records, _, err := c.search(ctx, method, false, extra)
 	return records, err
@@ -500,9 +475,6 @@ func first(record map[string]any, key string) string {
 }
 
 // lookup finds a value regardless of the case of the field name.
-// The directory returns "krbLastPwdChange" one time and "krblastpwdchange"
-// another, depending on the response mode; pinning to one spelling ends in
-// silently missing data.
 func lookup(record map[string]any, key string) any {
 	if value, ok := record[key]; ok {
 		return value

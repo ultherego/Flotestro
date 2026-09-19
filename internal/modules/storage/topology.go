@@ -16,19 +16,14 @@ const (
 	PVSPath   = "/usr/sbin/pvs"
 )
 
-// The fields the LVM tools are asked for. They are named here rather than
-// at the call site, because the parser and the query have to agree: a
-// field missing from the query comes back as an empty string, and an empty
-// string read as a size is a zero nobody measured.
+// The fields the LVM tools are asked for.
 const (
 	VGSFields = "vg_name,vg_uuid,vg_size,vg_free,vg_extent_size,pv_count,lv_count"
 	LVSFields = "lv_name,vg_name,lv_size,lv_path,lv_uuid,lv_attr,origin,data_percent"
 	PVSFields = "pv_name,vg_name,pv_uuid,pv_size,pv_free"
 )
 
-// LsblkColumns lists the fields lsblk is asked for. A full "-O" returns
-// dozens of columns per device and most of them are driver details the
-// panel never shows.
+// LsblkColumns lists the fields lsblk is asked for.
 var LsblkColumns = []string{
 	"NAME", "KNAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
 	"MOUNTPOINTS", "MODEL", "SERIAL", "WWN", "ROTA", "RO", "PKNAME",
@@ -36,8 +31,8 @@ var LsblkColumns = []string{
 }
 
 // IdentityColumns is the list the helper asks for: the same identity and
-// topology as the agent's, without the filesystem usage that changes
-// between two reads and has no place in a plan fingerprint.
+// topology as the agent's, without the filesystem usage that changes between
+// two reads and has no place in a plan fingerprint.
 var IdentityColumns = []string{
 	"NAME", "KNAME", "PATH", "TYPE", "SIZE", "FSTYPE", "LABEL", "UUID", "PARTUUID",
 	"MOUNTPOINTS", "MODEL", "SERIAL", "WWN", "ROTA", "RO", "PKNAME",
@@ -73,11 +68,6 @@ type rawBlock struct {
 }
 
 // ParseDevices reads the output of "lsblk -J -b".
-//
-// The tree is flattened into a list with a reference to the parent: the
-// operator looks at the topology disk -> partition -> volume, but the panel
-// must be able to point at every device separately, also in an operation
-// plan.
 func ParseDevices(output string) ([]Device, error) {
 	var result struct {
 		Blockdevices []rawBlock `json:"blockdevices"`
@@ -97,8 +87,8 @@ func ParseDevices(output string) ([]Device, error) {
 		flatten(block, "")
 	}
 	// lsblk repeats a device that sits on several parents - a volume group
-	// spanning two disks lists its volumes under each - and a plan must
-	// point at every device exactly once.
+	// spanning two disks lists its volumes under each - and a plan must point at
+	// every device exactly once.
 	devices = dedupe(devices)
 	CompleteTopology(devices)
 	return devices, nil
@@ -237,10 +227,8 @@ func ParseVolumes(output string) ([]LogicalVolume, error) {
 				Attributes: entry.Attributes,
 				Origin:     entry.Origin,
 			}
-			// LVM prints the fill of a snapshot's copy-on-write space as a
-			// number with a decimal point, and an empty string on a volume
-			// that has none. An empty string is not a zero here: an ordinary
-			// volume has no such space at all.
+			// LVM prints the fill of a snapshot's copy-on-write space as a number with
+			// a decimal point, and an empty string on a volume that has none.
 			if text := strings.TrimSpace(entry.DataPercent); text != "" {
 				if value, err := strconv.ParseFloat(text, 64); err == nil {
 					volume.DataPercent = &value
@@ -252,12 +240,8 @@ func ParseVolumes(output string) ([]LogicalVolume, error) {
 	return volumes, nil
 }
 
-// ParsePhysicalVolumes reads the output of "pvs --reportformat json
-// --units b".
-//
-// The physical volumes are what a group is extended with, and the read is
-// how the panel confirms afterwards that the new disk really joined the
-// group rather than that the tool exited zero.
+// ParsePhysicalVolumes reads the output of "pvs --reportformat json --units
+// b".
 func ParsePhysicalVolumes(output string) ([]PhysicalVolume, error) {
 	var report lvmReport
 	if err := json.Unmarshal([]byte(output), &report); err != nil {

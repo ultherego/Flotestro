@@ -1,10 +1,4 @@
-// Package storage describes the disks, filesystems and mount points of a
-// host.
-//
-// The module reads the kernel state and the volume manager, not /etc/fstab
-// itself: the file says what is to be mounted after a reboot, not what is
-// mounted now. The difference between the two is usually the reason
-// somebody opens this tab at all.
+// Package storage describes the disks, filesystems and mount points of a host.
 package storage
 
 import (
@@ -22,16 +16,10 @@ const (
 )
 
 // Device is one block device.
-//
-// Identification goes by WWN, serial and UUID, not by /dev/sdX: the device
-// name depends on the detection order and after a reboot can point at an
-// entirely different disk. In a destructive operation that is the
-// difference between wiping the right disk and wiping somebody else's data.
 type Device struct {
 	Name string `json:"name"`
-	// KernelName is the name under /sys/class/block and the target of the
-	// by-id links: a logical volume is "vg-data" to lsblk and "dm-3" to the
-	// kernel.
+	// KernelName is the name under /sys/class/block and the target of the by-id
+	// links: a logical volume is "vg-data" to lsblk and "dm-3" to the kernel.
 	KernelName string `json:"kernel_name,omitempty"`
 	Path       string `json:"path"`
 	Type       string `json:"type"`
@@ -45,11 +33,9 @@ type Device struct {
 	Model     string `json:"model,omitempty"`
 	Serial    string `json:"serial,omitempty"`
 	WWN       string `json:"wwn,omitempty"`
-	// ByID is the path under /dev/disk/by-id that names this device by
-	// what it is - its WWN, its serial, the UUID of the volume it carries -
-	// rather than by where the kernel found it. This is the identity a
-	// destructive operation binds to; a device without one has no stable
-	// identity and is not formatted or wiped by the panel.
+	// ByID is the path under /dev/disk/by-id that names this device by what it is
+	// - its WWN, its serial, the UUID of the volume it carries - rather than by
+	// where the kernel found it.
 	ByID string `json:"by_id,omitempty"`
 	// IdentityUnavailableReason says why the device has no by-id link. A
 	// missing link is a fact about the device, not an empty string.
@@ -60,16 +46,12 @@ type Device struct {
 	// Children lists the devices directly under this one: the partitions of
 	// a disk, the volumes on a physical volume.
 	Children []string `json:"children,omitempty"`
-	// Holders lists the kernel names of the devices stacked on top of this
-	// one, from /sys/class/block/<name>/holders: a device-mapper target, a
-	// software RAID array, an encrypted volume. A device with a holder is in
-	// use even when nothing under it is mounted.
+	// Holders lists the kernel names of the devices stacked on top of this one,
+	// from /sys/class/block/<name>/holders: a device-mapper target, a software
+	// RAID array, an encrypted volume.
 	Holders []string `json:"holders,omitempty"`
 	// RootDevice says the device or a device under it carries the root
-	// filesystem. HasMountedChildren says something under it is mounted or
-	// used as swap; HasOpenHolders says the device or something under it is a
-	// member of a volume group, an array or an encrypted container. Each of
-	// the three stops a destructive operation on its own.
+	// filesystem.
 	RootDevice         bool `json:"root_device,omitempty"`
 	HasMountedChildren bool `json:"has_mounted_children,omitempty"`
 	HasOpenHolders     bool `json:"has_open_holders,omitempty"`
@@ -94,14 +76,11 @@ type Mount struct {
 	FSType string `json:"fs_type"`
 	// Options are the options the filesystem is mounted with now.
 	Options string `json:"options,omitempty"`
-	// FstabOptions are the options written in /etc/fstab. A difference
-	// between them and Options means a mount that behaves differently after
-	// a reboot.
+	// FstabOptions are the options written in /etc/fstab. A difference between
+	// them and Options means a mount that behaves differently after a reboot.
 	FstabOptions string `json:"fstab_options,omitempty"`
-	// InFstab and Mounted separate two questions: whether the entry exists
-	// and whether the filesystem is mounted. Four combinations mean four
-	// different things, and the operator looks at this tab precisely because
-	// of them.
+	// InFstab and Mounted separate two questions: whether the entry exists and
+	// whether the filesystem is mounted.
 	InFstab bool `json:"in_fstab"`
 	Mounted bool `json:"mounted"`
 	// Managed marks an entry created by the panel.
@@ -117,15 +96,13 @@ type Mount struct {
 // VolumeGroup is an LVM volume group.
 type VolumeGroup struct {
 	Name string `json:"name"`
-	// UUID is the identity of the group. A group can be renamed and a name
-	// can be given to another group tomorrow, so an operation that creates
-	// or extends inside a group binds to the UUID, not to the name.
+	// UUID is the identity of the group.
 	UUID      string `json:"uuid,omitempty"`
 	SizeBytes uint64 `json:"size_bytes"`
 	FreeBytes uint64 `json:"free_bytes"`
-	// ExtentSizeBytes is the grain the group allocates in: a volume is
-	// always a whole number of extents, so a request that is not one is
-	// rounded up by LVM and the plan says so beforehand.
+	// ExtentSizeBytes is the grain the group allocates in: a volume is always a
+	// whole number of extents, so a request that is not one is rounded up by LVM
+	// and the plan says so beforehand.
 	ExtentSizeBytes uint64 `json:"extent_size_bytes,omitempty"`
 	PVCount         int    `json:"pv_count"`
 	LVCount         int    `json:"lv_count"`
@@ -140,17 +117,13 @@ type LogicalVolume struct {
 	// volume can carry after a rename.
 	UUID      string `json:"uuid,omitempty"`
 	SizeBytes uint64 `json:"size_bytes"`
-	// Attributes is lv_attr as LVM prints it. Its first letter says what
-	// the volume is: "s" a snapshot, "o" an origin, "-" an ordinary
-	// volume. The panel keeps the original, because LVM adds letters.
+	// Attributes is lv_attr as LVM prints it. Its first letter says what the
+	// volume is: "s" a snapshot, "o" an origin, "-" an ordinary volume.
 	Attributes string `json:"attributes,omitempty"`
 	// Origin names the volume this one is a snapshot of; empty on an
 	// ordinary volume.
 	Origin string `json:"origin,omitempty"`
-	// DataPercent is how full a snapshot's copy-on-write space is. A
-	// snapshot that fills up is dropped by the kernel, so this is the
-	// number that decides whether it is still usable. No value means the
-	// volume has none - not a snapshot at zero.
+	// DataPercent is how full a snapshot's copy-on-write space is.
 	DataPercent *float64 `json:"data_percent,omitempty"`
 }
 
@@ -178,32 +151,22 @@ type PhysicalVolume struct {
 type Snapshot struct {
 	Devices []Device `json:"devices,omitempty"`
 	Mounts  []Mount  `json:"mounts,omitempty"`
-	// FstabRevision is the digest of /etc/fstab as it was when the picture
-	// was taken. A mount plan carries it, so an fstab edited between the
-	// plan and the change makes the plan stale instead of landing on a file
-	// nobody approved.
+	// FstabRevision is the digest of /etc/fstab as it was when the picture was
+	// taken.
 	FstabRevision string `json:"fstab_revision,omitempty"`
-	// Groups and Volumes are empty on a host without LVM. The
-	// unavailability reason is carried by LVMUnavailableReason: no groups
-	// and no LVM are two different answers.
+	// Groups and Volumes are empty on a host without LVM.
 	Groups               []VolumeGroup    `json:"groups,omitempty"`
 	Volumes              []LogicalVolume  `json:"volumes,omitempty"`
 	PhysicalVolumes      []PhysicalVolume `json:"physical_volumes,omitempty"`
 	LVMUnavailableReason string           `json:"lvm_unavailable_reason,omitempty"`
-	// Arrays are the software RAID arrays of the host. An empty list with an
-	// empty reason means a host that has the md driver and no array
-	// assembled; RAIDUnavailableReason carries the other answer - no md
-	// driver, or a read that failed. The two are not the same thing and the
-	// panel shows them differently.
+	// Arrays are the software RAID arrays of the host.
 	Arrays                []RAIDArray `json:"arrays,omitempty"`
 	RAIDUnavailableReason string      `json:"raid_unavailable_reason,omitempty"`
 	ObservedAt            time.Time   `json:"observed_at"`
 	UnavailableReason     string      `json:"unavailable_reason,omitempty"`
 }
 
-// DegradedArrays lists the arrays that have lost a member or their
-// redundancy. It is what the panel judges the host's storage health on: a
-// degraded array is a fact the host reports and the panel acts on.
+// DegradedArrays lists the arrays that have lost a member or their redundancy.
 func (s Snapshot) DegradedArrays() []RAIDArray {
 	var degraded []RAIDArray
 	for _, array := range s.Arrays {
@@ -235,10 +198,7 @@ func (s Snapshot) VolumeAt(path string) *LogicalVolume {
 	return nil
 }
 
-// DeviceForVolume finds the block device the kernel has for a logical
-// volume. lvs prints /dev/<group>/<volume> and lsblk prints
-// /dev/mapper/<group>-<volume>: the same device under two names, and a
-// plan that compared the strings would miss it.
+// DeviceForVolume finds the block device the kernel has for a logical volume.
 func (s Snapshot) DeviceForVolume(volume LogicalVolume) *Device {
 	for i := range s.Devices {
 		if MatchesVolume(volume, s.Devices[i].Path) {

@@ -29,33 +29,14 @@ import (
 	"github.com/ultherego/flotestro/internal/systemd"
 )
 
-// The verification of a change: the host is read after the apply and
-// compared with what the payload or the plan promised, and only that read
-// turns the change into a success.
-//
-// An exit code of zero says a tool ran. It does not say that the unit is
-// active, that the file has the digest of the plan, that the package is at
-// the candidate version or that the mount is there - and a job that says
-// succeeded on the exit code alone tells the operator something nobody
-// observed. Every mutating operation therefore declares a verifier in the
-// contract (opspec.Verifier), and the executor runs it between the module's
-// result and the settlement. A verifier that finds another state settles
-// the job failed with applied_unverified: the change was made, the state
-// the operator asked for was not observed. Where the contract says so, the
-// host puts the previous state back first and says so in the reason.
-//
-// The verifiers read the host through the same readers the inventory and
-// the module tabs use; the readers are a value on the executor so that a
-// test can hand it a host of its own.
+// The verification of a change: the host is read after the apply and compared
+// with what the payload or the plan promised, and only that read turns the
+// change into a success.
 
-// verifyTimeout bounds one verification. A read of the host is short; a
-// verification that cannot read the host in this time reports that it
-// could not, rather than holding the result.
+// verifyTimeout bounds one verification.
 const verifyTimeout = 90 * time.Second
 
-// observation is what a verifier found on the host next to what it
-// expected. Neither side ever carries the content of a file or a secret:
-// a digest, a state word, a version.
+// observation is what a verifier found on the host next to what it expected.
 type observation struct {
 	expected string
 	observed string
@@ -81,10 +62,7 @@ func unreadable(expected, why string) observation {
 	return observation{expected: expected, observed: "unknown", reason: "the verifier could not read the host: " + why}
 }
 
-// hostReaders are the reads the verifiers observe the host through. The
-// executor fills them with the real readers; a test replaces the ones its
-// case needs. A nil reader means the host cannot be read that way and the
-// verifier says so.
+// hostReaders are the reads the verifiers observe the host through.
 type hostReaders struct {
 	unit         func(ctx context.Context, unit string) (systemd.UnitState, error)
 	schedules    func(ctx context.Context) (schedules.Snapshot, error)
@@ -114,9 +92,9 @@ type hostReaders struct {
 	directory    func(path string) (exists bool, entries int, err error)
 }
 
-// fileState is what the verifier reads of one file: whether it is there,
-// the digest of its content, and the content itself only while a rollback
-// baseline needs it. The content never reaches a result.
+// fileState is what the verifier reads of one file: whether it is there, the
+// digest of its content, and the content itself only while a rollback baseline
+// needs it.
 type fileState struct {
 	exists    bool
 	sha256    string
@@ -142,9 +120,8 @@ func (e *TaskExecutor) readers() *hostReaders {
 	return e.verifyReaders
 }
 
-// defaultReaders assembles the real readers: the inventory collectors for
-// what the agent reads on its own, the helper probes for what only root
-// sees.
+// defaultReaders assembles the real readers: the inventory collectors for what
+// the agent reads on its own, the helper probes for what only root sees.
 func (e *TaskExecutor) defaultReaders() *hostReaders {
 	return &hostReaders{
 		unit:      systemd.Show,
@@ -176,9 +153,9 @@ func (e *TaskExecutor) defaultReaders() *hostReaders {
 		certificates: e.ProbeCertificates,
 		account:      e.readSingleAccount,
 		docker: func(ctx context.Context) (docker.Snapshot, error) {
-			// The full read, not the summary: a verifier asks about one
-			// container, one image, one project - and the summary carries
-			// none of the lists it would have to look in.
+			// The full read, not the summary: a verifier asks about one container, one
+			// image, one project - and the summary carries none of the lists it would
+			// have to look in.
 			return e.ProbeDocker(ctx, true)
 		},
 		identity: ReadIdentityState,
@@ -195,8 +172,8 @@ func (e *TaskExecutor) defaultReaders() *hostReaders {
 }
 
 // readFileState reads one file through the helper: the digest and the
-// attributes always, the content with them - a rollback baseline needs it
-// and nothing else keeps it.
+// attributes always, the content with them - a rollback baseline needs it and
+// nothing else keeps it.
 func (e *TaskExecutor) readFileState(ctx context.Context, path string) (fileState, error) {
 	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
 		TimeoutSeconds: 60,
@@ -218,9 +195,9 @@ func (e *TaskExecutor) readFileState(ctx context.Context, path string) (fileStat
 	}
 	state := fileState{exists: true, sha256: result.GetSha256(), content: result.GetContent(),
 		truncated: result.GetTruncated()}
-	// The attributes come from the snapshot the helper sends with every
-	// file answer; a file outside the managed set has none there and the
-	// verifier compares only the digest.
+	// The attributes come from the snapshot the helper sends with every file
+	// answer; a file outside the managed set has none there and the verifier
+	// compares only the digest.
 	var snapshot files.Snapshot
 	if data := result.GetSnapshot(); len(data) > 0 && json.Unmarshal(data, &snapshot) == nil {
 		for _, file := range snapshot.Files {
@@ -232,9 +209,9 @@ func (e *TaskExecutor) readFileState(ctx context.Context, path string) (fileStat
 	return state, nil
 }
 
-// readBackupRepository lists the snapshots of the repository the order
-// names, through the helper's plan read, with the credentials fetched the
-// way the run fetched them: the value lives for the read and no longer.
+// readBackupRepository lists the snapshots of the repository the order names,
+// through the helper's plan read, with the credentials fetched the way the run
+// fetched them: the value lives for the read and no longer.
 func (e *TaskExecutor) readBackupRepository(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.BackupPayload) (backupRepositoryState, error) {
 	request := &helperv1.BackupRequest{
@@ -289,8 +266,7 @@ func (e *TaskExecutor) readBackupRepository(ctx context.Context, task *agentv1.T
 }
 
 // readSysctl reads one key from /proc/sys. The path form of the key is the
-// dotted form with the dots replaced; a key with a slash in a name (the
-// net.ipv4.conf.eth0/1 case) is not one the panel writes.
+// dotted form with the dots replaced; a key with a slash in a name (the net.
 func readSysctl(key string) (string, error) {
 	content, err := os.ReadFile("/proc/sys/" + strings.ReplaceAll(key, ".", "/"))
 	if err != nil {
@@ -327,15 +303,12 @@ func readDirectory(path string) (bool, int, error) {
 	return true, len(entries), nil
 }
 
-// baseline is what the host looked like right before a change whose
-// contract lets the host put it back, or whose verifier compares before
-// with after. It is read after the claims are held, so it is the state the
-// change lands on; a baseline that could not be read leaves the rollback
-// out and the reason says so.
+// baseline is what the host looked like right before a change whose contract
+// lets the host put it back, or whose verifier compares before with after.
 type baseline struct {
-	// file is the previous state of a managed file, content included:
-	// the rollback of an unverified write is the write of this content
-	// back, or the removal of a file that was not there.
+	// file is the previous state of a managed file, content included: the
+	// rollback of an unverified write is the write of this content back, or the
+	// removal of a file that was not there.
 	file *fileState
 	// sysctl holds the previous values of the keys of the order.
 	sysctl map[string]string
@@ -348,18 +321,13 @@ type baseline struct {
 	// volumeSizes are the sizes of the logical volumes and the filesystems
 	// by path before an extension.
 	volumeSizes map[string]uint64
-	// snapshots are the identifiers the backup repository listed before a
-	// run. An empty map is a repository with no copies in it - including
-	// one that did not exist yet - and nil is a repository that could not
-	// be read, which is a different answer; snapshotsReason says why.
+	// snapshots are the identifiers the backup repository listed before a run.
 	snapshots       map[string]bool
 	snapshotsReason string
 }
 
-// errRepositoryAbsent means the host answered that the repository is not
-// there yet. It travels as an error because the read did refuse, and it is
-// typed because a repository nobody has created holds no copies, which a
-// verifier can work with.
+// errRepositoryAbsent means the host answered that the repository is not there
+// yet.
 var errRepositoryAbsent = errors.New("the repository does not exist yet")
 
 type certificateBefore struct {
@@ -367,10 +335,8 @@ type certificateBefore struct {
 	notAfter    time.Time
 }
 
-// observeBaseline reads the part of the host a verifier compares against
-// or a rollback restores. Only the operations that need one read anything;
-// the read is bounded and its failure is a fact for the reason, not a
-// refusal of the change.
+// observeBaseline reads the part of the host a verifier compares against or a
+// rollback restores.
 func (e *TaskExecutor) observeBaseline(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload opspec.Payload) *baseline {
 	if !action.Mutating() || action.Verifier() == opspec.VerifierNone {
@@ -451,10 +417,8 @@ func (e *TaskExecutor) observeBaseline(ctx context.Context, task *agentv1.TaskEn
 				before.snapshots[id] = true
 			}
 		case errors.Is(err, errRepositoryAbsent):
-			// The first copy into a fresh repository: there was nothing
-			// there, so anything the run leaves behind is what it made.
-			// Without this the first backup of every host could be made and
-			// never confirmed.
+			// The first copy into a fresh repository: there was nothing there, so
+			// anything the run leaves behind is what it made.
 			before.snapshots = map[string]bool{}
 		default:
 			// The reason travels, so the verdict says why the host could
@@ -465,15 +429,8 @@ func (e *TaskExecutor) observeBaseline(ctx context.Context, task *agentv1.TaskEn
 	return before
 }
 
-// verifyOutcome runs the verifier of the operation on a result that says
-// the change was made, and settles the result by what the host shows.
-//
-// A refusal, a failure and a read pass through untouched: there is no
-// change to confirm. A mutation with a result that already carries a
-// verification - a module that settles itself, a power-off nobody can
-// observe - keeps it. A verifier the panel runs on the host's return
-// (reboot, agent version) leaves nothing here: the module withholds the
-// result and the panel settles the job on the next Hello.
+// verifyOutcome runs the verifier of the operation on a result that says the
+// change was made, and settles the result by what the host shows.
 func (e *TaskExecutor) verifyOutcome(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload opspec.Payload, before *baseline,
 	result *agentv1.TaskResult) *agentv1.TaskResult {
@@ -530,9 +487,7 @@ type verifyInput struct {
 	before  *baseline
 }
 
-// observe runs the verifier named by the contract. A verifier the registry
-// names and this agent does not carry is a state nobody read: the change
-// is not a success on that ground.
+// observe runs the verifier named by the contract.
 func (e *TaskExecutor) observe(ctx context.Context, verifier opspec.Verifier, in verifyInput) observation {
 	readers := e.readers()
 	switch verifier {
@@ -609,8 +564,7 @@ func (e *TaskExecutor) observe(ctx context.Context, verifier opspec.Verifier, in
 }
 
 // rollbackUnverified puts the state from before the change back where the
-// contract asks for it and the baseline was read. It returns the sentence
-// the reason ends with: what was put back, or why nothing was.
+// contract asks for it and the baseline was read.
 func (e *TaskExecutor) rollbackUnverified(ctx context.Context, task *agentv1.TaskEnvelope,
 	action opspec.ActionType, payload opspec.Payload, before *baseline, found observation) string {
 	if strings.HasPrefix(found.reason, "the verifier could not read the host") {
@@ -636,9 +590,9 @@ func (e *TaskExecutor) rollbackUnverified(ctx context.Context, task *agentv1.Tas
 	return "no rollback was made: the operation keeps no previous state to put back"
 }
 
-// rollbackFile writes the previous content of the file back, or removes a
-// file that was not there before, through the same helper operation the
-// write went through. The digests are what the sentence carries.
+// rollbackFile writes the previous content of the file back, or removes a file
+// that was not there before, through the same helper operation the write went
+// through.
 func (e *TaskExecutor) rollbackFile(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.FilePayload, previous fileState) string {
 	request := &helperv1.FileRequest{Operation: helperv1.FileRequest_OPERATION_REMOVE, Path: payload.Path}
@@ -646,9 +600,8 @@ func (e *TaskExecutor) rollbackFile(ctx context.Context, task *agentv1.TaskEnvel
 		request = &helperv1.FileRequest{
 			Operation: helperv1.FileRequest_OPERATION_ENSURE, Path: payload.Path,
 			Content: previous.content, Mode: previous.mode, Owner: previous.owner, Group: previous.group,
-			// The previous content went through no validator when it was
-			// written by whoever wrote it; putting it back is not the
-			// moment to start refusing it.
+			// The previous content went through no validator when it was written by
+			// whoever wrote it; putting it back is not the moment to start refusing it.
 			AllowMissingValidator: true,
 		}
 	}

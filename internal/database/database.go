@@ -20,12 +20,6 @@ import (
 )
 
 // Open creates the connection pool and waits for the database to answer.
-//
-// The shape of the pool comes from the installation rather than from a
-// constant: every replica takes its MaxConns out of the same max_connections
-// of the server, so the number belongs to whoever knows how many replicas
-// there are. A shape that contradicts itself stops the start here, before a
-// single connection is opened.
 func Open(ctx context.Context, dsn string, settings config.DatabasePool) (*pgxpool.Pool, error) {
 	if err := settings.Validate(); err != nil {
 		return nil, err
@@ -39,11 +33,7 @@ func Open(ctx context.Context, dsn string, settings config.DatabasePool) (*pgxpo
 	cfg.MaxConnLifetime = settings.MaxConnLifetime
 	cfg.MaxConnIdleTime = settings.MaxConnIdleTime
 	cfg.HealthCheckPeriod = settings.HealthCheckPeriod
-	// The DSN may carry connect_timeout of its own. The variable wins when
-	// the installation named it, the DSN stands when it did not, and a DSN
-	// that names neither gets the default - but whatever decides it has to
-	// stay under the window the start waits, so the wait cannot run out in
-	// the middle of the first attempt.
+	// The DSN may carry connect_timeout of its own.
 	switch {
 	case settings.ConnectTimeoutSet || cfg.ConnConfig.ConnectTimeout <= 0:
 		cfg.ConnConfig.ConnectTimeout = settings.ConnectTimeout
@@ -84,16 +74,14 @@ func waitForDatabase(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // renamedMigrations maps the former file names of migrations to the current
-// ones. The version is the file name, so a rename would otherwise make an
-// already migrated database run the migration a second time.
+// ones.
 var renamedMigrations = map[string]string{
 	"0044_budzety":      "0044_budgets",
 	"0045_kwalifikacja": "0045_qualification",
 }
 
-// EmbeddedVersions lists the migrations this binary carries, in the order
-// they are applied. It is what the schema of a database is compared with:
-// the binary expects exactly these, no fewer and no more.
+// EmbeddedVersions lists the migrations this binary carries, in the order they
+// are applied.
 func EmbeddedVersions() ([]string, error) {
 	entries, err := fs.Glob(db.Migrations, "migrations/*.sql")
 	if err != nil {
@@ -114,10 +102,9 @@ func versionOf(entry string) string {
 
 // MigrateOptions is the contract the migrator runs under.
 type MigrateOptions struct {
-	// Role is the role the migrator takes on after connecting, so that
-	// every object it creates belongs to the owner of the schema rather
-	// than to the login it happened to use. Empty leaves the login role in
-	// place, which is the quick start with a single DSN.
+	// Role is the role the migrator takes on after connecting, so that every
+	// object it creates belongs to the owner of the schema rather than to the
+	// login it happened to use.
 	Role string
 	// LockWait bounds the wait for another migrator. Zero means the
 	// default of the configuration.
@@ -127,24 +114,14 @@ type MigrateOptions struct {
 	Log *slog.Logger
 }
 
-// migrationLockID is the advisory lock every migrator of this product
-// takes: "FLOT". It is a session lock on one connection, so it serialises
-// migrations across replicas and is released even if the process is killed,
-// because the backend goes with it.
+// migrationLockID is the advisory lock every migrator of this product takes:
+// "FLOT".
 const migrationLockID = 0x464c4f54
 
-// migrationLockPoll is how often a waiting migrator asks again. It is a
-// variable so that the waiting itself can be exercised without a test that
-// takes as long as the wait.
+// migrationLockPoll is how often a waiting migrator asks again.
 var migrationLockPoll = 2 * time.Second
 
 // Migrate applies the missing migrations in one transaction per file.
-//
-// A second migrator waits rather than races: the lock is taken without
-// blocking, and a migrator that does not get it says so in the log and asks
-// again until the wait runs out. Waiting silently inside the server is how
-// a migration job looks hung; giving up at once is how two migrators end up
-// applying the same file.
 func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error {
 	log := opts.Log
 	if log == nil {
@@ -161,9 +138,9 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 	}
 	defer conn.Release()
 
-	// The role is taken on before the lock and before any DDL, so that the
-	// lock, the bookkeeping table and every object the migrations create
-	// belong to the same owner.
+	// The role is taken on before the lock and before any DDL, so that the lock,
+	// the bookkeeping table and every object the migrations create belong to the
+	// same owner.
 	if err := assumeRole(ctx, conn, opts.Role, log); err != nil {
 		return err
 	}
@@ -251,10 +228,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool, opts MigrateOptions) error
 }
 
 // migrationConn is what the role and the lock need: one connection, not a
-// pool. Both have to run on the very connection the migrations then use,
-// because SET ROLE and a session advisory lock live in a session. It is an
-// interface so that the waiting and the refusals can be exercised without a
-// database; *pgxpool.Conn is what it is in the product.
+// pool.
 type migrationConn interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -296,12 +270,6 @@ func takeMigrationLock(ctx context.Context, conn migrationConn, wait time.Durati
 }
 
 // assumeRole takes on the configured role for the rest of the session.
-//
-// A migrator that logs in as one role and creates objects as another is the
-// point of the separation: the login may be short-lived and the ownership
-// stays with the NOLOGIN owner of the schema. The refusals are what makes
-// the separation real - a login that is a superuser could set any role at
-// all, so the boundary the configuration draws would not exist.
 func assumeRole(ctx context.Context, conn migrationConn, role string, log *slog.Logger) error {
 	if role == "" {
 		return nil
@@ -337,9 +305,9 @@ func assumeRole(ctx context.Context, conn migrationConn, role string, log *slog.
 			config.EnvMigrationRole, role, current)
 	}
 	if canLogin {
-		// Not a refusal: the owner of the schema is meant to be NOLOGIN,
-		// but an installation migrating towards that layout still has the
-		// right owner even while the role can still log in.
+		// Not a refusal: the owner of the schema is meant to be NOLOGIN, but an
+		// installation migrating towards that layout still has the right owner even
+		// while the role can still log in.
 		log.Warn("the migration role can log in; the owner of the schema is meant to be a NOLOGIN role "+
 			"that only the migrator's login may take on", "role", role)
 	}
@@ -347,9 +315,7 @@ func assumeRole(ctx context.Context, conn migrationConn, role string, log *slog.
 	return nil
 }
 
-// validRoleName refuses anything that is not a plain role name. The role is
-// an identifier and cannot travel as a parameter, so it is quoted - and a
-// name that needs more than quoting is a name nobody meant to configure.
+// validRoleName refuses anything that is not a plain role name.
 func validRoleName(role string) error {
 	if len(role) > 63 {
 		return fmt.Errorf("%s is longer than the 63 characters a PostgreSQL role name may take",
@@ -368,8 +334,8 @@ func validRoleName(role string) error {
 }
 
 // quoteIdentifier renders a checked name as a quoted identifier, so that a
-// role whose name happens to be a keyword or holds capitals is read as it
-// was written.
+// role whose name happens to be a keyword or holds capitals is read as it was
+// written.
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
@@ -406,9 +372,7 @@ const (
 // expects.
 func (r SchemaReport) Current() bool { return len(r.Pending) == 0 && len(r.Ahead) == 0 }
 
-// Code names what is wrong, or is empty when nothing is. A database that is
-// both ahead and behind is reported as ahead: the newer version is the fact
-// that decides what may be done next, and downgrading a schema is never it.
+// Code names what is wrong, or is empty when nothing is.
 func (r SchemaReport) Code() string {
 	switch {
 	case len(r.Ahead) > 0:
@@ -441,20 +405,18 @@ func displayLevel(level string) string {
 	return level
 }
 
-// CheckSchema reads the schema of the database and changes nothing - not
-// even the bookkeeping table, which a check that created it would report as
-// a database it had just improved. A readiness gate and an upgrade runbook
-// both need an answer that leaves no trace.
+// CheckSchema reads the schema of the database and changes nothing - not even
+// the bookkeeping table, which a check that created it would report as a
+// database it had just improved.
 func CheckSchema(ctx context.Context, pool *pgxpool.Pool) (SchemaReport, error) {
 	embedded, err := EmbeddedVersions()
 	if err != nil {
 		return SchemaReport{}, err
 	}
 	var present bool
-	// Unqualified on purpose: the table lives wherever the search path of
-	// the connection puts it, which is the same place the migrator wrote
-	// it, and naming a schema here would report an installation that uses
-	// another one as an empty database.
+	// Unqualified on purpose: the table lives wherever the search path of the
+	// connection puts it, which is the same place the migrator wrote it, and
+	// naming a schema here would report an installation that uses another one as
 	if err := pool.QueryRow(ctx, "select to_regclass('schema_migrations') is not null").
 		Scan(&present); err != nil {
 		return SchemaReport{}, fmt.Errorf("reading the schema of the database: %w", err)
@@ -484,10 +446,9 @@ func CheckSchema(ctx context.Context, pool *pgxpool.Pool) (SchemaReport, error) 
 // compareSchema is the judgement itself, over two lists of versions. It is
 // separate from the reading so that it can be exercised without a database.
 func compareSchema(embedded, applied []string) SchemaReport {
-	// The rename of a migration file is a rename, not a new migration: a
-	// database recorded under the former name is translated here, the same
-	// way the migrator translates it, so a check never calls it ahead of a
-	// binary that carries exactly that migration under its current name.
+	// The rename of a migration file is a rename, not a new migration: a database
+	// recorded under the former name is translated here, the same way the
+	// migrator translates it, so a check never calls it ahead of a binary that
 	recorded := map[string]bool{}
 	for _, version := range applied {
 		if current, renamed := renamedMigrations[version]; renamed {

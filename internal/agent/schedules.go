@@ -100,13 +100,6 @@ func (e *TaskExecutor) applySchedule(ctx context.Context, task *agentv1.TaskEnve
 }
 
 // previewSchedule computes the coming runs of an expression on the host.
-//
-// The read needs no helper: the evaluator is the one the panel checks the
-// expression with, and the zone is the host's own - which is the point of
-// asking the host rather than computing the dates in the browser. The
-// answer travels in the typed preview field and, as JSON, on stdout, the
-// channel every result reaches the panel through unchanged. It is not a
-// snapshot: the state of the host's schedules did not change.
 func (e *TaskExecutor) previewSchedule(task *agentv1.TaskEnvelope,
 	payload *opspec.SchedulePayload) *agentv1.TaskResult {
 	if payload == nil {
@@ -114,26 +107,21 @@ func (e *TaskExecutor) previewSchedule(task *agentv1.TaskEnvelope,
 			"the schedule payload is missing")
 	}
 	preview := schedules.PreviewExpression(payload.Expression, time.Now(), schedules.HostTimezone())
-	// A timer is two files, and the operator is to read them before they
-	// are on the host: the preview carries the plan of what would be
-	// written, with the calendar expression the cron line becomes. The
-	// files are not read here - the agent may not read the unit directory,
-	// and this is what would be written, not what is there.
+	// A timer is two files, and the operator is to read them before they are on
+	// the host: the preview carries the plan of what would be written, with the
+	// calendar expression the cron line becomes.
 	if payload.Kind == schedules.KindTimer && preview.Error == "" {
 		preview.Kind = schedules.KindTimer
 		calendar, err := schedules.CalendarFromCron(payload.Expression)
 		if err != nil {
-			// An expression that has no calendar form is said plainly: the
-			// runs are still the runs of the cron expression, and the
-			// operator reads why the timer would not be written.
+			// An expression that has no calendar form is said plainly: the runs are
+			// still the runs of the cron expression, and the operator reads why the
+			// timer would not be written.
 			preview.Error = err.Error()
 		} else {
 			preview.Calendar = calendar
 		}
-		// The units are shown once the order is complete enough to render
-		// them. A form still being filled in has no account and no name
-		// yet, and the calendar above is already the answer to what was
-		// asked.
+		// The units are shown once the order is complete enough to render them.
 		if preview.Error == "" && payload.ID != "" && payload.User != "" {
 			plan, err := schedules.RenderTimer(schedules.SystemdUnitDir, schedules.Schedule{
 				ID:         payload.ID,

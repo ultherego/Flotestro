@@ -27,26 +27,19 @@ var (
 	// ErrRepeated says the order carried an idempotency key already used:
 	// the campaign returned with it is the existing one, not a new one.
 	ErrRepeated = errors.New("the campaign was already created with this idempotency key")
-	// ErrConcurrentTransition says the row moved under the writer: its
-	// revision, its state or its claim token is not the one the writer
-	// read. The decision was made on a stale picture; the writer reads the
-	// row again and decides afresh rather than repeating it.
+	// ErrConcurrentTransition says the row moved under the writer: its revision,
+	// its state or its claim token is not the one the writer read.
 	ErrConcurrentTransition = errors.New("the row changed since it was read; the transition was not applied")
 	// ErrIllegalTransition says the state machine has no such move: a
 	// settled host asked to move again, a finished campaign asked to run.
 	ErrIllegalTransition = errors.New("the transition is not one the state machine allows")
-	// ErrLeaseLost says the orchestrator no longer holds the runner lease of
-	// the campaign: another instance took it over, and this one stops
-	// writing to the campaign until it claims the lease again.
+	// ErrLeaseLost says the orchestrator no longer holds the runner lease of the
+	// campaign: another instance took it over, and this one stops writing to the
+	// campaign until it claims the lease again.
 	ErrLeaseLost = errors.New("the runner lease of the campaign is held by another instance")
 )
 
-// The runner lease of a campaign. One orchestrator drives a campaign at a
-// time; it renews the lease while it works, and a holder that stopped
-// renewing - a dead process, a stalled tick - loses it after the term, so
-// the next instance takes over without waiting for anyone to give it up.
-// The term is long against a tick and short against an operator's
-// patience: a campaign stands still for at most that long after a crash.
+// The runner lease of a campaign.
 const (
 	RunnerLeaseTerm    = 45 * time.Second
 	RunnerLeaseRenewal = 15 * time.Second
@@ -67,18 +60,16 @@ func (s *Store) Pool() *pgxpool.Pool { return s.pool }
 type TargetHost struct {
 	ID     string
 	BootID string
-	// State and Reason describe a host that is already settled at the moment
-	// the campaign is created: ineligible for this operation or inside a
-	// maintenance window. An empty state means a host ready to work.
+	// State and Reason describe a host that is already settled at the moment the
+	// campaign is created: ineligible for this operation or inside a maintenance
+	// window.
 	State   TargetState
 	Reason  string
 	Message string
 }
 
 // Create creates a campaign together with an immutable snapshot of its
-// targets. The division into waves happens at planning time: a host added to
-// the fleet later will not enter a campaign under way without the operator
-// knowing.
+// targets.
 func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []TargetHost) (*Campaign, error) {
 	if err := spec.Validate(); err != nil {
 		return nil, err
@@ -102,36 +93,29 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 	}
 
 	state := StateQueuedOrApproval(spec.RequiresApproval)
-	// A change computed per host starts with planning: the consent is to
-	// concern the diffs, and those are yet to come into being - read from
-	// the hosts, or split from the order in the panel.
+	// A change computed per host starts with planning: the consent is to concern
+	// the diffs, and those are yet to come into being - read from the hosts, or
+	// split from the order in the panel.
 	if opspec.CampaignPlans(opspec.ActionType(spec.ActionType)) {
 		state = StatePlanning
 	}
 	campaignID := uuid.NewString()
 
 	// The policy is recorded as resolved: an empty value would leave the
-	// orchestrator to guess, and a guess about an offline host is exactly
-	// what the policy exists to replace. It is resolved before the
-	// fingerprint, so the consent covers the policy that really applies.
+	// orchestrator to guess, and a guess about an offline host is exactly what
+	// the policy exists to replace.
 	if spec.OfflinePolicy == "" {
 		spec.OfflinePolicy = opspec.ActionType(spec.ActionType).OfflinePolicy()
 	}
 
-	// The fingerprint comes from the same description that reaches the
-	// database. The approval will have to quote it, so the consent concerns
-	// this list of hosts and this policy rather than the campaign identifier
-	// alone.
+	// The fingerprint comes from the same description that reaches the database.
 	fingerprint, err := Fingerprint(spec, hosts)
 	if err != nil {
 		return nil, err
 	}
 
-	// The selector is recorded as ordered, exclusions included: the
-	// approver reads what was asked for, and the snapshot below says what
-	// it resolved to.
-	// The deadline is counted from the creation, in the database's clock:
-	// the same clock the orchestrator compares it with later.
+	// The selector is recorded as ordered, exclusions included: the approver
+	// reads what was asked for, and the snapshot below says what it resolved to.
 	const insert = `
 		insert into campaigns (id, name, action_type, payload, selector, state,
 		                       canary_size, wave_size, max_concurrent,
@@ -147,9 +131,9 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
 		        $22, now() + make_interval(mins => $23), $24, $25, $26, $27, $28, $29, $30)
 		on conflict (created_by, idempotency_key) where idempotency_key is not null do nothing`
-	// The reboot timeout is recorded resolved, like the deadline: the row
-	// says how long the campaign really waits, and the orchestrator does
-	// not have to know what the default was on the day of the order.
+	// The reboot timeout is recorded resolved, like the deadline: the row says
+	// how long the campaign really waits, and the orchestrator does not have to
+	// know what the default was on the day of the order.
 	tag, err := tx.Exec(ctx, insert, campaignID, spec.Name, spec.ActionType, payload, selectorJSON,
 		string(state), spec.CanarySize, spec.WaveSize, spec.MaxConcurrent,
 		spec.FailureThresholdPercent, spec.FailureThresholdAbsolute,
@@ -182,11 +166,7 @@ func (s *Store) Create(ctx context.Context, tx pgx.Tx, spec Spec, hosts []Target
 		return &existing[0], ErrRepeated
 	}
 
-	// We count the waves from the ready hosts only. A host settled right away
-	// must not take a place in the canary: a canary made of hosts that will
-	// do nothing is not a trial on a small group. An excluded host is
-	// settled the same way - closed at once, with the reason and the author
-	// in its message.
+	// We count the waves from the ready hosts only.
 	ready := 0
 	for _, host := range hosts {
 		state := host.State
@@ -226,13 +206,8 @@ type HostPlanSpec struct {
 }
 
 // CreatePlanned creates a campaign whose per-host plans exist before the
-// order: a fleet remediation, where the panel computes every host's steps
-// from its findings.
-//
-// The plans go into the same transaction as the snapshot, and the approval
-// fingerprint is recomputed over the set at once: there is no moment at
-// which the campaign waits for a consent that would not cover its plans.
-// The campaign starts where a planned one ends - at the decision.
+// order: a fleet remediation, where the panel computes every host's steps from
+// its findings.
 func (s *Store) CreatePlanned(ctx context.Context, tx pgx.Tx, spec Spec, hosts []TargetHost,
 	plans []HostPlanSpec) (*Campaign, error) {
 	campaign, err := s.Create(ctx, tx, spec, hosts)
@@ -305,8 +280,6 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID string, appro
 		return nil, err
 	}
 	// The record is the evidence; the columns above are the convenience.
-	// It is written in the same transaction, so there is no approval
-	// without its record and no record without the approval.
 	const record = `
 		insert into campaign_approvals
 		    (campaign_id, approval_fingerprint, requested_by, approved_by,
@@ -324,16 +297,14 @@ func (s *Store) Approve(ctx context.Context, tx pgx.Tx, campaignID string, appro
 	return s.getTx(ctx, tx, campaignID)
 }
 
-// Approvals lists the approval records of a campaign, oldest first. A
-// campaign approved once has one; the list form leaves room for a second
-// person where a policy asks for two.
+// Approvals lists the approval records of a campaign, oldest first.
 func (s *Store) Approvals(ctx context.Context, campaignID string) ([]Approval, error) {
 	return s.approvalsFrom(ctx, s.pool, campaignID)
 }
 
-// ApprovalsTx lists the approvals as the caller's transaction sees them:
-// the record Approve wrote a moment ago is on the list before the commit,
-// which a read through the pool would not show yet.
+// ApprovalsTx lists the approvals as the caller's transaction sees them: the
+// record Approve wrote a moment ago is on the list before the commit, which a
+// read through the pool would not show yet.
 func (s *Store) ApprovalsTx(ctx context.Context, tx pgx.Tx, campaignID string) ([]Approval, error) {
 	return s.approvalsFrom(ctx, tx, campaignID)
 }
@@ -368,16 +339,6 @@ func (s *Store) approvalsFrom(ctx context.Context, q approvalQuerier, campaignID
 }
 
 // Pause holds a campaign back. The hosts already started finish their tasks.
-// A campaign standing at the manual gate can be paused too: the gate is a
-// question, and a pause is the answer "not now".
-//
-// A campaign with hosts under way is pausing rather than paused: nothing
-// new starts from this moment, but the hosts carrying a task settle first,
-// with their leases renewed meanwhile, and only then is the campaign
-// paused. The decision is made on the target rows under the campaign's
-// lock, so a host dispatched a moment before the pause is counted, and a
-// host the orchestrator is about to dispatch finds the campaign pausing
-// and does not start.
 func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	const query = `
 		update campaigns set
@@ -401,9 +362,7 @@ func (s *Store) Pause(ctx context.Context, campaignID, actor, reason string) (*C
 	return s.Get(ctx, campaignID)
 }
 
-// Resume restarts a campaign that was held back. A campaign still pausing
-// resumes too: its hosts under way were never stopped, and the queue
-// simply opens again.
+// Resume restarts a campaign that was held back.
 func (s *Store) Resume(ctx context.Context, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, paused_by = null, paused_at = null,
@@ -423,11 +382,7 @@ func (s *Store) Resume(ctx context.Context, campaignID, actor string) (*Campaign
 	return s.Get(ctx, campaignID)
 }
 
-// Cancel stops a campaign. The targets that have not started are canceled
-// at once; the hosts carrying a task settle on their own, and while any
-// does the campaign is canceling rather than canceled - a terminal state
-// with work still under it would have its report written from a moving
-// picture. The orchestrator ends the campaign once the last host settles.
+// Cancel stops a campaign.
 func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*Campaign, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -435,9 +390,8 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// The state the campaign is leaving is read under a lock: the steps
-	// recorded below depend on it, and a second cancel must find the row
-	// already moved.
+	// The state the campaign is leaving is read under a lock: the steps recorded
+	// below depend on it, and a second cancel must find the row already moved.
 	var previous string
 	err = tx.QueryRow(ctx, `select state from campaigns where id = $1 for update`, campaignID).Scan(&previous)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -450,9 +404,9 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		return nil, ErrConflict
 	}
 
-	// The hosts that have not started will not be started - the ones
-	// waiting for their connection included, and the ones computing a
-	// plan: a plan is a read, and a cancel does not wait for a read.
+	// The hosts that have not started will not be started - the ones waiting for
+	// their connection included, and the ones computing a plan: a plan is a read,
+	// and a cancel does not wait for a read.
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets
 		   set state = 'canceled', finished_at = now(), settled_at = now(), state_since = now(),
@@ -461,14 +415,9 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		campaignID); err != nil {
 		return nil, err
 	}
-	// The tasks the campaign created that are still in the panel's queue
-	// never reached a host, and a cancel takes them back: a host that came
-	// online an hour later would otherwise carry out a change of a
-	// campaign that no longer exists. The reboot and the verification owed
-	// to a host whose change landed are kept - the host settles the way it
-	// always does - and a task the agent already holds is not taken away
-	// either: the request is recorded on the target, and the host settles
-	// or acknowledges it.
+	// The tasks the campaign created that are still in the panel's queue never
+	// reached a host, and a cancel takes them back: a host that came online an
+	// hour later would otherwise carry out a change of a campaign that no longer
 	why := "the campaign was canceled by " + actor
 	if reason != "" {
 		why += ": " + reason
@@ -481,12 +430,9 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	if err != nil {
 		return nil, fmt.Errorf("taking back the queued tasks of the campaign: %w", err)
 	}
-	// The tasks the hosts hold are asked to stop, not written off: each
-	// moves to cancel_requested with a request on the trail, and the
-	// agent answers what the request found - a task not yet started ends
-	// canceled, one under way in a phase that must finish runs to its
-	// end, and the campaign drains on the answers. The follow-up tasks
-	// owed to a host whose change landed are not asked.
+	// The tasks the hosts hold are asked to stop, not written off: each moves to
+	// cancel_requested with a request on the trail, and the agent answers what
+	// the request found - a task not yet started ends canceled, one under way in
 	if _, err := jobs.RequestCancelOf(ctx, tx, campaignID, actor, why, owed); err != nil {
 		return nil, fmt.Errorf("asking the hosts of the campaign to stop: %w", err)
 	}
@@ -507,8 +453,7 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 	}
 	// The hosts still carrying a task keep it, and the row says the cancel
 	// reached them while they worked: the campaign waits for them, and the
-	// acknowledgement of the agent says whether the task was interrupted,
-	// never started, or runs to its end.
+	// acknowledgement of the agent says whether the task was interrupted, never
 	if _, err := tx.Exec(ctx, `
 		update campaign_targets
 		   set cancel_requested_at = coalesce(cancel_requested_at, now()), revision = revision + 1
@@ -517,22 +462,17 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		campaignID); err != nil {
 		return nil, err
 	}
-	// The tokens of the hosts that will not start go back now: a lease
-	// held by a host that does nothing stops the next campaign until it
-	// expires.
+	// The tokens of the hosts that will not start go back now: a lease held by a
+	// host that does nothing stops the next campaign until it expires.
 	if _, err := tx.Exec(ctx, `
 		delete from budget_leases
 		 where owner in (select id::text from campaign_targets where campaign_id = $1 and state = 'canceled')`,
 		campaignID); err != nil {
 		return nil, err
 	}
-	// Every host that will not start gets the step it was waiting for
-	// recorded as canceled, with the actor and the reason: the strip of a
-	// canceled host is to say who stopped it, not stay blank. The step is
-	// the plan while the campaign was still planning and the change
-	// otherwise; a plan step already open on a planning host is closed the
-	// same way. Hosts already at work keep their steps open; they finish
-	// on their own, like the target rows say.
+	// Every host that will not start gets the step it was waiting for recorded as
+	// canceled, with the actor and the reason: the strip of a canceled host is to
+	// say who stopped it, not stay blank.
 	step := StepExecute
 	if previous == string(StatePlanning) {
 		step = StepPlan
@@ -555,9 +495,9 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		return nil, fmt.Errorf("recording the canceled steps: %w", err)
 	}
 
-	// Whether the campaign ends now or drains first is read off the hosts
-	// after the waiting ones were closed: what is left under way is what
-	// the cancel waits for.
+	// Whether the campaign ends now or drains first is read off the hosts after
+	// the waiting ones were closed: what is left under way is what the cancel
+	// waits for.
 	var underWay int
 	if err := tx.QueryRow(ctx, `
 		select count(*) from campaign_targets
@@ -577,10 +517,9 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 		where id = $1`, campaignID, string(next), actor, nullable(reason)); err != nil {
 		return nil, err
 	}
-	// A cancellation that ends the campaign now writes its report here, so
-	// the record shows the targets as the cancellation left them; one that
-	// drains first gets its report from the orchestrator with the last
-	// host.
+	// A cancellation that ends the campaign now writes its report here, so the
+	// record shows the targets as the cancellation left them; one that drains
+	// first gets its report from the orchestrator with the last host.
 	if next == StateCanceled {
 		if err := s.recordReport(ctx, tx, campaignID); err != nil {
 			return nil, err
@@ -593,9 +532,8 @@ func (s *Store) Cancel(ctx context.Context, campaignID, actor, reason string) (*
 }
 
 // followUpJobs lists the reboot and verification tasks of the hosts whose
-// change is done: a cancel does not take those back, because a host left
-// with its change applied and its reboot never ordered is a host the cancel
-// would have half-done.
+// change is done: a cancel does not take those back, because a host left with
+// its change applied and its reboot never ordered is a host the cancel would
 func (s *Store) followUpJobs(ctx context.Context, tx pgx.Tx, campaignID string) ([]string, error) {
 	rows, err := tx.Query(ctx, `
 		select j::text from campaign_targets t
@@ -616,10 +554,7 @@ func (s *Store) followUpJobs(ctx context.Context, tx pgx.Tx, campaignID string) 
 	return owed, rows.Err()
 }
 
-// Advance lets a campaign standing at the manual gate into the waves. The
-// decision is recorded on the campaign: who let it through and when, so
-// that a later return to the queue of an offline canary host does not
-// close the gate again.
+// Advance lets a campaign standing at the manual gate into the waves.
 func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaign, error) {
 	const query = `
 		update campaigns set state = $2, gate_advanced_by = $3, gate_advanced_at = now(),
@@ -638,27 +573,8 @@ func (s *Store) Advance(ctx context.Context, campaignID, actor string) (*Campaig
 	return s.Get(ctx, campaignID)
 }
 
-// SetState changes the state of a campaign on behalf of the orchestrator
-// that drives it.
-//
-// The write is a compare-and-swap: it names the revision the orchestrator
-// read and the runner lease it holds, and touches nothing when either
-// moved. A campaign that moved is read again, and the transition is
-// applied only when the state machine still allows it from where the
-// campaign stands now - a pause committed meanwhile is respected, a
-// threshold pause repeated after an operator's resume is not. The record
-// passed in is refreshed with what was written, so the caller goes on
-// with the current revision.
-//
-// A terminal state is written together with the final report, in one
-// transaction: the report is the durable record of how the campaign
-// ended, and a campaign that ended without one would be a campaign whose
-// history depends on its target rows staying around. The reason column is
-// the pause reason by name and the reason the campaign stopped in fact:
-// a campaign that expired or failed to plan says why in the same place a
-// paused one does, because that is where the screen reads it. A campaign
-// that finishes pausing keeps the reason and the author of the pause: the
-// transition closes the pause, it does not order a new one.
+// SetState changes the state of a campaign on behalf of the orchestrator that
+// drives it.
 func (s *Store) SetState(ctx context.Context, campaign *Campaign, state State, reason string) error {
 	const query = `
 		update campaigns set state = $2, updated_at = now(), revision = revision + 1,
@@ -711,9 +627,8 @@ func (s *Store) SetState(ctx context.Context, campaign *Campaign, state State, r
 			return ErrLeaseLost
 		}
 		if fresh.State != campaign.State {
-			// Somebody moved the campaign: an operator paused or canceled
-			// it, or another pass settled it. The decision the caller made
-			// was made about another campaign than this one.
+			// Somebody moved the campaign: an operator paused or canceled it, or
+			// another pass settled it.
 			*campaign = *fresh
 			return fmt.Errorf("%w: the campaign is %s now", ErrConcurrentTransition, fresh.State)
 		}
@@ -741,16 +656,8 @@ func (s *Store) withReport(ctx context.Context, campaignID string, write func(tx
 
 // Active returns the campaigns the orchestrator has to handle.
 func (s *Store) Active(ctx context.Context) ([]Campaign, error) {
-	// Planning is an active state: the campaign changes nothing yet, but
-	// the orchestrator has work to do - every host computes its own plan.
-	// A campaign awaiting its approval is watched for the age of its
-	// plans, and a canceling or pausing one for the hosts still carrying a
-	// task: their leases are renewed and their results read, whatever the
-	// operator decided about the rest of the fleet. A paused campaign is on
-	// the list for as long as it has such hosts - a pause written directly
-	// by a threshold, or before the pausing state existed, may have left
-	// some - and off it once they settled, so a campaign paused for a week
-	// costs nothing on every tick.
+	// Planning is an active state: the campaign changes nothing yet, but the
+	// orchestrator has work to do - every host computes its own plan.
 	return s.query(ctx, `
 		where state in ('planning', 'planned', 'awaiting_approval', 'canary', 'running', 'pausing', 'canceling')
 		   or (state = 'paused' and exists (select 1 from campaign_targets t
@@ -775,9 +682,6 @@ func (s *Store) OldestPlan(ctx context.Context, campaignID string) (time.Time, e
 }
 
 // SavePlan records the plan computed on one host.
-//
-// A plan comes into being once and is not recomputed after the approval: the
-// consent concerns that diff, not what the host computes now.
 func (s *Store) SavePlan(ctx context.Context, campaignID, hostID, hash string,
 	plan json.RawMessage) error {
 	return s.savePlan(ctx, s.pool, campaignID, hostID, hash, plan)
@@ -826,11 +730,6 @@ func (s *Store) Plans(ctx context.Context, campaignID string) (map[string]string
 }
 
 // HostPlan returns the plan computed on one host together with its content.
-//
-// The digest alone is enough to bind the consent but not to execute: a file
-// write has to come back to the host with the digest of the content the
-// operator reviewed, and that lies in the plan's content rather than in its
-// digest.
 func (s *Store) HostPlan(ctx context.Context, campaignID, hostID string) (string, json.RawMessage, time.Time, error) {
 	var hash string
 	var plan json.RawMessage
@@ -858,11 +757,6 @@ type PlanEntry struct {
 }
 
 // PlansWithContent returns the plans of every host in a campaign.
-//
-// The consent concerns the set of plans, so the operator has to see it in
-// full rather than infer it from a single digest. The host name travels
-// together with the plan, because a list of identifiers tells nobody
-// anything.
 func (s *Store) PlansWithContent(ctx context.Context, campaignID string) ([]PlanEntry, error) {
 	const query = `
 		select p.host_id, coalesce(h.hostname, ''), p.plan_hash, p.plan, p.computed_at
@@ -891,10 +785,6 @@ func (s *Store) PlansWithContent(ctx context.Context, campaignID string) ([]Plan
 // FinishPlanning records the digest of the set of plans together with the
 // approval fingerprint and moves the campaign into the state where it waits
 // for a decision.
-//
-// The approval fingerprint changes here for the last time: from this moment
-// the consent concerns one specific set of plans rather than the request
-// alone.
 func (s *Store) FinishPlanning(ctx context.Context, campaignID, planSetHash,
 	fingerprint string, next State) error {
 	const query = `
@@ -924,20 +814,12 @@ type Event struct {
 
 // Course returns the durable trail of a campaign: what happened in it and
 // when.
-//
-// The final state is visible in the tables, but the course is what the
-// operator needs while it runs: when the canary started, which host failed
-// first and at what time the campaign stopped. Notifications will not keep
-// that - an event sent at the moment the panel restarts exists nowhere any
-// more.
 func (s *Store) Course(ctx context.Context, campaignID string, limit int) ([]Event, error) {
 	return s.CourseAfter(ctx, campaignID, 0, limit)
 }
 
 // CourseAfter returns the trail of a campaign after the given event
-// identifier. It is how a stream resumes after a broken connection and how
-// a long trail is read page by page: the identifiers grow with time, so
-// "after" is a cursor that no later insert can move.
+// identifier.
 func (s *Store) CourseAfter(ctx context.Context, campaignID string, after int64, limit int) ([]Event, error) {
 	if limit <= 0 || limit > maxCourseEntries {
 		limit = maxCourseEntries
@@ -967,17 +849,10 @@ func (s *Store) CourseAfter(ctx context.Context, campaignID string, after int64,
 	return course, rows.Err()
 }
 
-// maxCourseEntries bounds a single read of the course. A campaign on a
-// thousand hosts has a few thousand events and there is no reason to send
-// them all at once.
+// maxCourseEntries bounds a single read of the course.
 const maxCourseEntries = 2000
 
 // ActiveTargets says which hosts are already targets of campaigns under way.
-//
-// A collision does not stop a new request: the resource locks on the host
-// will queue the operations anyway. But the operator is to know before the
-// start - a campaign waiting for somebody else's package transaction looks
-// like a campaign standing still for no reason.
 func (s *Store) ActiveTargets(ctx context.Context) (map[string]string, error) {
 	const query = `
 		select t.host_id, t.campaign_id
@@ -1036,9 +911,9 @@ func (s *Store) getTx(ctx context.Context, tx pgx.Tx, campaignID string) (*Campa
 type Scope struct {
 	Site        string
 	Environment string
-	// Team, as in the job listing: a boundary this table cannot express,
-	// carried so that it narrows to nothing instead of being dropped and
-	// leaving the listing wide open.
+	// Team, as in the job listing: a boundary this table cannot express, carried
+	// so that it narrows to nothing instead of being dropped and leaving the
+	// listing wide open.
 	Team string
 }
 
@@ -1065,15 +940,6 @@ type ListPage struct {
 
 // List returns the campaigns narrowed to the scopes in which the caller has
 // the right to read, and to the filter.
-//
-// A campaign has no scope of its own - it has targets. Visible is therefore
-// the one that touches at least one host from the caller's scope; the
-// operator of one environment sees the campaigns that concern them and does
-// not see anybody else's.
-//
-// Every campaign of the page carries its progress: the tally of its
-// hosts, read with one query over the page's targets rather than one per
-// row, so a list of two hundred campaigns costs the database two reads.
 func (s *Store) List(ctx context.Context, filter ListFilter, scopes []Scope) (ListPage, error) {
 	limit := filter.Limit
 	if limit <= 0 || limit > 200 {
@@ -1116,10 +982,8 @@ func (s *Store) List(ctx context.Context, filter ListFilter, scopes []Scope) (Li
 	return ListPage{Items: items, Total: total}, nil
 }
 
-// attachProgress fills the progress of every campaign given from one
-// grouped read of their targets. A campaign without targets in the
-// answer gets an empty tally rather than none: the row is to show zeros,
-// not a blank that reads as "not known".
+// attachProgress fills the progress of every campaign given from one grouped
+// read of their targets.
 func (s *Store) attachProgress(ctx context.Context, items []Campaign) error {
 	if len(items) == 0 {
 		return nil
@@ -1198,15 +1062,9 @@ const campaignColumns = `
 	       revision, coalesce(runner_id::text, ''), runner_token, runner_until
 	from campaigns `
 
-// changedTargetCondition tells a target whose change landed on the host,
-// on the alias t: the host succeeded, or failed only after the change -
-// in the reboot or the verification - which the execute step records as
-// succeeded. A host whose change failed, or whose session broke mid-task,
-// holds something unknown, and unknown is not "unchanged". A host that
-// reported no change ran its change step to the end and changed nothing;
-// its own state says so, and it is not counted. The same rule
-// ChangedTargets reads the hosts of a compensation by, so the count the
-// campaign carries is the count that compensation will run on.
+// changedTargetCondition tells a target whose change landed on the host, on
+// the alias t: the host succeeded, or failed only after the change - in the
+// reboot or the verification - which the execute step records as succeeded.
 const changedTargetCondition = `(t.state = 'succeeded'
 	                          or (t.state <> 'no_change'
 	                              and exists (select 1 from campaign_steps s
@@ -1266,10 +1124,7 @@ type TargetFilter struct {
 	Search string
 }
 
-// TargetCursor is the position of the last row of the previous page. The
-// order of the targets is the order of the rollout - wave, then position -
-// and both are fixed once the snapshot is frozen, so a cursor built from
-// them stays valid however the states change underneath.
+// TargetCursor is the position of the last row of the previous page.
 type TargetCursor struct {
 	Wave     int
 	Position int
@@ -1297,9 +1152,9 @@ func (c TargetCursor) String() string {
 // TargetPage is one page of a campaign's targets.
 type TargetPage struct {
 	Items []Target `json:"items"`
-	// Total is the number of targets matching the filter, all pages included:
-	// the operator is to know how many hosts a filter names, not how many fit
-	// on the screen.
+	// Total is the number of targets matching the filter, all pages included: the
+	// operator is to know how many hosts a filter names, not how many fit on the
+	// screen.
 	Total int `json:"total"`
 	// NextCursor is empty on the last page.
 	NextCursor string `json:"next_cursor,omitempty"`
@@ -1310,8 +1165,7 @@ type TargetPage struct {
 const maxTargetPage = 1000
 
 // TargetsPage reads the targets of a campaign page by page, in the order of
-// the rollout. A limit of zero means no limit - the orchestrator needs the
-// whole set, and it is the only caller that does.
+// the rollout.
 func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter TargetFilter,
 	cursor TargetCursor, limit int) (TargetPage, error) {
 	if limit > maxTargetPage {
@@ -1389,12 +1243,6 @@ func (s *Store) TargetsPage(ctx context.Context, campaignID string, filter Targe
 }
 
 // UpdateTarget records the state of a campaign target.
-//
-// The write is a compare-and-swap against the revision, the state and the
-// claim token the caller read: the target in memory is what the caller
-// decided on, and a row that moved since fails the write with
-// ErrConcurrentTransition. On success the target in memory carries the
-// new revision and state.
 func (s *Store) UpdateTarget(ctx context.Context, target *Target, state TargetState,
 	errorCode, message string) error {
 	revision, err := s.updateTarget(ctx, s.pool, target, state, errorCode, message)
@@ -1408,13 +1256,7 @@ func (s *Store) UpdateTarget(ctx context.Context, target *Target, state TargetSt
 	return nil
 }
 
-// UpdateTargetTx records the state inside the caller's transaction. The
-// step rows are written next to the transition, and a transition without
-// its step - or a step without its transition - must not be able to
-// commit alone. It returns the revision the row will carry once the
-// transaction commits; the caller applies it to the target in memory
-// after the commit, so a rolled-back transaction leaves the picture as it
-// was.
+// UpdateTargetTx records the state inside the caller's transaction.
 func (s *Store) UpdateTargetTx(ctx context.Context, tx pgx.Tx, target *Target, state TargetState,
 	errorCode, message string) (int64, error) {
 	return s.updateTarget(ctx, tx, target, state, errorCode, message)
@@ -1425,11 +1267,9 @@ func (s *Store) updateTarget(ctx context.Context, q stepQuerier, target *Target,
 	if !target.State.mayBecome(state) {
 		return 0, fmt.Errorf("%w: a %s host cannot become %s", ErrIllegalTransition, target.State, state)
 	}
-	// The previous state and the moment it was entered come back with the
-	// update: the time spent in a state is measured when it is left, and
-	// only this statement knows both ends. The row is written only when it
-	// still carries the revision, the state and the claim token the caller
-	// read; a row that moved is left as it is.
+	// The previous state and the moment it was entered come back with the update:
+	// the time spent in a state is measured when it is left, and only this
+	// statement knows both ends.
 	const query = `
 		update campaign_targets t set
 			state       = $5,
@@ -1470,11 +1310,7 @@ func (s *Store) updateTarget(ctx context.Context, q stepQuerier, target *Target,
 }
 
 // TransitionTarget moves a target from one state to another against the
-// revision and the claim token the caller read. It is the bare
-// compare-and-swap of the document: the row is written only when it still
-// carries that revision, that state and that token, and the caller gets
-// ErrConcurrentTransition otherwise - the cue to read the row again rather
-// than repeat the decision. The new revision comes back on success.
+// revision and the claim token the caller read.
 func (s *Store) TransitionTarget(ctx context.Context, id string, expectedRevision int64,
 	from, to TargetState, token int64) (int64, error) {
 	target := Target{ID: id, Revision: expectedRevision, State: from, ClaimToken: token}
@@ -1482,11 +1318,7 @@ func (s *Store) TransitionTarget(ctx context.Context, id string, expectedRevisio
 }
 
 // FollowTask records where the open task of a target stands: dispatched,
-// waiting for a lock with the blocker the agent named, or running. The
-// three are one step of the host - the change - so the step row is not
-// touched; the state and the blocker are, and the time in the state is
-// measured like every other transition. The write is fenced like every
-// other: the row must still be what the caller read.
+// waiting for a lock with the blocker the agent named, or running.
 func (s *Store) FollowTask(ctx context.Context, target *Target, state TargetState, blocker string) error {
 	if !target.State.mayBecome(state) {
 		return fmt.Errorf("%w: a %s host cannot become %s", ErrIllegalTransition, target.State, state)
@@ -1522,18 +1354,14 @@ func (s *Store) FollowTask(ctx context.Context, target *Target, state TargetStat
 	return nil
 }
 
-// AttachJobTx binds a target to the task that was created, inside the
-// caller's transaction - the one that creates the task and moves the
-// target, so a target never names a task that does not exist and a task
-// is never created for a target that stayed where it was.
+// AttachJobTx binds a target to the task that was created, inside the caller's
+// transaction - the one that creates the task and moves the target, so a
+// target never names a task that does not exist and a task is never created
 func (s *Store) AttachJobTx(ctx context.Context, tx pgx.Tx, target *Target, column, jobID string) error {
 	return s.attachJob(ctx, tx, target, column, jobID)
 }
 
 // attachJob writes the task identifier under the claim the caller holds.
-// The revision does not move - the course of the host has not changed,
-// and the transition written next to it in the same transaction moves it
-// - but a caller that lost the claim writes nothing.
 func (s *Store) attachJob(ctx context.Context, q stepQuerier, target *Target, column, jobID string) error {
 	var query string
 	switch column {
@@ -1558,9 +1386,9 @@ func (s *Store) attachJob(ctx context.Context, q stepQuerier, target *Target, co
 	return nil
 }
 
-// SetBootIDBeforeTx records the boot ID from before the reboot, inside
-// the transaction that orders the reboot: the proof the host came back is
-// written with the order, never beside it.
+// SetBootIDBeforeTx records the boot ID from before the reboot, inside the
+// transaction that orders the reboot: the proof the host came back is written
+// with the order, never beside it.
 func (s *Store) SetBootIDBeforeTx(ctx context.Context, tx pgx.Tx, target *Target, bootID string) error {
 	return s.setBootIDBefore(ctx, tx, target, bootID)
 }
@@ -1578,20 +1406,14 @@ func (s *Store) setBootIDBefore(ctx context.Context, q stepQuerier, target *Targ
 	return nil
 }
 
-// ErrSkipNotAllowed says the host is not one an operator may skip: only a
-// host waiting for its connection is, because only such a host is holding
-// the campaign for nothing - a host under way settles on its own, and a
-// host in the queue starts on the next pass.
+// ErrSkipNotAllowed says the host is not one an operator may skip: only a host
+// waiting for its connection is, because only such a host is holding the
+// campaign for nothing - a host under way settles on its own, and a host in
 var ErrSkipNotAllowed = errors.New("skip_not_allowed: only a host waiting for its connection can be skipped")
 
-// SkipTarget lets an operator leave a host waiting for its connection out
-// of the campaign, with a reason: the offline canary the document lets
-// the operator skip by name so that the wave barrier opens. The host
-// ends skipped with the reason and the author, its step is recorded as
-// skipped, and its tokens - it holds none while offline - are left as
-// they are. The write is the ordinary compare-and-swap: the row is read
-// first, and a host that moved between the read and the write - it came
-// back and started - is not skipped, because it is no longer waiting.
+// SkipTarget lets an operator leave a host waiting for its connection out of
+// the campaign, with a reason: the offline canary the document lets the
+// operator skip by name so that the wave barrier opens.
 func (s *Store) SkipTarget(ctx context.Context, campaignID, hostID, actor, reason string) (*Target, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

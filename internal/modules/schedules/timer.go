@@ -9,23 +9,14 @@ import (
 	"strings"
 )
 
-// The unit directory of a managed timer and the markers that make a unit
-// pair ours.
-//
-// A managed timer is two files: the timer that says when, and the service
-// that says what. They carry the same header as a managed cron file, so
-// ownership is read from the content and not from the name alone - a host
-// administrator may write a file called flotestro-something too, and the
-// panel must not take that for its own work.
+// The unit directory of a managed timer and the markers that make a unit pair
+// ours.
 const (
 	SystemdUnitDir = "/etc/systemd/system"
 	// MarkerEntry repeats the identifier inside the file, so a pair that
 	// was renamed by hand is still recognisable as ours.
 	MarkerEntry = "# Flotestro-Entry: "
-	// MarkerCron holds the expression the operator ordered. The unit runs
-	// on the calendar expression below it; the cron line is what the panel
-	// was asked for, and the entry comes back described in the language it
-	// was written in.
+	// MarkerCron holds the expression the operator ordered.
 	MarkerCron = "# Flotestro-Cron: "
 	// MarkerComment carries the operator's note: a unit file has no field
 	// for it that survives a rewrite.
@@ -33,33 +24,16 @@ const (
 )
 
 // ErrTimerNotManaged says that a unit file with the name of a managed timer
-// exists on the host without the panel's marker. It belongs to the host
-// administrator and the panel neither rewrites nor removes it.
+// exists on the host without the panel's marker.
 var ErrTimerNotManaged = errors.New("the unit file does not carry the marker of the panel")
 
-// ErrCalendarUnsupported says that a cron expression has no equivalent
-// timer. Cron runs a job when the day of the month or the day of the week
-// matches; systemd runs it only when both do. An expression that restricts
-// both means two different things on the two mechanisms, so it is written
-// as neither by accident.
+// ErrCalendarUnsupported says that a cron expression has no equivalent timer.
 var ErrCalendarUnsupported = errors.New("the expression cannot be written as a timer")
 
 // UnitPrefix is the namespace of a managed entry's units.
-//
-// It is not the plain product prefix, and the difference is the whole
-// point: /etc/systemd/system overrides the units a package installs under
-// /usr/lib, so an entry called "agent" written as flotestro-agent.service
-// would not collide with a file - it would silently replace the agent's
-// own unit, and the host would lose the agent at the next reload. Under a
-// namespace of its own no identifier can reach a unit of the product, and
-// the transient unit of a manual run (flotestro-schedule-<id>.service) is
-// out of reach as well.
 const UnitPrefix = FilePrefix + "entry-"
 
 // The directories systemd reads units from, in the order it prefers them.
-// A unit under a name we would write may live in any of them: the panel
-// looks at all of them, because a file in /etc that shadows a package's
-// unit is the accident with no way back.
 var unitSearchDirs = []string{
 	"/etc/systemd/system",
 	"/run/systemd/system",
@@ -83,10 +57,6 @@ type UnitFile struct {
 }
 
 // TimerPlan is what a managed timer would be on the host.
-//
-// The plan is computed from the order alone, so the panel can show it
-// before the operation runs; the helper computes the same plan once more
-// under the resource guard and compares it with the files on the host.
 type TimerPlan struct {
 	ID string `json:"id"`
 	// Calendar is the OnCalendar expression systemd will run by, derived
@@ -98,23 +68,15 @@ type TimerPlan struct {
 	Timer      UnitFile   `json:"timer"`
 	Service    UnitFile   `json:"service"`
 	Files      []UnitFile `json:"files"`
-	// Present says whether the pair is already on the host, Changed
-	// whether writing it would change anything. Both are filled only by
-	// the plan computed on the host; a plan made without reading the disk
-	// leaves them false and says so by Read being false.
+	// Present says whether the pair is already on the host, Changed whether
+	// writing it would change anything.
 	Present bool `json:"present"`
 	Changed bool `json:"changed"`
 	Read    bool `json:"read"`
 }
 
-// RenderTimer turns an entry into the pair of unit files, without touching
-// the host.
-//
-// The command goes through the same composer a cron line goes through:
-// systemd reads quotes and percent specifiers of its own, so an argument
-// that would not be one argument in a cron line is not one here either.
-// The rules being identical means an entry can be ordered as either
-// mechanism without the operator learning a second grammar.
+// RenderTimer turns an entry into the pair of unit files, without touching the
+// host.
 func RenderTimer(dir string, entry Schedule) (TimerPlan, error) {
 	if !ValidIdentifier(entry.ID) {
 		return TimerPlan{}, fmt.Errorf("invalid entry identifier %q", entry.ID)
@@ -149,9 +111,9 @@ func RenderTimer(dir string, entry Schedule) (TimerPlan, error) {
 	}
 	timer += "\n[Unit]\n" + description + "\n\n[Timer]\n" +
 		"OnCalendar=" + calendar + "\n" +
-		// The unit is named in full rather than left to the implicit
-		// pairing by file name: a rename by hand then fails loudly instead
-		// of quietly starting something else.
+		// The unit is named in full rather than left to the implicit pairing by file
+		// name: a rename by hand then fails loudly instead of quietly starting
+		// something else.
 		"Unit=" + ServiceUnitName(entry.ID) + "\n\n" +
 		"[Install]\nWantedBy=timers.target\n"
 	service += "\n[Unit]\n" + description + "\n\n[Service]\nType=oneshot\n" +
@@ -170,10 +132,6 @@ func RenderTimer(dir string, entry Schedule) (TimerPlan, error) {
 }
 
 // PlanTimer renders the pair and compares it with what lies on the host.
-//
-// A file already there without our marker stops the plan: it is somebody
-// else's unit under a name we would use, and the panel does not rewrite
-// work nobody entered into it.
 func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 	plan, err := RenderTimer(dir, entry)
 	if err != nil {
@@ -181,10 +139,9 @@ func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 	}
 	plan.Read = true
 	for _, file := range plan.Files {
-		// A unit of that name somewhere else on the host is the dangerous
-		// case: writing ours into /etc/systemd/system would not collide
-		// with it, it would shadow it, and the unit the host really runs
-		// would be gone at the next reload with nothing to say so.
+		// A unit of that name somewhere else on the host is the dangerous case:
+		// writing ours into /etc/systemd/system would not collide with it, it would
+		// shadow it, and the unit the host really runs would be gone at the next
 		if shadowed, err := shadowingUnit(filepath.Base(file.Path), file.Path); err != nil {
 			return TimerPlan{}, err
 		} else if shadowed != "" {
@@ -211,8 +168,7 @@ func PlanTimer(dir string, entry Schedule) (TimerPlan, error) {
 }
 
 // shadowingUnit names a unit file of the same name in another of systemd's
-// directories, when that file is not one of ours. The path being written
-// is skipped: a managed unit already in place is read by the caller.
+// directories, when that file is not one of ours.
 func shadowingUnit(name, writing string) (string, error) {
 	for _, dir := range unitSearchDirs {
 		path := filepath.Join(dir, name)
@@ -224,9 +180,8 @@ func shadowingUnit(name, writing string) (string, error) {
 		case os.IsNotExist(err):
 			continue
 		case err != nil:
-			// A unit that cannot be read is not thereby absent: refusing
-			// here is the fail-closed answer, because writing would be the
-			// irreversible one.
+			// A unit that cannot be read is not thereby absent: refusing here is the
+			// fail-closed answer, because writing would be the irreversible one.
 			return "", fmt.Errorf("reading %s: %w", path, err)
 		}
 		if !ours(string(content)) {
@@ -236,9 +191,7 @@ func shadowingUnit(name, writing string) (string, error) {
 	return "", nil
 }
 
-// RemoveTimer deletes the pair of a managed timer. A file without our
-// marker is left where it is, and the removal says so rather than deleting
-// somebody else's unit.
+// RemoveTimer deletes the pair of a managed timer.
 func RemoveTimer(dir, id string) error {
 	if !ValidIdentifier(id) {
 		return fmt.Errorf("invalid entry identifier %q", id)
@@ -263,8 +216,7 @@ func RemoveTimer(dir, id string) error {
 }
 
 // TimerOwnership says whether a unit pair under the name of a managed entry
-// exists on the host and whether it is ours. A pair that is not ours is
-// reported as present and not owned, so the refusal can name it.
+// exists on the host and whether it is ours.
 func TimerOwnership(dir, id string) (present, owned bool, path string) {
 	owned = true
 	for _, candidate := range []string{TimerUnitPath(dir, id), ServiceUnitPath(dir, id)} {
@@ -284,10 +236,6 @@ func TimerOwnership(dir, id string) (present, owned bool, path string) {
 }
 
 // ReadManagedTimers reads the entries the panel keeps as systemd timers.
-//
-// The state of the units - enabled, next run - is not here: that is a fact
-// of systemd and the caller asks systemd for it. This is what the files
-// say: which entry, on what expression, running what, as whom.
 func ReadManagedTimers(dir string) []Schedule {
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -311,9 +259,8 @@ func ReadManagedTimers(dir string) []Schedule {
 		}
 		timer, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil || !ours(string(timer)) {
-			// A unit that does not carry our marker belongs to the host
-			// administrator; it is read with the other timers, from
-			// systemd, as a found entry.
+			// A unit that does not carry our marker belongs to the host administrator;
+			// it is read with the other timers, from systemd, as a found entry.
 			continue
 		}
 		entry := Schedule{
@@ -324,18 +271,14 @@ func ReadManagedTimers(dir string) []Schedule {
 			Comment:  markerOf(string(timer), MarkerComment),
 			Path:     TimerUnitPath(dir, id),
 		}
-		// The entry reads back in the language it was ordered in. A pair
-		// written by a version that did not keep the cron line shows the
-		// calendar expression instead of inventing one.
+		// The entry reads back in the language it was ordered in.
 		entry.Expression = markerOf(string(timer), MarkerCron)
 		if entry.Expression == "" {
 			entry.Expression = entry.Calendar
 		}
 		service, err := os.ReadFile(ServiceUnitPath(dir, id))
 		if err != nil || !ours(string(service)) {
-			// A timer without its service runs nothing. It is still ours
-			// and still shown: the operator has to see the half a removal
-			// left behind, not an entry that looks complete.
+			// A timer without its service runs nothing.
 			entry.CommandLine = ""
 		} else {
 			entry.CommandLine = settingOf(string(service), "ExecStart")
@@ -347,18 +290,8 @@ func ReadManagedTimers(dir string) []Schedule {
 	return entries
 }
 
-// MergeManagedTimers puts the entries the panel wrote into the list read
-// from systemd.
-//
-// The two readings say different things about one timer: the files say
-// which entry it is, what it runs and as whom, systemd says whether it is
-// enabled and when it fires next. The merge takes each from the side that
-// knows it. A managed timer systemd has not loaded - a disabled one, most
-// of the time - is still in the result: an entry that disappears from the
-// list when it is switched off cannot be switched back on.
-//
-// fileStates maps a unit name to its UnitFileState as systemctl reports it;
-// a unit missing from it keeps whatever the timer list said about it.
+// MergeManagedTimers puts the entries the panel wrote into the list read from
+// systemd.
 func MergeManagedTimers(found, managed []Schedule, fileStates map[string]string) []Schedule {
 	if len(managed) == 0 {
 		return found
@@ -379,9 +312,8 @@ func MergeManagedTimers(found, managed []Schedule, fileStates map[string]string)
 			entry.NextRun = found[index].NextRun
 			entry.NextRuns = found[index].NextRuns
 		}
-		// The unit file state is the durable answer: a timer is enabled
-		// when it is installed, whether or not it happens to be loaded at
-		// this moment.
+		// The unit file state is the durable answer: a timer is enabled when it is
+		// installed, whether or not it happens to be loaded at this moment.
 		if state, ok := fileStates[unit]; ok {
 			entry.Enabled = state == "enabled"
 		}
@@ -439,15 +371,8 @@ func singleLine(text string) string {
 // them.
 var weekdayNames = [7]string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 
-// CalendarFromCron turns a cron expression into the OnCalendar expression
-// of a timer.
-//
-// The panel keeps one schedule language: the operator writes cron, the
-// preview and the next runs are computed from it, and a timer is written
-// from the same text. Translating is not always possible - cron runs a job
-// when the day of month OR the day of week matches, systemd when both do -
-// so an expression that restricts both is refused here rather than written
-// as a timer that runs on other days than the operator read.
+// CalendarFromCron turns a cron expression into the OnCalendar expression of a
+// timer.
 func CalendarFromCron(expression string) (string, error) {
 	parsed, err := ParseExpression(expression)
 	if err != nil {
@@ -498,11 +423,8 @@ func (e Expression) values(field int) []int {
 	return list
 }
 
-// component renders one component of the calendar expression: an asterisk
-// when every value is allowed, otherwise the values themselves. A list is
-// written out rather than turned back into a step, because systemd's step
-// counts from the start of the range and cron's from the first value - the
-// two do not always mean the same set.
+// component renders one component of the calendar expression: an asterisk when
+// every value is allowed, otherwise the values themselves.
 func component(values []int, min, max int) string {
 	if len(values) >= max-min+1 {
 		return "*"

@@ -18,14 +18,10 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/sudoers"
 )
 
-// The effective access: who may enter a host and with what privileges. The
-// panel reads the directory's rules and projects them onto one host; the
-// verdict for a concrete user comes from the directory's own simulation, so
-// the answer is the one the host will apply rather than a reconstruction.
+// The effective access: who may enter a host and with what privileges.
 
-// handleSimulateAccess asks the directory whether a user may use a service
-// on a host. It reads and changes nothing, so it needs the policy read
-// permission and no plan.
+// handleSimulateAccess asks the directory whether a user may use a service on
+// a host.
 func (s *Server) handleSimulateAccess(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.authorize(w, r, authz.PermIdentityPolicyRead, authz.GlobalScope, "identity", "access-simulate"); !ok {
 		return
@@ -71,9 +67,7 @@ func (s *Server) handleSimulateAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 // hostAccessView is the effective access of one host: the directory's
-// projection and the local sudo policy side by side. The two halves are
-// independent - a directory the panel cannot reach says nothing about
-// what /etc/sudoers grants - so each says on its own whether it is known.
+// projection and the local sudo policy side by side.
 type hostAccessView struct {
 	identity.HostAccess
 	Directory directoryState `json:"directory"`
@@ -118,18 +112,13 @@ type localSudoRule struct {
 	// by naming it. Empty when the rule names other hosts.
 	Via         []string `json:"via"`
 	ReachesHost bool     `json:"reaches_host"`
-	// ReachedUsers are the local accounts the rule's groups and ids
-	// resolve to. A netgroup or a name the host does not know stays
-	// unresolved and is not in the list.
+	// ReachedUsers are the local accounts the rule's groups and ids resolve to.
 	ReachedUsers []string `json:"reached_users,omitempty"`
 }
 
-// handleHostAccess returns the effective access of one host: its host
-// groups and the access and sudo rules that reach it from the directory,
-// and the local sudo rules next to them. The directory projection is
-// computed from the same short-lived directory reads as the other
-// directory views, so it is as fresh as they are and no fresher; the
-// local rules come from the inventory the helper read.
+// handleHostAccess returns the effective access of one host: its host groups
+// and the access and sudo rules that reach it from the directory, and the
+// local sudo rules next to them.
 func (s *Server) handleHostAccess(w http.ResponseWriter, r *http.Request) {
 	hostID := r.PathValue("id")
 	host, scope, ok := s.hostScope(w, r, hostID)
@@ -176,9 +165,6 @@ func (s *Server) handleHostAccess(w http.ResponseWriter, r *http.Request) {
 }
 
 // mergeLocalSudoers lays the local sudo policy of the host over the view.
-// The rules come from the sudoers fragment, the accounts they reach from
-// the accounts fragment; a fragment the host has not sent leaves the
-// local half unknown with its reason.
 func (s *Server) mergeLocalSudoers(ctx context.Context, host *hosts.Host, view *hostAccessView) error {
 	fragment, err := s.inventory.Fragment(ctx, host.ID, "sudoers")
 	if err != nil {
@@ -234,9 +220,7 @@ type localAccount struct {
 	Groups []string `json:"groups"`
 }
 
-// localAccountsOf reads the accounts of the host from its inventory. A
-// host without the fragment resolves no group: the rules are still shown,
-// with their grantees as written.
+// localAccountsOf reads the accounts of the host from its inventory.
 func (s *Server) localAccountsOf(ctx context.Context, hostID string) ([]localAccount, error) {
 	fragment, err := s.inventory.Fragment(ctx, hostID, "accounts")
 	if err != nil || fragment == nil || len(fragment.Payload) == 0 {
@@ -253,10 +237,8 @@ func (s *Server) localAccountsOf(ctx context.Context, hostID string) ([]localAcc
 	return content.Accounts, nil
 }
 
-// localRuleVia says how a local rule reaches the host: by covering every
-// host, or by naming it by its short name or its FQDN. A rule that names
-// only other hosts, a netgroup or a network does not reach it as far as
-// the panel can tell.
+// localRuleVia says how a local rule reaches the host: by covering every host,
+// or by naming it by its short name or its FQDN.
 func localRuleVia(rule sudoers.Rule, hostname, domain string) []string {
 	via := []string{}
 	short := strings.ToLower(strings.TrimSuffix(hostname, "."))
@@ -279,9 +261,9 @@ func localRuleVia(rule sudoers.Rule, hostname, domain string) []string {
 	return via
 }
 
-// reachedAccounts resolves the grantees of a rule through the accounts of
-// the host: a group to its members, a gid or a uid to the account that
-// has it, a name to itself. A negated grantee takes its accounts out.
+// reachedAccounts resolves the grantees of a rule through the accounts of the
+// host: a group to its members, a gid or a uid to the account that has it, a
+// name to itself.
 func reachedAccounts(rule sudoers.Rule, accounts []localAccount) []string {
 	if len(accounts) == 0 {
 		return nil
@@ -357,9 +339,8 @@ func reachedAccounts(rule sudoers.Rule, accounts []localAccount) []string {
 	return names
 }
 
-// rootEquivalentWarning puts one root-equivalent grant into a sentence
-// with the file and line it comes from, so the operator can go and read
-// it.
+// rootEquivalentWarning puts one root-equivalent grant into a sentence with
+// the file and line it comes from, so the operator can go and read it.
 func rootEquivalentWarning(rule sudoers.Rule, passwordlessGlobally bool) string {
 	who := strings.Join(rule.Users, ", ")
 	how := "every command as root"
@@ -376,30 +357,13 @@ func rootEquivalentWarning(rule sudoers.Rule, passwordlessGlobally bool) string 
 	return fmt.Sprintf("%s (%s:%d)", sentence, rule.Source, rule.Line)
 }
 
-// Role bindings scoped to a team.
-//
-// A binding names one vocabulary or the other, never both: a team, or a
-// site and an environment. That is not a convenience - it is what lets a
-// person read a binding and know what it grants. A binding that named
-// both would grant something whose meaning depended on which check read
-// it first, so a request naming both is refused here with a code of its
-// own before the database's constraint has to explain it.
-//
-// The grant takes two permissions at once. principal.manage is what every
-// grant takes, because this is still handing somebody a role; team.binding.write
-// is what this particular scope takes on top, because a team binding is
-// the one grant that follows the fleet around as hosts change hands. An
-// installation can therefore let its identity administrators grant site
-// roles while keeping the team boundary in fewer hands.
+// Role bindings scoped to a team. A binding names one vocabulary or the other,
+// never both: a team, or a site and an environment.
 
-// teamBindingRequest names one binding over a team. Site and Environment
-// are read only so that naming them can be refused: they belong to the
-// other vocabulary.
+// teamBindingRequest names one binding over a team.
 type teamBindingRequest struct {
 	Role string `json:"role"`
-	// Team is the identifier of the team the role is granted over. A name
-	// would not do: a team renamed is the same team, and a binding that
-	// followed the name would follow a rename into somebody else's group.
+	// Team is the identifier of the team the role is granted over.
 	Team        string `json:"team"`
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
@@ -409,8 +373,8 @@ type teamBindingRequest struct {
 }
 
 // parse reads the binding and refuses the shapes that have no meaning: an
-// unknown role, a missing or malformed team, and the two vocabularies in
-// one request.
+// unknown role, a missing or malformed team, and the two vocabularies in one
+// request.
 func (request teamBindingRequest) parse() (authz.Role, authz.Scope, *time.Time, string, error) {
 	role := authz.Role(request.Role)
 	if !authz.KnownRole(role) {
@@ -432,17 +396,14 @@ func (request teamBindingRequest) parse() (authz.Role, authz.Scope, *time.Time, 
 		return "", authz.Scope{}, nil, "invalid_binding",
 			errors.New("valid_until must be an RFC 3339 timestamp")
 	}
-	// The site and the environment stay at the wildcard the constraint
-	// gives a team binding: they say nothing there, and Scope.Matches
-	// reads the team alone once it is set.
+	// The site and the environment stay at the wildcard the constraint gives a
+	// team binding: they say nothing there, and Scope.
 	return role, authz.Scope{Site: authz.Wildcard, Environment: authz.Wildcard, Team: team},
 		validUntil, "", nil
 }
 
-// findTeamBinding returns the binding of the role over the team as the
-// trail describes it, or nil when the identity has none. It is the team
-// twin of findBinding: a team binding is keyed on the team, and the site
-// and environment it carries are not part of the key.
+// findTeamBinding returns the binding of the role over the team as the trail
+// describes it, or nil when the identity has none.
 func findTeamBinding(bindings []authz.Binding, role authz.Role, team string) map[string]any {
 	for _, binding := range bindings {
 		if binding.Role == role && binding.Scope.Team == team {
@@ -452,9 +413,8 @@ func findTeamBinding(bindings []authz.Binding, role authz.Role, team string) map
 	return nil
 }
 
-// authorizeTeamBinding checks the two permissions a team binding takes
-// and resolves the identity it is about. The answer has been written when
-// the result is false.
+// authorizeTeamBinding checks the two permissions a team binding takes and
+// resolves the identity it is about.
 func (s *Server) authorizeTeamBinding(w http.ResponseWriter, r *http.Request) (authz.Principal, *authz.Principal, bool) {
 	actor, ok := s.authorize(w, r, authz.PermPrincipalManage, authz.GlobalScope, "principal", r.PathValue("id"))
 	if !ok {
@@ -487,9 +447,9 @@ func (s *Server) handleGrantTeamRole(w http.ResponseWriter, r *http.Request) {
 		problem(w, http.StatusBadRequest, code, err.Error())
 		return
 	}
-	// A binding over a team nobody created would be an access to nothing
-	// that starts granting the moment somebody creates a team with that
-	// identifier; the team is read first, and the refusal says so.
+	// A binding over a team nobody created would be an access to nothing that
+	// starts granting the moment somebody creates a team with that identifier;
+	// the team is read first, and the refusal says so.
 	team, err := s.hosts.Team(r.Context(), scope.Team)
 	if errors.Is(err, hosts.ErrTeamNotFound) {
 		problem(w, http.StatusNotFound, "team_not_found", "no such team")
@@ -539,14 +499,8 @@ func (s *Server) handleGrantTeamRole(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleRevokeTeamRole removes one team binding: the role in the path,
-// the team in the body. The team is part of the key, because an operator
-// of two teams loses one and keeps the other.
-//
-// The team is not read back first. A binding may outlive the team it
-// names only in the moment between two statements, but a revocation must
-// work on whatever is on record: refusing to clean up a binding because
-// its team is gone would leave the record dirtier than it found it.
+// handleRevokeTeamRole removes one team binding: the role in the path, the
+// team in the body.
 func (s *Server) handleRevokeTeamRole(w http.ResponseWriter, r *http.Request) {
 	actor, target, ok := s.authorizeTeamBinding(w, r)
 	if !ok {

@@ -2,43 +2,21 @@ package opspec
 
 import (
 	"github.com/ultherego/flotestro/internal/buildinfo"
-	// Under a name of its own: the template of a container lifecycle
-	// operation is built by a local helper called docker, and a package
-	// under the same name would be out of reach exactly where the
-	// declarations need it.
+	// Under a name of its own: the template of a container lifecycle operation is
+	// built by a local helper called docker, and a package under the same name
+	// would be out of reach exactly where the declarations need it.
 	dockermod "github.com/ultherego/flotestro/internal/modules/docker"
 	"github.com/ultherego/flotestro/internal/modules/network"
 )
 
 // PayloadTemplate gives an example payload for an operation: the shape the
-// wizard starts from when the operation has no form of its own. The panel
-// is the authority on the contract, so the example lives here, next to the
-// validation, and a test keeps every template valid - a template the
-// server would refuse is worse than none.
-//
-// The values are placeholders an operator replaces; they are chosen to be
-// obviously examples rather than something a hasty click would apply. A
-// template that carries certificate material cannot be valid as it stands -
-// TemplateNeedsMaterial names those, and the server refuses them until the
-// placeholder is replaced with real PEM.
-// placeholderDevice and placeholderVolume stand where a disk and a
-// logical volume go in a template. They name nothing: a template is the
-// shape of an order, and a shape carrying /dev/sdb1 is an order somebody
-// can send by mistake at a disk that really is called that on half the
-// fleet. The operator replaces them with what the host's storage page
-// shows, which is the only place the true name of a disk is.
+// wizard starts from when the operation has no form of its own.
 const (
 	placeholderDevice = "/dev/disk/by-id/name-the-disk"
 	placeholderVolume = "/dev/name-the-group/name-the-volume"
 )
 
 // placeholderInterface stands where an interface name goes in a template.
-// It is deliberately not a name any host has: a link is called whatever
-// its host calls it - enp2s0, ens192, eno1np0 - so an example name like
-// eth0 would be wrong on most machines and, on the few where it is right,
-// would be applied to a real interface by a hasty click.
-// A Linux interface name is at most fifteen characters, and a VLAN
-// template puts ".100" after this one, so it stays short.
 const placeholderInterface = "the-link"
 
 func PayloadTemplate(action ActionType) (Payload, bool) {
@@ -112,9 +90,7 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Compose: &ComposePayload{Project: "example",
 			Manifest: "services:\n  web:\n    image: docker.io/library/nginx:1.27\n"}}, true
 
-	// A declared object. The example is the shape of a description rather
-	// than something worth applying: a container of one image on one port,
-	// a network with a range of its own, a volume on the default driver.
+	// A declared object.
 	case ActionDockerContainerEnsure:
 		return Payload{DockerEnsure: &DockerEnsurePayload{
 			Container: &dockermod.ContainerRequest{
@@ -199,10 +175,9 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Network: &NetworkPayload{Interface: placeholderInterface,
 			Routes: []string{"198.51.100.0/24 192.0.2.1"}, RollbackSeconds: 120}}, true
 	case ActionNetworkLinkApply:
-		// A VLAN is the example: it is the one layer that needs no second
-		// interface to be a sensible placeholder, and it names both of the
-		// fields a layered order is about - what it stands on and what tag
-		// it carries.
+		// A VLAN is the example: it is the one layer that needs no second interface
+		// to be a sensible placeholder, and it names both of the fields a layered
+		// order is about - what it stands on and what tag it carries.
 		return Payload{Network: &NetworkPayload{Interface: placeholderInterface + ".100",
 			Link: &network.LinkSpec{Name: placeholderInterface + ".100", Kind: "vlan",
 				Parent: placeholderInterface, VLANID: 100},
@@ -234,10 +209,9 @@ func PayloadTemplate(action ActionType) (Payload, bool) {
 		return Payload{Reboot: &RebootPayload{DelaySeconds: 15, Reason: "planned maintenance reboot"}}, true
 
 	case ActionSystemHostnameSet:
-		// The shared part of a rename order carries no name on purpose: the
-		// names live in the mapping the wizard builds host by host, and a
-		// template with a name would be the one name every host must not
-		// get. The campaign validation stands in a placeholder for it.
+		// The shared part of a rename order carries no name on purpose: the names
+		// live in the mapping the wizard builds host by host, and a template with a
+		// name would be the one name every host must not get.
 		return Payload{Hostname: &HostnamePayload{}}, true
 	}
 	return Payload{}, false

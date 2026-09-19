@@ -17,28 +17,18 @@ import (
 	"github.com/ultherego/flotestro/internal/secrets"
 )
 
-// The status screen: is this panel well, and if not, which part of it is
-// not. The metrics endpoint carries the same facts for a scraper; the
-// screen is for the person who has no scraper and asks "is it the
-// database, the publisher or the feed" while the fleet waits.
-//
-// Every block says whether it is fine, and when it is not, why. A block
-// the panel cannot judge - a connector not configured, a sweep that has
-// not run yet - is unknown, never fine: a green light that means "nobody
-// looked" is the one that costs an outage.
+// The status screen: is this panel well, and if not, which part of it is not.
 
 // processStarted is when this process came up; the uptime counts from it.
 var processStarted = time.Now()
 
 // Process gathers what the process resolved at start that the effective
-// configuration does not carry: the loops with a state of their own and
-// the switches read by the gateway and the scheduler rather than by the
-// API server. The settings screen shows the switches; the status screen
-// reads the loops.
+// configuration does not carry: the loops with a state of their own and the
+// switches read by the gateway and the scheduler rather than by the API
 type Process struct {
-	// Crypto is the cryptographic state of the installation as the
-	// startup guard left it; nil means a panel started without the guard,
-	// which the status screen reports as unknown.
+	// Crypto is the cryptographic state of the installation as the startup guard
+	// left it; nil means a panel started without the guard, which the status
+	// screen reports as unknown.
 	Crypto *cryptostate.Runtime
 	// Housekeeping is the retention sweeper; nil means a panel started
 	// without one, which the status screen reports as unknown.
@@ -64,10 +54,7 @@ func (s *Server) SetProcess(process Process) {
 	s.process = &process
 }
 
-// statusBlock is one part of the panel as the screen judges it. OK is
-// nil when the panel cannot tell; Reason explains a false OK; Attention
-// is a note on a block that is fine but deserves a look - a webhook
-// receiver that fails, a certificate that runs out next week.
+// statusBlock is one part of the panel as the screen judges it.
 type statusBlock struct {
 	OK        *bool          `json:"ok"`
 	Reason    string         `json:"reason,omitempty"`
@@ -95,16 +82,10 @@ func statusUnknown(reason string, facts map[string]any) statusBlock {
 	return statusBlock{Reason: reason, Facts: facts}
 }
 
-// statusQueryTimeout bounds every query of the screen. A status page that
-// hangs on the database it is asking about answers nothing to the person
-// who needs to know that the database hangs.
+// statusQueryTimeout bounds every query of the screen.
 const statusQueryTimeout = 5 * time.Second
 
-// handleStatus returns the condition of every part of the panel. The
-// permission is the one of the settings screen: whoever may see how the
-// panel is set up may see how it is doing. The read leaves no audit event,
-// unlike the settings: the screen refreshes itself every few seconds, and
-// a trail of one event per refresh would bury the events that matter.
+// handleStatus returns the condition of every part of the panel.
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	principal := authz.FromContext(r.Context())
 	if !principal.Authenticated() || !principal.Can(authz.PermSettingsRead, authz.GlobalScope) {
@@ -130,9 +111,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		"monitoring":          s.monitoringStatus(ctx),
 		"build":               s.buildStatus(),
 	}
-	// The verdict of the whole: false when any block that could be judged
-	// is not fine; unknown blocks do not make it green, they make it
-	// incomplete, and the screen says so next to the verdict.
+	// The verdict of the whole: false when any block that could be judged is not
+	// fine; unknown blocks do not make it green, they make it incomplete, and the
+	// screen says so next to the verdict.
 	overall := true
 	unknown := 0
 	for _, block := range blocks {
@@ -172,10 +153,9 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 	stat := s.pool.Stat()
 	facts["pool_used"] = stat.TotalConns()
 	facts["pool_max"] = stat.MaxConns()
-	// The shape of the pool, not only how much of it is in use: a replica
-	// allowed to open more connections than the server answers is an
-	// outage waiting for the next restart, and this is the number an
-	// operator compares with max_connections.
+	// The shape of the pool, not only how much of it is in use: a replica allowed
+	// to open more connections than the server answers is an outage waiting for
+	// the next restart, and this is the number an operator compares with
 	poolConfig := s.pool.Config()
 	facts["pool_min"] = poolConfig.MinConns
 	facts["pool_idle"] = stat.IdleConns()
@@ -183,9 +163,9 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 	facts["pool_max_conn_idle_time"] = poolConfig.MaxConnIdleTime.String()
 	facts["pool_health_check_period"] = poolConfig.HealthCheckPeriod.String()
 	facts["pool_connect_timeout"] = poolConfig.ConnConfig.ConnectTimeout.String()
-	// How often an acquire found no free connection: the pool is bounded
-	// by the caller's context rather than by an acquire timeout, so this
-	// count is what says the pool is too small.
+	// How often an acquire found no free connection: the pool is bounded by the
+	// caller's context rather than by an acquire timeout, so this count is what
+	// says the pool is too small.
 	facts["pool_empty_acquires"] = stat.EmptyAcquireCount()
 
 	var size *int64
@@ -251,9 +231,8 @@ func (s *Server) migrationsStatus(ctx context.Context) statusBlock {
 	return statusOK(facts)
 }
 
-// outboxStatus reads the durable trail: what waits for the publisher and
-// where every external consumer has got to. An event that waits longer
-// than a couple of rounds of the publisher is a publisher that stopped.
+// outboxStatus reads the durable trail: what waits for the publisher and where
+// every external consumer has got to.
 func (s *Server) outboxStatus(ctx context.Context) statusBlock {
 	var pending int
 	var oldest *float64
@@ -360,9 +339,9 @@ func (s *Server) schedulerStatus(ctx context.Context) statusBlock {
 		facts["dispatch_rate"] = s.process.DispatchRate
 	}
 	block := statusOK(facts)
-	// A task queued for an hour is a host that is offline or a budget that
-	// is full, not a scheduler that stopped; the screen points at it
-	// without calling the scheduler broken.
+	// A task queued for an hour is a host that is offline or a budget that is
+	// full, not a scheduler that stopped; the screen points at it without calling
+	// the scheduler broken.
 	if oldest != nil && *oldest > 3600 {
 		block.Attention = "the oldest queued task has waited for more than an hour"
 	}
@@ -389,9 +368,7 @@ func (s *Server) sessionsStatus(ctx context.Context) statusBlock {
 	return statusOK(facts)
 }
 
-// relaysStatus counts the relays by state. A silent relay is a site whose
-// hosts are about to lose their results; a relay never seen is one that
-// was registered and has not started yet.
+// relaysStatus counts the relays by state.
 func (s *Server) relaysStatus(ctx context.Context) statusBlock {
 	if s.relays == nil {
 		return statusUnknown("this installation keeps no relays", map[string]any{"total": 0})
@@ -438,9 +415,7 @@ func relayState(relay relays.Relay, now time.Time) string {
 	}
 }
 
-// directoryStatus reads the connector's own record of its calls. No call
-// reaches the directory here: a status page must answer at once when the
-// directory does not.
+// directoryStatus reads the connector's own record of its calls.
 func (s *Server) directoryStatus() statusBlock {
 	if s.directory == nil {
 		return statusUnknown("the directory connector is not configured", map[string]any{"configured": false})
@@ -473,9 +448,7 @@ func (s *Server) directoryStatus() statusBlock {
 	return block
 }
 
-// feedsStatus reads the age of every vulnerability feed. A feed is stale
-// when the panel has not confirmed it within the configured age, not when
-// its data have not changed.
+// feedsStatus reads the age of every vulnerability feed.
 func (s *Server) feedsStatus(ctx context.Context) statusBlock {
 	if s.vulnerabilities == nil {
 		return statusUnknown("the vulnerability correlator is not enabled", map[string]any{"enabled": false})
@@ -533,9 +506,8 @@ func (s *Server) feedsStatus(ctx context.Context) statusBlock {
 	return block
 }
 
-// certificatesStatus reads the fleet CA and the agent certificates about
-// to run out. The counts are the ones the metrics endpoint exposes, read
-// the same way, so the screen and the alert agree.
+// certificatesStatus reads the fleet CA and the agent certificates about to
+// run out.
 func (s *Server) certificatesStatus(ctx context.Context) statusBlock {
 	if s.trust == nil {
 		return statusUnknown("this panel holds no trust set", nil)
@@ -574,10 +546,9 @@ func (s *Server) certificatesStatus(ctx context.Context) statusBlock {
 	return block
 }
 
-// cryptoStatus repeats the self-test of the startup guard: the active
-// key is there and opens the installation sentinel, and the CA on disk is
-// the recorded issuer. The counts by key are what a key rotation is
-// judged by - the old key may go only when nothing names it.
+// cryptoStatus repeats the self-test of the startup guard: the active key is
+// there and opens the installation sentinel, and the CA on disk is the
+// recorded issuer.
 func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 	if s.process == nil || s.process.Crypto == nil {
 		return statusUnknown("this panel started without the cryptographic state guard", nil)
@@ -609,9 +580,8 @@ func (s *Server) cryptoStatus(ctx context.Context) statusBlock {
 	return block
 }
 
-// unusedKeys lists the keys the provider holds that are neither active
-// nor named by any live version - the ones a finished rotation leaves
-// behind. A version of the first form counts for the legacy key.
+// unusedKeys lists the keys the provider holds that are neither active nor
+// named by any live version - the ones a finished rotation leaves behind.
 func unusedKeys(report cryptostate.Report) []string {
 	var unused []string
 	for _, key := range report.Keys {
@@ -650,17 +620,9 @@ func (s *Server) housekeepingStatus() statusBlock {
 	return statusOK(facts)
 }
 
-// monitoringStatus reads the machinery behind the charts and the alerts:
-// how much raw history is on disk, how far behind the rollup is, and which
+// monitoringStatus reads the machinery behind the charts and the alerts: how
+// much raw history is on disk, how far behind the rollup is, and which
 // instance is judging the rules.
-//
-// The backlog is the number worth watching. Every stored sample marks the
-// quarter-hour it belongs to, and the rollup clears those marks; a backlog
-// that grows and does not come back down is a rollup that has stopped, and
-// the long charts are quietly standing still while the short ones look
-// fine. The retention of a partition that still owes a recomputation is
-// held back too, so the same number explains a database that stops
-// shrinking.
 func (s *Server) monitoringStatus(ctx context.Context) statusBlock {
 	if s.monitoring == nil {
 		return statusUnknown("this panel keeps no resource samples", nil)

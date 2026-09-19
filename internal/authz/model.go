@@ -1,6 +1,4 @@
-// Package authz holds the authorisation model: permissions, roles and
-// scopes. A permission is always a pair of operation + scope, never an
-// operation alone.
+// Package authz holds the authorisation model: permissions, roles and scopes.
 package authz
 
 import (
@@ -10,18 +8,13 @@ import (
 	"time"
 )
 
-// Permission is a single permission. Host operations have their own
-// permissions coming from opspec, so that restarting a service is not the
-// same level of trust as reading the inventory.
+// Permission is a single permission.
 type Permission string
 
 const (
 	PermHostRead      Permission = "host.read"
 	PermInventoryRead Permission = "inventory.read"
 	// PermInventoryRefresh allows ordering the inventory to be read again.
-	// Separate from reading: looking at the stored picture is free, telling
-	// the host to collect it anew is not - those are subprocesses on a
-	// machine that is doing work.
 	PermInventoryRefresh Permission = "inventory.refresh"
 	PermAuditRead        Permission = "audit.read"
 	PermJobRead          Permission = "job.read"
@@ -33,36 +26,25 @@ const (
 	PermHostEnrollCreate Permission = "host.enroll.create"
 	PermHostEnrollRead   Permission = "host.enroll.read"
 	PermHostEnrollRevoke Permission = "host.enroll.revoke"
-	// PermHostEnrollBatch is the right to issue one token good for many
-	// machines. It comes on top of inviting hosts: a token per host is the
-	// preferred order, and a pool of uses is a standing door that a
-	// separate right keeps narrow, next to the fresh authentication such
-	// an order asks for anyway.
+	// PermHostEnrollBatch is the right to issue one token good for many machines.
 	PermHostEnrollBatch Permission = "host.enroll.batch"
 	// PermRelayEnrollCreate is separate from inviting hosts: a relay carries
 	// the traffic of a whole site, so the right to add one is its own role.
 	PermRelayEnrollCreate Permission = "relay.enroll.create"
-	// PermRelayManage covers the life of a relay after its registration:
-	// revoking one cuts a whole site off from the panel, so it is a right
-	// separate from adding one.
+	// PermRelayManage covers the life of a relay after its registration: revoking
+	// one cuts a whole site off from the panel, so it is a right separate from
+	// adding one.
 	PermRelayManage Permission = "relay.manage"
-	// PermHostIdentityReplace allows restoring the identity of an existing
-	// host. That is a right separate from inviting new machines: replacing an
-	// identity means taking over a host that is already in the fleet.
+	// PermHostIdentityReplace allows restoring the identity of an existing host.
 	PermHostIdentityReplace Permission = "host.identity.replace"
-	// The host lifecycle. Quarantine, lifting it and decommissioning are
-	// three different decisions and have three different rights: cutting a
-	// host off during an incident has to be fast, restoring and
-	// decommissioning - deliberate.
+	// The host lifecycle.
 	PermHostQuarantine        Permission = "host.quarantine"
 	PermHostQuarantineRelease Permission = "host.quarantine.release"
 	PermHostDecommission      Permission = "host.decommission"
 	PermPrincipalManage       Permission = "principal.manage"
-	// Teams draw the boundary of what somebody may touch, so the two rights
-	// that move that boundary are their own, and both are global: moving a
-	// host into a team changes who may act on it, and binding a role to a
-	// team hands that team to somebody. Neither is part of running the
-	// fleet - they are decisions about authority, like managing principals.
+	// Teams draw the boundary of what somebody may touch, so the two rights that
+	// move that boundary are their own, and both are global: moving a host into a
+	// team changes who may act on it, and binding a role to a team hands that
 	PermHostScopeWrite   Permission = "host.scope.write"
 	PermTeamBindingWrite Permission = "team.binding.write"
 
@@ -74,9 +56,9 @@ const (
 
 	PermPackagesPlan    Permission = "packages.plan"
 	PermPackagesUpgrade Permission = "packages.upgrade"
-	// PermAgentUpgrade is a right separate from upgrading packages: replacing
-	// the agent cuts the host off from management for the restart and is
-	// settled differently - only the host's return is a success.
+	// PermAgentUpgrade is a right separate from upgrading packages: replacing the
+	// agent cuts the host off from management for the restart and is settled
+	// differently - only the host's return is a success.
 	PermAgentUpgrade Permission = "agent.upgrade"
 	// A repair touches packages that can decide whether the host starts, so
 	// it is a separate permission rather than part of an upgrade.
@@ -101,21 +83,16 @@ const (
 	PermProcessSignal Permission = "process.signal"
 	// The full package lifecycle. Installing and removing are separated from
 	// upgrading: those are three different decisions about the same host.
-	// The full package list is an inventory read, but a separate one: the
-	// vulnerability assessment comes from it, so it has its own permission
-	// and its own trail.
 	PermPackagesRead    Permission = "packages.read"
 	PermPackagesInstall Permission = "packages.install"
 	PermPackagesRemove  Permission = "packages.remove"
 	PermPackagesHold    Permission = "packages.hold.write"
 	// A package source is a decision about trust rather than about a version:
-	// once it is added the host takes software from there as well, together
-	// with package scripts that run as root. Hence a permission separate from
-	// installing.
+	// once it is added the host takes software from there as well, together with
+	// package scripts that run as root.
 	PermPackagesRepository Permission = "packages.repository.write"
-	// Scheduled jobs run without the operator, including when nobody is
-	// watching - creating an entry is a decision separate from disabling or
-	// removing it.
+	// Scheduled jobs run without the operator, including when nobody is watching
+	// - creating an entry is a decision separate from disabling or removing it.
 	PermScheduleWrite   Permission = "schedule.write"
 	PermScheduleDisable Permission = "schedule.disable"
 	PermScheduleRemove  Permission = "schedule.remove"
@@ -129,11 +106,7 @@ const (
 	// A write whose validator the host lacks may go on only with this
 	// grant and an order that says so; without it the host refuses.
 	PermFileWriteUnvalidated Permission = "file.write.unvalidated"
-	// The network. Reading the profiles is preparation for a change, so it is
-	// cheap; changing an address or a route can cut the host off from the
-	// panel, and then no further order will arrive. Routes have their own
-	// permission, because changing the default route redirects all of the
-	// host's traffic, not just its address.
+	// The network.
 	PermNetworkRead       Permission = "network.read"
 	PermNetworkWrite      Permission = "network.write"
 	PermNetworkRouteWrite Permission = "network.route.write"
@@ -142,37 +115,30 @@ const (
 	// returns to a state the operator may no longer remember.
 	PermNetworkMTUWrite Permission = "network.mtu.write"
 	PermNetworkRollback Permission = "network.rollback"
-	// Building a layer moves the addressing of every member onto the layer
-	// above, and removing one gives it back: two decisions of their own,
-	// separate from rewriting an address on a single interface.
+	// Building a layer moves the addressing of every member onto the layer above,
+	// and removing one gives it back: two decisions of their own, separate from
+	// rewriting an address on a single interface.
 	PermNetworkLinkWrite  Permission = "network.link.write"
 	PermNetworkLinkRemove Permission = "network.link.remove"
-	// The host's DNS is separated from the records in the directory: an entry
-	// in a zone is seen by every client of the domain, and the host's
-	// resolver - only by that host.
+	// The host's DNS is separated from the records in the directory: an entry in
+	// a zone is seen by every client of the domain, and the host's resolver -
+	// only by that host.
 	PermDNSRead Permission = "dns.read"
 	// The resolver plan is a read: it computes a difference and changes nothing.
 	PermDNSPlan      Permission = "dns.plan"
 	PermDNSHostWrite Permission = "dns.host.write"
 	// Directory DNS is a different scope from the host's resolver: there the
-	// panel tells one host whom to ask, and here - what the directory answers
-	// the whole network. A bad record breaks not one host but everyone who
-	// asks about it, so the permission is separate and global.
+	// panel tells one host whom to ask, and here - what the directory answers the
+	// whole network.
 	PermDNSDirectoryWrite Permission = "dns.directory.write"
-	// The firewall. Reading the ruleset is preparation for a change; a bad
-	// rule cuts the panel off from the host and there is nothing left to undo
-	// the change with. Removing a rule, changing a zone and restoring the
-	// state have their own permissions, because those are three different
-	// decisions about the same host.
+	// The firewall.
 	PermFirewallRead         Permission = "firewall.read"
 	PermFirewallWrite        Permission = "firewall.write"
 	PermFirewallRuleRemove   Permission = "firewall.rule.remove"
 	PermFirewallZoneWrite    Permission = "firewall.zone.write"
 	PermFirewallServiceWrite Permission = "firewall.service.write"
 	PermFirewallRestore      Permission = "firewall.restore"
-	// Storage. Reading the topology is diagnostics; mounting decides whether
-	// the host comes back from a reboot the way it stands now, and checking a
-	// filesystem requires that nobody is using it.
+	// Storage.
 	PermStorageRead        Permission = "storage.read"
 	PermStorageMountWrite  Permission = "storage.mount.write"
 	PermStorageMountRemove Permission = "storage.mount.remove"
@@ -186,9 +152,7 @@ const (
 	PermStorageFilesystemWrite Permission = "storage.filesystem.write"
 	PermStorageDestructive     Permission = "storage.destructive"
 	PermStorageWipe            Permission = "storage.wipe"
-	// The layers above a bare disk. Each is its own decision: failing a
-	// member spends an array's redundancy, adding one overwrites a disk,
-	// and deleting a volume destroys what stood on it.
+	// The layers above a bare disk.
 	PermStorageRAIDFail          Permission = "storage.raid.fail"
 	PermStorageRAIDRemove        Permission = "storage.raid.remove"
 	PermStorageRAIDAdd           Permission = "storage.raid.add"
@@ -202,121 +166,90 @@ const (
 	PermSSHRead          Permission = "ssh.read"
 	PermSSHConfigWrite   Permission = "ssh.config.write"
 	PermSSHHostKeyRotate Permission = "ssh.hostkey.rotate"
-	// Security. A scan collects reconnaissance material about the host, so it
-	// has its own permission separate from reading the findings. Remediation
-	// has no host operation of its own: it is carried out by the module
-	// responsible for the given thing, so the remediation permission does not
-	// replace those modules' permissions.
+	// Security. A scan collects reconnaissance material about the host, so it has
+	// its own permission separate from reading the findings.
 	PermSecurityRead      Permission = "security.read"
 	PermSecurityScan      Permission = "security.scan"
 	PermSecurityRemediate Permission = "security.remediate"
 	PermSecurityMACWrite  Permission = "security.mac.write"
 	// Reloading the audit rules changes what the host records.
 	PermSecurityAuditReload Permission = "security.audit.reload"
-	// Backup. Reading the state of the repository is part of being on call -
-	// a backup nobody knows is broken is worse than none. A restore has its
-	// own permission and the highest risk: it unpacks old state onto a
-	// running system.
+	// Backup. Reading the state of the repository is part of being on call - a
+	// backup nobody knows is broken is worse than none.
 	PermBackupRead    Permission = "backup.read"
 	PermBackupRun     Permission = "backup.run"
 	PermBackupVerify  Permission = "backup.verify"
 	PermBackupRestore Permission = "backup.restore"
 
-	// Vulnerabilities. The assessment is formed in the panel out of the
-	// distribution vendor's findings; reading it is a separate permission,
-	// because the fleet's list of vulnerabilities is reconnaissance material
-	// about the fleet itself.
+	// Vulnerabilities.
 	PermVulnerabilityRead Permission = "vulnerability.read"
 
-	// Monitoring. The panel keeps the resource samples of the hosts and
-	// evaluates its own alert rules over them. Silencing an alert has its
-	// own permission, because it switches a sensor off; writing the rules
-	// has another, because a rule decides what the whole fleet alarms on -
-	// and a probe leaves the host with a connection, so it is not an
-	// ordinary inventory read.
+	// Monitoring. The panel keeps the resource samples of the hosts and evaluates
+	// its own alert rules over them.
 	PermMonitoringRead       Permission = "monitoring.read"
 	PermMonitoringProbe      Permission = "monitoring.probe"
 	PermMonitoringSilence    Permission = "monitoring.silence.write"
 	PermMonitoringRulesWrite Permission = "monitoring.rules.write"
-	// Notifications. A channel carries what the fleet says to the people
-	// who are not looking at the panel: reading the channels goes with
-	// reading what they carry, writing one names an address the whole
-	// fleet reports to, so it is the platform administrator's alone.
+	// Notifications.
 	PermNotificationRead   Permission = "notification.read"
 	PermNotificationManage Permission = "notification.manage"
 
-	// A maintenance window belongs to running operations rather than to
-	// changing a host: it is declared by whoever watches the campaigns and
-	// the on-call duty.
+	// A maintenance window belongs to running operations rather than to changing
+	// a host: it is declared by whoever watches the campaigns and the on-call
+	// duty.
 	PermHostMaintenanceWrite Permission = "host.maintenance.write"
-	// Tags and groups describe the fleet in the panel and change nothing on
-	// a host, but they decide which hosts a campaign reaches: a wrong tag
-	// puts a machine into somebody else's rollout. Hence rights of their
-	// own, separate from reading the host and from running the campaign.
+	// Tags and groups describe the fleet in the panel and change nothing on a
+	// host, but they decide which hosts a campaign reaches: a wrong tag puts a
+	// machine into somebody else's rollout.
 	PermHostTagWrite   Permission = "host.tag.write"
 	PermHostGroupWrite Permission = "host.group.write"
-	// Shutting a host down has its own permission, separate from rebooting:
-	// after a reboot the host comes back by itself, after a shutdown somebody
-	// has to go to it.
+	// Shutting a host down has its own permission, separate from rebooting: after
+	// a reboot the host comes back by itself, after a shutdown somebody has to go
+	// to it.
 	PermSystemShutdown Permission = "system.shutdown"
 	// Renaming a host changes its identity towards everything that knows it
 	// by name; it belongs to the administrator alone.
 	PermSystemHostnameWrite Permission = "system.hostname.write"
 	// Time. Reading and testing the sources are part of diagnosis - a drifted
 	// clock looks from the outside like broken Kerberos or broken mTLS.
-	// Changing the sources can step the clock, so it has its own
-	// permission.
 	PermTimeRead Permission = "time.read"
 	// The time-source plan is a read: it computes a difference and changes nothing.
 	PermTimePlan  Permission = "time.plan"
 	PermTimeWrite Permission = "time.write"
 	// The timezone has its own permission, because it is a different decision
-	// from the time sources: it changes what the host shows to people and
-	// writes to the journal, but it does not touch the moment the host lives
-	// in.
+	// from the time sources: it changes what the host shows to people and writes
+	// to the journal, but it does not touch the moment the host lives in.
 	PermTimezoneWrite Permission = "time.timezone.write"
-	// The kernel. A sysctl setting can be undone the same way it was set;
-	// blacklisting a module shows its effect only when the host starts, so it
-	// has a separate permission.
+	// The kernel.
 	PermKernelRead Permission = "kernel.read"
 	// The module blacklist plan is a read: it computes a difference and changes nothing.
 	PermKernelModulePlan      Permission = "kernel.module.plan"
 	PermKernelSysctlWrite     Permission = "kernel.sysctl.write"
 	PermKernelModuleWrite     Permission = "kernel.module.write"
 	PermKernelModuleBlacklist Permission = "kernel.module.blacklist"
-	// Configuration files. Reading the content is separated from the plan,
-	// because the content is sometimes sensitive even when the file is not a
-	// secret.
+	// Configuration files.
 	PermFileRead     Permission = "file.read"
 	PermFilePlan     Permission = "file.plan"
 	PermFileWrite    Permission = "file.write"
 	PermFileRemove   Permission = "file.remove"
 	PermFileRollback Permission = "file.rollback"
 	// PermDockerRead allows reading the state of the container engine.
-	// Reading is separated from changes: looking at containers is part of the
-	// work of anyone diagnosing a host, stopping them is not.
 	PermDockerRead Permission = "docker.read"
-	// PermDockerEvents allows reading the engine's event journal. Separate
-	// from reading state: state says how things are, and the journal - what
-	// happened here, including what the state no longer remembers.
+	// PermDockerEvents allows reading the engine's event journal.
 	PermDockerEvents Permission = "docker.events"
-	// PermDockerLogs allows reading what a container wrote. Separate from
-	// reading the engine state: a log carries what the application said,
-	// which is more than what the engine knows about it.
+	// PermDockerLogs allows reading what a container wrote.
 	PermDockerLogs Permission = "docker.container.logs"
 	// Container operations have separate permissions: starting a service and
-	// removing it are two different decisions, including as to who may take
-	// them.
+	// removing it are two different decisions, including as to who may take them.
 	PermDockerStart   Permission = "docker.container.start"
 	PermDockerStop    Permission = "docker.container.stop"
 	PermDockerRestart Permission = "docker.container.restart"
 	PermDockerRemove  Permission = "docker.container.remove"
 	PermDockerPull    Permission = "docker.image.pull"
 	PermDockerPrune   Permission = "docker.prune"
-	// A declared object is its own decision, separate from starting a
-	// container or pruning what nobody uses: a declaration replaces what
-	// stands on the host when it differs, and the plan that says what
-	// differs is read with the plan permission before any of it.
+	// A declared object is its own decision, separate from starting a container
+	// or pruning what nobody uses: a declaration replaces what stands on the host
+	// when it differs, and the plan that says what differs is read with the plan
 	PermDockerPlan            Permission = "docker.plan"
 	PermDockerContainerEnsure Permission = "docker.container.ensure"
 	PermDockerNetworkEnsure   Permission = "docker.network.ensure"
@@ -334,119 +267,86 @@ const (
 	PermCampaignControl Permission = "campaign.control"
 
 	// Budgets say how many changes at once the fleet and the site can carry.
-	// Reading them is part of the view into campaigns: without it a host
-	// waiting on a budget looks like a forgotten host. Changing the capacity
-	// is a separate permission, because raised silently it takes the meaning
-	// out of every limit below.
 	PermBudgetRead  Permission = "budget.read"
 	PermBudgetWrite Permission = "budget.write"
 
-	// Desired-state policies. Writing a draft and publishing it are
-	// separated the way ordering and approving a campaign are: the
-	// publication is the approval the document names. Automatic
-	// remediation is a permission of its own, as the document requires,
-	// because a policy in that mode changes hosts without a second look;
-	// it is granted to the platform administrator alone.
+	// Desired-state policies.
 	PermPolicyRead          Permission = "policy.read"
 	PermPolicyWrite         Permission = "policy.write"
 	PermPolicyPublish       Permission = "policy.publish"
 	PermPolicyRemediateAuto Permission = "policy.remediate.auto"
 
-	// Permissions of the identity layer. Managing sudo and HBAC is separated
-	// from the rest, because a mistake in those rules opens access to the
-	// whole fleet.
+	// Permissions of the identity layer. Managing sudo and HBAC is separated from
+	// the rest, because a mistake in those rules opens access to the whole fleet.
 	PermIdentityRead Permission = "identity.read"
-	// HBAC and sudo rules describe who may get access and raise their
-	// privileges. That is reconnaissance material, so reading them is a
-	// separate permission rather than part of an ordinary view into the
-	// directory.
+	// HBAC and sudo rules describe who may get access and raise their privileges.
 	PermIdentityPolicyRead  Permission = "identity.policy.read"
 	PermIdentityUserWrite   Permission = "identity.user.write"
 	PermIdentityGroupWrite  Permission = "identity.group.write"
 	PermIdentityPolicyWrite Permission = "identity.policy.write"
 	PermIdentityHostEnroll  Permission = "identity.host.enroll"
 	// Taking a host out of the domain is a separate right: it cuts every
-	// directory account off the host, and bringing hosts in does not imply
-	// the right to do that.
+	// directory account off the host, and bringing hosts in does not imply the
+	// right to do that.
 	PermIdentityHostLeave Permission = "identity.host.leave"
 	// Rotating a service keytab is a right of its own, as the architecture
-	// document asks: the directory retires the credential a service
-	// authenticates with, and the host fetches a new one. Both halves ask
-	// for this one permission, so nobody holds one half alone.
+	// document asks: the directory retires the credential a service authenticates
+	// with, and the host fetches a new one.
 	PermIdentityKeytabRotate Permission = "identity.keytab.rotate"
 
-	// Local accounts are a separate path of access to the host, independent
-	// of the directory. Creating an account and changing SSH keys means
-	// granting access to the system, so they have their own permissions;
-	// reading the list of accounts fits within the inventory.
+	// Local accounts are a separate path of access to the host, independent of
+	// the directory.
 	PermLocalUserRead    Permission = "localuser.read"
 	PermLocalUserCreate  Permission = "localuser.create"
 	PermLocalUserLock    Permission = "localuser.lock"
 	PermLocalUserUnlock  Permission = "localuser.unlock"
 	PermLocalSSHKeyWrite Permission = "localuser.sshkeys.write"
-	// The keys edited one at a time: appending a key and taking a named
-	// one away are ordinary changes of access, while writing the whole
-	// list anew is the operation that has cut accounts off by accident
-	// and keeps a permission of its own.
+	// The keys edited one at a time: appending a key and taking a named one away
+	// are ordinary changes of access, while writing the whole list anew is the
+	// operation that has cut accounts off by accident and keeps a permission of
 	PermLocalSSHKeyAdd     Permission = "localuser.sshkeys.add"
 	PermLocalSSHKeyRemove  Permission = "localuser.sshkeys.remove"
 	PermLocalSSHKeyReplace Permission = "localuser.sshkeys.replace"
-	// PermAccountsPrivilegedGroups is asked for on top of the permission
-	// of the change whenever an account lands in a group that is root by
-	// another name: sudo, wheel, docker, lxd.
+	// PermAccountsPrivilegedGroups is asked for on top of the permission of the
+	// change whenever an account lands in a group that is root by another name:
+	// sudo, wheel, docker, lxd.
 	PermAccountsPrivilegedGroups Permission = "accounts.privileged_groups"
-	// The groups and the expiry of an account are changes of access with a
-	// scope of their own: a group can be root by another name, an expiry is
-	// a lock with a date. Deleting an account is destructive and belongs to
-	// the administrator alone.
+	// The groups and the expiry of an account are changes of access with a scope
+	// of their own: a group can be root by another name, an expiry is a lock with
+	// a date.
 	PermLocalUserGroupsWrite Permission = "localuser.groups.write"
 	PermLocalUserExpiryWrite Permission = "localuser.expiry.write"
 	PermLocalUserDelete      Permission = "localuser.delete"
 
-	// The metrics describe the fleet: the number of hosts, the states of
-	// tasks and the validity of the CA. That is reconnaissance material, so
-	// it has its own permission rather than being available to everyone who
-	// knows the panel's address.
+	// The metrics describe the fleet: the number of hosts, the states of tasks
+	// and the validity of the CA.
 	PermMetricsRead Permission = "metrics.read"
 
 	// The secret store. Reading concerns metadata - the value cannot be read
-	// through the API at all. Destroying a version is irreversible, so it has
-	// its own permission, separate from creating and rotating.
+	// through the API at all.
 	PermSecretRead    Permission = "secret.read"
 	PermSecretWrite   Permission = "secret.write"
 	PermSecretDestroy Permission = "secret.destroy"
 
-	// Certificates on hosts. Reading the dates and names is part of being on
-	// call - an expired certificate looks like a service outage. A deployment
-	// and a renewal replace the identity a service shows to the world, so
-	// they have their own permissions. Pointing the panel at a file to watch
-	// does not change the host and is a separate, lighter decision.
-	// The deployment plan is a read: it computes a difference and changes
-	// nothing.
+	// Certificates on hosts. Reading the dates and names is part of being on call
+	// - an expired certificate looks like a service outage.
 	PermCertificatePlan   Permission = "certificate.plan"
 	PermCertificateRead   Permission = "certificate.read"
 	PermCertificateWatch  Permission = "certificate.watch"
 	PermCertificateDeploy Permission = "certificate.deploy"
 	// Trusting an authority is wider than one file: from that moment the host
-	// accepts every certificate this authority signs. Withdrawing it has a
-	// separate permission, because it breaks connections nobody changed.
-	// The plan of a rotation step is a read: it reads the trust store and
-	// computes a difference, changing nothing.
+	// accepts every certificate this authority signs.
 	PermCertificateTrustPlan   Permission = "certificate.trust.plan"
 	PermCertificateTrustWrite  Permission = "certificate.trust.write"
 	PermCertificateTrustRemove Permission = "certificate.trust.remove"
 	PermCertificateRenew       Permission = "certificate.renew"
 
-	// The fleet's CA is the root of trust for every host. Replacing it has
-	// its own permission, separate from the rest of administration: a mistake
-	// here cuts off the whole fleet.
+	// The fleet's CA is the root of trust for every host.
 	PermPKIRead   Permission = "pki.read"
 	PermPKIRotate Permission = "pki.rotate"
 
-	// The effective configuration of the installation: which provider
-	// signs people in, which directory the panel reads, what the step-up
-	// policy is. It names servers and accounts, so it is not a viewer's
-	// read; the secrets in it are never shown, whoever asks.
+	// The effective configuration of the installation: which provider signs
+	// people in, which directory the panel reads, what the step-up policy is.
 	PermSettingsRead Permission = "settings.read"
 )
 
@@ -463,9 +363,7 @@ const (
 	RolePlatformAdmin Role = "platform_admin"
 )
 
-// rolePermissions describes what each role may do. Separating the operator
-// from the approver is deliberate: whoever orders a change should not be the
-// one to approve it.
+// rolePermissions describes what each role may do.
 var rolePermissions = map[Role][]Permission{
 	RoleViewer: {
 		PermHostRead, PermInventoryRead, PermJobRead, PermCampaignRead, PermUnitStatus,
@@ -481,9 +379,8 @@ var rolePermissions = map[Role][]Permission{
 		// An auditor looks at the state of the system, so the metrics and a
 		// review of the CA are part of their work; replacing the CA is not.
 		PermMetricsRead, PermPKIRead,
-		// An auditor looks at the host's protective state and at the results
-		// of the checks - that is the material of their work; they do not
-		// have to fix it.
+		// An auditor looks at the host's protective state and at the results of the
+		// checks - that is the material of their work; they do not have to fix it.
 		PermSecurityRead, PermSecurityScan,
 		// Certificate dates are audit material just as the protective state
 		// is: an expiring certificate is a finding, not an outage.
@@ -494,13 +391,11 @@ var rolePermissions = map[Role][]Permission{
 		// Alerts and silences are audit material: a silence set for a
 		// quarter is a finding, not an on-call detail.
 		PermMonitoringRead,
-		// The package list is the basis of the vulnerability assessment, so
-		// an auditor has to be able to see it - together with the assessment
-		// itself.
+		// The package list is the basis of the vulnerability assessment, so an
+		// auditor has to be able to see it - together with the assessment itself.
 		PermPackagesRead, PermVulnerabilityRead,
-		// Secret metadata is part of the picture of the installation: what
-		// exists, who created it, when it was rotated. Nobody sees the
-		// values.
+		// Secret metadata is part of the picture of the installation: what exists,
+		// who created it, when it was rotated.
 		PermSecretRead,
 		// Compliance with the declared state is audit material of the
 		// first order: the verdicts, not the fixes.
@@ -509,23 +404,21 @@ var rolePermissions = map[Role][]Permission{
 	RoleOperator: {
 		PermHostRead, PermInventoryRead, PermJobRead,
 		// Refreshing the inventory is the first move in every outage: before
-		// somebody starts changing a host, they want to know how things are
-		// now.
+		// somebody starts changing a host, they want to know how things are now.
 		PermInventoryRefresh,
 		PermJobCreate, PermJobCancel,
 		PermUnitStart, PermUnitStop, PermUnitRestart, PermUnitReload, PermUnitResetFailed,
 		PermJournalRead,
 		// The operator runs containers but does not delete them: removing and
-		// pruning are irreversible and belong to the administrator. The log of
-		// a container is diagnostics, like the journal.
+		// pruning are irreversible and belong to the administrator.
 		PermDockerRead, PermDockerEvents, PermDockerLogs,
 		PermDockerStart, PermDockerStop, PermDockerRestart, PermDockerPull,
 		// The operator plans project deployments and declarations but does
 		// not carry them out: a plan is a read of the difference.
 		PermComposePlan, PermDockerPlan,
 		// The operator plans upgrades but does not carry them out: a package
-		// transaction is an operation of the highest risk and requires a
-		// separate right.
+		// transaction is an operation of the highest risk and requires a separate
+		// right.
 		PermPackagesPlan, PermPackagesRead,
 		// The operator plans and runs campaigns but does not approve them.
 		PermCampaignRead, PermCampaignCreate, PermCampaignControl,
@@ -538,16 +431,12 @@ var rolePermissions = map[Role][]Permission{
 		// Tags and groups are how the operator names the targets of a
 		// campaign, so they go with the right to order one.
 		PermHostTagWrite, PermHostGroupWrite,
-		// The operator invites a machine into their own site, one token per
-		// host, sees the pending installations and closes a token that
-		// leaked. A token for a batch of machines is a separate right and
-		// stays with the administrator.
+		// The operator invites a machine into their own site, one token per host,
+		// sees the pending installations and closes a token that leaked.
 		PermHostEnrollCreate, PermHostEnrollRead, PermHostEnrollRevoke,
-		// The operator sees local accounts but does not create them: granting
-		// access to a host is an administrative decision rather than part of
-		// handling an outage. The groups and the expiry of an existing
-		// account are theirs to change - a privileged group still asks for
-		// fresh authentication - and deletion stays with the administrator.
+		// The operator sees local accounts but does not create them: granting access
+		// to a host is an administrative decision rather than part of handling an
+		// outage.
 		PermLocalUserRead, PermLocalUserGroupsWrite, PermLocalUserExpiryWrite,
 		// The operator reads the network configuration but does not change
 		// it: a bad change cuts the host off and cannot be fixed remotely.
@@ -556,9 +445,8 @@ var rolePermissions = map[Role][]Permission{
 		// testing the time sources belongs to the first diagnosis.
 		PermTimeRead, PermTimePlan, PermSecurityRead, PermSecurityScan, PermFilePlan,
 		PermVulnerabilityRead,
-		// The operator looks at certificates and tells the panel which files
-		// to watch; deploying a new one is already an administrator's
-		// decision.
+		// The operator looks at certificates and tells the panel which files to
+		// watch; deploying a new one is already an administrator's decision.
 		PermCertificateRead, PermCertificatePlan, PermCertificateTrustPlan, PermCertificateWatch,
 		// The operator makes and verifies copies; a restore is a separate
 		// decision, because it unpacks old state onto a running system.
@@ -580,18 +468,12 @@ var rolePermissions = map[Role][]Permission{
 		PermIdentityHostLeave, PermIdentityKeytabRotate,
 		PermDNSDirectoryWrite,
 		PermUnitStatus,
-		// Local accounts are an alternative to the directory, so they belong
-		// to the same role: it is the one responsible for who has access to
-		// the hosts.
+		// Local accounts are an alternative to the directory, so they belong to the
+		// same role: it is the one responsible for who has access to the hosts.
 		PermLocalUserRead, PermLocalUserCreate, PermLocalUserLock,
 		PermLocalUserUnlock, PermLocalSSHKeyWrite,
 		PermLocalSSHKeyAdd, PermLocalSSHKeyRemove, PermLocalSSHKeyReplace,
-		// Not accounts.privileged_groups: this role makes accounts and
-		// keys, and putting one into sudo, wheel, docker or lxd is a
-		// grant of root by another name. The two are different levels of
-		// trust, so the second belongs to the platform administrator -
-		// the compound permission means nothing if the same role holds
-		// both halves.
+		// Not accounts.
 		PermNotificationRead,
 		PermScheduleRootExec,
 	},
@@ -704,26 +586,16 @@ func AllRoles() []Role {
 type Scope struct {
 	Site        string `json:"site"`
 	Environment string `json:"environment"`
-	// Team is the group of hosts a target belongs to, where somebody has
-	// said which one. It is an identifier rather than a name, because a
-	// team renamed is the same team, and it is set only for a target that
-	// really has one: a binding that names a team matches nothing else,
-	// and a target with no team is reachable through its site alone.
+	// Team is the group of hosts a target belongs to, where somebody has said
+	// which one.
 	Team string `json:"team,omitempty"`
 }
 
 // Wildcard is the value meaning any scope.
 const Wildcard = "*"
 
-// Matches checks whether the permission's scope covers the target's scope.
-// An asterisk on the permission's side matches everything. An empty target
-// scope is not matched by a narrow permission: not knowing the target must
-// not widen permissions.
-//
-// A binding that names a team is about that team and nothing else: it does
-// not widen to the site the hosts happen to stand in, and it does not
-// reach a host nobody has put in a team. The two vocabularies never mix,
-// which is what lets a person read a binding and know what it grants.
+// Matches checks whether the permission's scope covers the target's scope. An
+// asterisk on the permission's side matches everything.
 func (s Scope) Matches(target Scope) bool {
 	if s.Team != "" {
 		return s.Team == target.Team
@@ -757,16 +629,12 @@ func orWildcard(value string) string {
 type Binding struct {
 	Role  Role  `json:"role"`
 	Scope Scope `json:"scope"`
-	// ValidUntil is the moment the binding stops granting anything. Nil
-	// means until somebody revokes it. An access granted for a rotation or
-	// an engagement ends by itself this way, instead of depending on
-	// somebody remembering to take it back.
+	// ValidUntil is the moment the binding stops granting anything. Nil means
+	// until somebody revokes it.
 	ValidUntil *time.Time `json:"valid_until,omitempty"`
 }
 
-// Active says whether the binding still grants its role at the given
-// moment. An expired binding stays on the record and in the listings; it
-// grants nothing.
+// Active says whether the binding still grants its role at the given moment.
 func (b Binding) Active(now time.Time) bool {
 	return b.ValidUntil == nil || now.Before(*b.ValidUntil)
 }
@@ -780,9 +648,7 @@ type Principal struct {
 	Bindings    []Binding `json:"bindings"`
 }
 
-// live returns the bindings that grant something now. Every decision goes
-// through it, so an expired binding is ignored at once, whether the
-// principal was loaded a moment ago or is held by a long-running check.
+// live returns the bindings that grant something now.
 func (p Principal) live() []Binding {
 	now := time.Now()
 	live := p.Bindings[:0:0]
@@ -806,11 +672,6 @@ func (p Principal) Can(permission Permission, target Scope) bool {
 
 // CanAnywhere checks whether the identity has the permission in any scope at
 // all.
-//
-// It serves collections: a list of hosts or campaigns has no single scope, so
-// the question "may you see this globally" is wrongly put for it. The
-// operator of one environment is to see their part of the fleet, not a
-// refusal.
 func (p Principal) CanAnywhere(permission Permission) bool {
 	for _, binding := range p.live() {
 		if binding.Role.Has(permission) {
@@ -822,10 +683,6 @@ func (p Principal) CanAnywhere(permission Permission) bool {
 
 // Permissions returns the sorted list of permissions the identity has in any
 // scope at all.
-//
-// The interface uses it to hide the sections that must not be opened anyway.
-// The source is the server rather than guesswork over role names in the
-// browser: the policy can change without rebuilding the panel.
 func (p Principal) Permissions() []string {
 	unique := map[string]bool{}
 	for _, binding := range p.live() {
@@ -868,19 +725,6 @@ func (p Principal) Roles() []string {
 }
 
 // ScopeSQL builds an SQL condition narrowing the rows to the given scopes.
-//
-// The semantics are the same as in Matches, and that is the reason this
-// function exists: narrowing lists once drifted apart from authorisation,
-// because it was written separately. An asterisk means any scope and lifts
-// the condition. An empty value matches nothing - not knowing the scope must
-// not widen visibility.
-//
-// An empty list of scopes gives a false condition: an identity without any
-// scope sees nothing. Returning an empty condition would mean access to
-// everything, that is, an error in the worst possible direction.
-//
-// offset is the number of parameters already used in the query; the function
-// numbers its own from the next one.
 func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string, []any) {
 	if len(scopes) == 0 {
 		return "false", nil
@@ -890,13 +734,9 @@ func ScopeSQL(scopes []Scope, siteColumn, envColumn string, offset int) (string,
 	var args []any
 	for _, scope := range scopes {
 		if scope.Team != "" {
-			// A team scope cannot be written with the site and the
-			// environment columns: the binding carries the wildcards its
-			// constraint gives it, and a listing reading those alone would
-			// answer with the whole fleet. A listing that cannot express
-			// the boundary shows nothing rather than everything; the ones
-			// that can - the host listings - go through hosts.ScopeSQL,
-			// which takes the team column as well.
+			// A team scope cannot be written with the site and the environment columns:
+			// the binding carries the wildcards its constraint gives it, and a listing
+			// reading those alone would answer with the whole fleet.
 			conditions = append(conditions, "false")
 			continue
 		}
