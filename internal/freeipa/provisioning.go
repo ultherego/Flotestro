@@ -35,6 +35,16 @@ const (
 	// have it needs an administrator with an LDAP client - which the step
 	// reports rather than attempts.
 	PreservePermission = "System: Preserve User"
+	// A preserve needs three rights, not one, and the laboratory proved
+	// each of them the hard way. The move itself is a moddn, which is what
+	// PreservePermission carries. Changing the entry's relative name as it
+	// moves is a second right. And the directory's own command re-reads
+	// the entry it has just moved to build its answer, so without the read
+	// on the container of preserved accounts the move succeeds and the
+	// call still comes back "no matching entry" - a change made and
+	// reported as a failure, which is the worst of both.
+	PreserveRDNPermission  = "System: Modify User RDN"
+	PreserveReadPermission = "System: Read Preserved Users"
 	// PreservePrivilege is the privilege the connector's role holds. It
 	// carries that one permission, so the role grants the move and not the
 	// rest of the user administration that the directory's own privilege
@@ -289,11 +299,14 @@ func (c *Client) ProvisionPreserveRights(ctx context.Context) (ProvisioningRepor
 		report.settle()
 		return report, nil
 	}
-	if !c.ensureMember(ctx, &report,
-		permission+" in the privilege "+PreservePrivilege,
-		"privilege_add_permission", PreservePrivilege, "permission", report.Permission, commands[1]) {
-		report.settle()
-		return report, nil
+	for _, name := range append([]string{report.Permission}, preserveCompanions...) {
+		if !c.ensureMember(ctx, &report,
+			"the permission "+name+" in the privilege "+PreservePrivilege,
+			"privilege_add_permission", PreservePrivilege, "permission", name,
+			`ipa privilege-add-permission "`+PreservePrivilege+`" --permissions="`+name+`"`) {
+			report.settle()
+			return report, nil
+		}
 	}
 	if !c.ensureObject(ctx, &report, "role", PreserveRole, "role_show", "role_add",
 		map[string]any{"description": roleDescription}, commands[2]) {
@@ -462,7 +475,8 @@ func operatorCommands(principal string) []string {
 	}
 	return []string{
 		`ipa privilege-add "` + PreservePrivilege + `" --desc="` + privilegeDescription + `"`,
-		`ipa privilege-add-permission "` + PreservePrivilege + `" --permissions="` + PreservePermission + `"`,
+		`ipa privilege-add-permission "` + PreservePrivilege + `" --permissions="` + PreservePermission +
+			`" --permissions="` + PreserveRDNPermission + `" --permissions="` + PreserveReadPermission + `"`,
 		`ipa role-add "` + PreserveRole + `" --desc="` + roleDescription + `"`,
 		`ipa role-add-privilege "` + PreserveRole + `" --privileges="` + PreservePrivilege + `"`,
 		`ipa role-add-member "` + PreserveRole + `" ` + flag + member,
@@ -541,3 +555,9 @@ func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
 	}
 	return "", lastErr
 }
+
+// preserveCompanions are the two rights the move needs beside the moddn
+// itself: the change of the entry's relative name, and the read of the
+// container it lands in, without which the directory's own command cannot
+// report what it did.
+var preserveCompanions = []string{PreserveRDNPermission, PreserveReadPermission}
