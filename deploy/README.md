@@ -107,24 +107,24 @@ Rotation is the same either way.
 ```
 docker buildx build -f deploy/Containerfile --target control-plane \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.54.0 \
+  --build-arg VERSION=0.59.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-control-plane:0.54.0 --push .
+  -t ghcr.io/ultherego/flotestro-control-plane:0.59.0 --push .
 
 docker buildx build -f deploy/Containerfile --target relay \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.54.0 \
+  --build-arg VERSION=0.59.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-relay:0.54.0 --push .
+  -t ghcr.io/ultherego/flotestro-relay:0.59.0 --push .
 
 docker buildx build -f deploy/Containerfile --target admin-tools \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.54.0 \
+  --build-arg VERSION=0.59.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-admin-tools:0.54.0 --push .
+  -t ghcr.io/ultherego/flotestro-admin-tools:0.59.0 --push .
 ```
 
 The fourth image is built from something the source tree does not contain: a
@@ -136,15 +136,15 @@ half, `flotestro-repo.asc`, which is what a host imports before it installs
 anything.
 
 ```
-packaging/build-release.sh all 0.54.0 /srv/release
+packaging/build-release.sh all 0.59.0 /srv/release
 packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo
 
 docker build -f deploy/Containerfile --target package-repository \
   --build-context repository=/srv/repo \
-  --build-arg VERSION=0.54.0 \
+  --build-arg VERSION=0.59.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-package-repository:0.54.0 .
+  -t ghcr.io/ultherego/flotestro-package-repository:0.59.0 .
 ```
 
 The build refuses a context without `flotestro-repo.asc`: a tree that carries
