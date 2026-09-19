@@ -86,13 +86,14 @@ func TestTheProvisioningCreatesWhatIsMissingAndNamesIt(t *testing.T) {
 	// entry's relative name, and the read of the container it lands in.
 	wanted := []string{"permission_show", "privilege_show", "privilege_add",
 		"privilege_add_permission", "privilege_add_permission", "privilege_add_permission",
-		"role_show", "role_add", "role_add_privilege", "role_add_member"}
+		"privilege_add_permission", "role_show", "role_add", "role_add_privilege", "role_add_member"}
 	if got := fake.methods(); len(got) < len(wanted) || !slices.Equal(got[:len(wanted)], wanted) {
 		t.Fatalf("the provisioning sent %v", got)
 	}
 	if got := outcomes(report); !slices.Equal(got, []string{
 		ProvisionAlreadyPresent, ProvisionCreated, ProvisionCreated, ProvisionCreated,
-		ProvisionCreated, ProvisionCreated, ProvisionCreated, ProvisionCreated}) {
+		ProvisionCreated, ProvisionCreated, ProvisionCreated, ProvisionCreated,
+		ProvisionCreated}) {
 		t.Fatalf("the steps read %v", got)
 	}
 	if !report.Changed || !report.Complete || !report.Verified {

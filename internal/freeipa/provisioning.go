@@ -45,6 +45,12 @@ const (
 	// reported as a failure, which is the worst of both.
 	PreserveRDNPermission  = "System: Modify User RDN"
 	PreserveReadPermission = "System: Read Preserved Users"
+	// And the fourth: the directory's own command clears the password of
+	// the entry it preserves, so without the write on the container the
+	// move happens and the call fails afterwards - the account ends up
+	// preserved while the panel reports a failure and leaves the local
+	// one untouched.
+	PreserveModifyPermission = "System: Modify Preserved Users"
 	// PreservePrivilege is the privilege the connector's role holds. It
 	// carries that one permission, so the role grants the move and not the
 	// rest of the user administration that the directory's own privilege
@@ -476,7 +482,8 @@ func operatorCommands(principal string) []string {
 	return []string{
 		`ipa privilege-add "` + PreservePrivilege + `" --desc="` + privilegeDescription + `"`,
 		`ipa privilege-add-permission "` + PreservePrivilege + `" --permissions="` + PreservePermission +
-			`" --permissions="` + PreserveRDNPermission + `" --permissions="` + PreserveReadPermission + `"`,
+			`" --permissions="` + PreserveRDNPermission + `" --permissions="` + PreserveReadPermission +
+			`" --permissions="` + PreserveModifyPermission + `"`,
 		`ipa role-add "` + PreserveRole + `" --desc="` + roleDescription + `"`,
 		`ipa role-add-privilege "` + PreserveRole + `" --privileges="` + PreservePrivilege + `"`,
 		`ipa role-add-member "` + PreserveRole + `" ` + flag + member,
@@ -556,8 +563,11 @@ func (c *Client) findPreservePermission(ctx context.Context) (string, error) {
 	return "", lastErr
 }
 
-// preserveCompanions are the two rights the move needs beside the moddn
-// itself: the change of the entry's relative name, and the read of the
-// container it lands in, without which the directory's own command cannot
-// report what it did.
-var preserveCompanions = []string{PreserveRDNPermission, PreserveReadPermission}
+// preserveCompanions are the three rights the move needs beside the moddn
+// itself: the change of the entry's relative name, the read of the
+// container it lands in, and the write on that container - the directory's
+// own command renames, clears and re-reads the entry it moves, and a
+// missing one of those turns a move that happened into a call that failed.
+var preserveCompanions = []string{
+	PreserveRDNPermission, PreserveReadPermission, PreserveModifyPermission,
+}
