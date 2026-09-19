@@ -94,6 +94,14 @@ function FactValue({ fact, area }: { fact: SettingsFact; area: string }) {
    translate rather than a key. A key without a label is shown as it is. */
 const FACT_LABELS: Record<string, string> = {
   version: "Version",
+  pool_max_conns: "Pool maximum",
+  pool_min_conns: "Pool minimum",
+  pool_max_conn_lifetime: "Connection lifetime",
+  pool_max_conn_idle_time: "Idle limit",
+  pool_health_check_period: "Health check period",
+  pool_connect_timeout: "Connect timeout",
+  auto_migrate: "Migration at start",
+  migration_role: "Migration role",
   commit: "Commit",
   build_date: "Build date",
   agent_protocol: "Agent protocol",

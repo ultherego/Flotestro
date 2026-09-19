@@ -24,6 +24,15 @@ relay:
 
   # The relay runs without root privileges, so the port is above 1024.
   listen: "0.0.0.0:8453"
+  # The health listener: plain HTTP, no client certificate, answering
+  # /healthz (liveness: the process serves and its listener accepts) and
+  # /readyz (readiness: the session upstream, the bound of the spool, the
+  # certificate). The loopback by default, because the answer is for the
+  # machine and its container runtime rather than for the network of the
+  # site; a probe from outside the container - a kubelet, a load balancer -
+  # needs an address that is reachable, for instance "0.0.0.0:8454".
+  # An empty value turns the listener off; the key absent takes the default.
+  health_listen: "127.0.0.1:8454"
 
   # The names the site agents see the relay under. They enter the server
   # certificate; changing the names requires an operator decision in the

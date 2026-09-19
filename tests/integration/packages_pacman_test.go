@@ -79,7 +79,7 @@ func TestUpdatePlanOnPacman(t *testing.T) {
 			}
 		}
 	default:
-		if last.ErrorCode != "checkupdates_missing" {
+		if last.ErrorCode != "plan_metadata_missing" {
 			t.Fatalf("the plan ended in state %s with the code %q: %s",
 				job.State, last.ErrorCode, last.Message)
 		}

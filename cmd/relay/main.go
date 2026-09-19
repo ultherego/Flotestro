@@ -98,6 +98,12 @@ func configCommand(args []string) error {
 		fmt.Printf("listen:          %s\n", cfg.Relay.Listen)
 		fmt.Printf("network names:   %s\n", strings.Join(cfg.Relay.AdvertisedNames, ", "))
 		fmt.Printf("state directory: %s\n", cfg.Relay.StateDir)
+		if address := cfg.HealthListen(); address != "" {
+			fmt.Printf("health:          %s%s (liveness), %s%s (readiness)\n",
+				address, relay.HealthPathLive, address, relay.HealthPathReady)
+		} else {
+			fmt.Printf("health:          turned off\n")
+		}
 		fmt.Printf("buffer (bytes):  %d\n", cfg.Buffer())
 		spoolDir, spoolOptions := spoolSettings(cfg)
 		fmt.Printf("spool:           %s\n", spoolDir)
@@ -319,12 +325,31 @@ func runCommand(args []string, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	// The accepts of the listener are watched, because that is what the
+	// liveness answer is about: a relay that has stopped taking the
+	// connections of its site is the wedged one a runtime should restart,
+	// and a dial of the socket would not show it - the kernel accepts
+	// into the backlog whether or not the process still calls Accept.
+	watched := relay.WatchListener(listener)
+	health := relay.NewHealth(relay.HealthOptions{
+		Relay:    proxy,
+		Listener: watched,
+		Identity: live.Current,
+		Version:  version,
+	})
+	healthServer, err := startHealthListener(cfg.HealthListen(), health, log)
+	if err != nil {
+		return err
+	}
+	defer stopHealthListener(healthServer)
+
 	log.Info("the relay is listening", "address", cfg.Relay.Listen,
 		"centre", proxy.Gateway(), "gateways", len(cfg.Upstream.GatewayURLs),
-		"spool", spoolDir, "spool_max_bytes", spoolOptions.MaxBytes)
+		"spool", spoolDir, "spool_max_bytes", spoolOptions.MaxBytes,
+		"health", cfg.HealthListen())
 
 	errCh := make(chan error, 1)
-	go func() { errCh <- server.ServeTLS(listener, "", "") }()
+	go func() { errCh <- server.ServeTLS(watched, "", "") }()
 
 	select {
 	case <-ctx.Done():

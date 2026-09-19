@@ -8,6 +8,7 @@ import { toInstant } from "../lib/format";
 import { Actions, Card, EmptyState, Field, FieldGrid, PageHeader, StatGrid, Stat, Toolbar } from "../components/layout";
 import { Breakdown } from "../components/widgets";
 import { CertificateAuthority } from "./CertificateAuthority";
+import { useTeams } from "./Teams";
 import { useT } from "../i18n";
 
 /** A scope part that names no site or environment: an asterisk, as the server keeps it, or nothing. */
@@ -16,12 +17,33 @@ function anyScope(value: string | undefined): boolean {
 }
 
 /**
+ * The scope of a binding as the server sends it. A binding over a team
+ * carries the team's identifier and leaves the site and the environment
+ * at the asterisk, which is why the team has to be read first: rendered
+ * as a site scope it would read as "whole fleet", the one sentence it
+ * does not mean.
+ */
+export type BindingScope = { site?: string; environment?: string; team?: string };
+
+/** Which vocabulary a binding is written in. The two never mix. */
+export function scopeKind(scope: BindingScope | undefined): GrantScope {
+  return scope?.team ? "team" : "site";
+}
+
+/**
  * A scope in words. The server keeps it as two fields, and "lab / test"
  * or "* / prod" in a table says neither which is the site nor what the
  * asterisk stands for; the words do.
  */
-function ScopeText({ site, environment }: { site?: string; environment?: string }) {
+function ScopeText({ site, environment, team, teamName }: { site?: string; environment?: string; team?: string; teamName?: string }) {
   const t = useT();
+  if (team) {
+    return (
+      <span className="badge" title={t("The role reaches the hosts of this team wherever they stand, and nothing else. It follows the team as hosts are placed in it and taken out.")}>
+        {t("team")} {teamName || team}
+      </span>
+    );
+  }
   if (anyScope(site) && anyScope(environment)) return <span className="badge warn">{t("whole fleet")}</span>;
   return (
     <span>
@@ -30,6 +52,39 @@ function ScopeText({ site, environment }: { site?: string; environment?: string 
       {anyScope(environment) ? t("any environment") : <>{t("environment")} <span className="mono">{environment}</span></>}
     </span>
   );
+}
+
+/**
+ * The two vocabularies a binding may be written in. A binding names a
+ * team, or a site and an environment; the form offers the choice rather
+ * than two sets of fields, so the server's scope_conflict cannot be
+ * reached from the panel at all.
+ */
+export type GrantScope = "site" | "team";
+
+/**
+ * The request one grant makes: the route and the whole body. The choice
+ * decides both, and the body carries one vocabulary alone - the fields of
+ * the other are not sent empty, they are not sent.
+ */
+export function grantRequest(principalID: string, scope: GrantScope, fields: {
+  role: string; site: string; environment: string; team: string; validUntil: string; reason: string;
+}): { path: string; body: Record<string, unknown> } {
+  const common = {
+    role: fields.role,
+    valid_until: toInstant(fields.validUntil),
+    reason: fields.reason.trim(),
+  };
+  if (scope === "team") {
+    return {
+      path: `/api/v1/principals/${principalID}/team-roles`,
+      body: { ...common, team: fields.team.trim() },
+    };
+  }
+  return {
+    path: `/api/v1/principals/${principalID}/roles`,
+    body: { ...common, site: fields.site.trim(), environment: fields.environment.trim() },
+  };
 }
 
 const ROLES = [
@@ -368,6 +423,10 @@ type Pending =
   | { kind: "issue-token"; principal: ListedPrincipal }
   | { kind: "revoke-token"; principal: ListedPrincipal; token: ApiToken }
   | { kind: "revoke-role"; principal: ListedPrincipal; role: string; site: string; environment: string }
+  // A team binding is keyed on the team, not on the site and the
+  // environment it leaves at the asterisk, so it is removed by its own
+  // route and waits for its reason under its own name.
+  | { kind: "revoke-team-role"; principal: ListedPrincipal; role: string; team: string; teamName: string }
   | { kind: "revoke-session"; principal: ListedPrincipal; session: SessionView };
 
 function Identities({ initialSearch }: { initialSearch: string }) {
@@ -427,6 +486,11 @@ function Identities({ initialSearch }: { initialSearch: string }) {
       api.del(`/api/v1/principals/${id}/roles/${role}`, { site, environment, reason }),
     onSuccess: settled, onError,
   });
+  const revokeTeamRole = useMutation({
+    mutationFn: ({ id, role, team, reason }: { id: string; role: string; team: string; reason: string }) =>
+      api.del(`/api/v1/principals/${id}/team-roles/${role}`, { team, reason }),
+    onSuccess: settled, onError,
+  });
   const revokeSession = useMutation({
     mutationFn: ({ id, session, reason }: { id: string; session: string; reason: string }) =>
       api.del(`/api/v1/principals/${id}/sessions/${session}?reason=${encodeURIComponent(reason)}`),
@@ -439,20 +503,38 @@ function Identities({ initialSearch }: { initialSearch: string }) {
   const [grantRole, setGrantRole] = useState("viewer");
   const [grantSite, setGrantSite] = useState("");
   const [grantEnvironment, setGrantEnvironment] = useState("");
+  // Which vocabulary the binding is written in. It is one choice rather
+  // than two sets of fields nobody stops an operator from filling at
+  // once: a binding that named both would grant something whose meaning
+  // depends on which check reads it first.
+  const [grantScopeKind, setGrantScopeKind] = useState<GrantScope>("site");
+  const [grantTeam, setGrantTeam] = useState("");
   const [grantUntil, setGrantUntil] = useState("");
   const [grantReason, setGrantReason] = useState("");
   const grantMutation = useMutation({
-    mutationFn: () =>
-      api.post(`/api/v1/principals/${grant?.id}/roles`, {
-        role: grantRole, site: grantSite.trim(), environment: grantEnvironment.trim(),
-        valid_until: toInstant(grantUntil), reason: grantReason.trim(),
-      }),
+    mutationFn: () => {
+      const request = grantRequest(grant?.id ?? "", grantScopeKind, {
+        role: grantRole, site: grantSite, environment: grantEnvironment,
+        team: grantTeam, validUntil: grantUntil, reason: grantReason,
+      });
+      return api.post(request.path, request.body);
+    },
     onSuccess: () => { setGrant(null); setGrantReason(""); setGrantUntil(""); refresh(); }, onError,
   });
+  // The teams a binding may name, by name: the bindings on record carry
+  // the identifier, and an identifier in a table tells a reader nothing.
+  const teams = useTeams();
+  const teamName = (id: string) => teams.data?.items.find((team) => team.id === id)?.name ?? id;
 
   // One side card at a time: opening one closes the others, so the row
   // the operator is working on is never beside two forms about two rows.
-  const openGrant = (principal: ListedPrincipal) => { setPending(null); setCreating(false); setGrant({ id: principal.id, subject: principal.subject }); };
+  const openGrant = (principal: ListedPrincipal) => {
+    setPending(null); setCreating(false);
+    // The form opens on the vocabulary most bindings are written in; the
+    // team of a previous grant must not ride along into the next one.
+    setGrantScopeKind("site"); setGrantTeam("");
+    setGrant({ id: principal.id, subject: principal.subject });
+  };
   const openPending = (next: Pending) => { setGrant(null); setCreating(false); setPending(next); };
   const openCreate = () => { setGrant(null); setPending(null); setCreating(true); };
 
@@ -539,12 +621,17 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                         whole screen down. */}
                     {(principal.bindings ?? []).length === 0
                       ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
-                      : (principal.bindings ?? []).map((binding, index) => (
-                          <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }}>
+                      : (principal.bindings ?? []).map((binding, index) => {
+                          // The team is read first: a team binding leaves the
+                          // site and the environment at the asterisk, and as a
+                          // site scope it would read as the whole fleet.
+                          const scope = binding.scope as BindingScope;
+                          return (
+                          <div key={index} className="row-actions" style={{ justifyContent: "flex-start" }} data-testid="binding">
                             <span>
                               {binding.role}
                               <span className="source">
-                                {" "}<ScopeText site={binding.scope.site} environment={binding.scope.environment} />
+                                {" "}<ScopeText site={scope.site} environment={scope.environment} team={scope.team} teamName={scope.team ? teamName(scope.team) : undefined} />
                               </span>
                               {/* A binding with a date ends by itself; one past its date
                                   stays on the record and grants nothing. */}
@@ -557,18 +644,24 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                             {!principal.disabled_at && (
                               <button
                                 className="secondary"
-                                disabled={revokeRole.isPending}
-                                onClick={() => openPending({
-                                  kind: "revoke-role", principal, role: binding.role,
-                                  site: binding.scope.site === "*" ? "" : binding.scope.site,
-                                  environment: binding.scope.environment === "*" ? "" : binding.scope.environment,
-                                })}
+                                disabled={revokeRole.isPending || revokeTeamRole.isPending}
+                                onClick={() => openPending(scope.team
+                                  ? {
+                                      kind: "revoke-team-role", principal, role: binding.role,
+                                      team: scope.team, teamName: teamName(scope.team),
+                                    }
+                                  : {
+                                      kind: "revoke-role", principal, role: binding.role,
+                                      site: scope.site === "*" ? "" : scope.site ?? "",
+                                      environment: scope.environment === "*" ? "" : scope.environment ?? "",
+                                    })}
                               >
                                 {t("Remove")}
                               </button>
                             )}
                           </div>
-                        ))}
+                          );
+                        })}
                   </td>
                   <td>
                     {(principal.tokens ?? []).length === 0
@@ -653,7 +746,7 @@ function Identities({ initialSearch }: { initialSearch: string }) {
             title={t("Grant role to {subject}", { subject: grant.subject })}
             footer={
               <Actions>
-                <button disabled={!reasonGiven(grantReason) || grantMutation.isPending}
+                <button disabled={!reasonGiven(grantReason) || grantMutation.isPending || (grantScopeKind === "team" && !grantTeam)}
                         onClick={() => grantMutation.mutate()}>
                   {t("Grant role")}
                 </button>
@@ -667,12 +760,48 @@ function Identities({ initialSearch }: { initialSearch: string }) {
                   {ROLES.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>
               </Field>
-              <Field label={t("Site (empty = all)")}>
-                <input value={grantSite} onChange={(e) => setGrantSite(e.target.value)} placeholder="lab" />
+              {/* One choice, not two sets of fields: a binding names a team
+                  or a site and an environment, and the fields of the
+                  vocabulary not chosen are not on the screen to be filled. */}
+              <Field
+                label={t("Granted over")}
+                hint={t("A team is a boundary that follows its hosts; a site and an environment are where the machines stand. A binding names one of the two, never both.")}
+                wide
+              >
+                <select
+                  value={grantScopeKind}
+                  onChange={(e) => setGrantScopeKind(e.target.value as GrantScope)}
+                  data-testid="grant-scope-kind"
+                >
+                  <option value="site">{t("a site and an environment")}</option>
+                  <option value="team">{t("a team")}</option>
+                </select>
               </Field>
-              <Field label={t("Environment (empty = all)")}>
-                <input value={grantEnvironment} onChange={(e) => setGrantEnvironment(e.target.value)} placeholder="test" />
-              </Field>
+              {grantScopeKind === "site" ? (
+                <>
+                  <Field label={t("Site (empty = all)")}>
+                    <input value={grantSite} onChange={(e) => setGrantSite(e.target.value)} placeholder="lab" />
+                  </Field>
+                  <Field label={t("Environment (empty = all)")}>
+                    <input value={grantEnvironment} onChange={(e) => setGrantEnvironment(e.target.value)} placeholder="test" />
+                  </Field>
+                </>
+              ) : (
+                <Field
+                  label={t("Team")}
+                  hint={teams.data && teams.data.items.length === 0
+                    ? t("No teams exist yet; a role can only be granted over a team somebody has created.")
+                    : t("The role reaches the hosts of the team wherever they stand, and follows the team as hosts are placed in it and taken out.")}
+                  wide
+                >
+                  <select value={grantTeam} onChange={(e) => setGrantTeam(e.target.value)} data-testid="grant-team">
+                    <option value="">{t("choose a team")}</option>
+                    {(teams.data?.items ?? []).map((team) => (
+                      <option key={team.id} value={team.id}>{team.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              )}
               <Field label={t("Valid until (empty = until revoked)")}>
                 <input type="datetime-local" value={grantUntil} onChange={(e) => setGrantUntil(e.target.value)} />
               </Field>
@@ -749,6 +878,22 @@ function Identities({ initialSearch }: { initialSearch: string }) {
             busy={revokeRole.isPending}
             onConfirm={(reason) => revokeRole.mutate({
               id: pending.principal.id, role: pending.role, site: pending.site, environment: pending.environment, reason,
+            })}
+            onCancel={() => setPending(null)}
+          />
+        )}
+        {pending?.kind === "revoke-team-role" && (
+          <ConfirmCard
+            key={`revoke-team-role-${pending.principal.id}-${pending.role}-${pending.team}`}
+            title={t("Remove role from {subject}", { subject: pending.principal.subject })}
+            text={t("The identity loses {role} over the team {team}. The team and its hosts are untouched, and a role it holds through a group mapping or over a site is not touched.", {
+              role: pending.role, team: pending.teamName,
+            })}
+            action={t("Remove")}
+            danger
+            busy={revokeTeamRole.isPending}
+            onConfirm={(reason) => revokeTeamRole.mutate({
+              id: pending.principal.id, role: pending.role, team: pending.team, reason,
             })}
             onCancel={() => setPending(null)}
           />
@@ -1097,6 +1242,11 @@ function Review() {
 
 function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
   const t = useT();
+  // The review reads the same bindings as the list, so it must read a
+  // team binding as a team too; a scope of "whole fleet" on a review row
+  // would be the one mistake a review exists to catch.
+  const teams = useTeams();
+  const teamName = (id: string) => teams.data?.items.find((team) => team.id === id)?.name ?? id;
   return (
     <tr>
       <td>
@@ -1107,15 +1257,18 @@ function ReviewRow({ principal }: { principal: ReviewedPrincipal }) {
       <td>
         {principal.bindings.length === 0
           ? <span className="source">{t("no direct assignments; roles may come from group mappings")}</span>
-          : principal.bindings.map((binding, index) => (
+          : principal.bindings.map((binding, index) => {
+            const scope = binding.scope as BindingScope;
+            return (
               <div key={index}>
                 {binding.role}
-                <span className="source"> <ScopeText site={binding.scope.site} environment={binding.scope.environment} /></span>
+                <span className="source"> <ScopeText site={scope.site} environment={scope.environment} team={scope.team} teamName={scope.team ? teamName(scope.team) : undefined} /></span>
                 {binding.expired
                   ? <> <span className="badge unknown">{t("expired")}</span></>
                   : binding.valid_until && <span className="source"> · {t("until")} <Time value={binding.valid_until} /></span>}
               </div>
-            ))}
+            );
+          })}
       </td>
       <td>
         {principal.last_seen_at

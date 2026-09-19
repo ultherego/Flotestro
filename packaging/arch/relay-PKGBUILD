@@ -9,7 +9,7 @@ pkgdesc='Flotestro site relay'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
 license=('LicenseRef-Flotestro')
-depends=('systemd' 'ca-certificates')
+depends=('systemd' 'ca-certificates' 'shadow')
 # The site configuration survives package updates; the new version lands
 # next to it as .pacnew.
 backup=('etc/flotestro/relay.yaml')

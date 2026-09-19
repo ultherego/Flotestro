@@ -6,9 +6,20 @@ License:        Proprietary
 URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
 
+# The runtime dependencies are the whole of what the agent needs: systemd
+# for the units and the journal, the trust store for the session to the
+# control plane, and the shadow tools the local account module mutates
+# accounts with. No module pulls a backend of its own in - a tool that is
+# not on the host disables exactly one capability, which the agent reports
+# as unavailable together with the name of the package that restores it.
 Requires:       systemd
+Requires:       ca-certificates
+Requires:       shadow-utils
 Requires(post): systemd, shadow-utils
 Requires(preun): systemd
+# A weak dependency dnf does not install by itself: without the versionlock
+# plugin the host simply reports packages.hold as a feature it has not got.
+Suggests:       python3-dnf-plugin-versionlock
 
 # The binaries are built earlier and given by directory; the spec compiles
 # no code, so that the package is made from exactly the same artefacts that

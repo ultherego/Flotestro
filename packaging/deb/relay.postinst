@@ -8,10 +8,13 @@ configure)
     # Separate from the agent account: an ordinary agent may also run on the
     # relay machine, and its identity must not be readable by the relay nor
     # the other way round.
+    # The account is made with the shadow tools from the passwd package,
+    # the same ones the .rpm scriptlet uses.
     if ! getent passwd flotestro-relay >/dev/null; then
-        adduser --system --group --no-create-home \
-            --home /var/lib/flotestro-relay --shell /usr/sbin/nologin \
-            flotestro-relay >/dev/null
+        getent group flotestro-relay >/dev/null || groupadd --system flotestro-relay
+        useradd --system --gid flotestro-relay --no-create-home \
+            --home-dir /var/lib/flotestro-relay --shell /usr/sbin/nologin \
+            flotestro-relay
     fi
 
     install -d -m 0700 -o flotestro-relay -g flotestro-relay /var/lib/flotestro-relay

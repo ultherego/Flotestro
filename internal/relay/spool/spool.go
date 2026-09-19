@@ -278,17 +278,36 @@ func (s *Spool) Append(record *Record) error {
 	if err := s.writeLocked(record); err != nil {
 		return err
 	}
-	if record.Priority <= PriorityJobResult {
-		// The durable classes reach the disk before the caller goes on:
+	if Durable(record.Stream) {
+		// Every durable class reaches the disk before the caller goes on:
 		// what the relay took is what it holds, whatever happens next.
+		// Control, job results and inventory alike - a class written
+		// ahead of the live forward is a class the relay answers for, and
+		// a batch of a tenth of a second is exactly the window a power
+		// failure takes a report away in.
 		if err := s.active.sync(); err != nil {
+			s.flushErr = err
 			return err
 		}
+		s.flushErr = nil
 		s.dirty = false
 	} else {
 		s.dirty = true
 	}
 	return nil
+}
+
+// FlushError returns the last failure of the batched sync of the light
+// classes, nil once a sync succeeded again.
+//
+// The batch is the one place where a record is on its way to the disk
+// rather than on it, and a disk that stopped taking writes shows up here
+// first. The relay reads it into its readiness: a spool that cannot
+// reach the disk is not a spool the site should be handing results to.
+func (s *Spool) FlushError() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.flushErr
 }
 
 // roomLocked says whether a record of the priority fits: within the

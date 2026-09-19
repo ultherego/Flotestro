@@ -427,3 +427,72 @@ func TestARecordKeepsItsIdentifier(t *testing.T) {
 		t.Fatalf("the record came back under another identifier: %+v", records)
 	}
 }
+
+// TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted guards the promise
+// the relay makes when it takes a message of a durable class: the record
+// is on the disk before the caller goes on, so a power failure a
+// millisecond later costs the site nothing.
+//
+// The classes written ahead of the live forward are control, job results
+// and inventory. An inventory report accepted into the batch of the light
+// classes would be a report the relay answers for and does not hold - the
+// window is short, and a site that loses its inventory over a power
+// failure has no way of telling.
+func TestEveryDurableClassIsOnTheDiskBeforeItIsAccepted(t *testing.T) {
+	// The batch of the light classes is pushed out of the way, so that
+	// what the test observes is the sync of the append and not a tick
+	// that happened to arrive.
+	spool := open(t, t.TempDir(), Options{FlushInterval: time.Hour})
+	durable := []struct {
+		name    string
+		message *agentv1.AgentMessage
+	}{
+		{"a control message", &agentv1.AgentMessage{}},
+		{"a job result", result("job-1")},
+		{"an inventory report", inventory("rev-1", true)},
+	}
+	for index, c := range durable {
+		appendMessage(t, spool, "host-1", signed(c.message, "session-a", uint64(index+1)))
+		spool.mu.Lock()
+		waiting := spool.dirty
+		spool.mu.Unlock()
+		if waiting {
+			t.Fatalf("%s was accepted with its record still waiting for the batch", c.name)
+		}
+	}
+	// A metrics sample is the light class: one of many, and the next one
+	// says more, so it may wait for the batch.
+	appendMessage(t, spool, "host-1", signed(metric(1), "session-a", 9))
+	spool.mu.Lock()
+	waiting := spool.dirty
+	spool.mu.Unlock()
+	if !waiting {
+		t.Fatal("a metrics sample was synced one by one; the batch exists so that it is not")
+	}
+}
+
+// TestASpoolThatCannotReachTheDiskSaysSo guards what the readiness of the
+// relay is built on: a failed sync of the batch is remembered rather than
+// swallowed, so a relay whose disk stopped taking writes stops reporting
+// itself able to carry the results of the site.
+func TestASpoolThatCannotReachTheDiskSaysSo(t *testing.T) {
+	spool := open(t, t.TempDir(), Options{FlushInterval: 5 * time.Millisecond})
+	appendMessage(t, spool, "host-1", signed(metric(1), "session-a", 1))
+	if err := spool.FlushError(); err != nil {
+		t.Fatalf("a spool that writes reported %v", err)
+	}
+	// The file under the active segment is taken away: what a disk that
+	// stopped answering does to the next sync.
+	spool.mu.Lock()
+	_ = spool.active.file.Close()
+	spool.dirty = true
+	spool.mu.Unlock()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for spool.FlushError() == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("a sync that failed left the spool reporting itself healthy")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}

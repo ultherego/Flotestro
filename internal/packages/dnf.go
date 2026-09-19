@@ -2,8 +2,10 @@ package packages
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -351,6 +353,84 @@ func (d *DNF) DatabaseBroken(ctx context.Context) bool {
 // dnfVersionlock is the name of the command of the plugin that locks
 // versions.
 const dnfVersionlock = "versionlock"
+
+// ErrorVersionlockMissing means the host cannot hold a package version,
+// because the plugin that does it is not installed. It is a refusal of the
+// host rather than a failed transaction: nothing was attempted, and a
+// package taken for held and upgraded in the next campaign is worse than an
+// outright refusal.
+const ErrorVersionlockMissing = "versionlock_missing"
+
+// versionlockPackage names what restores the feature. The two generations of
+// the tool ship it under different names, and the panel shows the name of
+// the package rather than the name of the plugin, because that is what an
+// operator installs.
+const versionlockPackage = "python3-dnf-plugin-versionlock on dnf4, dnf5-plugin-versionlock on dnf5"
+
+// ErrVersionlockMissing means the hold was refused before anything was
+// attempted. It is a sentinel rather than a sentence, so the refusal reaches
+// the panel as the code ErrorVersionlockMissing instead of as a failed
+// transaction.
+var ErrVersionlockMissing = errors.New("this host has no dnf versionlock plugin, so a package " +
+	"version cannot be held; install " + versionlockPackage)
+
+// versionlockPaths are the files a distribution installs the plugin as:
+// dnf4 loads it as a Python module next to the other commands of
+// dnf-plugins-core, dnf5 as a shared library of libdnf5, and both keep the
+// configuration of the plugin in the same file. The list is a variable so a
+// test can point it at a directory of its own; it is read and no process is
+// started, because capability detection must not run dnf.
+var versionlockPaths = []string{
+	"/usr/lib/python3*/site-packages/dnf-plugins/versionlock.py",
+	"/usr/lib64/python3*/site-packages/dnf-plugins/versionlock.py",
+	"/usr/lib64/dnf5/plugins/versionlock.so",
+	"/usr/lib/dnf5/plugins/versionlock.so",
+	"/usr/lib64/libdnf5/plugins/versionlock.so",
+	"/usr/lib/libdnf5/plugins/versionlock.so",
+	"/etc/dnf/plugins/versionlock.conf",
+}
+
+// VersionlockInstalled says whether the host has the plugin that holds a
+// package version. The answer is read from the file system, so the
+// capability registry can carry it without starting dnf.
+func VersionlockInstalled() bool {
+	for _, pattern := range versionlockPaths {
+		matches, err := filepath.Glob(pattern)
+		if err == nil && len(matches) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// DNFFeatures are the parts of the dnf adapter the host has. The hold is a
+// feature of its own: a host without the versionlock plugin cannot hold a
+// package, and the panel is to see that before it offers the operation
+// rather than after the order fails.
+func DNFFeatures(dnf, versionlock bool) map[string]bool {
+	return map[string]bool{
+		// An rpm database lock looks different from a debconf question, and
+		// the repair would look different too, so the adapter does not have
+		// it.
+		"repair": false,
+		"hold":   dnf && versionlock,
+	}
+}
+
+// DNFReason explains the limits of the adapter on this host: a missing dnf
+// and a dnf that cannot hold a package are two different answers.
+func DNFReason(dnf, versionlock bool) string {
+	if !dnf {
+		return "dnf is not installed on this host"
+	}
+	if !versionlock {
+		// The same sentence the refusal of the operation carries, so the
+		// panel shows one explanation whether it hides the hold or refuses
+		// an order for it.
+		return ErrVersionlockMissing.Error()
+	}
+	return ""
+}
 
 // planRemove computes what will disappear along with the named packages.
 func (d *DNF) planRemove(ctx context.Context, plan Plan, options Options) (Plan, error) {
@@ -735,9 +815,13 @@ func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, err
 	if len(pkgs) == 0 {
 		return apply, fmt.Errorf("a hold requires a list of packages")
 	}
-	if !d.HasVersionlock(ctx) {
-		return apply, fmt.Errorf("%s: this host has no versionlock plugin, so dnf cannot "+
-			"hold a package", ErrorUnsupported)
+	// The preflight of the hold: the plugin is looked for on the file system
+	// first, so a host without it is refused without starting dnf at all,
+	// with the same answer the capability registry gave the panel before the
+	// order. Only a host that has the files is asked whether the command
+	// really loads, which catches a plugin present but disabled.
+	if !VersionlockInstalled() || !d.HasVersionlock(ctx) {
+		return apply, ErrVersionlockMissing
 	}
 	operation := "delete"
 	if hold {
@@ -755,6 +839,13 @@ func (d *DNF) SetHold(ctx context.Context, pkgs []string, hold bool) (Apply, err
 // Holds returns the packages held on the host. A host without the
 // versionlock plugin cannot hold, and says so instead of reporting no holds.
 func (d *DNF) Holds(ctx context.Context) ([]string, string) {
+	// A host without the plugin has an unknown list of holds rather than an
+	// empty one, and the answer names what is missing instead of a failed
+	// command line.
+	if !VersionlockInstalled() {
+		return nil, "this host has no dnf versionlock plugin, so the held packages are unknown; " +
+			"install " + versionlockPackage
+	}
 	// --quiet removes the lines about metadata from the output; without it the
 	// first line was sometimes shown as the name of a held package.
 	result := run(ctx, time.Minute, dnfPath, "--quiet", dnfVersionlock, "list")

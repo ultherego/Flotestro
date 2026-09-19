@@ -708,6 +708,12 @@ type Stats struct {
 	Critical bool
 }
 
+// SpoolError returns the last failure of the spool to reach the disk,
+// nil while it writes. The readiness of the relay reads it: a spool that
+// cannot write is one the site should not be handing results to, even
+// though every other part of the relay works.
+func (r *Relay) SpoolError() error { return r.spool.FlushError() }
+
 // Stats describes the state of the relay for the metrics and the diagnostics.
 func (r *Relay) Stats() (sessions int, buffer_ Stats, upstreamOK bool) {
 	r.mu.RLock()

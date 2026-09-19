@@ -4,15 +4,17 @@ Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: Flotestro <flotestro@localhost>
-Depends: systemd, adduser
-Recommends: postgresql-client
+Depends: systemd, ca-certificates, passwd
+Suggests: postgresql-client
 Description: Flotestro Linux fleet management panel
  The control plane accepts agent sessions over mTLS, plans typed operations
  and runs campaigns on the fleet. It serves the web panel and the REST API.
  .
  PostgreSQL is the only source of truth; the schema is created and migrated
- at startup. The database may be local or remote - the package does not
- install it.
+ at startup. The database may be local or remote - the package installs
+ neither the server nor its client: the panel speaks to the database over
+ the network protocol, and psql is a tool for the administrator rather than
+ a dependency of the service.
  .
  The identity directory integration and the OIDC login provider are
  optional. Without them the panel works on API tokens and manages the local

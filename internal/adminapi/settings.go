@@ -232,6 +232,19 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			durationFact("outbox_events", sweeps.Outbox),
 			fact("secrets_key_file", effective.SecretsKeyFile),
 		}},
+		// The shape of the connection pool and how the schema is brought
+		// forward: the two settings an operator compares with what the
+		// database server allows and with how the deployment migrates.
+		{Key: "database", Title: "Database", Facts: []settingsFact{
+			fact("pool_max_conns", effective.DatabasePool.MaxConns),
+			fact("pool_min_conns", effective.DatabasePool.MinConns),
+			fact("pool_max_conn_lifetime", effective.DatabasePool.MaxConnLifetime.String()),
+			fact("pool_max_conn_idle_time", effective.DatabasePool.MaxConnIdleTime.String()),
+			fact("pool_health_check_period", effective.DatabasePool.HealthCheckPeriod.String()),
+			fact("pool_connect_timeout", effective.DatabasePool.ConnectTimeout.String()),
+			fact("auto_migrate", effective.Migration.AutoMigrate),
+			fact("migration_role", effective.Migration.Role),
+		}},
 	}
 	for i := range areas {
 		for j := range areas[i].Facts {

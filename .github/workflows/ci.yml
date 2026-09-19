@@ -175,7 +175,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$FLOTESTRO_STATE_DIR"
-          go run ./cmd/control-plane --migrate-only
+          go run ./cmd/control-plane migrate
           echo "applied=yes" >> "$GITHUB_OUTPUT"
 
       - name: The migrations match the files
@@ -229,7 +229,7 @@ jobs:
           }
           dump > before.sql
           before_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
-          go run ./cmd/control-plane --migrate-only
+          go run ./cmd/control-plane migrate
           after_count="$(psql_ -tAq -c 'select count(*) from schema_migrations')"
           if [ "$before_count" != "$after_count" ]; then
             echo "the second pass recorded $((after_count - before_count)) migrations; a file does not match what was recorded" >&2

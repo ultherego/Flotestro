@@ -14,6 +14,7 @@ import {
 } from "../components/SortableTable";
 import { Breakdown, Meter, StatusBar } from "../components/widgets";
 import { HostsMetadata } from "./HostsMetadata";
+import { useTeams } from "./Teams";
 import { useT } from "../i18n";
 
 /** The adapters a host can be filtered by; the names the hosts report. */
@@ -71,6 +72,12 @@ type HostFilters = {
   agent_behind: string;
   relay: string;
   failure_domain: string;
+  /**
+   * The team the hosts belong to, by identifier, or the word `none` for
+   * the hosts nobody has placed in a team. It narrows the list; it is not
+   * what the caller may see, which the server decides on its own.
+   */
+  team: string;
   sort: string;
 };
 
@@ -78,7 +85,7 @@ const EMPTY_FILTERS: HostFilters = {
   q: "", site: "", environment: "", os_family: "", connection_state: "", lifecycle_state: "",
   owner: "", maintenance: "", capability: "", channel: "", reboot_required: "", security_updates: "",
   identity_domain: "", connection_refusal: "", tags: "", failed_units: "", package_db_broken: "",
-  sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", sort: "",
+  sssd_offline: "", agent_behind: "", relay: "", failure_domain: "", team: "", sort: "",
 };
 
 /**
@@ -241,6 +248,10 @@ export function Hosts() {
     enabled: canSeeRelays,
     staleTime: 60 * 1000,
   });
+  // The teams, for the filter by team. Whoever may read a host may read
+  // the name of the team it is in: the name is printed on the host page
+  // and somebody choosing a filter has to see the names to choose from.
+  const teams = useTeams();
 
   // The columns of the table. The name stays whatever the operator hides;
   // the columns a phone screen can do without are marked secondary, and
@@ -306,11 +317,17 @@ export function Hosts() {
     identity_domain: t("domain"), connection_refusal: t("refused for"), tags: t("tags"),
     failed_units: t("failed units"), package_db_broken: t("package database broken"),
     sssd_offline: t("SSSD offline"), agent_behind: t("agent behind"), relay: t("relay"),
-    failure_domain: t("failure domain"),
+    failure_domain: t("failure domain"), team: t("team"),
   };
   const chipValue = (key: keyof HostFilters, value: string): string => {
     if (key === "connection_refusal") return t(refusalName(value));
     if (key === "relay") return relays.data?.items.find((relay) => relay.id === value)?.name ?? value;
+    // The chip says which team in words; the server's own word for the
+    // other list says what it means rather than repeating "none".
+    if (key === "team") {
+      if (value === "none") return t("no team");
+      return teams.data?.items.find((team) => team.id === value)?.name ?? value;
+    }
     return value;
   };
   const activeFilters = (Object.keys(EMPTY_FILTERS) as (keyof HostFilters)[])
@@ -464,6 +481,23 @@ export function Hosts() {
             ) : (
               <input placeholder={t("relay identifier")} value={filters.relay} onChange={(e) => setFilter("relay", e.target.value)} />
             )}
+            {/* The team: who the hosts belong to, which is not where they
+                stand. The last entry is the list an administrator works
+                through after the teams are created - the hosts nobody has
+                placed in one, reachable through their site alone. */}
+            <select
+              value={filters.team}
+              onChange={(e) => setFilter("team", e.target.value)}
+              title={t("the team the hosts belong to; a team is a boundary of authority, not a label")}
+              data-testid="filter-team"
+            >
+              <option value="">{t("team: any")}</option>
+              {(teams.data?.items ?? []).map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              <option value="none">{t("no team")}</option>
+              {filters.team && filters.team !== "none" && !teams.data?.items.some((team) => team.id === filters.team) && (
+                <option value={filters.team}>{filters.team}</option>
+              )}
+            </select>
             {/* The "needs attention" boxes: each is the filter a dashboard
                 tile links here with, ticked means "only these". */}
             <label className="toggle" title={t("hosts with at least one failed unit")}>

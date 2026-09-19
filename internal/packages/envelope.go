@@ -403,13 +403,16 @@ func dnfIndexFiles() []string {
 	return files
 }
 
-// pacmanIndexFiles lists the databases of the sync copy the plan reads.
+// pacmanIndexFiles lists the databases the plan reads: the copy on a host
+// that syncs one, the host's own database where the plan comes from there.
+// The digest of the plan envelope is made of these files, so a plan read
+// against the host's own database stops matching once the host syncs.
 func pacmanIndexFiles() []string {
-	copyDir := checkupdatesDB()
-	if !fileExists(checkupdatesPath) {
-		copyDir = SyncCopyDir
+	root := pacmanPlanDatabase()
+	if root == "" {
+		root = pacmanDatabaseDir
 	}
-	matches, _ := filepath.Glob(filepath.Join(copyDir, "sync", "*.db"))
+	matches, _ := filepath.Glob(filepath.Join(root, "sync", "*.db"))
 	return matches
 }
 

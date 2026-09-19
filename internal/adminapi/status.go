@@ -172,6 +172,21 @@ func (s *Server) databaseStatus(ctx context.Context) statusBlock {
 	stat := s.pool.Stat()
 	facts["pool_used"] = stat.TotalConns()
 	facts["pool_max"] = stat.MaxConns()
+	// The shape of the pool, not only how much of it is in use: a replica
+	// allowed to open more connections than the server answers is an
+	// outage waiting for the next restart, and this is the number an
+	// operator compares with max_connections.
+	poolConfig := s.pool.Config()
+	facts["pool_min"] = poolConfig.MinConns
+	facts["pool_idle"] = stat.IdleConns()
+	facts["pool_max_conn_lifetime"] = poolConfig.MaxConnLifetime.String()
+	facts["pool_max_conn_idle_time"] = poolConfig.MaxConnIdleTime.String()
+	facts["pool_health_check_period"] = poolConfig.HealthCheckPeriod.String()
+	facts["pool_connect_timeout"] = poolConfig.ConnConfig.ConnectTimeout.String()
+	// How often an acquire found no free connection: the pool is bounded
+	// by the caller's context rather than by an acquire timeout, so this
+	// count is what says the pool is too small.
+	facts["pool_empty_acquires"] = stat.EmptyAcquireCount()
 
 	var size *int64
 	if err := s.pool.QueryRow(ctx, `select pg_database_size(current_database())`).Scan(&size); err == nil && size != nil {

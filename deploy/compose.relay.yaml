@@ -64,9 +64,10 @@ services:
       # deliberately not a question about the link to the centre - a WAN
       # outage is what the relay exists for, and a health check that failed
       # during one would restart the process that is holding the site's
-      # results. The readiness of the upstream link is read from the panel
-      # and from relayctl, not from here.
-      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-tcp", "-addr", "127.0.0.1:8453"]
+      # results. Readiness - the upstream session, the bound of the spool,
+      # the certificate - is /readyz, for an operator and a load balancer,
+      # never for this check.
+      test: ["CMD", "/usr/local/bin/flotestro-healthcheck", "-addr", "127.0.0.1:8454"]
       interval: 30s
       timeout: 5s
       retries: 3

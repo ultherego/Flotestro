@@ -45,10 +45,13 @@ const PacmanName = "pacman"
 // package module: an operation refused by the policy of the distribution is
 // to be recognisable by the panel rather than read out of a sentence.
 const (
-	// ErrorCheckupdatesMissing means the host cannot plan an upgrade without
-	// touching the sync database: checkupdates from pacman-contrib is the
-	// tool that syncs a copy of its own.
-	ErrorCheckupdatesMissing = "checkupdates_missing"
+	// ErrorPlanMetadataMissing means the host has nothing to plan an upgrade
+	// from: neither the copy of the sync database the helper keeps nor a
+	// system database that was ever synced. checkupdates is not in the name
+	// of the code, because the plan does not need it - a host without
+	// pacman-contrib plans from the copy, and only a host without any
+	// repository metadata at all cannot plan.
+	ErrorPlanMetadataMissing = "plan_metadata_missing"
 	// ErrorPartialUpgrade means an upgrade of named packages was ordered on
 	// a distribution that does not support partial upgrades.
 	ErrorPartialUpgrade = "partial_upgrade_unsupported"
@@ -57,11 +60,14 @@ const (
 	ErrorSecurityUnknown = "security_metadata_unavailable"
 )
 
-// ErrCheckupdatesMissing means an upgrade cannot be planned on this host.
-// Planning must not modify the system, and on Arch the only way to see the
-// pending updates without syncing the system database is checkupdates.
-var ErrCheckupdatesMissing = errors.New("checkupdates is not installed, so an upgrade cannot " +
-	"be planned without touching the sync database")
+// ErrPlanMetadataMissing means an upgrade cannot be planned on this host.
+// Planning must not modify the system, so the plan reads repository
+// metadata that is already there: the copy of the sync database the helper
+// keeps, or the host's own sync database when there is no copy. A host on
+// which neither exists has an unknown set of pending updates - and says so
+// instead of answering with an empty plan.
+var ErrPlanMetadataMissing = errors.New("this host has no repository metadata to plan from: " +
+	"no copy of the sync database at " + SyncCopyDir + " and a system database that was never synced")
 
 // ErrPartialUpgrade means an upgrade narrowed to named packages was ordered.
 // Arch supports no partial upgrades: a package raised alone links against
@@ -186,6 +192,7 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 		return plan, fmt.Errorf("%w; plan the upgrade without naming packages", ErrPartialUpgrade)
 	}
 	var pending []Change
+	database := pacmanPlanDatabase()
 	if fileExists(checkupdatesPath) {
 		result := run(ctx, 10*time.Minute, checkupdatesPath, "--nocolor")
 		switch {
@@ -201,10 +208,11 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 		// Without pacman-contrib the plan reads the copy the helper synced
 		// (see Refresh): the pending updates against a fresh copy of the
 		// repositories, with the system database untouched, which is what
-		// checkupdates does. A missing copy is a refusal with a reason: the
-		// agent asks the helper for one before it plans.
+		// checkupdates does. Without a copy it reads the database the host
+		// already has. Either way the plan is computed, so pacman-contrib
+		// is a faster path and not a requirement.
 		var err error
-		if pending, err = p.pendingFromSyncCopy(ctx); err != nil {
+		if pending, err = p.pendingWithoutCheckupdates(ctx, database); err != nil {
 			return plan, err
 		}
 	}
@@ -217,39 +225,112 @@ func (p *Pacman) plan(ctx context.Context, options Options) (Plan, error) {
 		}
 		plan.Changes = append(plan.Changes, change)
 	}
-	copyDir := checkupdatesDB()
-	if !fileExists(checkupdatesPath) {
-		copyDir = SyncCopyDir
-	}
-	p.enrichFromSyncCopy(ctx, &plan, copyDir)
+	p.enrichFromSyncCopy(ctx, &plan, database)
 	plan.RebootPredicted = p.rebootPredicted(plan.Changes)
-	// The sizes of the candidates come from the same copy of the database
-	// the plan came from, so the plan and its sizes agree.
-	plan.Space = p.planSpace(ctx, plan, "--dbpath", copyDir)
+	// The sizes of the candidates come from the same database the plan came
+	// from, so the plan and its sizes agree.
+	plan.Space = p.planSpace(ctx, plan, pacmanDatabaseArgs(database)...)
 	return plan, nil
 }
 
-// pendingFromSyncCopy lists the updates pending against the copy of the
-// sync database the helper keeps (SyncCopyDir). The copy holds the local
-// database as a link, so pacman compares fresh repositories with what is
-// installed, and the query needs no privilege. Without a copy the plan is
-// refused with the same code as a missing checkupdates: nothing was
-// read, and the agent knows to ask the helper for a sync.
-func (p *Pacman) pendingFromSyncCopy(ctx context.Context) ([]Change, error) {
-	if _, ok := SyncCopyAge(); !ok {
-		return nil, fmt.Errorf("%w; no copy of the sync database at %s either", ErrCheckupdatesMissing, SyncCopyDir)
+// pacmanPlanDatabase is the database directory a plan on this host is read
+// from: the one checkupdates syncs for itself where pacman-contrib is
+// installed, the copy the helper keeps where it is not, and the host's own
+// database when there is no copy either. An empty string is the host's own
+// database, which pacman reads with no argument. One function answers this
+// for the plan, for the download of the archives and for the digest of the
+// index the plan was read against, so the three cannot disagree.
+func pacmanPlanDatabase() string {
+	if fileExists(checkupdatesPath) {
+		return checkupdatesDB()
 	}
+	if _, ok := SyncCopyAge(); ok {
+		return SyncCopyDir
+	}
+	return ""
+}
+
+// pacmanDatabaseArgs turns the directory a plan was read from into the
+// arguments of a query against it. An empty directory is the host's own
+// database, which pacman reads with no argument at all - passing an empty
+// --dbpath would point it at the root of the file system.
+func pacmanDatabaseArgs(database string) []string {
+	if database == "" {
+		return nil
+	}
+	return []string{"--dbpath", database}
+}
+
+// pendingWithoutCheckupdates lists the updates pending on a host that has no
+// pacman-contrib, against the database the plan reads.
+//
+// The first source is the copy of the sync database the helper keeps
+// (SyncCopyDir): it holds the local database as a link, so pacman compares
+// fresh repositories with what is installed, and the query needs no
+// privilege. Without a copy the answer comes from the database the host
+// already has - "pacman -Qu" reads it and syncs nothing, so the plan is
+// computed rather than refused, and MetadataRefreshed says against what.
+// Only a host whose own database was never synced either has nothing to
+// answer from, and that is a refusal rather than an empty plan.
+func (p *Pacman) pendingWithoutCheckupdates(ctx context.Context, database string) ([]Change, error) {
+	if database == "" && !pacmanSystemDatabaseSynced() {
+		return nil, ErrPlanMetadataMissing
+	}
+	return p.pendingAgainst(ctx, database)
+}
+
+// pendingAgainst asks pacman what is pending against the given database
+// directory; an empty directory is the host's own.
+func (p *Pacman) pendingAgainst(ctx context.Context, database string) ([]Change, error) {
 	// Exit 1 without output is pacman's way of saying nothing is pending.
-	pending := run(ctx, 2*time.Minute, pacmanPath, "-Qu", "--dbpath", SyncCopyDir)
+	pending := run(ctx, 2*time.Minute, pacmanPath, append([]string{"-Qu"},
+		pacmanDatabaseArgs(database)...)...)
+	source := "the copy"
+	if database == "" {
+		source = "the database of the host"
+	}
 	switch {
 	case !pending.Ran:
-		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
+		return nil, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
 	case pending.ExitCode != 0 && strings.TrimSpace(pending.Stdout) == "":
 		return nil, nil
 	case pending.ExitCode != 0:
-		return nil, fmt.Errorf("pacman -Qu against the copy: %s", pending.Reason())
+		return nil, fmt.Errorf("pacman -Qu against %s: %s", source, pending.Reason())
 	}
 	return ParseCheckupdates(pending.Stdout), nil
+}
+
+// pacmanSystemDatabaseSynced says whether the host's own sync database holds
+// any repository at all. A database directory without a single .db file
+// means the host has never synced, so a query against it would answer "no
+// updates" for the wrong reason.
+func pacmanSystemDatabaseSynced() bool {
+	databases, err := filepath.Glob(filepath.Join(pacmanDatabaseDir, "sync", "*.db"))
+	return err == nil && len(databases) > 0
+}
+
+// PacmanFeatures are the parts of the pacman adapter the host has. They are
+// stated here, next to the operations that carry them out, so the registry
+// the panel reads and the adapter cannot drift apart: the plan works
+// wherever pacman is, because it reads a database that is already there,
+// and the security count is unknown on Arch whatever is installed.
+func PacmanFeatures(pacman bool) map[string]bool {
+	return map[string]bool{
+		"repair":   pacman,
+		"hold":     pacman,
+		"plan":     pacman,
+		"security": false,
+	}
+}
+
+// PacmanReason explains the limits of the adapter on this host. A host with
+// pacman is not told about checkupdates: the tool is a faster path to the
+// same plan, and naming it would read as a missing capability.
+func PacmanReason(pacman bool) string {
+	if !pacman {
+		return "pacman is not installed on this host"
+	}
+	return "the Arch repositories carry no security metadata, so the security count is unknown"
 }
 
 // SyncCopy refreshes the copy of the sync database at SyncCopyDir. It runs
@@ -446,17 +527,18 @@ func ParseCheckupdates(output string) []Change {
 	return changes
 }
 
-// enrichFromSyncCopy fills the origin and the download size in from the copy
-// of the database checkupdates has just synced. A failure leaves the plan as
-// it was: the size is an estimate and the origin a convenience, neither is
-// worth a failed plan.
+// enrichFromSyncCopy fills the origin and the download size in from the
+// database the plan was read against - the copy on a host without
+// pacman-contrib, the host's own where there is no copy. A failure leaves
+// the plan as it was: the size is an estimate and the origin a convenience,
+// neither is worth a failed plan.
 func (p *Pacman) enrichFromSyncCopy(ctx context.Context, plan *Plan, copyDir string) {
 	if len(plan.Changes) == 0 {
 		return
 	}
-	result := run(ctx, 2*time.Minute, pacmanPath, "-Sup", "--noconfirm",
-		"--dbpath", copyDir, "--ignore", AgentPackage,
-		"--print-format", pacmanPrintFormat)
+	args := append([]string{"-Sup", "--noconfirm"}, pacmanDatabaseArgs(copyDir)...)
+	args = append(args, "--ignore", AgentPackage, "--print-format", pacmanPrintFormat)
+	result := run(ctx, 2*time.Minute, pacmanPath, args...)
 	if !result.Ran || result.ExitCode != 0 {
 		return
 	}
@@ -1052,7 +1134,7 @@ func pacmanRebootRequired() bool {
 // copy and an unknown number of updates.
 func (p *Pacman) PendingUpdates(ctx context.Context) (int, string) {
 	if !fileExists(checkupdatesPath) {
-		pending, err := p.pendingFromSyncCopy(ctx)
+		pending, err := p.pendingWithoutCheckupdates(ctx, pacmanPlanDatabase())
 		if err != nil {
 			return 0, err.Error()
 		}

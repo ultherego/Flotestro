@@ -17,6 +17,7 @@ import {
 } from "./shared";
 import { TargetConfirmation } from "./TargetConfirmation";
 import { FacetList, useFleetFacets } from "../Bulk";
+import { HOST_TEAM_PERMISSION, useTeams, type HostTeamFields } from "../Teams";
 import { ActionGuard, ReadOnlyModuleNotice } from "../../components/ActionGuard";
 import { useT } from "../../i18n";
 
@@ -54,6 +55,10 @@ export function Overview() {
     staleTime: 5 * 60 * 1000,
   });
   const canEditFacts = (whoami.data?.permissions ?? []).includes("host.tag.write");
+  // Moving a host between teams is not editing a fact about it: it hands
+  // the machine to other people, so it takes its own permission, the one
+  // only the platform administrator holds out of the box.
+  const canMoveTeam = (whoami.data?.permissions ?? []).includes(HOST_TEAM_PERMISSION);
 
   // A host that has not reported its adapters has an unknown registry,
   // not an empty one: the bar shows dashes until the first report.
@@ -114,6 +119,13 @@ export function Overview() {
                 says so and asks for a reason. */}
             <Fact label={t("Site / environment")}>
               <HostPlacement host={host} editable={canEditFacts} />
+            </Fact>
+            {/* The team stands beside the placement because both answer
+                "where does this host belong", and apart from the owner and
+                the tags because it is the only one of them that decides
+                who may act on the machine. */}
+            <Fact label={t("Team")}>
+              <HostTeam host={host} editable={canMoveTeam} />
             </Fact>
             <Fact label={t("Owner")}>
               <HostFact
@@ -606,6 +618,91 @@ function HostPlacement({ host, editable }: { host: Host; editable: boolean }) {
       </Fields>
       <FormNote>
         {t("Groups that select on the site or the environment take the host in or let it go at their next read; nothing already planned is re-evaluated.")}
+      </FormNote>
+      <FormActions>
+        <button onClick={() => save.mutate()} disabled={save.isPending || !ready}>{save.isPending ? t("saving…") : t("Move")}</button>
+        <button className="secondary" onClick={() => setEditing(false)} disabled={save.isPending}>{t("Cancel")}</button>
+      </FormActions>
+      <Message text={message} error />
+    </Form>
+  );
+}
+
+/**
+ * The team of the host, and the move between teams.
+ *
+ * A host nobody has placed is in no team, which is not a team called
+ * nothing: such a host is reachable through its site alone, and the fact
+ * says so instead of showing a blank. The move has its own permission and
+ * its own reason because it is the one change on this page that hands the
+ * machine to other people - the form says that once, plainly, and the
+ * panel does not repeat the whole doctrine at somebody who is mid-task.
+ */
+export function HostTeam({ host, editable }: { host: Host; editable: boolean }) {
+  const t = useT();
+  const queryClient = useQueryClient();
+  const teams = useTeams();
+  const placement = host as Host & HostTeamFields;
+  const [editing, setEditing] = useState(false);
+  const [team, setTeam] = useState("");
+  const [reason, setReason] = useState("");
+  const [message, setMessage] = useState("");
+
+  const save = useMutation({
+    mutationFn: () =>
+      api.put<Host>(`/api/v1/hosts/${host.id}/team`, { team, reason: reason.trim() }),
+    onSuccess: () => {
+      setEditing(false);
+      setMessage("");
+      queryClient.invalidateQueries({ queryKey: ["host", host.id] });
+      queryClient.invalidateQueries({ queryKey: ["hosts"] });
+      queryClient.invalidateQueries({ queryKey: ["teams"] });
+    },
+    onError: (error) => setMessage(error instanceof Error ? error.message : String(error)),
+  });
+
+  const open = () => {
+    setTeam(placement.team_id ?? "");
+    setReason("");
+    setMessage("");
+    setEditing(true);
+  };
+
+  // Nothing moves when the team is the one the host is already in, so the
+  // button stays shut rather than placing a write the server would answer
+  // with the host unchanged.
+  const ready = reason.trim().length >= 8 && team !== (placement.team_id ?? "");
+
+  if (!editing) {
+    return (
+      <span data-testid="fact-team">
+        {placement.team_name
+          ? <span>{placement.team_name}</span>
+          : <span className="badge unknown" title={t("Nobody has placed this host in a team; it is reachable through its site alone.")}>{t("no team")}</span>}
+        {editable && (
+          <>
+            {" "}
+            <button type="button" className="link" onClick={open} data-testid="move-team">{t("move")}</button>
+          </>
+        )}
+      </span>
+    );
+  }
+  return (
+    <Form>
+      <Fields>
+        <Field label={t("Team")} help={t("The group of people this host belongs to. A team is a boundary of authority, not a label: the hosts of a team are named by the role bindings that name the team.")}>
+          <select value={team} onChange={(e) => setTeam(e.target.value)} data-testid="edit-team">
+            <option value="">{t("no team")}</option>
+            {(teams.data?.items ?? []).map((one) => <option key={one.id} value={one.id}>{one.name}</option>)}
+          </select>
+        </Field>
+        <Field label={t("Reason")} help={t("Required, at least 8 characters; kept in the audit trail.")}>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={t("the payments group took the host over")} data-testid="team-reason" />
+        </Field>
+      </Fields>
+      <FormNote>
+        {t("Moving a host between teams changes who may act on it: from the next request, the operators of the new team may see and change it, and the operators of the old team may not. Work already under way keeps the targets it was planned with.")}
       </FormNote>
       <FormActions>
         <button onClick={() => save.mutate()} disabled={save.isPending || !ready}>{save.isPending ? t("saving…") : t("Move")}</button>

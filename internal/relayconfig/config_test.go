@@ -125,3 +125,63 @@ func TestASecondDocumentIsAnError(t *testing.T) {
 		t.Fatalf("a second document gave %v", err)
 	}
 }
+
+// TestTheHealthListenerHasADefaultAndCanBeTurnedOff guards the
+// difference between a file that says nothing about the health listener
+// and one that turns it off: an installation upgraded from a release
+// without the listener gets it on the loopback, and only an operator who
+// wrote an empty entry loses the answers a container runtime asks for.
+func TestTheHealthListenerHasADefaultAndCanBeTurnedOff(t *testing.T) {
+	cfg, err := Read(strings.NewReader(validConfig))
+	if err != nil {
+		t.Fatalf("the configuration without a health entry was rejected: %v", err)
+	}
+	if cfg.HealthListen() != DefaultHealthListen {
+		t.Fatalf("the health listener without an entry = %q, expected %q",
+			cfg.HealthListen(), DefaultHealthListen)
+	}
+
+	moved := strings.Replace(validConfig, `  listen: "0.0.0.0:8453"`,
+		"  listen: \"0.0.0.0:8453\"\n  health_listen: \"0.0.0.0:8454\"", 1)
+	cfg, err = Read(strings.NewReader(moved))
+	if err != nil {
+		t.Fatalf("a health listener on another address was rejected: %v", err)
+	}
+	if cfg.HealthListen() != "0.0.0.0:8454" {
+		t.Fatalf("the health listener = %q", cfg.HealthListen())
+	}
+
+	off := strings.Replace(validConfig, `  listen: "0.0.0.0:8453"`,
+		"  listen: \"0.0.0.0:8453\"\n  health_listen: \"\"", 1)
+	cfg, err = Read(strings.NewReader(off))
+	if err != nil {
+		t.Fatalf("a health listener turned off was rejected: %v", err)
+	}
+	if cfg.HealthListen() != "" {
+		t.Fatalf("an empty entry gave the health listener %q", cfg.HealthListen())
+	}
+}
+
+// TestTheHealthListenerIsNotThePortOfTheFleet guards the one mistake that
+// would turn a convenience into a leak: the health answer goes out
+// without a client certificate, and on the port of the agents it would
+// hand the state of the site to whoever reaches the relay.
+func TestTheHealthListenerIsNotThePortOfTheFleet(t *testing.T) {
+	cases := []struct {
+		name    string
+		address string
+	}{
+		{"the port of the agents", "127.0.0.1:8453"},
+		{"a privileged port", "127.0.0.1:443"},
+		{"not an address at all", "8454"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			text := strings.Replace(validConfig, `  listen: "0.0.0.0:8453"`,
+				"  listen: \"0.0.0.0:8453\"\n  health_listen: \""+c.address+"\"", 1)
+			if _, err := Read(strings.NewReader(text)); !errors.Is(err, ErrHealthListen) {
+				t.Fatalf("the health listener %s gave %v", c.address, err)
+			}
+		})
+	}
+}

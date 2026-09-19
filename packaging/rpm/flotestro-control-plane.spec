@@ -7,9 +7,14 @@ URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
 
 Requires:       systemd
+Requires:       ca-certificates
 Requires(post): systemd, shadow-utils
 Requires(preun): systemd
-Recommends:     postgresql
+# The database is the operator's: the panel speaks to PostgreSQL over the
+# network protocol and works with a remote server just as well, so neither
+# the server nor psql is installed here. A host that is also to run the
+# database gets it from the operator's own decision.
+Suggests:       postgresql-server
 
 %global _build_id_links none
 %global __strip /bin/true

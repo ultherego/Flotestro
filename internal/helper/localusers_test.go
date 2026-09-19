@@ -15,6 +15,86 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/accounts"
 )
 
+// TestMain makes the shadow tools look present for the tests of this
+// package. The handlers check the tool of an operation before they touch the
+// host, and the machine running the tests is not the host: without this the
+// result of a test would depend on whether the developer's system has chage.
+func TestMain(m *testing.M) {
+	accountToolPresent = func(string) bool { return true }
+	os.Exit(m.Run())
+}
+
+// TestAccountMutationsNeedTheirTool guards that a missing shadow tool takes
+// away exactly one operation, with a refusal that names the tool, and that
+// nothing is attempted on the host. A module that advertised the mutation
+// and failed inside chage would leave the operator with a transaction
+// failure instead of an answer.
+func TestAccountMutationsNeedTheirTool(t *testing.T) {
+	restore := accountToolPresent
+	accountToolPresent = func(tool string) bool { return tool != toolChage }
+	defer func() { accountToolPresent = restore }()
+
+	tool := &fakeAccountTool{}
+	server := accountServer(tool, map[string]accountRecord{
+		"smith": {Name: "smith", UID: 1500, GID: 1500, Home: "/home/smith", InPasswd: true},
+	})
+
+	expiry := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY,
+		func(a *helperv1.LocalUserActionRequest) { a.ExpiresAt = "2030-01-01" }), nil)
+	if expiry.GetAccepted() {
+		t.Fatal("the expiry was set on a host without chage")
+	}
+	if expiry.GetErrorCode() != ErrorAccountToolMissing {
+		t.Errorf("code = %q, expected %s", expiry.GetErrorCode(), ErrorAccountToolMissing)
+	}
+	if !strings.Contains(expiry.GetMessage(), toolChage) {
+		t.Errorf("the refusal does not name the missing tool: %s", expiry.GetMessage())
+	}
+	if len(tool.calls) != 0 {
+		t.Errorf("the host was touched despite the refusal: %v", tool.calls)
+	}
+
+	// The operations whose tool is there keep working: one missing tool is
+	// one missing operation, not a module that has gone.
+	groups := server.handle(context.Background(), accountRequest(
+		helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS,
+		func(a *helperv1.LocalUserActionRequest) { a.Groups = []string{"developers"} }), nil)
+	if !groups.GetAccepted() {
+		t.Fatalf("the groups were refused: %s %s", groups.GetErrorCode(), groups.GetMessage())
+	}
+
+	features := LocalAccountFeatures()
+	if features[FeatureAccountExpiry] {
+		t.Error("the expiry is reported as available on a host without chage")
+	}
+	for _, feature := range []string{FeatureAccountCreate, FeatureAccountLock,
+		FeatureAccountGroups, FeatureAccountDelete, FeatureAccountSSHKeys} {
+		if !features[feature] {
+			t.Errorf("%s is reported as unavailable although its tool is there", feature)
+		}
+	}
+	reason := LocalAccountsReason()
+	if !strings.Contains(reason, toolChage) || !strings.Contains(reason, "shadow-utils") {
+		t.Errorf("the reason names neither the tool nor the package: %q", reason)
+	}
+}
+
+// TestLocalAccountsReasonIsEmptyOnACompleteHost guards that a host with the
+// tools gets no sentence: a reason on an adapter that works would show in
+// the panel as a limitation nobody has.
+func TestLocalAccountsReasonIsEmptyOnACompleteHost(t *testing.T) {
+	if missing := MissingLocalAccountTools(); len(missing) != 0 {
+		t.Fatalf("the stub of the tools reports %v as missing", missing)
+	}
+	if reason := LocalAccountsReason(); reason != "" {
+		t.Errorf("reason = %q on a host with every tool", reason)
+	}
+	if keys := LocalAccountFeatures()[FeatureAccountSSHKeys]; !keys {
+		t.Error("the keys are written by the helper itself and are always there")
+	}
+}
+
 // TestShadowSemantics guards the separation of a lock from a missing password.
 // An account created by the panel has no password and logs in with an SSH key;
 // showing it as locked would be false information about access being cut off.

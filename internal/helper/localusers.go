@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -213,4 +214,97 @@ func homeDirectory(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("the account has no entry in /etc/passwd")
+}
+
+// The tools the module changes accounts with. Every one of them comes from
+// one package of the distribution - passwd on Debian and Ubuntu,
+// shadow-utils on Fedora and RHEL, shadow on Arch - and the agent package
+// depends on it, so a host installed from our packages has them all. A host
+// that lost them keeps the module: reading the accounts needs nothing but
+// NSS and /etc/shadow, and only the mutation that uses the missing tool is
+// gone.
+const (
+	toolUseradd = "useradd"
+	toolUsermod = "usermod"
+	toolUserdel = "userdel"
+	toolChage   = "chage"
+)
+
+// LocalAccountTools are the tools the mutations of the module need.
+var LocalAccountTools = []string{toolUseradd, toolUsermod, toolUserdel, toolChage}
+
+// LocalAccountToolsPackage names what restores them. The panel shows the
+// name of a package rather than the name of a binary, because that is what
+// an operator installs; the families name the same tools differently.
+const LocalAccountToolsPackage = "passwd on Debian and Ubuntu, shadow-utils on Fedora and RHEL, shadow on Arch"
+
+// accountToolDirectories are the directories the tools are looked for in.
+// They are the search path of the runner that starts them, so the capability
+// and the operation cannot disagree about what the host has.
+var accountToolDirectories = []string{"/usr/bin", "/usr/sbin", "/sbin"}
+
+// accountToolPresent says whether the host has the tool. It is a variable so
+// a test can answer for a host it is not running on; nothing is started, as
+// the capability registry must not run a process to find out what is there.
+var accountToolPresent = func(tool string) bool {
+	for _, directory := range accountToolDirectories {
+		info, err := os.Stat(filepath.Join(directory, tool))
+		if err == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// MissingLocalAccountTools lists the tools of LocalAccountTools this host has
+// not got, in the order of the list.
+func MissingLocalAccountTools() []string {
+	var missing []string
+	for _, tool := range LocalAccountTools {
+		if !accountToolPresent(tool) {
+			missing = append(missing, tool)
+		}
+	}
+	return missing
+}
+
+// The features of the local account capability. One feature is one operation
+// of the panel, because one missing tool takes away one operation and not
+// the module: a host without chage still creates and locks accounts.
+const (
+	FeatureAccountCreate  = "create"
+	FeatureAccountLock    = "lock"
+	FeatureAccountGroups  = "groups"
+	FeatureAccountExpiry  = "expiry"
+	FeatureAccountDelete  = "delete"
+	FeatureAccountSSHKeys = "sshkeys"
+)
+
+// LocalAccountFeatures says which operations of the module this host can
+// carry out. The keys are written by the helper itself into the file of the
+// account, so they need no tool of the distribution and are there wherever
+// the module is.
+func LocalAccountFeatures() map[string]bool {
+	usermod := accountToolPresent(toolUsermod)
+	return map[string]bool{
+		FeatureAccountCreate:  accountToolPresent(toolUseradd),
+		FeatureAccountLock:    usermod,
+		FeatureAccountGroups:  usermod,
+		FeatureAccountExpiry:  accountToolPresent(toolChage),
+		FeatureAccountDelete:  accountToolPresent(toolUserdel),
+		FeatureAccountSSHKeys: true,
+	}
+}
+
+// LocalAccountsReason explains what the module cannot do here. A host with
+// every tool gets no sentence: the reason exists to name the missing tool
+// and the package that brings it back, and the panel shows it next to the
+// operations it has hidden.
+func LocalAccountsReason() string {
+	missing := MissingLocalAccountTools()
+	if len(missing) == 0 {
+		return ""
+	}
+	return "this host has no " + strings.Join(missing, ", ") +
+		", so the accounts can be read and not changed here; install " + LocalAccountToolsPackage
 }

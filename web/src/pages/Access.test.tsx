@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { expiresSoon, matchesIdentity, permissionMatrix, tabFromParam } from "./Access";
+import { expiresSoon, grantRequest, matchesIdentity, permissionMatrix, scopeKind, tabFromParam } from "./Access";
 import { exportFileName, targetLink, toLocalInput } from "./Audit";
 
 /* The access screen decides a few things without the server: which tab
@@ -86,5 +86,69 @@ describe("the audit page", () => {
     expect(new Date(local).toISOString()).toBe("2026-09-15T12:34:00.000Z");
     expect(toLocalInput("")).toBe("");
     expect(toLocalInput("yesterday")).toBe("");
+  });
+});
+
+/*
+ * A role binding names a team, or a site and an environment, never both.
+ * The server refuses a request that names both with scope_conflict; the
+ * panel must never be able to send one, so the form is a choice of
+ * vocabulary and the request is built from that choice alone. The two
+ * functions below are what the form and the tables read, so both are
+ * checked here without a screen.
+ */
+
+const principal = "5f1c9e6a-0000-4000-8000-000000000001";
+const team = "8f2b1d3e-0000-4000-8000-000000000001";
+
+describe("grantRequest", () => {
+  const filled = {
+    role: "operator", site: "lab", environment: "test", team,
+    validUntil: "", reason: "  on-call rotation for the quarter  ",
+  };
+
+  it("sends a site binding to the role route, with no team in the body", () => {
+    const request = grantRequest(principal, "site", filled);
+    expect(request.path).toBe(`/api/v1/principals/${principal}/roles`);
+    expect(request.body).toEqual({
+      role: "operator", site: "lab", environment: "test",
+      valid_until: "", reason: "on-call rotation for the quarter",
+    });
+    expect(request.body).not.toHaveProperty("team");
+  });
+
+  it("sends a team binding to the team-roles route, with no site or environment in the body", () => {
+    const request = grantRequest(principal, "team", filled);
+    expect(request.path).toBe(`/api/v1/principals/${principal}/team-roles`);
+    expect(request.body).toEqual({
+      role: "operator", team,
+      valid_until: "", reason: "on-call rotation for the quarter",
+    });
+    // The fields of the other vocabulary are not sent empty; they are not
+    // sent at all, which is what makes scope_conflict unreachable from
+    // the panel even when the operator typed a site first.
+    expect(request.body).not.toHaveProperty("site");
+    expect(request.body).not.toHaveProperty("environment");
+  });
+
+  it("never names both vocabularies, whatever the fields hold", () => {
+    for (const scope of ["site", "team"] as const) {
+      const body = grantRequest(principal, scope, filled).body;
+      const namesTeam = "team" in body;
+      const namesSite = "site" in body || "environment" in body;
+      expect(namesTeam && namesSite).toBe(false);
+    }
+  });
+});
+
+describe("scopeKind", () => {
+  it("reads a binding with a team as a team binding", () => {
+    expect(scopeKind({ site: "*", environment: "*", team })).toBe("team");
+  });
+
+  it("reads a binding without one as a site binding, so a team is never shown as the whole fleet", () => {
+    expect(scopeKind({ site: "*", environment: "*" })).toBe("site");
+    expect(scopeKind({ site: "lab", environment: "prod" })).toBe("site");
+    expect(scopeKind(undefined)).toBe("site");
   });
 });

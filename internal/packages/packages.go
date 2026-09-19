@@ -66,8 +66,10 @@ func ErrorCodeOf(err error) (string, bool) {
 		return ErrorModulesHidden, true
 	case errors.Is(err, ErrDatabaseBroken):
 		return ErrorDatabaseBroken, true
-	case errors.Is(err, ErrCheckupdatesMissing):
-		return ErrorCheckupdatesMissing, true
+	case errors.Is(err, ErrPlanMetadataMissing):
+		return ErrorPlanMetadataMissing, true
+	case errors.Is(err, ErrVersionlockMissing):
+		return ErrorVersionlockMissing, true
 	case errors.Is(err, ErrPartialUpgrade):
 		return ErrorPartialUpgrade, true
 	case errors.Is(err, ErrSecurityUnknown):
@@ -87,7 +89,8 @@ func ErrorCodeOf(err error) (string, bool) {
 // failure of a transaction: the operation asked for something this host
 // cannot do or its distribution does not allow, and nothing was attempted.
 func Refused(err error) bool {
-	return errors.Is(err, ErrLocked) || errors.Is(err, ErrCheckupdatesMissing) ||
+	return errors.Is(err, ErrLocked) || errors.Is(err, ErrPlanMetadataMissing) ||
+		errors.Is(err, ErrVersionlockMissing) ||
 		errors.Is(err, ErrPartialUpgrade) || errors.Is(err, ErrSecurityUnknown) ||
 		errors.Is(err, ErrNoSpace) || errors.Is(err, plan.ErrStalePlan) ||
 		errors.Is(err, plan.ErrReplanRequired) || errors.Is(err, plan.ErrPlanExpired)

@@ -162,6 +162,16 @@ type Effective struct {
 	// SecretsKeyFile is where the key of the secret store lies; the key
 	// itself is not here.
 	SecretsKeyFile string
+
+	// DatabasePool is the shape of the connection pool of this replica,
+	// as it was resolved. The screens show it because the budget it takes
+	// out of the database is shared with every other replica, and the
+	// first question after "too many clients already" is how much this
+	// one was allowed to take.
+	DatabasePool DatabasePool
+	// Migration says how this process treats the schema: whether it
+	// brings it forward itself, and under which role it would.
+	Migration Migration
 }
 
 // EffectiveIdentity describes the identity provider the operators sign in

@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: Flotestro <flotestro@localhost>
-Depends: systemd, adduser
+Depends: systemd, ca-certificates, passwd
 Description: Flotestro site relay
  The relay mediates between the agents of one site and the centre: it keeps
  one upstream connection instead of hundreds, buffers results for the

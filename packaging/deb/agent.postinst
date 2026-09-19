@@ -6,17 +6,21 @@ case "$1" in
 configure)
     # A service account without a shell and without a home directory: the
     # agent is not an identity anybody logs into the host with. The
-    # declaration in sysusers.d is the source; adduser is the fallback for
-    # a system without systemd-sysusers.
+    # declaration in sysusers.d is the source; useradd is the fallback for
+    # a system without systemd-sysusers. The fallback uses the shadow tools
+    # from the passwd package the agent depends on anyway, so the package
+    # does not pull the adduser wrapper in for one line of a maintainer
+    # script.
     if ! getent passwd flotestro-agent >/dev/null; then
         if command -v systemd-sysusers >/dev/null 2>&1; then
             systemd-sysusers /usr/lib/sysusers.d/flotestro-agent.conf >/dev/null 2>&1 || true
         fi
     fi
     if ! getent passwd flotestro-agent >/dev/null; then
-        adduser --system --group --no-create-home \
-            --home /var/lib/flotestro-agent --shell /usr/sbin/nologin \
-            flotestro-agent >/dev/null
+        getent group flotestro-agent >/dev/null || groupadd --system flotestro-agent
+        useradd --system --gid flotestro-agent --no-create-home \
+            --home-dir /var/lib/flotestro-agent --shell /usr/sbin/nologin \
+            flotestro-agent
     fi
 
     # Reading the journal without root requires membership in the

@@ -225,11 +225,10 @@ func (p *Pacman) ApplyExact(ctx context.Context, approved Plan, options Options)
 		upgrade := approved.Mode == "" || approved.Mode == ModeUpgrade
 		var printArgs, downloadArgs []string
 		if upgrade {
-			copyDir := checkupdatesDB()
-			if !fileExists(checkupdatesPath) {
-				copyDir = SyncCopyDir
-			}
-			database := []string{"--dbpath", copyDir}
+			// The archives are fetched against the same database the plan
+			// was read from, so the transaction carries out the plan that
+			// was approved.
+			database := pacmanDatabaseArgs(pacmanPlanDatabase())
 			printArgs = append([]string{"-Sup", "--noconfirm", "--ignore", AgentPackage,
 				"--print-format", pacmanPrintFormat}, database...)
 			downloadArgs = append([]string{"-Suw", "--noconfirm", "--noprogressbar", "--ignore", AgentPackage}, database...)

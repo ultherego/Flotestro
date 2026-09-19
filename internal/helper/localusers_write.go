@@ -50,7 +50,24 @@ const (
 	ErrorManagedFileNotRead = "managed_file_not_read"
 	ErrorInvalidKey         = "invalid_ssh_key"
 	ErrorStaleKeyList       = "stale_plan"
+	// ErrorAccountToolMissing marks an operation the host has no tool for:
+	// the shadow tools are a dependency of the agent package, and a host
+	// that lost one of them is to hear which one before anything is
+	// attempted. The same fact is in the capability registry, so this
+	// refusal is the second line of defence rather than the first.
+	ErrorAccountToolMissing = "account_tool_missing"
 )
+
+// accountOperationTools name the tool every mutation of the module needs.
+// The key operations are not here: the helper writes the key file itself.
+var accountOperationTools = map[helperv1.LocalUserActionRequest_Operation]string{
+	helperv1.LocalUserActionRequest_OPERATION_CREATE:     toolUseradd,
+	helperv1.LocalUserActionRequest_OPERATION_LOCK:       toolUsermod,
+	helperv1.LocalUserActionRequest_OPERATION_UNLOCK:     toolUsermod,
+	helperv1.LocalUserActionRequest_OPERATION_SET_GROUPS: toolUsermod,
+	helperv1.LocalUserActionRequest_OPERATION_SET_EXPIRY: toolChage,
+	helperv1.LocalUserActionRequest_OPERATION_DELETE:     toolUserdel,
+}
 
 // uidRangeReader reads the UID range of people from the host's login.defs
 // right before a write: the same classifier the inventory uses, read
@@ -131,6 +148,16 @@ func (s *Server) applyLocalUserAction(ctx context.Context, request *helperv1.Hel
 
 	operationCtx, cancel := deadline(ctx, request, 60*time.Second, 5*time.Minute)
 	defer cancel()
+
+	// The tool the operation needs is checked before the account is touched.
+	// Without it the tool runner would fail halfway through with a sentence
+	// about a missing binary, and a refusal that names the tool and the
+	// package is an answer the operator can act on.
+	if tool, needed := accountOperationTools[action.GetOperation()]; needed && !accountToolPresent(tool) {
+		return reject(ErrorAccountToolMissing, fmt.Sprintf(
+			"this host has no %s, so the operation cannot be carried out; install %s",
+			tool, LocalAccountToolsPackage))
+	}
 
 	switch action.GetOperation() {
 	case helperv1.LocalUserActionRequest_OPERATION_CREATE:

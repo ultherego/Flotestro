@@ -4,9 +4,13 @@ set -e
 
 case "$1" in
 configure)
+    # The service account is made with the shadow tools from the passwd
+    # package, the same ones the .rpm scriptlet uses; the adduser wrapper
+    # would be a dependency for one line of a maintainer script.
     if ! getent passwd flotestro >/dev/null; then
-        adduser --system --group --no-create-home \
-            --home /var/lib/flotestro --shell /usr/sbin/nologin flotestro >/dev/null
+        getent group flotestro >/dev/null || groupadd --system flotestro
+        useradd --system --gid flotestro --no-create-home \
+            --home-dir /var/lib/flotestro --shell /usr/sbin/nologin flotestro
     fi
 
     # The state directory holds the fleet CA key - the most sensitive

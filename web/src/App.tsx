@@ -65,6 +65,7 @@ import { Reports } from "./pages/Reports";
 import { Notifications } from "./pages/Notifications";
 import { Profile } from "./pages/Profile";
 import { Tags } from "./pages/Tags";
+import { Teams } from "./pages/Teams";
 import { PreferencesProvider, usePreferences } from "./lib/preferences";
 import { Bulk } from "./pages/Bulk";
 import { Campaigns } from "./pages/Campaigns";
@@ -218,6 +219,10 @@ export function App() {
         // Access management is seen only by whoever can change anything in
         // it; for the rest the item would lead to a bare refusal.
         ...(managesAccess ? [{ to: "/access", label: "Access", icon: "access" as const }] : []),
+        // A team is a boundary of authority rather than a label, so it
+        // stands with the access rules and not with the groups and the
+        // tags, which only choose hosts inside what somebody may touch.
+        { to: "/teams", label: "Teams", icon: "accounts" as const },
       ],
     },
     {
@@ -275,6 +280,7 @@ export function App() {
               <Route path="/" element={<Landing />} />
               <Route path="/profile" element={<Profile theme={theme} setTheme={setTheme} />} />
               <Route path="/tags" element={<Tags />} />
+              <Route path="/teams" element={<Teams />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/setup" element={<Setup />} />

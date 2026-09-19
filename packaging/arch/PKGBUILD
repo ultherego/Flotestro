@@ -13,7 +13,16 @@ pkgdesc='Flotestro fleet agent'
 arch=('x86_64' 'aarch64')
 url='https://github.com/ultherego/flotestro'
 license=('LicenseRef-Flotestro')
-depends=('systemd' 'ca-certificates')
+# The whole of what the agent needs at run time: the units and the journal,
+# the trust store for the session to the control plane, and the shadow tools
+# the local account module mutates accounts with. Every other module drives a
+# tool the host already has; a tool that is not there disables exactly one
+# capability, which the agent reports as unavailable by name.
+depends=('systemd' 'ca-certificates' 'shadow')
+# checkupdates is a faster way to the same upgrade plan, not a requirement:
+# without pacman-contrib the plan is computed from the private copy of the
+# sync database the helper keeps, with the system database untouched.
+optdepends=('pacman-contrib: faster upgrade plan through checkupdates')
 # The host configuration survives package updates; the new version lands
 # next to it as .pacnew and must be visible in diagnostics.
 backup=('etc/flotestro/agent.yaml')

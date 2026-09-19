@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 
+	"github.com/ultherego/flotestro/internal/helper"
 	"github.com/ultherego/flotestro/internal/modules/backup"
 	"github.com/ultherego/flotestro/internal/modules/certificates"
 	"github.com/ultherego/flotestro/internal/modules/firewall"
@@ -11,6 +12,7 @@ import (
 	"github.com/ultherego/flotestro/internal/modules/security"
 	"github.com/ultherego/flotestro/internal/modules/storage"
 	hosttime "github.com/ultherego/flotestro/internal/modules/time"
+	"github.com/ultherego/flotestro/internal/packages"
 	"github.com/ultherego/flotestro/internal/relayproof"
 )
 
@@ -74,6 +76,12 @@ const (
 	// Backup. The module drives a tool the host already has: without the tool
 	// and without runbooks there is nothing to make a copy with.
 	CapBackup = "backup"
+	// The local accounts of the host. The read works everywhere: the
+	// accounts come from NSS and the lock states from /etc/shadow. The
+	// mutations need the shadow tools, and every one of them is a feature
+	// of its own, because a missing tool takes away one operation and not
+	// the module.
+	CapAccountsLocal = "accounts.local"
 	// CapHelperCapability says this agent forwards the panel's signed
 	// capability to the root helper. The features name the mode the helper
 	// reported - observe, prefer or enforce - one of them true once the
@@ -234,10 +242,10 @@ func DetectCapabilities() Capabilities {
 	apt := isExecutable("/usr/bin/apt-get")
 	dnf := isExecutable("/usr/bin/dnf") || isExecutable("/usr/bin/dnf5")
 	pacman := isExecutable("/usr/bin/pacman")
-	// checkupdates from pacman-contrib is the only way to see the pending
-	// updates without syncing the system database; without it the module
-	// works, only without a plan.
-	checkupdates := pacman && isExecutable("/usr/bin/checkupdates")
+	// Holding a package version on dnf is the versionlock plugin, and a host
+	// without it has the module without the hold. The plugin is recognised
+	// by its files, because detection must start no process.
+	versionlock := dnf && packages.VersionlockInstalled()
 	docker := exists("/var/run/docker.sock") || exists("/run/docker.sock")
 	compose := docker && composePlugin() != ""
 	journald := exists("/run/systemd/journal/socket")
@@ -327,26 +335,28 @@ func DetectCapabilities() Capabilities {
 			Name:      CapDNF,
 			Version:   adapterVersion,
 			Available: dnf,
-			Reason:    reason(dnf, "dnf is not installed on this host"),
-			// An rpm database lock looks different from a debconf question, and the repair
-			// would look different too, so the adapter does not have it.
-			Features: map[string]bool{"repair": false},
+			Reason:    packages.DNFReason(dnf, versionlock),
+			Features:  packages.DNFFeatures(dnf, versionlock),
 		},
 		{
 			Name:      CapPacman,
 			Version:   adapterVersion,
 			Available: pacman,
-			Reason:    pacmanReason(pacman, checkupdates),
-			Features: map[string]bool{
-				// The repair removes a stale database lock and checks the
-				// local database; the hold is a line in pacman.conf.
-				"repair": pacman,
-				"hold":   pacman,
-				"plan":   checkupdates,
-				// The Arch repositories carry no security metadata, so the
-				// number of security updates is unknown rather than zero.
-				"security": false,
-			},
+			// The plan reads a database that is already on the host, so it
+			// works wherever pacman is; checkupdates is a faster path to the
+			// same answer and not a requirement.
+			Reason:   packages.PacmanReason(pacman),
+			Features: packages.PacmanFeatures(pacman),
+		},
+		{
+			Name:    CapAccountsLocal,
+			Version: adapterVersion,
+			// The module reads everywhere: a missing shadow tool is a fact
+			// about the host, not a missing module.
+			Available: true,
+			ReadOnly:  len(helper.MissingLocalAccountTools()) == len(helper.LocalAccountTools),
+			Features:  helper.LocalAccountFeatures(),
+			Reason:    helper.LocalAccountsReason(),
 		},
 		{
 			Name:      CapNetwork,
@@ -416,9 +426,8 @@ func DetectCapabilities() Capabilities {
 			Name:    CapMonitoring,
 			Version: adapterVersion,
 			// A probe needs nothing beyond the network, so the module works
-			// wszedzie. Metryki i alerty czyta panel z systemow centralnych,
-			// and not the agent - the host gets not a single
-			// dodatkowego collectora.
+			// everywhere. The metrics and the alerts are read by the panel,
+			// not by the agent - the host gets not a single extra collector.
 			Available: true,
 			Features:  map[string]bool{"probe.http": true, "probe.tcp": true},
 		},
@@ -624,20 +633,6 @@ func resolverAdapterReason(resolver bool, adapter string) string {
 			"would be overwritten by whoever owns the file"
 	}
 	return ""
-}
-
-// pacmanReason explains what the pacman module is missing. A host without
-// checkupdates has the module, only without a plan - and it is to say so
-// rather than fail a plan after the order.
-func pacmanReason(pacman, checkupdates bool) string {
-	if !pacman {
-		return "pacman is not installed on this host"
-	}
-	if !checkupdates {
-		return "checkupdates (pacman-contrib) is not installed, so upgrades cannot be planned " +
-			"without touching the sync database; the security count is unknown on Arch"
-	}
-	return "the Arch repositories carry no security metadata, so the security count is unknown"
 }
 
 // sshdReason explains what the sshd module is missing.

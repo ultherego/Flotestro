@@ -7,6 +7,7 @@ URL:            https://github.com/ultherego/flotestro
 BuildArch:      %{_target_cpu}
 
 Requires:       systemd
+Requires:       ca-certificates
 Requires(post): systemd, shadow-utils
 Requires(preun): systemd
 

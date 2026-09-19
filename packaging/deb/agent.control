@@ -4,8 +4,7 @@ Section: admin
 Priority: optional
 Architecture: __ARCH__
 Maintainer: Flotestro <flotestro@localhost>
-Depends: systemd, adduser
-Recommends: systemd-journal-remote
+Depends: systemd, ca-certificates, passwd
 Description: Flotestro fleet agent
  The agent connects a host to the Linux fleet management panel. It keeps an
  mTLS session to the control plane, reports the inventory and carries out
@@ -15,3 +14,11 @@ Description: Flotestro fleet agent
  Operations that require root are carried out by a separate helper process
  started by a systemd socket, which verifies the caller by SO_PEERCRED. The
  agent itself runs without root privileges.
+ .
+ The package installs the minimum: systemd, the trust store and the shadow
+ tools the local account module changes accounts with. Every other module
+ drives a tool the host already has, and a tool that is not there disables
+ exactly one capability, which the agent reports as unavailable with the
+ reason and the name of the missing package - it installs neither a network
+ backend, nor a firewall, nor a backup tool, nor a journal forwarder of its
+ own.

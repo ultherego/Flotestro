@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
@@ -80,6 +81,13 @@ func main() {
 }
 
 func run() error {
+	// Which of the three things this process is, before anything else: the
+	// serving control plane, the migrator, or the check that answers
+	// whether the schema is the one this binary expects.
+	cmd, args, err := parseCommand(os.Args[1:])
+	if err != nil {
+		return err
+	}
 	cfg := config.ControlPlane{}
 	// The secrets are read before the flags are defined, so that an
 	// installation can mount each of them as a file instead of putting the
@@ -101,6 +109,14 @@ func run() error {
 		return err
 	}
 	nvdKey, err := config.OptionalSecretValue("FLOTESTRO_VULN_NVD_KEY")
+	if err != nil {
+		return err
+	}
+	// The DSN of the migrator. A deployment with separate roles hands the
+	// migration job a login that may run DDL and the serving replicas one
+	// that may not; a quick start configures neither and everything runs
+	// on the single FLOTESTRO_DATABASE_URL.
+	migrationURL, err := config.OptionalSecretValue(config.EnvMigrationDatabaseURL)
 	if err != nil {
 		return err
 	}
@@ -360,14 +376,76 @@ func run() error {
 	productionList := flag.String("production-environments",
 		config.Env("FLOTESTRO_PRODUCTION_ENVIRONMENTS", "prod,production"),
 		"the environments where a change has to be approved by a second person")
-	// A run that only brings the schema forward. The installer and the
-	// continuous integration need the migrations applied, not a control
-	// plane listening, and applying them with another tool would test
-	// another tool.
+	// The deprecated spelling of the migrate command. It stays because the
+	// installer and the continuous integration call it; the process says
+	// in the log what to call instead.
 	migrateOnly := flag.Bool("migrate-only",
 		config.Env("FLOTESTRO_MIGRATE_ONLY", "") != "",
-		"apply the missing migrations and exit; nothing is served")
-	flag.Parse()
+		"deprecated: the old spelling of the migrate command")
+	// The shape of the connection pool of this replica and the contract of
+	// the schema. Both are read from the environment first, and a value
+	// that cannot be read or contradicts itself stops the start there: a
+	// replica allowed to open more connections than the server answers is
+	// an outage of the whole fleet at the next restart, not a preference.
+	dbPool, err := config.DatabasePoolFromEnv()
+	if err != nil {
+		return err
+	}
+	migration, err := config.MigrationFromEnv()
+	if err != nil {
+		return err
+	}
+	dbMaxConns := flag.Int("db-max-conns", int(dbPool.MaxConns),
+		"how many connections this replica may open; every replica takes its own share of max_connections")
+	dbMinConns := flag.Int("db-min-conns", int(dbPool.MinConns),
+		"how many connections the pool keeps open while the fleet is quiet")
+	dbMaxConnLifetime := flag.Duration("db-max-conn-lifetime", dbPool.MaxConnLifetime,
+		"how long a connection is used before it is retired while healthy")
+	dbMaxConnIdleTime := flag.Duration("db-max-conn-idle-time", dbPool.MaxConnIdleTime,
+		"how long an unused connection is kept before it is given back")
+	dbHealthCheckPeriod := flag.Duration("db-health-check-period", dbPool.HealthCheckPeriod,
+		"how often the pool looks at the connections it holds")
+	dbConnectTimeout := flag.Duration("db-connect-timeout", dbPool.ConnectTimeout,
+		"how long one attempt to open a connection may take; it stays under the start-up wait")
+	autoMigrate := flag.Bool("auto-migrate", migration.AutoMigrate,
+		"let the serving process bring the schema forward itself; the quick start does, "+
+			"a deployment with a migration job sets it to false")
+	migrationRole := flag.String("migration-role", migration.Role,
+		"the role the migrator takes on after connecting, usually the NOLOGIN owner of the schema")
+	migrationLockWait := flag.Duration("migration-lock-wait", migration.LockWait,
+		"how long a migrator waits for another one that already holds the schema lock")
+	if err := flag.CommandLine.Parse(args); err != nil {
+		return err
+	}
+
+	// The whole numbers of the pool are the int32 the pool driver takes; a
+	// value that would wrap around is refused rather than turned into a
+	// pool of a different size than the one that was asked for.
+	if *dbMaxConns < 0 || *dbMaxConns > math.MaxInt32 || *dbMinConns < 0 || *dbMinConns > math.MaxInt32 {
+		return fmt.Errorf("the connection counts are whole numbers between 0 and %d", math.MaxInt32)
+	}
+	dbPool.MaxConns = int32(*dbMaxConns)
+	dbPool.MinConns = int32(*dbMinConns)
+	dbPool.MaxConnLifetime = *dbMaxConnLifetime
+	dbPool.MaxConnIdleTime = *dbMaxConnIdleTime
+	dbPool.HealthCheckPeriod = *dbHealthCheckPeriod
+	dbPool.ConnectTimeout = *dbConnectTimeout
+	// A connect timeout named on the command line counts as named: it wins
+	// against a connect_timeout the DSN carries, exactly as the variable
+	// does.
+	if flagWasSet("db-connect-timeout") {
+		dbPool.ConnectTimeoutSet = true
+	}
+	if err := dbPool.Validate(); err != nil {
+		return err
+	}
+	migration.AutoMigrate = *autoMigrate
+	migration.Role = strings.TrimSpace(*migrationRole)
+	migration.LockWait = *migrationLockWait
+	if migration.LockWait <= 0 {
+		return fmt.Errorf("-migration-lock-wait is %s; a migrator that does not wait for the one "+
+			"already running is a migrator that races it", migration.LockWait)
+	}
 
 	// A raw retention shorter than the window the panel offers plus the
 	// longest a sample may take to arrive deletes a reading a relay is
@@ -402,29 +480,107 @@ func run() error {
 
 	cfg.GatewayID = config.Env("FLOTESTRO_GATEWAY_ID", defaultGatewayID())
 	cfg.StaleAfter = time.Duration(cfg.HeartbeatSeconds+cfg.HeartbeatJitter) * 3 * time.Second
-	if err := cfg.Validate(); err != nil {
-		return err
-	}
 
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
+	if *migrateOnly {
+		if cmd == commandServe {
+			cmd = commandMigrate
+		}
+		log.Warn("-migrate-only is the deprecated spelling of the migrate command",
+			"call_instead", "flotestro-control-plane migrate")
+	}
+	// A migration job has no CA, no listeners and no state directory of its
+	// own, so only the serving process is held to the whole contract.
+	if cmd == commandServe {
+		if err := cfg.Validate(); err != nil {
+			return err
+		}
+	}
+	// The migrator uses the DSN of its own role where the deployment gives
+	// it one; everything else runs on the runtime DSN.
+	dsn := cfg.DatabaseURL
+	if cmd == commandMigrate && migrationURL != "" {
+		dsn = migrationURL
+	}
+	if dsn == "" {
+		return fmt.Errorf("no database is configured: set FLOTESTRO_DATABASE_URL_FILE, or %s_FILE for the %s command",
+			config.EnvMigrationDatabaseURL, commandMigrate)
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	pool, err := database.Open(ctx, dsn, dbPool)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	log.Info("the connection pool is open", "command", string(cmd),
+		"max_conns", dbPool.MaxConns, "min_conns", dbPool.MinConns,
+		"max_conn_lifetime", dbPool.MaxConnLifetime.String(),
+		"max_conn_idle_time", dbPool.MaxConnIdleTime.String(),
+		"health_check_period", dbPool.HealthCheckPeriod.String(),
+		"connect_timeout", dbPool.ConnectTimeout.String())
 
-	if err := database.Migrate(ctx, pool); err != nil {
-		return err
+	migrateOptions := database.MigrateOptions{
+		Role: migration.Role, LockWait: migration.LockWait, Log: log,
 	}
-	log.Info("the database schema is current")
-	if *migrateOnly {
+	switch cmd {
+	case commandMigrate:
+		if err := database.Migrate(ctx, pool, migrateOptions); err != nil {
+			return err
+		}
+		report, err := database.CheckSchema(ctx, pool)
+		if err != nil {
+			return err
+		}
+		// A migrator that carries fewer migrations than the database
+		// already has is an older image pointed at an upgraded database.
+		// It applied nothing, and saying "done" would let a deployment
+		// carry on towards replicas that will refuse to serve.
+		if report.Code() == database.CodeSchemaAhead {
+			return schemaRefusal(log, report, "the migration changed nothing")
+		}
+		log.Info("the schema was brought forward", "level", report.Level, "applied", report.Applied)
+		return nil
+	case commandSchemaCheck:
+		report, err := database.CheckSchema(ctx, pool)
+		if err != nil {
+			return err
+		}
+		if !report.Current() {
+			return schemaRefusal(log, report, "the schema of the database is not the one this binary expects")
+		}
+		log.Info("the schema of the database is the one this binary expects",
+			"level", report.Level, "applied", report.Applied)
 		return nil
 	}
+
+	// Serving. Bringing the schema forward at the start is the quick
+	// start: one DSN owns the schema and serves the fleet. A deployment
+	// with a migration job of its own turns it off, and then this process
+	// only reads the schema - it never holds the rights to change one.
+	if migration.AutoMigrate {
+		log.Info("the schema is brought forward at this start", "migration_mode", "auto",
+			"note", "set FLOTESTRO_AUTO_MIGRATE=false and run the migrate command as its own job "+
+				"where the serving replicas must not hold the rights to change the schema")
+		if err := database.Migrate(ctx, pool, migrateOptions); err != nil {
+			return err
+		}
+	} else {
+		log.Info("the schema is not touched at this start", "migration_mode", "none",
+			"note", "the migrate command brings it forward")
+	}
+	report, err := database.CheckSchema(ctx, pool)
+	if err != nil {
+		return err
+	}
+	if !report.Current() {
+		return schemaRefusal(log, report, "the control plane refuses to start")
+	}
+	log.Info("the database schema is current", "level", report.Level, "applied", report.Applied)
 
 	// The cryptographic identity of the installation is checked before
 	// anything touches the secret store or the CA. A missing key or a
@@ -997,6 +1153,8 @@ func run() error {
 		MetricsRollupRetention: metricsRetention.RollupRetention,
 		AuditRetention:         *auditRetention,
 		SecretsKeyFile:         keyProvider.Dir(),
+		DatabasePool:           dbPool,
+		Migration:              migration,
 	})
 
 	adminServer := &http.Server{
@@ -1316,6 +1474,24 @@ func errorText(err error) string {
 		return ""
 	}
 	return err.Error()
+}
+
+// schemaRefusal reports a schema that is not the one this binary expects
+// and turns it into the exit of the process. The code is what the runbook
+// indexes and what a readiness gate matches on; the hint is the one line
+// that stops somebody from "fixing" it by writing rows into
+// schema_migrations by hand.
+func schemaRefusal(log *slog.Logger, report database.SchemaReport, headline string) error {
+	hint := "run the migrate command as its own job, with the credentials of the migrator, " +
+		"before the serving replicas start"
+	if report.Code() == database.CodeSchemaAhead {
+		hint = "deploy the version that migrated this database, or restore the backup of the database " +
+			"and of the state directory taken before the upgrade; a schema does not come back by swapping the image"
+	}
+	log.Error(headline, "code", report.Code(), "reason", report.Summary(),
+		"level", report.Level, "expected", report.Expected,
+		"pending", len(report.Pending), "ahead", len(report.Ahead), "hint", hint)
+	return fmt.Errorf("%s: %s", report.Code(), report.Summary())
 }
 
 func splitList(value string) []string {

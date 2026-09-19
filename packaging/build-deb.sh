@@ -61,7 +61,7 @@ agent)
     done
     install -m 0640 "$here/agent.yaml" "$root/etc/flotestro/agent.yaml"
     # The service account is declared for systemd-sysusers, the same way as
-    # on Arch; the maintainer script falls back to adduser where sysusers
+    # on Arch; the maintainer script falls back to useradd where sysusers
     # is not available. Debian keeps the shell at /usr/sbin/nologin.
     install -d -m 0755 "$root/usr/lib/sysusers.d"
     sed 's#/usr/bin/nologin#/usr/sbin/nologin#' "$here/arch/flotestro-agent.sysusers" \

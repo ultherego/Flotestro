@@ -562,3 +562,68 @@ func TestPacmanEntriesAreSplit(t *testing.T) {
 		t.Errorf("header = %q %v", header, ok)
 	}
 }
+
+// TestPacmanPlanDoesNotDependOnCheckupdates guards the declaration of the
+// adapter: the plan is computed from a database that is already on the host,
+// so a host without pacman-contrib reports the plan as available and really
+// makes one. A feature that said "plan" only where checkupdates is installed
+// hid an operation that works, and a plan that failed after the order would
+// be worse still.
+func TestPacmanPlanDoesNotDependOnCheckupdates(t *testing.T) {
+	features := PacmanFeatures(true)
+	for _, feature := range []string{"repair", "hold", "plan"} {
+		if !features[feature] {
+			t.Errorf("%s is reported as unavailable on a host with pacman", feature)
+		}
+	}
+	// The repositories of Arch carry no security metadata, so the count of
+	// security updates is unknown rather than zero - that stays false
+	// whatever is installed.
+	if features["security"] {
+		t.Error("the security feature is reported on a distribution without security metadata")
+	}
+	if PacmanReason(true) == "" {
+		t.Error("a host with pacman still has something to say about the security count")
+	}
+	if strings.Contains(PacmanReason(true), "checkupdates") {
+		t.Errorf("the reason names checkupdates, which the plan does not need: %q", PacmanReason(true))
+	}
+	if !strings.Contains(PacmanReason(false), "pacman") {
+		t.Errorf("the reason of a host without pacman does not name it: %q", PacmanReason(false))
+	}
+	for name, available := range PacmanFeatures(false) {
+		if available {
+			t.Errorf("a host without pacman reports the feature %s", name)
+		}
+	}
+}
+
+// TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone guards the query
+// against the host's own database: an empty --dbpath would point pacman at
+// the root of the file system, so the argument is left out entirely.
+func TestPacmanDatabaseArgumentsLeaveTheHostDatabaseAlone(t *testing.T) {
+	if args := pacmanDatabaseArgs(""); args != nil {
+		t.Errorf("args = %v, expected the query of the host's own database", args)
+	}
+	args := pacmanDatabaseArgs(SyncCopyDir)
+	if len(args) != 2 || args[0] != "--dbpath" || args[1] != SyncCopyDir {
+		t.Errorf("args = %v", args)
+	}
+}
+
+// TestPlanMetadataMissingIsARefusal guards that a host with no repository
+// metadata at all says so with its own code instead of answering with an
+// empty plan - nothing pending and nothing read look the same to an
+// operator, and only one of them is true.
+func TestPlanMetadataMissingIsARefusal(t *testing.T) {
+	code, ok := ErrorCodeOf(ErrPlanMetadataMissing)
+	if !ok || code != ErrorPlanMetadataMissing {
+		t.Errorf("code = %q, %v", code, ok)
+	}
+	if !Refused(ErrPlanMetadataMissing) {
+		t.Error("nothing was attempted, so the error is a refusal of the host")
+	}
+	if !strings.Contains(ErrPlanMetadataMissing.Error(), SyncCopyDir) {
+		t.Errorf("the refusal does not name the copy: %v", ErrPlanMetadataMissing)
+	}
+}
