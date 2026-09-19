@@ -297,10 +297,15 @@ func TestSupersededCertificateIsRevokedWhenTheNewOneConnects(t *testing.T) {
 		h.awaitConnection(host.ID, 2*time.Minute)
 	})
 
+	// The session the host holds now: the revocation happens when a new one
+	// opens, so the test waits for a different session rather than for the
+	// host to look connected, which it never stopped doing.
+	previous, _, _ := openSession(ctx, db, host.ID)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine",
 		map[string]any{"reason": hardeningReason}, nil, http.StatusOK)
 	h.do(http.MethodPost, "/api/v1/hosts/"+host.ID+"/quarantine/release",
 		map[string]any{"reason": hardeningReason}, nil, http.StatusOK)
+	awaitNewSession(ctx, t, db, host.ID, previous, 3*time.Minute)
 	h.awaitConnection(host.ID, 2*time.Minute)
 
 	var revokedReason *string
