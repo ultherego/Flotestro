@@ -16,7 +16,6 @@ var DurationBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600, 18
 
 // AckBuckets covers an acknowledgement: a round trip on a healthy stream is
 // well under a second, and the dispatch lease is a minute, so the buckets are
-// dense below a second and end where the lease does.
 var AckBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60}
 
 // Registry keeps the instruments of one process.
@@ -111,7 +110,6 @@ func (h *Histogram) Observe(value float64, values ...string) {
 
 // key joins the label values; the separator cannot occur in a label value
 // because escape takes care of it at render time, not here, so a value with
-// the separator would only merge two series - it never breaks the format.
 func key(values []string) string { return strings.Join(values, "\x00") }
 
 func splitKey(k string) []string {
@@ -237,7 +235,6 @@ var (
 		DurationBuckets, "action")
 	// SampleAck measures the time from taking a resource sample off the stream
 	// to the word the panel sends back about it. At fleet cadence this is the
-	// call the gateway makes most often, so its tail is the gateway's tail.
 	SampleAck = Default.NewHistogram("flotestro_metric_sample_ack_seconds",
 		"Time from taking a resource sample off the stream to acknowledging it, by status.",
 		AckBuckets, "status")
@@ -249,25 +246,21 @@ var (
 
 	// AgentReconnect counts the sessions opened by a host whose previous session
 	// ended within the last ten minutes: a link that flaps or an agent that
-	// crashes, which the connection state alone never shows.
 	AgentReconnect = Default.NewCounter("flotestro_agent_reconnect_total",
 		"Agent sessions opened within ten minutes of the host's previous session ending, by host family.",
 		"host_family")
 	// RelaySessionIdentity counts the sessions opened through a relay by how the
 	// host was identified: end_to_end, when the host signed its envelope and the
-	// gateway verified the signature against the certificate on record; attested,
 	RelaySessionIdentity = Default.NewCounter("flotestro_relay_session_identity_total",
 		"Agent sessions opened through a relay, by the strength of the host's identity.",
 		"strength")
 	// RelayEnvelopeRefusal counts the relayed messages and calls whose identity
 	// envelope was refused, by the refusal code: relay_envelope_invalid,
-	// relay_body_hash_mismatch, relay_sequence_replayed,
 	RelayEnvelopeRefusal = Default.NewCounter("flotestro_relay_envelope_refusal_total",
 		"Relayed messages whose identity envelope was refused, by code.",
 		"code")
 	// RelayEnvelopeRedelivery counts the relayed messages the panel had consumed
 	// already and the relay carried a second time because it never saw the
-	// acknowledgement - a link that broke while the spool was draining.
 	RelayEnvelopeRedelivery = Default.NewCounter("flotestro_relay_envelope_redelivery_total",
 		"Relayed messages carried again after the panel had already consumed them.")
 	// AgentRenewal counts the certificate renewals by how they ended. The gateway
@@ -276,7 +269,6 @@ var (
 		"Agent certificate renewals, by outcome.", "outcome")
 	// SessionFence counts what the session ownership fence refused or held, by
 	// outcome: delivery_held when the scheduler kept a task in the queue because
-	// the host had no live owner or another instance's session owned it;
 	SessionFence = Default.NewCounter("flotestro_session_fence_total",
 		"Writes refused and tasks held by the session ownership fence, by outcome.", "outcome")
 	// NotificationDeliveries counts the settled attempts of the notification
@@ -285,8 +277,6 @@ var (
 		"Settled attempts of the notification queue, by the state they settled in.", "state")
 	// AlertFence counts the writes of the alert state the evaluator's fencing
 	// token refused, by the write refused: start, fire, refresh, restart,
-	// resolve or discard. Every one of them is a pass that lost the lease and
-	// would have written over the leader that has it.
 	AlertFence = Default.NewCounter("flotestro_alert_fence_refused_total",
 		"Writes of the alert state refused because the instance no longer holds the evaluator lease, by the write refused.",
 		"write")

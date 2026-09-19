@@ -78,7 +78,6 @@ func (s *Store) EvaluateLeased(ctx context.Context, now time.Time) error {
 
 // EvaluateUnder runs one pass under a lease this instance already holds: it
 // renews the lease as it goes, stamps every write with the lease's token and
-// stops at the first write the fence refuses.
 func (s *Store) EvaluateUnder(ctx context.Context, now time.Time, lease Lease) error {
 	renewed := time.Now()
 	guard := func(ctx context.Context) error {
@@ -96,11 +95,6 @@ func (s *Store) EvaluateUnder(ctx context.Context, now time.Time, lease Lease) e
 
 // evaluatorGuardEvery is how many hosts of one rule pass between two checks of
 // the lease. The renewal behind the check is spaced by time, so this is not a
-// round trip per batch; it is how soon a pass that lost the fleet notices and
-// stops. Between the checks the database refuses its writes anyway, but a pass
-// that carries on computing verdicts nobody will take is wasted work on ten
-// thousand hosts. A rule over the whole fleet asks forty times rather than once
-// - the bug - or ten thousand times.
 const evaluatorGuardEvery = 256
 
 // evaluate is the pass itself.
@@ -121,7 +115,6 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, f fence, guard func
 	for _, rule := range rules {
 		// Asked between rules rather than only at the start: a pass over a fleet
 		// takes time, and an instance that lost the fleet halfway must not write the
-		// second half of a verdict somebody else is already giving.
 		if guard != nil {
 			if err := guard(ctx); err != nil {
 				return err
@@ -210,7 +203,6 @@ func (sc *scope) covers(hostID string) bool {
 
 // scopes resolves the selector of every enabled rule once per run, in the
 // database, through the same compiler the campaign preview uses: a rule on a
-// tag, a group or an expression picks exactly the hosts a campaign on the same
 func (s *Store) scopes(ctx context.Context, rules []Rule) map[string]*scope {
 	scopes := make(map[string]*scope, len(rules))
 	for _, rule := range rules {
@@ -276,10 +268,6 @@ const fencePredicate = `(fence_row.fencing_token is null or
 
 // fencedWrite frames one statement that moves an alert row. The lease is read
 // in the same statement as the write, so a pass that lost it between two hosts
-// is refused by the database rather than by a check that has gone stale in the
-// meantime; the answer says whether the row moved, what token it carried before
-// and whether the lease still stood, which is what tells a refusal from an
-// episode that had simply moved on.
 const fencedWrite = `
 with fence_lease as (
     select token from monitoring_leases
@@ -298,8 +286,6 @@ select exists (select 1 from written),
 
 // write runs one statement of the evaluator under the fence. It answers nil
 // both when the row moved and when the row had already moved on - a state guard
-// that did not match is not the fence - and ErrFenceStale when the fence
-// refused it.
 func (s *Store) write(ctx context.Context, f fence, w alertWrite, body string, args ...any) error {
 	if !f.held() {
 		// Fail closed: a pass with no lease to write under writes nothing.
@@ -383,7 +369,6 @@ func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostS
 
 // maxSampleGap is the longest hole in a host's samples that still counts as
 // one continuous run of readings: twice the sampling interval, so a single
-// lost sample is a lost sample and two in a row are a gap.
 const maxSampleGap = 2 * SamplingInterval
 
 // observedSince returns the moment from which the rule's window is counted for
@@ -409,7 +394,6 @@ func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host host
 
 // continuousSince walks the samples of an episode in order and returns the
 // start of the last uninterrupted run: the moment after the last hole wider
-// than gap.
 func continuousSince(started time.Time, samples []time.Time, now time.Time, gap time.Duration) time.Time {
 	since, last := started, started
 	for _, at := range samples {
@@ -492,7 +476,6 @@ func (s *Store) refresh(ctx context.Context, f fence, w alertWrite,
 
 // resolve ends a firing episode. The value is the last reading where there is
 // one; an episode ended because its rule stopped covering the host keeps the
-// reading it had.
 func (s *Store) resolve(ctx context.Context, f fence, w alertWrite,
 	now time.Time, value *float64) error {
 	var reading *float32

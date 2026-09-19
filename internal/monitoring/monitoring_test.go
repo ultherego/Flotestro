@@ -7,9 +7,6 @@ import (
 
 // TestTheClockOfAHostIsBoundedInBothDirections: a reading dated ahead of the
 // panel takes the panel's moment, because nothing observes the future; one
-// dated behind keeps its own, because a reading that waited in a spool
-// belongs where it was taken; one dated further back than the panel keeps
-// any reading is refused rather than stored somewhere convenient.
 func TestTheClockOfAHostIsBoundedInBothDirections(t *testing.T) {
 	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
 	const skewLimit, maxLateness = 5 * time.Minute, 24 * time.Hour
@@ -39,7 +36,6 @@ func TestTheClockOfAHostIsBoundedInBothDirections(t *testing.T) {
 
 	// A relay that comes back after three hours delivers readings three hours
 	// old. Stamping those with the moment they arrived would draw the outage
-	// as an unbroken line, which is the one thing a gap exists to prevent.
 	late := ClampObservation(now.Add(-3*time.Hour), now, skewLimit, maxLateness)
 	if late.Substituted {
 		t.Fatal("a reading drained from a spool was restamped with the panel's clock")
@@ -84,7 +80,6 @@ func pointsAt(start time.Time, step time.Duration, count int, value float64) []P
 
 // TestAHoleInTheSeriesIsReportedAsAHole: three hours without a reading are
 // three hours the answer has to name. Left out, they reach the chart as two
-// readings side by side and are drawn as a smooth line.
 func TestAHoleInTheSeriesIsReportedAsAHole(t *testing.T) {
 	r := Range{Name: "24h", Window: 24 * time.Hour, Step: SamplingInterval}
 	until := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
@@ -135,7 +130,6 @@ func TestAWindowWithoutAnyReadingIsOneHole(t *testing.T) {
 
 // TestTheQuarterNowRunningIsNotAHole: a rolled-up window has no row for the
 // quarter still being collected, and a chart that called that a hole would
-// report one on every host of the fleet for ever.
 func TestTheQuarterNowRunningIsNotAHole(t *testing.T) {
 	r := Range{Name: "7d", Window: 7 * 24 * time.Hour, Step: 15 * time.Minute}
 	until := time.Date(2026, 9, 19, 12, 7, 0, 0, time.UTC)

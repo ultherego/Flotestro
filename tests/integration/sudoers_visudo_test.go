@@ -13,7 +13,6 @@ const visudoSite = "visudo-test"
 
 // The rules every host of this file reports: the distribution's own grant to
 // the sudo group, which parses cleanly and asks for a password. Whatever the
-// verdict becomes, it comes from the host's checker and not from the rules.
 const visudoCleanRules = `"rules":[{"users":["%sudo"],"hosts":["ALL"],"run_as":["ALL"],` +
 	`"commands":["ALL"],"nopasswd":false,"all_users":false,"all_hosts":true,"all_commands":true,` +
 	`"run_as_any_user":true,"root_equivalent":true,"critical":true,"source":"/etc/sudoers","line":24,` +
@@ -21,8 +20,6 @@ const visudoCleanRules = `"rules":[{"users":["%sudo"],"hosts":["ALL"],"run_as":[
 
 // TestACheckerRefusalNeverPassesTheSudoChecks holds the rule of the chapter:
 // visudo -c is the syntactic proof, and a host that cannot show it does not
-// pass by default. The rules parse cleanly on all four hosts; only the answer
-// of the host's own checker differs.
 func TestACheckerRefusalNeverPassesTheSudoChecks(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -98,7 +95,6 @@ func TestACheckerRefusalNeverPassesTheSudoChecks(t *testing.T) {
 
 			// The rules are the same on every host here, so the policy check
 			// moves only because the files sudo loads are not the files the
-			// panel read.
 			policy := findFinding(t, report, "sudo.root_nopasswd")
 			if policy.Passed != host.policyPassed {
 				t.Errorf("the policy check passed=%v, expected %v: %+v", policy.Passed, host.policyPassed, policy)

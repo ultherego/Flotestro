@@ -137,7 +137,6 @@ func TestCapacityAndUsageAreSeparateSeries(t *testing.T) {
 
 // TestTheLifecycleCountersAreExposed guards the names of the lifecycle
 // document: a reconnect and a renewal are counted at the point of the event by
-// the gateway, and the collector renders them with the labels the document
 func TestTheLifecycleCountersAreExposed(t *testing.T) {
 	AgentReconnect.Inc("debian")
 	AgentRenewal.Inc("renewed")
@@ -157,7 +156,6 @@ func TestTheLifecycleCountersAreExposed(t *testing.T) {
 	}
 	// The relay buffers come from the heartbeats the panel keeps; a collector
 	// without that source, or without a database to name the relays, says nothing
-	// about them rather than reporting empty buffers.
 	if strings.Contains(text, "flotestro_relay_buffer") {
 		t.Errorf("relay buffer metrics appeared without a relay source:\n%s", text)
 	}
@@ -176,7 +174,6 @@ func writeFixture(t *testing.T, path, content string) {
 
 // The cgroup is the budget a container is killed against, so where there is
 // one it decides. The reclaimable page cache is not resident memory the panel
-// is responsible for, so it comes off the charge.
 func TestTheResidentSetComesFromTheCgroup(t *testing.T) {
 	procRoot, cgroupRoot := t.TempDir(), t.TempDir()
 	writeFixture(t, filepath.Join(procRoot, "self", "cgroup"),
@@ -321,8 +318,6 @@ func TestTheProcessGaugesComeFromTheHost(t *testing.T) {
 
 	// A host that answers nothing leaves every process gauge out. The name is
 	// looked for as a declared family, not as a substring: the help of the Go
-	// gauge names flotestro_process_resident_bytes on purpose, to send a reader
-	// from the reserved address space to the resident set.
 	silent := NewCollector(nil, nil, nil, "panel")
 	silent.footprint = func() Footprint { return Footprint{} }
 	text = string(silent.Gather(context.Background()))

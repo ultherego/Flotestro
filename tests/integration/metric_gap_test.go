@@ -71,11 +71,6 @@ func sendMetricsSample(t *testing.T, session *syntheticSession, bootID string,
 
 // TestARefusedSampleIsVisibleAsAGapAndNotAsAQuietHost is the negative the
 // change exists for. Two hosts end the test with no reading in the chart
-// window. One of them sent readings the panel would not store; the other
-// never sent anything. Before this change both answers looked the same -
-// no points, nothing else - and an operator reading the second chart during
-// an incident had no way to learn that the first host had been talking all
-// along and was being refused.
 func TestARefusedSampleIsVisibleAsAGapAndNotAsAQuietHost(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -165,7 +160,6 @@ func TestARefusedSampleIsVisibleAsAGapAndNotAsAQuietHost(t *testing.T) {
 
 // TestAnOutageBetweenTwoReadingsIsAHoleInTheAnswer: the series used to
 // return only the rows that exist, so two readings an outage apart arrived
-// side by side and the chart drew a line straight through the outage.
 func TestAnOutageBetweenTwoReadingsIsAHoleInTheAnswer(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -217,7 +211,6 @@ func TestAnOutageBetweenTwoReadingsIsAHoleInTheAnswer(t *testing.T) {
 
 // TestTheHostIsToldWhenThePanelUsedItsOwnClock: chapter 16.1 asks the UI to
 // say when the gateway's time was substituted, which until now it was not
-// told at all.
 func TestTheHostIsToldWhenThePanelUsedItsOwnClock(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

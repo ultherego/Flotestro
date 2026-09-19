@@ -23,7 +23,6 @@ const fencingLeaseTerm = 5 * time.Minute
 
 // TestAStaleEvaluatorCannotWriteOverTheNewLeader: the leader that lost the
 // lease where it stood finds the host reporting again and would resolve an
-// episode the new leader owns. The token on the row refuses it.
 func TestAStaleEvaluatorCannotWriteOverTheNewLeader(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -106,8 +105,6 @@ func TestAStaleEvaluatorCannotWriteOverTheNewLeader(t *testing.T) {
 
 // TestAnEpisodeFromThePreviousReleaseStaysWritable: during a rolling upgrade a
 // panel that knows nothing of the fence writes rows with no token on them. The
-// new panel has to be able to move them, or the upgrade leaves episodes nobody
-// can ever resolve.
 func TestAnEpisodeFromThePreviousReleaseStaysWritable(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
@@ -155,7 +152,6 @@ func TestAnEpisodeFromThePreviousReleaseStaysWritable(t *testing.T) {
 
 // quietHostRule creates a rule that holds while the host says nothing, scoped
 // to that host alone so the rest of the fleet stays quiet, and removes it again
-// with the test.
 func (h *harness) quietHostRule(t *testing.T, hostID, name string) alertRuleView {
 	t.Helper()
 	var rule alertRuleView
@@ -187,7 +183,6 @@ func (h *harness) setLastSample(t *testing.T, hostID string, ago time.Duration) 
 
 // freeTheEvaluatorLease takes the lease out of whoever's hands it is in before
 // the test starts, and puts it back the same way afterwards: a test that holds
-// it for minutes must not leave the panel without an evaluator.
 func (h *harness) freeTheEvaluatorLease(t *testing.T) {
 	t.Helper()
 	release := func() {
@@ -236,7 +231,6 @@ func takeEvaluatorLease(ctx context.Context, t *testing.T, store *monitoring.Sto
 
 // openEpisode reads the open episode of a rule on a host: its state and the
 // token of the lease that last wrote it. The state is empty when no episode is
-// open, and the token nil for a row nothing fenced.
 func openEpisode(ctx context.Context, t *testing.T, pool *pgxpool.Pool,
 	ruleID, hostID string) (string, *int64) {
 	t.Helper()

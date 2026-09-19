@@ -30,7 +30,6 @@ const (
 
 	// DefaultRawRetention and DefaultRollupRetention are the retention of the raw
 	// samples and of the quarter-hour rollups: a week of readings at full
-	// resolution, a quarter of a year of quarter-hours.
 	DefaultRawRetention    = 7 * 24 * time.Hour
 	DefaultRollupRetention = 90 * 24 * time.Hour
 	// DefaultMaxLateness is how long after it was taken a sample may still arrive
@@ -204,7 +203,6 @@ func NewStore(pool *pgxpool.Pool, log *slog.Logger, options Options) *Store {
 
 // ClockSkewLimit and MaxLateness are what the gateway judges an arriving
 // sample by: how far the host's clock may be out before the panel's time is
-// used, and how old a sample may be before it is refused outright.
 func (s *Store) ClockSkewLimit() time.Duration { return s.options.ClockSkewLimit }
 
 func (s *Store) MaxLateness() time.Duration { return s.options.MaxLateness }
@@ -225,7 +223,6 @@ const (
 	ErrorRetentionTooShort = "metrics_retention_too_short"
 	// ErrorClockSubstituted: the host dated the reading further from the
 	// panel's clock than the installation allows, so the panel supplied the
-	// moment itself. Not a refusal - the reading is stored.
 	ErrorClockSubstituted = "metric_clock_substituted"
 )
 
@@ -245,14 +242,6 @@ type Observation struct {
 
 // ClampObservation bounds a host's clock in both directions, and says in
 // which one it went out.
-//
-// Forward the bound is the clock skew limit: nothing observes the future, so
-// a reading dated ahead of the panel takes the panel's moment. Backward the
-// bound is the lateness budget, not the skew limit, because a reading that
-// waited in a spool belongs where it was taken - stamping a drained spool
-// with the moment it arrived would draw an outage as an unbroken line, which
-// is the very thing a gap exists to prevent. Past the lateness budget the
-// reading is refused and becomes a recorded gap instead.
 func ClampObservation(at, now time.Time, skewLimit, maxLateness time.Duration) Observation {
 	if skewLimit <= 0 {
 		skewLimit = DefaultClockSkewLimit
@@ -345,7 +334,6 @@ func (s *Store) Record(ctx context.Context, hostID string, sample Sample) (Recor
 	}
 	// The host row carries the moment the panel last heard from the host, by
 	// the panel's own clock: a host whose clock runs slow is talking, not
-	// silent. An old sample replayed after a break must not move it backwards.
 	if _, err := tx.Exec(ctx, `
 		update hosts set last_metrics_at = greatest(
 		    coalesce(last_metrics_at, '-infinity'::timestamptz),
@@ -373,7 +361,6 @@ type Refusal struct {
 
 // RecordRefusal notes that a reading of a host was not stored. The readings
 // of one host, one code and one day share a row: a relay draining a week of
-// spool must not cost a row per refused sample to say one thing.
 func (s *Store) RecordRefusal(ctx context.Context, hostID, reason string, at time.Time) error {
 	_, err := s.pool.Exec(ctx, `
 		insert into metric_gaps (host_id, reason, day, samples,
@@ -414,7 +401,6 @@ func (s *Store) Refusals(ctx context.Context, hostID string, since time.Time) ([
 
 // ClockSubstitution says the panel supplied the moment of a host's readings
 // itself, because that host's clock stands further from the panel's than the
-// installation allows.
 type ClockSubstitution struct {
 	Reason string `json:"reason"`
 	// SkewMillis is the host's clock against the panel's on the last reading
@@ -557,7 +543,6 @@ func (s *Store) Rollup(ctx context.Context) error {
 
 // queueFinishedBuckets is the net under the queue: it looks over the last hour
 // for a bucket of a host that nobody marked, queues it, and moves that host's
-// mark to the quarter now running.
 func (s *Store) queueFinishedBuckets(ctx context.Context) error {
 	const queue = `
 		with edge as (
@@ -670,7 +655,6 @@ func (s *Store) rollupBatch(ctx context.Context) (int64, error) {
 
 // sweep applies the retention: the raw samples a partition at a time, the
 // rollups and the expired silences by the row, and the identities of the
-// samples that can no longer arrive again.
 func (s *Store) sweep(ctx context.Context) error {
 	if err := s.DropExpiredPartitions(ctx, time.Now()); err != nil {
 		return err
@@ -804,7 +788,6 @@ type Point struct {
 
 // Gap is a stretch of a chart window with no reading at all. It is returned
 // beside the points rather than as points with zero values, because a hole
-// in the data is not a reading of zero and must not be drawn as one.
 type Gap struct {
 	// From and To are the readings the hole sits between, or the edges of the
 	// window where it begins or ends one.
@@ -864,8 +847,6 @@ func (s *Store) Series(ctx context.Context, hostID string, r Range) (Series, err
 
 // gapsIn finds the stretches of a window with no reading. The edges count:
 // a window that begins or ends without readings holds as much of a hole as
-// one broken in the middle, and the chart has to break its line over all of
-// them.
 func gapsIn(points []Point, r Range, from, until time.Time) []Gap {
 	gaps := []Gap{}
 	step := r.Step
@@ -1119,7 +1100,6 @@ func toPoints(samples []Sample) []Point {
 
 // Reporting counts the hosts that sent a sample within the last three
 // intervals and those that did not, among the hosts that are not retired and
-// within the given SQL condition over the alias h.
 func (s *Store) Reporting(ctx context.Context, visible string, args []any) (reporting, silent int, err error) {
 	params := append(append([]any{}, args...), silentAfter.Seconds())
 	cutoff := fmt.Sprintf("now() - make_interval(secs => $%d::double precision)", len(params))
