@@ -1,0 +1,730 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Installation &middot; Flotestro documentation</title>
+<meta name="description" content="Installing Flotestro from nothing: the control plane from its image or from packages, the first administrator, the backup pair, the hosts, a relay and the air-gapped profile.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html" aria-current="page">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>3. Installation</h1>
+
+    <p class="lede">An installation that does not exist yet, brought up in the
+    order the parts depend on each other: the control plane, the first
+    administrator and the group mappings, the backup pair before there is a
+    fleet to lose, and only then the hosts. The short form of this chapter is
+    the runbook <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/install.md"><code>docs/runbooks/install.md</code></a>;
+    this is the long one.</p>
+
+    <ul class="linkrow">
+      <li><a href="#before">Before you start</a></li>
+      <li><a href="#image">The control plane from its image</a></li>
+      <li><a href="#packages">&hellip; or from packages</a></li>
+      <li><a href="#admin">The first administrator</a></li>
+      <li><a href="#backup">The backup pair</a></li>
+      <li><a href="#hosts">The hosts</a></li>
+      <li><a href="#relay">A site behind a relay</a></li>
+      <li><a href="#airgap">The air-gapped profile</a></li>
+      <li><a href="#verify">Verification</a></li>
+      <li><a href="#rollback">Rollback and removal</a></li>
+    </ul>
+
+    <h2 id="before">Before you start</h2>
+
+    <ul>
+      <li><strong>PostgreSQL 16 or newer</strong> that this installation will own,
+      reachable from the panel's host - or the quick-start profile, which brings
+      one up beside it.</li>
+      <li><strong>A container runtime</strong>: Docker Engine with the Compose
+      plugin, or Podman. There is also a package path for the control plane, and
+      no container at all on the managed hosts.</li>
+      <li><strong>DNS</strong> that resolves the names the panel will advertise,
+      from the hosts and from the operator's browser. Those names enter the
+      agent gateway's certificate, so they are the names the fleet really
+      reaches - never a Compose service name.</li>
+      <li><strong>Ports</strong>: 8080 for the panel behind a reverse proxy, 8443
+      and 8444 reached by the fleet directly. The TLS of the last two is end to
+      end and must not be terminated by an HTTP proxy.</li>
+      <li><strong>A signed package repository</strong> the hosts can reach. The
+      release publishes one; an isolated site runs the package-repository image
+      of the air-gapped profile.</li>
+    </ul>
+
+    <p>The server runs in a container; the hosts do not. The agent and its helper
+    are native packages, because a host agent that has to see the real
+    <code>/proc</code>, the real disks and the real systemd would be a
+    <code>--privileged</code> container with nothing isolated about it.</p>
+
+    <h2 id="image">The control plane from its image</h2>
+
+    <p>There are four deployments, and they are profiles of one
+    <code>compose.yaml</code>. The control plane is the only service without a
+    profile, so nothing else ever starts unless it is named: an installation
+    pointed at an external database cannot quietly start a second, empty one
+    beside it, and a connected site does not quietly publish a package
+    repository.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Deployment</th><th>Command</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td>Quick start</td><td><code>docker compose --profile quickstart up -d</code></td><td>The panel and a PostgreSQL of its own on one host. A laboratory, a demonstration, a small installation.</td></tr>
+        <tr><td>Production basic</td><td><code>docker compose up -d</code></td><td>One control plane against an external, backed-up PostgreSQL. The default for a company.</td></tr>
+        <tr><td>Production relay</td><td><code>docker compose -f compose.relay.yaml up -d</code> on each site host</td><td>The same, plus one relay per site next to the agents it serves.</td></tr>
+        <tr><td>Air-gapped</td><td><code>docker compose --profile airgap up -d</code></td><td>Any of the three, plus the package repository of the release on the network the managed hosts reach.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>The first start</h3>
+
+    <p>Production basic, from an empty directory. The files are in
+    <code>deploy/</code> of the repository.</p>
+
+    <p class="filename">On the panel host</p>
+<pre><code>cd deploy
+
+# 1. The non-secret settings.
+cat &gt; .env &lt;&lt;'SETTINGS'
+FLOTESTRO_VERSION=0.60.0
+FLOTESTRO_GATEWAY_ID=cp-prod-01
+FLOTESTRO_ADVERTISE=panel.example.org
+FLOTESTRO_PUBLIC_URL=https://panel.example.org
+SETTINGS
+
+# 2. The database DSN, as a file.
+mkdir -p secrets &amp;&amp; chmod 700 secrets
+printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
+sudo chown 65532:65532 secrets/database-url
+chmod 400 secrets/database-url
+command -v chcon &gt;/dev/null &amp;&amp; sudo chcon -Rt container_file_t secrets
+
+# 3. Start. The panel migrates the schema itself before it listens.
+docker compose up -d
+docker compose logs -f control-plane        # wait for "the database schema is current"
+curl -fsS http://127.0.0.1:8080/healthz</code></pre>
+
+    <p>For the quick-start profile, write the database password first and point
+    the DSN at the local service:</p>
+
+<pre><code>printf '%s' 'a-long-random-password' &gt; secrets/postgres-password &amp;&amp; chmod 600 secrets/postgres-password
+printf '%s' 'postgresql://flotestro:a-long-random-password@postgres:5432/flotestro?sslmode=disable&amp;application_name=flotestro-control-plane' &gt; secrets/database-url
+docker compose --profile quickstart up -d</code></pre>
+
+    <p><code>sslmode=disable</code> is acceptable only there, on one host with an
+    internal network. An external database requires
+    <code>verify-full</code>.</p>
+
+    <div class="note note--warning">
+      <p class="note__title">Three things that cost an hour each</p>
+      <ul>
+        <li><strong>The secret files belong to the account the container runs
+        as.</strong> A Compose secret is a bind mount that keeps its ownership,
+        and the control plane runs as 65532. Under Docker:
+        <code>chown 65532:65532 secrets/*</code> and <code>chmod 0400</code>.</li>
+        <li><strong>Under rootless Podman that uid is outside the account's
+        subuid range</strong>, so the container would see the file as nobody's.
+        Add <code>-f compose.podman.yaml</code>, which turns the mapping round
+        with <code>keep-id</code> and leaves the files owned by the deploying
+        account at mode 0600.</li>
+        <li><strong>On a host with SELinux the secret also needs the container
+        label</strong>, or the read fails with a plain "permission denied" that
+        names nothing: <code>chcon -Rt container_file_t ./secrets</code>.</li>
+      </ul>
+    </div>
+
+    <h3>Secrets are files, never variables</h3>
+
+    <p>Every secret setting has a <code>_FILE</code> form that names a path; the
+    value form and the <code>_FILE</code> form must not both be set, and an empty
+    file, a symlink, a directory or a file readable by anyone else is refused. An
+    environment variable is visible in <code>docker inspect</code> and in the
+    host's process list, which is why the DSN travels as a path.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Secret</th><th>Variable</th><th>Mount</th></tr></thead>
+      <tbody>
+        <tr><td>Database DSN</td><td><code>FLOTESTRO_DATABASE_URL_FILE</code></td><td><code>/run/secrets/database_url</code></td></tr>
+        <tr><td>OIDC client secret</td><td><code>FLOTESTRO_OIDC_CLIENT_SECRET_FILE</code></td><td><code>/run/secrets/oidc_client_secret</code></td></tr>
+        <tr><td>Webhook HMAC key</td><td><code>FLOTESTRO_WEBHOOK_SECRET_FILE</code></td><td><code>/run/secrets/webhook_secret</code></td></tr>
+        <tr><td>NVD API key</td><td><code>FLOTESTRO_VULN_NVD_KEY_FILE</code></td><td><code>/run/secrets/nvd_key</code></td></tr>
+        <tr><td>FreeIPA keytab</td><td><code>FLOTESTRO_IPA_KEYTAB</code> (already a path)</td><td><code>/run/secrets/ipa.keytab</code></td></tr>
+        <tr><td>PostgreSQL password (quick start)</td><td><code>POSTGRES_PASSWORD_FILE</code></td><td><code>/run/secrets/postgres_password</code></td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>Pin a digest, and check what you are about to run</h3>
+
+    <p>The release prints the digest of each image and attaches a ready
+    <code>compose.pins.yaml</code> to its run. A tag is what a human reads; a
+    digest is what is deployed, and a tag can be rewritten by whoever publishes
+    it.</p>
+
+<pre><code>docker compose -f compose.yaml -f compose.pins.yaml up -d</code></pre>
+
+    <p>The signature is keyless: it was made against the identity of the workflow
+    and recorded in the public transparency log, so there is no key to steal and
+    none to distribute. Check the identity, not merely that a signature
+    exists:</p>
+
+<pre><code>cosign verify \
+  --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...</code></pre>
+
+    <p>The bill of materials and the provenance are read the same way with
+    <code>cosign verify-attestation --type cyclonedx</code> and
+    <code>docker buildx imagetools inspect</code>. A workflow run that received
+    no OIDC identity publishes the image unsigned and says so in its log; a
+    <code>cosign verify</code> against such an image fails, which is the correct
+    answer and not a malfunction.</p>
+
+    <h2 id="packages">&hellip; or the control plane from packages</h2>
+
+    <p>The release also builds <code>flotestro-control-plane</code> as a
+    <code>.deb</code> and an <code>.rpm</code> (pacman gets the agent and the
+    relay only). The package brings the panel, the systemd unit, the
+    configuration file and <code>flotestro-auditverify</code>, which stands next
+    to the panel so that an export of the audit trail can be checked where the
+    trail was written.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Path</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>/usr/bin/flotestro-control-plane</code></td><td>The binary.</td></tr>
+        <tr><td><code>/usr/bin/flotestro-auditverify</code></td><td>The offline verifier of an audit export.</td></tr>
+        <tr><td><code>/lib/systemd/system/flotestro-control-plane.service</code></td><td>The unit.</td></tr>
+        <tr><td><code>/etc/flotestro/control-plane.env</code></td><td>Every setting, commented. A configuration file: a package update does not overwrite it. Owned <code>root:flotestro</code>, mode 0640, because it holds the database credentials.</td></tr>
+        <tr><td><code>/var/lib/flotestro</code></td><td>The state directory, mode 0700, owned by the service account.</td></tr>
+        <tr><td><code>/usr/share/flotestro/web</code></td><td>The built panel; the unit points <code>FLOTESTRO_WEB_ROOT</code> at it.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>The package makes a system account <code>flotestro</code> and enables the
+    unit. It does <em>not</em> start it while the shipped DSN still says
+    <code>change-me</code>: a panel without a database has nowhere to keep the
+    fleet state, and a restart loop would only litter the journal. The
+    installation ends with the two lines that finish it - set
+    <code>FLOTESTRO_DATABASE_URL</code>, then
+    <code>systemctl start flotestro-control-plane.service</code>.</p>
+
+    <p>Three settings in that file have to be changed before the panel is of any
+    use: <code>FLOTESTRO_DATABASE_URL</code>,
+    <code>FLOTESTRO_ADVERTISE</code> (empty by default, and the certificate
+    issued without it covers <code>127.0.0.1</code> alone - an agent elsewhere
+    rejects the connection) and <code>FLOTESTRO_PUBLIC_URL</code>.</p>
+
+    <div class="note">
+      <p class="note__title">The package's defaults are not all the binary's</p>
+      <p>The shipped <code>control-plane.env</code> sets
+      <code>FLOTESTRO_METRICS_RETENTION_RAW=48h</code> and
+      <code>FLOTESTRO_METRICS_RETENTION_ROLLUP=720h</code>, which are shorter
+      than the binary's own defaults of <code>168h</code> and
+      <code>2160h</code>. What the file sets is what the installation runs on.
+      From the moment an operator stores a monitoring retention in the panel, the
+      stored value decides and the file is only what a cleared field falls back
+      to.</p>
+    </div>
+
+    <h2 id="admin">The first administrator, and the mappings without which nobody can sign in</h2>
+
+    <p>An installation with no identities writes a bootstrap token into its
+    state directory. It is the only way in before the identity provider is
+    connected, and it is meant to be spent and deleted.</p>
+
+<pre><code>docker compose cp control-plane:/var/lib/flotestro/bootstrap-token ./bootstrap-token</code></pre>
+
+    <p>Then, in this order:</p>
+
+    <ol class="steps">
+      <li>Sign in with the token.</li>
+      <li>Connect the identity provider: <code>FLOTESTRO_OIDC_ISSUER</code>,
+      <code>FLOTESTRO_OIDC_CLIENT_ID</code> (default
+      <code>flotestro-panel</code>) and <code>FLOTESTRO_OIDC_CLIENT_SECRET</code>.
+      An empty issuer disables browser login altogether and the panel then works
+      on API tokens alone. <code>FLOTESTRO_PUBLIC_URL</code> decides the redirect
+      and the <code>Secure</code> flag of the cookies, so it has to be the
+      address the browser really uses.</li>
+      <li><strong>Map at least one group to a role.</strong> A group grants
+      nothing by itself. With no mapping, whoever signs in through the provider
+      gets no permission at all - that is the single most common reason a fresh
+      installation looks broken.</li>
+      <li>Sign in through the provider and confirm you have what the mapping
+      granted.</li>
+      <li>Revoke the bootstrap token and delete
+      <code>./bootstrap-token</code>. The control plane warns at every start
+      while it is still valid.</li>
+    </ol>
+
+    <p>A mapping is a group of an issuer, a role and a scope. The panel writes
+    them on the access screen; the request behind the button is:</p>
+
+<pre><code>POST /api/v1/group-mappings
+{
+  "issuer":      "https://sso.example.org/realms/flotestro",
+  "group_name":  "linux-platform",
+  "role":        "platform_admin",
+  "site":        "*",
+  "environment": "*",
+  "reason":      "the platform team administers the installation"
+}</code></pre>
+
+    <p>The permission needed to write one is <code>principal.manage</code> in the
+    whole fleet; an unknown role is refused with
+    <code class="refusal">unknown_role</code>. Leaving the issuer out fills in the
+    configured one. The roles are <code>viewer</code>, <code>auditor</code>,
+    <code>operator</code>, <code>approver</code>, <code>identity_admin</code> and
+    <code>platform_admin</code>; <code>site</code> and <code>environment</code>
+    take <code>*</code> for the whole fleet or an exact value to scope the
+    grant.</p>
+
+    <h3>The checklist the panel keeps</h3>
+
+    <p><code>GET /api/v1/setup</code> is what the setup screen and the dashboard
+    card read. It answers with the steps in the order they are taken, how many
+    are done, which is next, and whether the bootstrap token still opens the
+    panel:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Step</th><th>Done when</th></tr></thead>
+      <tbody>
+        <tr><td><code>identity_provider</code></td><td>The issuer answers and names its signing keys.</td></tr>
+        <tr><td><code>group_mapping</code></td><td>At least one group decides a role at login.</td></tr>
+        <tr><td><code>bootstrap_token</code></td><td>The token is revoked or expired - that is, it no longer works.</td></tr>
+        <tr><td><code>directory</code></td><td>Optional: the FreeIPA connector is configured.</td></tr>
+        <tr><td><code>hosts</code></td><td>At least one host is enrolled and not retired.</td></tr>
+        <tr><td><code>relay</code></td><td>Optional: needed only for a site whose hosts cannot reach the panel directly.</td></tr>
+        <tr><td><code>policy</code></td><td>At least one policy declares what is to be true on the hosts; without one the panel reports the hosts as they are and judges nothing.</td></tr>
+        <tr><td><code>alert_rule</code>, <code>notification_channel</code></td><td>Something evaluates the samples, and somewhere to send what it finds. Both are optional steps: they do not hold the checklist back.</td></tr>
+        <tr><td><code>fleet_ca</code></td><td>Warns 30 days before the CA's end, because a rotation needs every agent to renew once under the new CA and agent certificates live thirty days.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h2 id="backup">Back up before the fleet exists</h2>
+
+    <p>The database and the state directory are one pair. The database holds the
+    hosts, the tasks, the campaigns, the audit trail, the monitoring and the
+    encrypted secrets; the state directory holds the keys those ciphertexts open
+    with and the CA the fleet's certificates were issued by. Take the pair now,
+    while the CA is minutes old, and prove the restore before the fleet depends
+    on it.</p>
+
+    <p class="filename">Once, before the first backup</p>
+<pre><code>mkdir -p backups &amp;&amp; chown 65532:65532 backups &amp;&amp; chmod 700 backups</code></pre>
+
+    <p class="filename">The backup itself, with the control plane stopped - or at least with the CA and key rotation held</p>
+<pre><code>docker compose --profile tools run --rm admin-tools backup</code></pre>
+
+    <p>It writes <code>./backups/&lt;backup-id&gt;/</code> and nothing outside
+    it:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>File</th><th>What it is</th></tr></thead>
+      <tbody>
+        <tr><td><code>database.dump</code></td><td><code>pg_dump --format=custom</code>, without owners and without privileges: the restore is done by whoever owns the empty database it goes into.</td></tr>
+        <tr><td><code>state.tar.zst</code></td><td>The state directory with numeric owners and the original modes - the directory is 0700 and the keys in it 0600.</td></tr>
+        <tr><td><code>manifest.json</code></td><td>What ties the halves together: the backup identifier, the moment, the version and commit of the image, the installation identifier, the active key and issuer identifiers, the digests of both files, and the image digest when the deployment pins one. No DSN, no password, no secret value.</td></tr>
+        <tr><td><code>SHA256SUMS</code></td><td>The digests of the two archives, checked before every restore.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>A pair can be checked without restoring anything, and a restore is a
+    profile of its own because it is the one operation that mounts the state
+    writable:</p>
+
+<pre><code>docker compose --profile tools   run --rm admin-tools   verify  20260919T101500Z
+docker compose --profile restore run --rm admin-restore restore 20260919T101500Z</code></pre>
+
+    <p>The restore refuses to start unless the checksums match, the state volume
+    is empty and the target database has no tables in its <code>public</code>
+    schema. It puts an installation back where there is none; it never writes
+    over the identity of one that is still there.</p>
+
+    <div class="note note--warning">
+      <p class="note__title">The archives hold secrets</p>
+      <p>The manifest does not, but <code>database.dump</code> and
+      <code>state.tar.zst</code> do. The backup belongs on encrypted storage,
+      away from the host it was taken from, and it is worth restoring it into an
+      isolated environment now and again to find out whether it actually
+      works.</p>
+    </div>
+
+    <h2 id="hosts">The hosts</h2>
+
+    <p>The panel generates the exact commands per host and per family under
+    <strong>Add host</strong>: the repository, the package, the fleet CA with its
+    fingerprint to compare, the enrollment and the start. Use those - they carry
+    this installation's own addresses, its one-time token and the CA the fleet
+    really uses. The shapes below are here so that an operator knows what is
+    being run.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Step</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td>repository</td><td>Adds the signed repository and its key to apt, dnf or pacman.</td></tr>
+        <tr><td>package</td><td>Installs <code>flotestro-agent</code>, which brings the helper with it.</td></tr>
+        <tr><td>CA</td><td>Writes the fleet CA where the agent reads it, and prints its fingerprint to compare.</td></tr>
+        <tr><td>enroll</td><td>Spends the one-time token and takes the host's own certificate.</td></tr>
+        <tr><td>start</td><td><code>systemctl enable --now flotestro-agent</code>.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <h3>From the signed repository</h3>
+
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | sudo tee /etc/apt/keyrings/flotestro.asc &gt;/dev/null
+echo 'deb [signed-by=/etc/apt/keyrings/flotestro.asc] https://ultherego.github.io/Flotestro/packages/deb stable main' | sudo tee /etc/apt/sources.list.d/flotestro.list &gt;/dev/null
+sudo apt update &amp;&amp; sudo apt install flotestro-agent</code></pre>
+
+    <p>Every index is signed by the release key, and there is no version in any
+    of those lines: <code>apt update</code> is how a host learns a newer version
+    exists and <code>apt upgrade</code> is what moves it. A pre-release goes to a
+    <code>testing</code> channel that a host asking for <code>stable</code> never
+    reads. <code>dnf</code> and <code>pacman</code> read the same tree under
+    <code>rpm/stable</code> and <code>arch/stable</code>. One pacman database
+    serves one architecture, so <code>arch/&lt;channel&gt;</code> is the x86_64
+    repository and any other architecture stands in
+    <code>arch/&lt;channel&gt;/&lt;architecture&gt;</code> for a host configured
+    by hand.</p>
+
+    <h3>Without a route out</h3>
+
+    <p>The file name carries the version, so there is no <code>latest</code> URL
+    to quote; <code>gh</code> resolves the newest stable release itself, and
+    pre-releases are not in it.</p>
+
+<pre><code>curl -fsS https://ultherego.github.io/Flotestro/packages/flotestro-repo.asc | gpg --import
+gh release download --repo ultherego/Flotestro --pattern 'flotestro-agent_*_amd64.deb' --pattern 'SHA256SUMS*'
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --ignore-missing SHA256SUMS
+sudo apt install ./flotestro-agent_*_amd64.deb
+
+gh attestation verify flotestro-agent_1.2.3_amd64.deb --repo ultherego/Flotestro</code></pre>
+
+    <h3>Enrollment</h3>
+
+<pre><code>sudo tee /var/lib/flotestro-agent/ca.pem &gt;/dev/null   # the fleet CA; compare the fingerprint with the panel
+sudo sed -i -e 's|^  enrollment_url: .*|  enrollment_url: "https://panel.example.org:8444"|' \
+            -e 's|^  gateway_urls: .*|  gateway_urls: ["https://panel.example.org:8443"]|' /etc/flotestro/agent.yaml
+echo "$TOKEN" | sudo -u flotestro-agent flotestro-agentctl enroll
+sudo systemctl enable --now flotestro-agent
+flotestro-agentctl diagnose                            # explains a host that does not show up</code></pre>
+
+    <div class="note note--refusal">
+      <p class="note__title">The token is one-time and short-lived</p>
+      <p>Pass it by file or on standard input, never in the environment:
+      <code>sudo -u flotestro-agent flotestro-agentctl enroll --token-file
+      /run/token</code>, and delete the file afterwards. The daemon itself never
+      enrolls - <code>FLOTESTRO_ENROLLMENT_TOKEN</code> in its environment is
+      ignored and reported at every start until it is removed.</p>
+      <p>A host that already holds an identity keeps it: a package upgrade does
+      not re-enroll, and an enrollment onto a host that carried a previous
+      installation is refused with
+      <code class="refusal">machine_already_enrolled</code> - a new fleet CA does
+      not recognise certificates the previous one issued. Remove the identity
+      explicitly first; the sanitisation is in the
+      <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/golden-image.md">golden-image runbook</a>.</p>
+      <p>A machine that is a copy of another answers
+      <code class="refusal">duplicate_machine_id</code> at the certificate step
+      or <code class="refusal">machine_id_mismatch</code> at the token step: the
+      host row is keyed by <code>/etc/machine-id</code>, and two machines sharing
+      one are one host as far as the panel is concerned.</p>
+    </div>
+
+    <p>For a whole inventory at once there is an Ansible role in
+    <a href="https://github.com/ultherego/Flotestro/tree/main/deploy/ansible"><code>deploy/ansible</code></a>.
+    For machines started from an image, the agent package installs
+    <code>flotestro-enroll.service</code>, which runs on the first boot only -
+    when <code>identity/current/agent.pem</code> does not exist - so every clone
+    enrolls as a host of its own.</p>
+
+    <h2 id="relay">A site behind a relay</h2>
+
+    <p>Create <code>relay.yaml</code> and <code>relay-ca.pem</code> next to
+    <code>compose.relay.yaml</code> <em>before</em> the first start: a bind mount
+    whose source does not exist becomes a directory. Then register the relay with
+    a one-time token from the panel and start it; the token file is deleted
+    afterwards.</p>
+
+<pre><code>docker compose -f compose.relay.yaml --profile enroll run --rm relay-enroll
+docker compose -f compose.relay.yaml up -d</code></pre>
+
+    <p class="filename">relay.yaml</p>
+<pre><code>schema_version: 1
+relay:
+  name: "relay-waw-01"
+  site: "warsaw"
+  listen: "0.0.0.0:8453"
+  advertised_names:
+    - "relay-waw-01.example.com"
+  state_dir: "/var/lib/flotestro-relay"
+  buffer_max_bytes: 268435456
+upstream:
+  enrollment_url: "https://enroll.flotestro.example.com"
+  gateway_urls:
+    - "https://gateway-a.flotestro.example.com:8443"
+    - "https://gateway-b.flotestro.example.com:8443"
+  bootstrap_ca_file: "/etc/flotestro/bootstrap-ca.pem"</code></pre>
+
+    <p>The relay is configured by that file and by nothing else;
+    <code>flotestro-relay config show</code> prints what it resolves to. Its site
+    is an expectation - the scope a relay really has is the one its enrollment
+    token granted. No relay may advertise a name that is in
+    <code>FLOTESTRO_ADVERTISE</code>. Its spool is on disk and survives a
+    restart, so give the filesystem room:
+    <code>spool.max_bytes</code> is 1 GiB by default and nothing is appended
+    below <code>spool.min_free_bytes</code>, 256 MiB.</p>
+
+    <h2 id="airgap">The air-gapped profile</h2>
+
+    <p>An isolated site receives the release on media and nothing else. Four
+    images cross the gap: the control plane, the package repository (the fleet
+    installs its agents from it and from nowhere else), the admin tools (a site
+    that cannot pull an image cannot improvise one on the day it has to restore)
+    and, where the site has one, the relay. PostgreSQL is the site's own, from
+    whatever channel it already trusts for its databases.</p>
+
+    <h3>On the connected side</h3>
+
+    <p>Verify the identity of each image <em>first</em>, then take it: a
+    signature checked after the crossing would be a signature checked against a
+    transparency log the site cannot reach.</p>
+
+<pre><code>for name in control-plane package-repository admin-tools relay; do
+  reference="ghcr.io/ultherego/flotestro-$name:$version"
+  cosign verify \
+    --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com "$reference"
+  docker pull "$reference"
+  docker save -o "flotestro-$name-$version.tar" "$reference"
+done</code></pre>
+
+    <p>Then write down what the isolated side is to check, and sign it with the
+    same GPG key the packages are signed with - that key is the one trust anchor
+    the site already has, and the only one that survives a gap. Record the
+    <em>image id</em>, not the registry digest: <code>docker save</code> writes
+    an archive of its own and <code>docker load</code> gives the image a new
+    manifest, so the <code>sha256:</code> the release printed does not survive
+    the crossing, and <code>compose.pins.yaml</code> is not usable there. A site
+    with a local registry has the other option - <code>skopeo copy</code> keeps
+    the manifest and then the digest pin works as everywhere else.</p>
+
+    <h3>On the isolated side</h3>
+
+<pre><code>gpg --import flotestro-repo.asc
+gpg --verify SHA256SUMS.asc SHA256SUMS
+sha256sum --check --strict SHA256SUMS
+for archive in flotestro-*.tar; do docker load -i "$archive"; done
+# then compare each loaded image id against the signed IMAGE-IDS file</code></pre>
+
+    <p>The images keep their <code>ghcr.io/ultherego/...</code> names although
+    the site cannot reach that registry. That is deliberate:
+    <code>docker load</code> restores an image under exactly the name it was
+    saved with, the Compose files name it the same way, and an image renamed at
+    the gap is one nobody can match against what was signed. Nothing pulls,
+    because every reference already resolves locally.</p>
+
+    <h3>Pointing the panel at the local repository</h3>
+
+<pre><code>cat &gt;&gt; .env &lt;&lt;'SETTINGS'
+FLOTESTRO_PACKAGE_REPOSITORY_URL=http://panel.site.example.org:8090
+FLOTESTRO_VULN_NVD_URL=
+SETTINGS
+
+docker compose --profile airgap up -d</code></pre>
+
+    <p>The panel does not serve the repository and does not proxy it: it composes
+    the "Add host" commands from one address and the hosts fetch from that
+    address themselves, so it is the address the <em>hosts</em> reach - never a
+    Compose service name. Left empty, it leaves a placeholder in those commands
+    and the Add host screen says so in a warning; it is not a setting the panel
+    guesses. NVD is read from a live API and has no offline form, so an isolated
+    site clears it rather than letting a timer fail every six hours.</p>
+
+    <p>Plain HTTP is not a weakness there. What a package manager trusts is the
+    signature over the index and the key it imported once, and a package is
+    verified on an isolated site exactly as it is anywhere else. A site that
+    wants TLS puts the same edge in front of port 8090 as in front of the
+    panel.</p>
+
+    <div class="note">
+      <p class="note__title">What an isolated site loses, and what it does not</p>
+      <p>Everything the fleet is managed with keeps working: inventory, tasks,
+      campaigns, monitoring and its rules, the audit trail, backups, agent
+      upgrades from the local repository. The vulnerability assessment is local
+      too - the hosts report their package lists, the panel compares versions
+      with dpkg and rpm rules of its own, and the feed snapshots live in the
+      database. What it loses is fresh feed data: the status block
+      <code>vulnerability_feeds</code> answers <em>unknown</em> while no feed has
+      ever been read and <em>failed</em> once a snapshot is older than
+      <code>FLOTESTRO_VULN_MAX_SNAPSHOT_AGE</code> (six hours by default). Per
+      host, <code>feed_stale</code> still produces findings while
+      <code>feed_missing</code> produces none at all - and the panel says in as
+      many words that zero findings there means nothing could be checked.</p>
+    </div>
+
+    <h2 id="verify">Verification</h2>
+
+    <ul>
+      <li><code>GET /api/v1/status</code>: the schema is current, the database
+      answers, and the instance claims its gateway identity.</li>
+      <li><code>GET /api/v1/hosts</code>: every enrolled host is
+      <code>online</code> and reports its distribution and its agent
+      version.</li>
+      <li>One operation end to end on one host - a read is enough - reaches a
+      terminal state with a result, not a refusal.</li>
+      <li>The panel shows no bootstrap token warning, and
+      <code>./bootstrap-token</code> is deleted.</li>
+      <li>The backup pair exists and has been restored once, somewhere that is
+      not production.</li>
+    </ul>
+
+    <h2 id="rollback">Rollback, upgrades and removal</h2>
+
+    <p>Nothing here is irreversible until hosts are enrolled. Before that,
+    <code>docker compose down -v</code> and an empty database put the machine
+    back. After that, a host is removed by sanitising it - the identity, the task
+    state and the firewall registry - and the panel decommissions its record.</p>
+
+    <p>An upgrade is three decisions in one order, and the order is not a matter
+    of taste, because the control plane refuses to serve a schema it does not
+    match in either direction:</p>
+
+    <ol class="steps">
+      <li><strong>Take the pair</strong>, with the new images pulled but nothing
+      started from them. A backup taken after the migration is a backup of the
+      version you are trying to leave.</li>
+      <li><strong>Ask what the new version would do</strong>:
+      <code>docker compose run --rm control-plane schema-check</code>. Exit 0
+      means no migration and the upgrade is a restart; exit 1 with
+      <code class="refusal">schema_behind</code> means it carries migrations and
+      names how many. Any other answer stops the upgrade.</li>
+      <li><strong>Migrate once, as its own job</strong>, with the migrator's
+      credentials:
+      <code>docker compose run --rm control-plane migrate</code>. Two migrators
+      do not race - the second waits on the advisory lock and says so. Run
+      <code>schema-check</code> again; it must now exit 0.</li>
+      <li><strong>Roll the replicas</strong> one at a time, watching the fleet
+      reconnect between them. The agents are upgraded afterwards and separately,
+      by the panel itself.</li>
+    </ol>
+
+    <p>Going back has one asymmetry: a version can be gone back to, a schema
+    cannot. If the new version applied no migration, put the previous image back
+    and start it. If it migrated, the old control plane refuses to start with
+    <code class="refusal">schema_ahead</code> and is right to - going back then
+    means restoring the pair from step 1 and losing everything recorded since.
+    Never delete rows from <code>schema_migrations</code> to make the two agree;
+    the tables are still the new ones and the panel would write into a shape it
+    misreads.</p>
+
+    <p>Removing an installation for good is deliberate and in this order:
+    decommission the hosts while the panel still runs, so each one stops trusting
+    the centre and revokes its own certificate; take a last backup pair if the
+    audit trail has to outlive the panel;
+    <code>docker compose down --volumes</code>, which takes the state volume with
+    it; and then the database, if it is one this installation owns. What remains
+    on a managed host is the agent package itself, which
+    <code>apt purge</code>, <code>dnf remove</code> or <code>pacman -Rns</code>
+    removes together with its identity files.</p>
+
+    <div class="note note--warning">
+      <p class="note__title"><code>down</code> keeps the volumes on purpose</p>
+      <p>A plain <code>docker compose down</code> stops the containers and leaves
+      the state and the database where they are, because an operator stopping a
+      panel for an hour must not lose the fleet's certificate authority by typing
+      the usual command. Only <code>--volumes</code> takes the state.</p>
+    </div>
+
+    <h2>Codes this chapter produces</h2>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Code</th><th>When</th></tr></thead>
+      <tbody>
+        <tr><td><code class="refusal">installation_state_mismatch</code></td><td>A control plane pointed at a database that belongs to another installation.</td></tr>
+        <tr><td><code class="refusal">gateway_id_in_use</code></td><td>A second instance claiming a gateway identity that is already held.</td></tr>
+        <tr><td><code class="refusal">machine_already_enrolled</code></td><td>An enrollment on a host that still holds an identity.</td></tr>
+        <tr><td><code class="refusal">duplicate_machine_id</code>, <code class="refusal">machine_id_mismatch</code></td><td>A machine already in the fleet under another host, or a token that does not fit this machine.</td></tr>
+        <tr><td><code class="refusal">schema_behind</code>, <code class="refusal">schema_ahead</code></td><td>The binary's schema is older or newer than the database's.</td></tr>
+        <tr><td><code class="refusal">secrets_key_unavailable</code>, <code class="refusal">issuer_key_unavailable</code>, <code class="refusal">pki_state_mismatch</code>, <code class="refusal">crypto_state_ambiguous</code></td><td>The cryptographic state of the installation is not usable; see the <a href="https://github.com/ultherego/Flotestro/blob/main/docs/runbooks/db-restore.md">database-restore runbook</a>.</td></tr>
+        <tr><td><code class="refusal">metrics_retention_too_short</code></td><td>A retention shorter than the query window plus the lateness; refused at start and on the settings screen alike.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <ul class="linkrow">
+      <li><a href="architecture.html">&larr; 2. Architecture</a></li>
+      <li><a href="concepts.html">Next: 4. How a change happens &rarr;</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

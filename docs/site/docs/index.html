@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flotestro documentation</title>
+<meta name="description" content="The Flotestro manual: introduction, architecture, installation, concepts, configuration, operations, errors, API and runbooks.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./" aria-current="page">Contents</a></li>
+        <li><a href="introduction.html">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>Flotestro documentation</h1>
+
+    <p class="lede">Flotestro manages a fleet of Linux servers from one panel:
+    it plans a change, has it approved, carries it out on the hosts and records
+    what happened. This manual is the reference for the people who run it -
+    what the parts are, how they are installed, what the panel promises, and
+    what every refusal means.</p>
+
+    <p>Read it in order the first time. <a href="introduction.html">Introduction</a>
+    and <a href="concepts.html">How a change happens</a> are the two chapters the
+    rest rests on: everything the panel does is a typed operation, a plan, an
+    approval bound to a digest, a dispatch and a result. After that the reference
+    chapters answer single questions - what this variable does, what this
+    operation needs, what this code means.</p>
+
+    <h2>Chapters</h2>
+
+    <h3><a href="introduction.html">1. Introduction</a></h3>
+    <p>What the product is, what it manages, and the things it deliberately does
+    not do - no shell on a host, no external monitoring stack, no guessing at a
+    fact the host could not report. The doctrine is here: unknown is never zero,
+    every operation is a typed contract, the host reports facts and the panel
+    judges, a plan is approved by digest, every refusal has a stable code,
+    fail-closed.</p>
+
+    <h3><a href="architecture.html">2. Architecture</a></h3>
+    <p>The five parts - the control plane, the unprivileged agent, the root
+    helper, the site relay and PostgreSQL - with the ports between them, the
+    identity each one proves, and the state directory that is not in the
+    database. It also answers why the agent is a native package and the control
+    plane is an image.</p>
+
+    <h3><a href="installation.html">3. Installation</a></h3>
+    <p>The long form of an installation from nothing: the control plane from its
+    image or from packages, the first administrator and the group mappings
+    without which nobody can sign in, the backup pair taken before the fleet
+    exists, hosts from the signed repository, a site behind a relay, and the
+    air-gapped profile.</p>
+
+    <h3><a href="concepts.html">4. How a change happens</a></h3>
+    <p>One change end to end: the operation, its plan, the approval bound to a
+    digest, dispatch, the lease, the result and the verifier - and what a
+    campaign adds on top of it: a snapshot, a canary, waves, maintenance
+    windows and budgets. Inventory with its revisions and cadences, and the
+    audit chain that <code>flotestro-auditverify</code> checks without the
+    database.</p>
+
+    <h3><a href="configuration.html">5. Configuration reference</a></h3>
+    <p>Every environment variable of every binary, its default, whether a
+    change needs a restart, and what it costs in security to change it.</p>
+
+    <h3><a href="operations.html">6. Operations reference</a></h3>
+    <p>The typed operations: what each one does, the permission it needs, its
+    risk level and lock class, whether it takes part in a campaign, and the
+    refusals it can answer with.</p>
+
+    <h3><a href="errors.html">7. Errors and refusals</a></h3>
+    <p>The stable codes. A refusal is part of the contract: the same situation
+    always answers with the same code, in the API, in the panel and in the
+    audit trail. The running panel serves the same list at
+    <code>GET /api/v1/errors</code>.</p>
+
+    <h3><a href="api.html">8. API</a></h3>
+    <p>The REST API under <code>/api/v1</code>: authentication, permissions,
+    concurrency with <code>If-Match</code>, and the routes themselves.</p>
+
+    <h3><a href="runbooks.html">9. Runbooks</a></h3>
+    <p>The procedures the panel does not carry out by itself - CA rotation, a
+    database restore, a queue that is not moving, a relay out of room, a gap in
+    the charts, quarantine and decommission, a support bundle, a golden image.
+    Each one names its signals, its preconditions, the exact requests, the
+    verification and the way back.</p>
+
+    <h2>How to read it</h2>
+
+    <dl class="kv">
+      <dt>A refusal code</dt>
+      <dd>Written as <code class="refusal">machine_already_enrolled</code>. It is
+      the stable identifier of one reason, not a message; the wording of the
+      message may change, the code does not.</dd>
+
+      <dt>A default</dt>
+      <dd>Given wherever there is one, as the product ships it. A setting with
+      no default is marked required, and the binary refuses to start without
+      it.</dd>
+
+      <dt>A command</dt>
+      <dd>Runs where the text says it runs: on the panel host, inside the
+      container, or on the managed host as <code>root</code>. The panel writes
+      the host commands for its own addresses under <strong>Add host</strong>;
+      the shapes in this manual are there so an operator knows what is being
+      run.</dd>
+
+      <dt>A permission</dt>
+      <dd>Written as <code>pki.rotate</code>. Permissions are granted to roles,
+      roles to groups of the identity provider, and each grant is scoped by site
+      and environment.</dd>
+    </dl>
+
+    <div class="note">
+      <p class="note__title">Where this manual ends</p>
+      <p>Everything here can be pointed at in the repository. Where a procedure
+      has no route and no command, the manual says so rather than inventing one:
+      there is no API that exports the database, and no route that pulls a
+      support bundle off a host.</p>
+    </div>
+
+    <h2>The sources this manual is made of</h2>
+
+    <ul>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/README.md"><code>README.md</code></a> - what the product is and the quick start.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/docs/configuration.md"><code>docs/configuration.md</code></a> - every setting of every binary.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/deploy/README.md"><code>deploy/README.md</code></a> - the images, the Compose files, the supply chain, the backup pair.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/tree/main/docs/runbooks"><code>docs/runbooks/</code></a> - the procedures.</li>
+      <li><a href="https://github.com/ultherego/Flotestro/blob/main/docs/ci.md"><code>docs/ci.md</code></a> - the checks a change passes before it reaches <code>main</code>.</li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

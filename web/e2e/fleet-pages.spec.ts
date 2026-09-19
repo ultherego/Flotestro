@@ -374,7 +374,9 @@ test.describe("settings", () => {
     await page.goto("/settings");
     await expect(header(page, "Settings")).toBeVisible();
     await expect(page.locator(".page-header .page-description")).toContainText(settings.source);
-    const cards = page.locator(".widgets .card");
+    // The areas the API reports, not the retention editor beside them: that
+    // one writes and has no entry in /api/v1/settings.
+    const cards = page.locator("[data-testid='settings-areas'] .card");
     await expect(cards).toHaveCount(settings.areas.length);
     for (const area of settings.areas) {
       const section = card(page, area.title);

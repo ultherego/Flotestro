@@ -33,7 +33,8 @@ export function Settings() {
         <MonitoringSettingsCard />
       </div>
       {data && (
-        <div className="widgets">
+        // The areas the API reports, apart from the editor above.
+        <div className="widgets" data-testid="settings-areas">
           {data.areas.map((area) => <AreaCard key={area.key} area={area} />)}
         </div>
       )}

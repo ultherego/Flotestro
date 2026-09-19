@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" width="1200" height="700" role="img" aria-labelledby="title desc">
+  <title id="title">How Flotestro Works</title>
+  <desc id="desc">A secure operation flow from the operator through the control plane and agent to Linux hosts and the audit trail.</desc>
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#11111b" flood-opacity=".18"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0 0 10 5 0 10z" fill="#FAB387"/>
+    </marker>
+    <style>
+      .sans{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+      .title{font-size:42px;font-weight:750;fill:#CDD6F4;letter-spacing:-1px}
+      .subtitle{font-size:18px;fill:#A6ADC8}
+      .step{font-size:14px;font-weight:800;fill:#181825}
+      .heading{font-size:21px;font-weight:750;fill:#CDD6F4}
+      .copy{font-size:15px;fill:#BAC2DE}
+      .small{font-size:13px;fill:#A6ADC8}
+    </style>
+  </defs>
+
+  <rect width="1200" height="700" rx="32" fill="#11111B"/>
+  <circle cx="1110" cy="72" r="120" fill="#FAB387" opacity=".06"/>
+  <circle cx="85" cy="640" r="150" fill="#89B4FA" opacity=".05"/>
+
+  <g class="sans">
+    <text x="64" y="78" class="title">How Flotestro works</text>
+    <text x="64" y="112" class="subtitle">One controlled change path for the entire Linux fleet</text>
+
+    <!-- flow line -->
+    <path d="M194 288H277M493 288H576M792 288H875" fill="none" stroke="#FAB387" stroke-width="5" stroke-linecap="round" marker-end="url(#arrow)"/>
+
+    <!-- Operator -->
+    <g filter="url(#shadow)">
+      <rect x="48" y="178" width="146" height="220" rx="24" fill="#1E1E2E" stroke="#45475A"/>
+      <circle cx="121" cy="235" r="29" fill="#FAB387"/>
+      <circle cx="121" cy="226" r="9" fill="#181825"/>
+      <path d="M101 249c4-13 36-13 40 0" fill="#181825"/>
+      <circle cx="76" cy="202" r="17" fill="#FAB387"/>
+      <text x="76" y="207" text-anchor="middle" class="step">1</text>
+      <text x="121" y="299" text-anchor="middle" class="heading">Operator</text>
+      <text x="121" y="329" text-anchor="middle" class="copy">selects an action</text>
+      <text x="121" y="352" text-anchor="middle" class="copy">and approves the plan</text>
+    </g>
+
+    <!-- Control plane -->
+    <g filter="url(#shadow)">
+      <rect x="277" y="162" width="216" height="252" rx="24" fill="#1E1E2E" stroke="#45475A"/>
+      <rect x="337" y="207" width="96" height="72" rx="14" fill="#313244" stroke="#FAB387" stroke-width="3"/>
+      <path d="M357 228h56M357 245h40M357 262h48" stroke="#FAB387" stroke-width="6" stroke-linecap="round"/>
+      <circle cx="305" cy="186" r="17" fill="#FAB387"/>
+      <text x="305" y="191" text-anchor="middle" class="step">2</text>
+      <text x="385" y="319" text-anchor="middle" class="heading">Control plane</text>
+      <text x="385" y="349" text-anchor="middle" class="copy">plans the campaign</text>
+      <text x="385" y="372" text-anchor="middle" class="copy">and enforces policies</text>
+      <text x="385" y="395" text-anchor="middle" class="small">canary · waves · failure thresholds</text>
+    </g>
+
+    <!-- Agent -->
+    <g filter="url(#shadow)">
+      <rect x="576" y="162" width="216" height="252" rx="24" fill="#1E1E2E" stroke="#45475A"/>
+      <path d="M634 225h100v68H634z" fill="#313244" stroke="#89B4FA" stroke-width="3"/>
+      <path d="M650 245l14 14-14 14M675 273h34" fill="none" stroke="#89B4FA" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="604" cy="186" r="17" fill="#89B4FA"/>
+      <text x="604" y="191" text-anchor="middle" class="step">3</text>
+      <text x="684" y="319" text-anchor="middle" class="heading">Host agent</text>
+      <text x="684" y="349" text-anchor="middle" class="copy">computes plan and digest</text>
+      <text x="684" y="372" text-anchor="middle" class="copy">verifies the host state</text>
+      <text x="684" y="395" text-anchor="middle" class="small">persistent mTLS · no remote shell</text>
+    </g>
+
+    <!-- Fleet -->
+    <g filter="url(#shadow)">
+      <rect x="875" y="146" width="277" height="284" rx="24" fill="#1E1E2E" stroke="#45475A"/>
+      <circle cx="903" cy="170" r="17" fill="#A6E3A1"/>
+      <text x="903" y="175" text-anchor="middle" class="step">4</text>
+      <g transform="translate(915 202)">
+        <rect width="197" height="45" rx="11" fill="#313244" stroke="#A6E3A1" stroke-width="2"/>
+        <circle cx="22" cy="22.5" r="6" fill="#A6E3A1"/><path d="M43 18h130M43 29h91" stroke="#6C7086" stroke-width="4" stroke-linecap="round"/>
+        <rect y="58" width="197" height="45" rx="11" fill="#313244" stroke="#89B4FA" stroke-width="2"/>
+        <circle cx="22" cy="80.5" r="6" fill="#89B4FA"/><path d="M43 76h130M43 87h108" stroke="#6C7086" stroke-width="4" stroke-linecap="round"/>
+        <rect y="116" width="197" height="45" rx="11" fill="#313244" stroke="#CBA6F7" stroke-width="2"/>
+        <circle cx="22" cy="138.5" r="6" fill="#CBA6F7"/><path d="M43 134h130M43 145h78" stroke="#6C7086" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <text x="1013" y="393" text-anchor="middle" class="heading">Linux fleet</text>
+      <text x="1013" y="417" text-anchor="middle" class="small">Debian · Ubuntu · Fedora · RHEL · Arch</text>
+    </g>
+
+    <!-- return path -->
+    <path d="M1013 452v48H684v-66" fill="none" stroke="#89B4FA" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrow)"/>
+    <text x="851" y="488" text-anchor="middle" class="small">result + verification</text>
+
+    <!-- Audit -->
+    <g filter="url(#shadow)">
+      <rect x="277" y="520" width="575" height="116" rx="24" fill="#181825" stroke="#FAB387" stroke-width="2"/>
+      <circle cx="318" cy="557" r="17" fill="#FAB387"/>
+      <text x="318" y="562" text-anchor="middle" class="step">5</text>
+      <path d="M315 582v23h499" fill="none" stroke="#45475A" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="386" cy="605" r="7" fill="#A6E3A1"/><circle cx="516" cy="605" r="7" fill="#89B4FA"/><circle cx="646" cy="605" r="7" fill="#CBA6F7"/><circle cx="776" cy="605" r="7" fill="#FAB387"/>
+      <text x="358" y="563" class="heading">Audit trail</text>
+      <text x="358" y="591" class="copy">Every plan, approval, step and result is recorded in the audit chain.</text>
+    </g>
+
+    <text x="64" y="671" class="small">Plan → approval → execution only for a matching digest → verification → audit</text>
+  </g>
+</svg>

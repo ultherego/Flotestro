@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Introduction &middot; Flotestro documentation</title>
+<meta name="description" content="What Flotestro is, what it manages, what it deliberately does not do, and the doctrine the rest of the product follows from.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="brand" href="../"><img class="brand__mark" src="../img/logo.webp" alt="">Flotestro</a>
+    <nav class="site-nav">
+      <a href="../">Overview</a>
+      <a href="./" aria-current="page">Documentation</a>
+      <a href="https://ultherego.github.io/Flotestro/packages/">Packages</a>
+      <a href="https://github.com/ultherego/Flotestro">Source</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+  <aside class="sidebar">
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Manual</h2>
+      <ul class="sidebar__list">
+        <li><a href="./">Contents</a></li>
+        <li><a href="introduction.html" aria-current="page">1. Introduction</a></li>
+        <li><a href="architecture.html">2. Architecture</a></li>
+        <li><a href="installation.html">3. Installation</a></li>
+        <li><a href="concepts.html">4. How a change happens</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Reference</h2>
+      <ul class="sidebar__list">
+        <li><a href="configuration.html">5. Configuration</a></li>
+        <li><a href="operations.html">6. Operations</a></li>
+        <li><a href="errors.html">7. Errors and refusals</a></li>
+        <li><a href="api.html">8. API</a></li>
+      </ul>
+    </nav>
+    <nav class="sidebar__group">
+      <h2 class="sidebar__title">Procedures</h2>
+      <ul class="sidebar__list">
+        <li><a href="runbooks.html">9. Runbooks</a></li>
+      </ul>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <h1>1. Introduction</h1>
+
+    <p class="lede">Flotestro is fleet management for Linux servers: one panel
+    that plans a change, has it approved, carries it out on the hosts and keeps
+    the evidence. It manages Debian, Ubuntu, Fedora, RHEL and Arch hosts through
+    an agent that runs unprivileged and hands the privileged part of a change to
+    a root helper with a fixed repertoire.</p>
+
+    <ul class="linkrow">
+      <li><a href="#what">What it is</a></li>
+      <li><a href="#manages">What it manages</a></li>
+      <li><a href="#doctrine">The doctrine</a></li>
+      <li><a href="#not">What it does not do</a></li>
+      <li><a href="#who">Who uses it</a></li>
+    </ul>
+
+    <h2 id="what">What Flotestro is</h2>
+
+    <p>An installation is one control plane, a PostgreSQL database and an agent
+    on every managed host; a site whose hosts cannot reach the panel directly
+    gets a relay of its own. The control plane is the panel, the API, the agent
+    gateway, the enrollment endpoint, the scheduler, the campaign engine and the
+    fleet's certificate authority in one binary. Nothing else has to be
+    installed: there is no message broker, no configuration-management runner
+    and no monitoring stack beside it.</p>
+
+    <p>What an operator does with it is always the same shape. They ask the
+    fleet a question - which hosts have a security update waiting, which have a
+    failed unit, which have drifted from a policy - and then order a typed
+    operation against the hosts that answered. The host computes what the change
+    would do, an approver reads that plan, the host applies it only if the plan
+    still holds, and the panel records the order, the approval, the result and
+    the verification as events that can be checked later without the
+    database.</p>
+
+    <figure class="figure">
+      <img src="dashboard.png" alt="The Flotestro dashboard: fleet counters, hosts needing attention, campaigns and alerts">
+      <figcaption><b>The dashboard.</b> Only the numbers that ask for a decision:
+      hosts online and offline, hosts wanting a reboot, hosts with a failed unit
+      or a broken package database, quarantined hosts, failed jobs in the last
+      day, relays whose buffers are filling.</figcaption>
+    </figure>
+
+    <h2 id="manages">What it manages</h2>
+
+    <p>The operations are grouped into modules, and every module works the same
+    way: the agent reports the facts of that module as inventory, the panel
+    judges them, and the changes in that area are typed operations with their
+    own permission.</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Area</th><th>What the panel does with it</th></tr></thead>
+      <tbody>
+        <tr><td>Packages</td><td>Plan, upgrade, install, remove, hold, repair a broken package database, upgrade the agent itself. Every change is a per-host plan approved by digest.</td></tr>
+        <tr><td>Services and processes</td><td>Start, stop, restart, reload, enable, mask, reset a failed unit; unit detail and journal; the process tree and signals.</td></tr>
+        <tr><td>Files and schedules</td><td>Managed files with versions kept on the host and a rollback to an exact earlier content; cron entries and systemd timers.</td></tr>
+        <tr><td>Network and firewall</td><td>NetworkManager, nmstate and netplan behind a connectivity watchdog that undoes a change that cuts the host off; firewalld, nftables and UFW; the resolver.</td></tr>
+        <tr><td>Storage</td><td>Mounts, filesystem check and resize, LVM, SMART, device wipe.</td></tr>
+        <tr><td>Containers</td><td>Docker containers, images, prune, events and logs; Compose projects deployed against a plan with resolved image digests.</td></tr>
+        <tr><td>Kernel and security</td><td><code>sysctl</code>, kernel modules, SELinux mode, audit rules; versioned security checks with a fleet-wide remediation.</td></tr>
+        <tr><td>Time</td><td>chrony and timesyncd, the time zone, and a test of a time source before it replaces the one in use.</td></tr>
+        <tr><td>Identity</td><td>FreeIPA users, groups, HBAC and sudo rules, an access simulation, domain joins; local accounts and their SSH keys.</td></tr>
+        <tr><td>Certificates and backups</td><td>Scanning the host's certificates, rotating trust anchors, certmonger renewal; restic and borg runs, verification and restore.</td></tr>
+        <tr><td>Monitoring</td><td>CPU, memory, swap, filesystems, inodes and uptime sampled by the agent; the rules, alerts and silences live in the panel.</td></tr>
+        <tr><td>Vulnerabilities</td><td>The package lists the hosts report, correlated against the Debian, Ubuntu, Red Hat and NVD feeds. The panel reads the feeds; a managed host never does.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>The registry that defines them all is <code>internal/opspec</code>: in this
+    release it holds 128 typed operations, each with its permission, risk level,
+    lock class, timeout, output limit, campaign mode, offline policy, cancel
+    mode, rollback class and verifier. The <a href="operations.html">operations
+    reference</a> lists them one by one.</p>
+
+    <h2 id="doctrine">The doctrine</h2>
+
+    <p>Six rules run through the whole product. They are not a statement of
+    intent: each one is visible in the code, and most of them have a refusal
+    code attached, because the way a rule is enforced is by saying no.</p>
+
+    <h3>Unknown is never zero</h3>
+
+    <p>A fact the agent could not determine is reported as absent, not as
+    <code>0</code>, not as <code>false</code> and not as an empty list that reads
+    like "nothing found". A module the host could not read is marked unread, and
+    the panel says so where the number would have been. A verdict that depends
+    on a module read too long ago is refused with
+    <code class="refusal">inventory_stale</code> rather than computed from what
+    is stale; a vulnerability assessment with no feed says
+    <code>feed_missing</code> and states in as many words that zero findings
+    there means nothing could be checked, while <code>feed_stale</code> still
+    produces findings, because day-old data beat none.</p>
+
+    <p>The same rule decides the defaults. An operation the registry does not
+    know is treated as <code>critical</code> risk, not as the lowest one. A
+    duration that cannot be parsed keeps the default rather than switching a
+    safeguard off. An empty list of privileged groups is read as "the
+    installation said nothing", not as "no group is privileged".</p>
+
+    <h3>Every operation is a typed contract</h3>
+
+    <p>There is no "run a command" operation and the panel never opens a shell on
+    a host. Each of the 128 operations is a versioned contract: the payload it
+    accepts, the permission it needs, its risk level
+    (<code>low</code>, <code>medium</code>, <code>high</code>,
+    <code>critical</code>, <code>destructive</code>), the lock class it takes on
+    the host so two changes of the same kind cannot interleave, whether it may
+    run in a campaign, what it does when the host is offline, whether it can be
+    cancelled after it has started, how it is rolled back, and which verifier
+    reads the host afterwards to say whether the change is really there.</p>
+
+    <p>Risk is not decoration. An operation of <code>critical</code> or
+    <code>destructive</code> risk requires fresh authentication; a
+    <code>destructive</code> one also requires the operator to type the target's
+    name, and needs two approvals rather than one.</p>
+
+    <h3>The host reports facts, the panel judges</h3>
+
+    <p>An agent reports what it read: the units, the packages, the mounts, the
+    interfaces, the certificates, the sudo policy. It does not decide whether any
+    of that is good. Compliance, drift from a policy, security check results and
+    vulnerability findings are all computed in the panel, from the reported
+    facts and a versioned rule set, so that the verdict of a check can be
+    changed, re-run over history and explained without touching a single
+    host.</p>
+
+    <p>This is also why the vulnerability feeds are read by the panel and never
+    by a managed host: a host has no route out, nothing to correlate against, and
+    no business holding an opinion about itself.</p>
+
+    <h3>A plan is approved by digest</h3>
+
+    <p>For every change that has a plan, the host computes what would happen -
+    the preconditions, the steps, the effects, the artifacts and the rollback -
+    and reports it with a digest. The digest is the SHA-256 of the plan in
+    RFC 8785 canonical JSON, taken over the content of the change alone: the
+    description, the host identifier, the inventory revision and the expiry are
+    stripped before hashing, so the same change on the same state always hashes
+    the same.</p>
+
+    <p>The approver reads the plan and approves that digest. When the task
+    reaches the host, the host computes the plan again and compares. If anything
+    moved in between, it refuses with
+    <code class="refusal">stale_plan</code> and changes nothing. A plan made by a
+    different planner version is refused with
+    <code class="refusal">replan_required</code>; one older than its lifetime,
+    24 hours by default, with <code class="refusal">plan_expired</code>.</p>
+
+    <h3>Every refusal has a stable code</h3>
+
+    <p>A refusal is part of the contract. The same situation always answers with
+    the same code - in the API, in the panel, in a campaign's target list and in
+    the audit trail - and the code is what a procedure, a dashboard or a script
+    keys on; the human wording of the message may change, the code does not.
+    Each code carries the stage it belongs to (admission, planning, dispatch,
+    helper, verify, reconcile, startup), whether it counts as a failure for a
+    campaign's threshold, and whether a retry can help at all:
+    <code>never</code>, <code>automatic</code>, <code>after_change</code>,
+    <code>after_replan</code> or <code>read_state</code>. The running panel
+    serves the whole guide at <code>GET /api/v1/errors</code>; it is also the
+    <a href="errors.html">error reference</a> of this manual.</p>
+
+    <h3>Fail-closed</h3>
+
+    <p>Where the product is unsure, it stops. A few examples of the same rule in
+    different places:</p>
+
+    <ul>
+      <li>A control plane whose state directory does not belong to the database
+      it is pointed at refuses to start with
+      <code class="refusal">installation_state_mismatch</code>. It never
+      generates a fresh CA in place of a missing one - that would silently cut
+      off the whole fleet.</li>
+      <li>A binary whose schema is older than the database stops with
+      <code class="refusal">schema_behind</code>, and one whose schema is newer
+      with <code class="refusal">schema_ahead</code>. It will not serve a shape
+      it misreads.</li>
+      <li>A root helper in <code>enforce</code> mode refuses any change that does
+      not carry a capability the panel signed for exactly this host, task, action
+      and payload: <code class="refusal">capability_required</code>. A capability
+      whose nonce was used before is refused as
+      <code class="refusal">capability_replay</code>.</li>
+      <li>A retention that would delete a reading a relay is still carrying is
+      refused, at start and on the settings screen alike, with
+      <code class="refusal">metrics_retention_too_short</code>.</li>
+      <li>A write of a managed SSH key file that <code>sshd</code> does not
+      actually read is refused with
+      <code class="refusal">managed_file_not_read</code> rather than writing keys
+      that open nothing.</li>
+      <li>An identity provider with no group mapped to a role grants nothing:
+      whoever signs in gets no permissions at all until a mapping says
+      otherwise.</li>
+    </ul>
+
+    <div class="note">
+      <p class="note__title">Note</p>
+      <p>Fail-closed cuts both ways, and the product accepts the cost. A host in
+      quarantine takes no operations and fetches no secrets; a campaign target on
+      such a host is marked ineligible rather than skipped quietly; an operation
+      whose result never arrived settles as
+      <code class="refusal">lease_expired</code> and says the outcome has to be
+      read from the host before it is tried again - it does not assume the change
+      did not happen.</p>
+    </div>
+
+    <h2 id="not">What Flotestro deliberately does not do</h2>
+
+    <dl class="kv">
+      <dt>Run arbitrary commands</dt>
+      <dd>There is no operation that executes a command line on a host and no
+      shell session from the panel. What is not a typed operation cannot be
+      ordered. The root helper's repertoire is fixed at compile time; it refuses
+      anything else with <code class="refusal">unknown_action</code>.</dd>
+
+      <dt>Bring a monitoring stack</dt>
+      <dd>No Prometheus, no agent-side exporter to scrape. The agent samples its
+      own host once a minute, the panel stores the samples and the quarter-hour
+      rollups, evaluates the alert rules and holds the alerts and the silences.
+      The panel does export <code>/metrics</code> about itself, for an
+      installation that already has somewhere to put it.</dd>
+
+      <dt>Run the agent in a container</dt>
+      <dd>The agent manages the host itself - its PID 1, its devices, its package
+      database - so it is a native package on every supported family. A container
+      that could do that job would be a <code>--privileged</code> container with
+      nothing isolated about it. The control plane, the relay, the admin tools
+      and the air-gapped package repository are images.</dd>
+
+      <dt>Put secrets in a task</dt>
+      <dd>A task never carries a secret value. The host fetches what it needs
+      under a short lease, from the gateway, over its own mTLS session, and the
+      panel records that it was fetched. A file version whose content came from
+      the secret store is reported without a checksum, so that naming it in the
+      panel cannot leak a fingerprint of the value.</dd>
+
+      <dt>Export its own database</dt>
+      <dd>There is no dump route and no backup button. Backups are taken with the
+      PostgreSQL tools, and the admin-tools image exists so that the panel's host
+      does not need a <code>pg_dump</code> of the right major version.</dd>
+
+      <dt>Pull a support bundle off a host</dt>
+      <dd>Nothing leaves a host by itself. A bundle is made on the host by an
+      explicit command, written to a file the operator names, and scanned before
+      it is written: a bundle containing a private key or a bearer token is
+      refused outright.</dd>
+
+      <dt>Publish a moving version</dt>
+      <dd>No <code>latest</code>, no <code>stable</code> alias, no truncated
+      <code>0.60</code> tag for the images: only the full version, which is never
+      rewritten, and a commit tag for diagnostics. A pre-release goes to a
+      <code>testing</code> channel that a host asking for <code>stable</code>
+      never reads.</dd>
+
+      <dt>Decide for the operator</dt>
+      <dd>The panel does not upgrade a fleet on its own, does not open a
+      maintenance window on its own and does not delete history on its own. The
+      audit retention defaults to keeping everything forever; shrinking a
+      monitoring retention is refused with
+      <code class="refusal">metrics_retention_shrink_unacknowledged</code> unless
+      the request says in its body that the data loss is accepted.</dd>
+    </dl>
+
+    <h2 id="who">Who uses it</h2>
+
+    <p>Permissions are granted to roles, roles are granted to groups of the
+    identity provider, and every grant is scoped by site and environment. The
+    six roles are:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Role</th><th>What it is for</th></tr></thead>
+      <tbody>
+        <tr><td><code>viewer</code></td><td>Reads the fleet: hosts, inventory, jobs, campaigns, and the plans of a change without ordering one.</td></tr>
+        <tr><td><code>auditor</code></td><td>Reads the state of the system as evidence: the audit trail, the metrics, the protective state of a host and the results of its checks.</td></tr>
+        <tr><td><code>operator</code></td><td>Orders operations and runs campaigns within their scope.</td></tr>
+        <tr><td><code>approver</code></td><td>Approves what an operator ordered. In a production environment the approval has to come from somebody else.</td></tr>
+        <tr><td><code>identity_admin</code></td><td>Manages the directory, the local accounts and their keys, but does not run operations on hosts.</td></tr>
+        <tr><td><code>platform_admin</code></td><td>The installation itself: settings, the fleet CA and its rotation, principals and group mappings, the lifecycle of a host.</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>Two permissions are deliberately kept apart from each other:
+    <code>accounts.privileged_groups</code>, which is needed to put an account
+    into a group that is root by another name, belongs to the platform
+    administrator, while making the account at all belongs to the identity
+    administrator. Granting the rights and granting the account are two halves
+    of one decision, and the product makes two people hold them.</p>
+
+    <ul class="linkrow">
+      <li><a href="architecture.html">Next: 2. Architecture &rarr;</a></li>
+      <li><a href="concepts.html">How a change happens</a></li>
+    </ul>
+  </main>
+
+</div>
+
+<footer class="site-footer">
+  <div class="site-footer__inner">
+    <p>Flotestro documentation, release 0.60.0.</p>
+    <p><a href="https://github.com/ultherego/Flotestro">github.com/ultherego/Flotestro</a></p>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,559 @@
+/* The one stylesheet of the Flotestro site: tokens, page shell and the
+   elements a documentation page needs, so no page adds CSS of its own. */
+
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Inter:wght@400;600&display=swap");
+
+:root {
+  /* Catppuccin Mocha, the official values. No hex literal below this block. */
+  --base:     #1e1e2e;  --mantle:   #181825;  --crust:    #11111b;
+  --surface0: #313244;  --surface1: #45475a;  --surface2: #585b70;
+  --overlay0: #6c7086;  --overlay1: #7f849c;  --overlay2: #9399b2;
+  --subtext0: #a6adc8;  --subtext1: #bac2de;  --text:     #cdd6f4;
+  --peach:    #fab387;  --red:      #f38ba8;  --maroon:   #eba0ac;
+  --yellow:   #f9e2af;  --green:    #a6e3a1;  --teal:     #94e2d5;
+  --sky:      #89dceb;  --sapphire: #74c7ec;  --blue:     #89b4fa;
+  --lavender: #b4befe;  --mauve:    #cba6f7;  --pink:     #f5c2e7;
+  --flamingo: #f2cdcd;  --rosewater:#f5e0dc;
+
+  --font-head: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-body: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --measure: 70ch;          /* running text */
+  --page: 74rem;            /* header, footer and the widest content */
+  --sidebar: 15.5rem;
+  --radius: 6px;
+  --gutter: 1.5rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  background: var(--base);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 1.0625rem;
+  line-height: 1.65;
+  text-rendering: optimizeLegibility;
+}
+
+a { color: var(--peach); text-decoration: none; border-bottom: 1px solid transparent; }
+a:hover { border-bottom-color: var(--peach); }
+
+:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; border-radius: 2px; }
+
+img, svg { max-width: 100%; height: auto; }
+
+hr { border: 0; border-top: 1px solid var(--surface1); margin: 3rem 0; }
+
+::selection { background: var(--surface1); color: var(--text); }
+
+/* Header ------------------------------------------------------------- */
+
+.site-header {
+  background: var(--crust);
+  border-bottom: 1px solid var(--surface1);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.site-header__inner {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 0.75rem var(--gutter);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1.5rem;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-family: var(--font-head);
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  border: 0;
+}
+
+.brand:hover { color: var(--peach); }
+
+/* The mark sits in the left square of the logo file; the rest is empty. */
+.brand__mark {
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: cover;
+  object-position: left center;
+  border-radius: var(--radius);
+}
+
+.site-nav {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  font-family: var(--font-head);
+  font-size: 0.8125rem;
+  letter-spacing: 0.02em;
+}
+
+.site-nav a { color: var(--subtext0); }
+.site-nav a:hover { color: var(--peach); }
+.site-nav a[aria-current="page"] { color: var(--peach); }
+
+/* Shell -------------------------------------------------------------- */
+
+.layout {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 2.5rem var(--gutter) 4rem;
+  display: grid;
+  grid-template-columns: var(--sidebar) minmax(0, 1fr);
+  gap: 3rem;
+  align-items: start;
+}
+
+/* The landing page and anything else without a documentation tree. */
+.layout--plain { grid-template-columns: minmax(0, 1fr); }
+
+.sidebar {
+  position: sticky;
+  top: 4.5rem;
+  font-size: 0.9375rem;
+}
+
+.sidebar__group + .sidebar__group { margin-top: 1.75rem; }
+
+.sidebar__title {
+  margin: 0 0 0.5rem;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--overlay1);
+}
+
+.sidebar__list { list-style: none; margin: 0; padding: 0; }
+.sidebar__list li { margin: 0; }
+
+.sidebar a,
+.sidebar__link {
+  display: block;
+  padding: 0.25rem 0 0.25rem 0.75rem;
+  border-left: 2px solid var(--surface0);
+  border-bottom: 0;
+  color: var(--subtext0);
+}
+
+.sidebar a:hover { color: var(--text); border-left-color: var(--surface2); }
+
+.sidebar a[aria-current="page"] {
+  color: var(--peach);
+  border-left-color: var(--peach);
+}
+
+.content { min-width: 0; }
+
+/* Running text stays readable however wide the column is. */
+.content > p,
+.content > ul,
+.content > ol,
+.content > dl,
+.prose { max-width: var(--measure); }
+
+.site-footer {
+  background: var(--crust);
+  border-top: 1px solid var(--surface1);
+  color: var(--subtext0);
+  font-size: 0.9375rem;
+}
+
+.site-footer__inner {
+  max-width: var(--page);
+  margin: 0 auto;
+  padding: 2rem var(--gutter);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  justify-content: space-between;
+}
+
+.site-footer p { margin: 0; }
+
+/* Headings and text -------------------------------------------------- */
+
+h1, h2, h3, h4 {
+  font-family: var(--font-head);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* The sticky header must not cover the heading an anchor jumps to. */
+[id] { scroll-margin-top: 5rem; }
+
+h1 { font-size: clamp(1.85rem, 1.3rem + 1.9vw, 2.6rem); margin: 0 0 0.75rem; }
+h2 { font-size: 1.5rem; margin: 3.5rem 0 1rem; }
+h3 { font-size: 1.125rem; margin: 2.5rem 0 0.75rem; }
+h4 { font-size: 1rem; margin: 2rem 0 0.5rem; color: var(--subtext1); }
+
+/* The accent marks a section without decorating it. */
+h2::before {
+  content: "";
+  display: block;
+  width: 2rem;
+  border-top: 2px solid var(--peach);
+  margin-bottom: 0.9rem;
+}
+
+p { margin: 0 0 1.1rem; }
+
+.lede {
+  font-size: 1.1875rem;
+  line-height: 1.55;
+  color: var(--subtext1);
+}
+
+.muted { color: var(--subtext0); }
+
+strong { color: var(--subtext1); font-weight: 600; }
+
+ul, ol { margin: 0 0 1.1rem; padding-left: 1.25rem; }
+li { margin: 0.3rem 0; }
+li::marker { color: var(--overlay1); }
+
+blockquote {
+  margin: 1.5rem 0;
+  padding-left: 1rem;
+  border-left: 2px solid var(--surface1);
+  color: var(--subtext0);
+}
+
+/* Key and value lists: the shape of most tables here. */
+.kv,
+.content > .kv { display: grid; grid-template-columns: 13rem minmax(0, 1fr); gap: 0 1.5rem; max-width: none; }
+.kv dt {
+  font-family: var(--font-head);
+  font-size: 0.875rem;
+  color: var(--peach);
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--surface1);
+}
+.kv dd {
+  margin: 0;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--surface1);
+  color: var(--subtext1);
+}
+
+/* Code --------------------------------------------------------------- */
+
+code, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 0.875em;
+}
+
+:not(pre) > code {
+  background: var(--surface0);
+  color: var(--subtext1);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/* Semantic colour only where it carries meaning: a refusal code, a good state. */
+.refusal { color: var(--red); }
+.ok { color: var(--green); }
+
+pre {
+  background: var(--mantle);
+  border: 1px solid var(--surface0);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  margin: 0 0 1.25rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  tab-size: 4;
+}
+
+pre code { background: none; padding: 0; color: var(--subtext1); font-size: 1em; }
+
+/* The name of the file or the shell a block belongs to. */
+.filename {
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--overlay1);
+  margin: 0 0 0.4rem;
+}
+
+/* Tables ------------------------------------------------------------- */
+
+.table-scroll { overflow-x: auto; margin: 0 0 1.5rem; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9375rem;
+  margin: 0 0 1.5rem;
+}
+
+th, td {
+  text-align: left;
+  padding: 0.55rem 1rem 0.55rem 0;
+  border-bottom: 1px solid var(--surface1);
+  vertical-align: top;
+}
+
+th {
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--subtext0);
+}
+
+td { color: var(--subtext1); }
+
+/* Notes -------------------------------------------------------------- */
+
+.note {
+  background: var(--surface0);
+  border-left: 3px solid var(--sapphire);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 0.9rem 1.1rem;
+  margin: 0 0 1.5rem;
+  max-width: var(--measure);
+  font-size: 0.9375rem;
+}
+
+.note > :last-child { margin-bottom: 0; }
+
+.note__title {
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sapphire);
+  margin: 0 0 0.35rem;
+}
+
+.note--warning { border-left-color: var(--yellow); }
+.note--warning .note__title { color: var(--yellow); }
+
+.note--refusal { border-left-color: var(--red); }
+.note--refusal .note__title { color: var(--red); }
+
+.note--success { border-left-color: var(--green); }
+.note--success .note__title { color: var(--green); }
+
+/* Figures ------------------------------------------------------------ */
+
+.figure { margin: 0 0 2.5rem; }
+
+.figure img {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--surface1);
+  border-radius: var(--radius);
+}
+
+/* A drawing that carries its own frame, unlike a screenshot. */
+.figure--bare img { border: 0; }
+
+.figure figcaption {
+  margin-top: 0.75rem;
+  max-width: var(--measure);
+  font-size: 0.9375rem;
+  color: var(--subtext0);
+}
+
+.figure figcaption b {
+  font-family: var(--font-head);
+  font-weight: 600;
+  color: var(--subtext1);
+}
+
+.figure-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem;
+}
+
+.figure-pair .figure figcaption { max-width: none; }
+
+/* Cards -------------------------------------------------------------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin: 0 0 1.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  background: var(--surface0);
+  border-radius: var(--radius);
+  padding: 1rem 1.1rem;
+  margin: 0;
+}
+
+.card__title {
+  font-family: var(--font-head);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0 0 0.35rem;
+}
+
+.card p { margin: 0; font-size: 0.9375rem; color: var(--subtext0); }
+
+/* Steps: the numbered path of a change. */
+.steps { counter-reset: step; list-style: none; padding: 0; max-width: var(--measure); }
+
+.steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.25rem;
+  margin: 0 0 0.9rem;
+}
+
+.steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0.05rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--surface2);
+  border-radius: 50%;
+  font-family: var(--font-head);
+  font-size: 0.75rem;
+  color: var(--peach);
+}
+
+/* A row of plain links under a heading. */
+.linkrow {
+  list-style: none;
+  padding: 0;
+  margin: 1.5rem 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  font-family: var(--font-head);
+  font-size: 0.875rem;
+}
+
+.linkrow li { margin: 0; }
+
+/* Narrow screens ----------------------------------------------------- */
+
+@media (max-width: 60rem) {
+  :root { --gutter: 1rem; }
+
+  body { font-size: 1rem; }
+
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    padding-top: 1.75rem;
+  }
+
+  /* The tree stays above the text instead of disappearing. */
+  .sidebar {
+    position: static;
+    max-height: 40vh;
+    overflow-y: auto;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--surface1);
+  }
+
+  .figure-pair { grid-template-columns: minmax(0, 1fr); gap: 2.5rem; }
+
+  .kv { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .kv dt { padding-bottom: 0; border-top: 1px solid var(--surface1); }
+  .kv dd { padding-top: 0.2rem; border-top: 0; }
+
+  .site-header__inner { padding: 0.6rem var(--gutter); }
+  .site-nav { width: 100%; margin-left: 0; }
+}
+
+/* ---------------------------------------------------------------------- */
+/* The reference chapters: a badge vocabulary the narrative pages have no  */
+/* use for, and the two-column shape a code entry reads best in.           */
+/* ---------------------------------------------------------------------- */
+
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 10;
+  background: var(--surface0); color: var(--text);
+  padding: 0.6rem 1rem; border-radius: 0 0 6px 0;
+}
+.skip-link:focus { left: 0; outline: 2px solid var(--peach); }
+
+/* The reference pages name the shell slightly differently; both spellings
+   reach the same thing rather than one set of pages going unstyled. */
+.site-title { font-family: var(--font-mono); font-weight: 600; color: var(--text); }
+.sidebar-title,
+.toc-title { font-family: var(--font-mono); font-size: 0.78rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--subtext0); margin: 1.4rem 0 0.5rem; }
+.sidebar a.current,
+a.current { color: var(--peach); }
+.footer-note { color: var(--subtext0); font-size: 0.86rem; }
+
+.toc { margin: 0 0 2rem; padding-left: 1.1rem; }
+.toc-sub { margin: 0.2rem 0 0.6rem 0; padding-left: 1.1rem; color: var(--subtext0); }
+.table-wrap { overflow-x: auto; margin: 1.2rem 0; }
+.caption { color: var(--subtext0); font-size: 0.86rem; margin-top: 0.4rem; }
+
+/* One entry of a reference: what it is on the left, what it means and what
+   to do on the right. */
+.ref { width: 100%; border-collapse: collapse; }
+.ref th, .ref td { text-align: left; vertical-align: top;
+  padding: 0.5rem 0.8rem; border-bottom: 1px solid var(--surface1); }
+.ref th { color: var(--subtext0); font-weight: 600; }
+.label { color: var(--subtext0); font-family: var(--font-mono); font-size: 0.82rem;
+  white-space: nowrap; }
+.meaning { color: var(--text); }
+.action { color: var(--subtext1); }
+.facts, .errors, .ops, .routes, .code-index { margin: 1rem 0 2.4rem; }
+.op-title, .code { font-family: var(--font-mono); color: var(--peach); }
+.alias { color: var(--subtext0); font-family: var(--font-mono); font-size: 0.82rem; }
+
+/* A badge says one word about an entry. The colour carries the meaning:
+   peach is the accent and never a severity. */
+.badge {
+  display: inline-block; font-family: var(--font-mono); font-size: 0.74rem;
+  letter-spacing: 0.04em; padding: 0.1rem 0.45rem; border-radius: 4px;
+  border: 1px solid var(--surface2); color: var(--subtext1);
+  background: var(--surface0); white-space: nowrap;
+}
+.badge.risk-destructive, .badge.risk-critical { border-color: var(--red); color: var(--red); }
+.badge.risk-high { border-color: var(--maroon); color: var(--maroon); }
+.badge.risk-medium { border-color: var(--yellow); color: var(--yellow); }
+.badge.risk-low { border-color: var(--green); color: var(--green); }
+.badge.counts-failure { border-color: var(--red); color: var(--red); }
+.badge.not-failure { border-color: var(--green); color: var(--green); }
+.badge.retry-never { border-color: var(--overlay1); color: var(--subtext0); }
+.badge.retry-automatic { border-color: var(--green); color: var(--green); }
+.badge.retry-after-change, .badge.retry-after-replan { border-color: var(--yellow); color: var(--yellow); }
+.badge.retry-read-state { border-color: var(--sapphire); color: var(--sapphire); }
+.badge.method { font-weight: 600; }
+.badge.method-get { border-color: var(--green); color: var(--green); }
+.badge.method-post { border-color: var(--sapphire); color: var(--sapphire); }
+.badge.method-put { border-color: var(--yellow); color: var(--yellow); }
+.badge.method-delete { border-color: var(--red); color: var(--red); }
