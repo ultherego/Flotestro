@@ -522,6 +522,8 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 		metrics.RelayEnvelopeRefusal.Inc(hosts.RefusalRelayEnvelopeInvalid)
 		s.log.Warn("an unsigned message on a signed relayed session was dropped",
 			"host_id", hostID, "relay_id", relayed.peer.RelayID)
+		// The panel will never take it, so the relay's record is freed here.
+		s.acknowledge(hostID, session, nil, msg.GetRelayMessageId())
 		return errMessageDropped
 	}
 	verified, err := s.envelopes.VerifyMessage(ctx, relayed.peer, msg)
@@ -532,7 +534,7 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 				// because the acknowledgement never reached it - a link that broke while
 				// the spool was draining.
 				metrics.RelayEnvelopeRedelivery.Inc()
-				s.acknowledge(hostID, session, msg.GetEnvelope())
+				s.acknowledge(hostID, session, msg.GetEnvelope(), msg.GetRelayMessageId())
 				s.log.Debug("a relayed message the panel had consumed was carried again and acknowledged",
 					"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
 				return errMessageDropped
@@ -541,6 +543,7 @@ func (s *AgentService) checkRelayedMessage(ctx context.Context, hostID string, s
 			metrics.RelayEnvelopeRefusal.Inc(refusal.Code)
 			s.log.Warn("a relayed message was carried a second time and was dropped",
 				"host_id", hostID, "relay_id", relayed.peer.RelayID, "detail", refusal.Detail)
+			s.acknowledge(hostID, session, nil, msg.GetRelayMessageId())
 			return errMessageDropped
 		}
 		return s.refuseEnvelope(ctx, hostID, err)
@@ -585,27 +588,29 @@ func (s *AgentService) handle(ctx context.Context, hostID string, session *Sessi
 	if err := s.consume(ctx, hostID, session, msg); err != nil {
 		return err
 	}
-	s.acknowledge(hostID, session, msg.GetEnvelope())
+	s.acknowledge(hostID, session, msg.GetEnvelope(), msg.GetRelayMessageId())
 	return nil
 }
 
-// acknowledge tells the relay that the message of the envelope is the panel's
-// now and its record may leave the spool.
-func (s *AgentService) acknowledge(hostID string, session *Session, envelope *agentv1.RelayedEnvelope) {
-	if envelope == nil || session == nil {
+// acknowledge tells the relay the message is the panel's now: by the sequence
+// of the envelope where there is one, by the relay's identifier where there is not.
+func (s *AgentService) acknowledge(hostID string, session *Session,
+	envelope *agentv1.RelayedEnvelope, relayMessageID string) {
+	if session == nil || (envelope == nil && relayMessageID == "") {
 		return
 	}
 	err := session.Send(&agentv1.ServerMessage{
 		Payload: &agentv1.ServerMessage_MessageAck{MessageAck: &agentv1.MessageAck{
-			HostId:    hostID,
-			SessionId: envelope.GetSessionId(),
-			Sequence:  envelope.GetSequence(),
+			HostId:         hostID,
+			SessionId:      envelope.GetSessionId(),
+			Sequence:       envelope.GetSequence(),
+			RelayMessageId: relayMessageID,
 		}},
 	}, ackSendTimeout)
 	if err != nil {
 		s.log.Warn("the acknowledgement of a relayed message was not sent; the relay will carry it again",
 			"host_id", hostID, "session_id", envelope.GetSessionId(),
-			"sequence", envelope.GetSequence(), "err", err)
+			"sequence", envelope.GetSequence(), "relay_message_id", relayMessageID, "err", err)
 	}
 }
 

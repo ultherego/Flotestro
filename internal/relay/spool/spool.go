@@ -112,6 +112,9 @@ type entry struct {
 	offset    int64
 	// sentAt is when the record was last sent up; zero for one waiting.
 	sentAt time.Time
+	// firstSentAt is the first delivery in the current session: the wait for an
+	// acknowledgement is counted from it and starts again with the session.
+	firstSentAt time.Time
 }
 
 // Stats describes the spool for the heartbeat, the state file and the
@@ -538,6 +541,9 @@ func (s *Spool) Next(hostID string, limit int) ([]*Record, error) {
 			continue
 		}
 		item.sentAt = now
+		if item.firstSentAt.IsZero() {
+			item.firstSentAt = now
+		}
 		records = append(records, record)
 	}
 	return records, nil
@@ -551,6 +557,9 @@ func (s *Spool) MarkSent(id uuid.UUID) {
 	defer s.mu.Unlock()
 	if item, known := s.index[id]; known {
 		item.sentAt = s.options.Now()
+		if item.firstSentAt.IsZero() {
+			item.firstSentAt = item.sentAt
+		}
 	}
 }
 
@@ -573,6 +582,7 @@ func (s *Spool) Unsend(hostID string) {
 	defer s.mu.Unlock()
 	for _, item := range s.byHost[hostID] {
 		item.sentAt = time.Time{}
+		item.firstSentAt = time.Time{}
 	}
 }
 
@@ -592,8 +602,54 @@ func (s *Spool) Ack(hostID, sessionID string, sequence uint64) (bool, error) {
 	return false, nil
 }
 
-// Delete removes a record by its identifier: the confirmation of a
-// message without an envelope, which has no acknowledgement to wait for.
+// AckID deletes the record the panel named by its identifier: the key of a
+// message that carries no envelope and so has no sequence.
+func (s *Spool) AckID(hostID string, id uuid.UUID) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return false, ErrClosed
+	}
+	item, known := s.index[id]
+	if !known {
+		return false, nil
+	}
+	if item.hostID != hostID {
+		// An acknowledgement travels the session of one host and frees nothing
+		// that belongs to another.
+		return false, nil
+	}
+	return true, s.deleteLocked(item)
+}
+
+// ForgetUnacknowledged drops the host's records that have no sequence, were
+// first delivered longer than the grace ago and were named by no acknowledgement.
+func (s *Spool) ForgetUnacknowledged(hostID string, grace time.Duration,
+	lastNamed time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return 0, ErrClosed
+	}
+	now := s.options.Now()
+	dropped := 0
+	for _, item := range append([]*entry(nil), s.byHost[hostID]...) {
+		if item.sequence != 0 || item.firstSentAt.IsZero() {
+			continue
+		}
+		if now.Sub(item.firstSentAt) < grace || lastNamed.After(item.firstSentAt) {
+			continue
+		}
+		if err := s.deleteLocked(item); err != nil {
+			return dropped, err
+		}
+		dropped++
+	}
+	return dropped, nil
+}
+
+// Delete removes a record by its identifier, for what no acknowledgement can
+// ever settle: a record this release cannot decode.
 func (s *Spool) Delete(id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

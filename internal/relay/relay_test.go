@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	agentv1 "github.com/ultherego/flotestro/internal/genproto/flotestro/agent/v1"
 	"github.com/ultherego/flotestro/internal/relay/spool"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -214,5 +216,70 @@ func TestTheUpstreamStateIsNamed(t *testing.T) {
 	}
 	if relay.InstanceID() == "" {
 		t.Fatal("the relay has no instance identifier")
+	}
+}
+
+// TestAMessageWithoutASequenceLeavesOnTheAcknowledgementToo guards the
+// durability rule for an agent of the previous release: it signs no envelope,
+// so its message is named by the record identifier and by nothing else.
+func TestAMessageWithoutASequenceLeavesOnTheAcknowledgementToo(t *testing.T) {
+	relay := newTestRelay(t, spool.Options{})
+	record := relay.keep("host-1", heartbeat(1))
+	if record == nil {
+		t.Fatal("the message was refused")
+	}
+	if record.Sequence != 0 {
+		t.Fatalf("a message without an envelope carries sequence %d", record.Sequence)
+	}
+	// The send alone confirms nothing.
+	relay.spool.MarkSent(record.ID)
+	if _, state, _ := relay.Stats(); state.Messages != 1 {
+		t.Fatalf("the spool holds %d messages after the send, expected 1", state.Messages)
+	}
+	// An identifier of another record frees nothing.
+	relay.acknowledge("host-1", &agentv1.MessageAck{
+		HostId: "host-1", RelayMessageId: uuid.NewString()})
+	if _, state, _ := relay.Stats(); state.Messages != 1 {
+		t.Error("an acknowledgement of another record removed the message")
+	}
+	relay.acknowledge("host-1", &agentv1.MessageAck{
+		HostId: "host-1", RelayMessageId: record.ID.String()})
+	if _, state, _ := relay.Stats(); state.Messages != 0 {
+		t.Error("the acknowledged message stayed in the spool")
+	}
+}
+
+// TestTheWaitForANamedAcknowledgementIsBounded guards the other direction of
+// N-1: a panel of the previous release cannot name a record, and the relay
+// falls back to the older behaviour instead of holding the record for ever.
+func TestTheWaitForANamedAcknowledgementIsBounded(t *testing.T) {
+	relay := newTestRelay(t, spool.Options{AckTimeout: 20 * time.Millisecond})
+	record := relay.keep("host-1", heartbeat(1))
+	if record == nil {
+		t.Fatal("the message was refused")
+	}
+	relay.spool.MarkSent(record.ID)
+	relay.forgetUnacknowledged("host-1")
+	if _, state, _ := relay.Stats(); state.Messages != 1 {
+		t.Fatal("the record was dropped before the grace ran out")
+	}
+	time.Sleep(relay.ackGrace() + 20*time.Millisecond)
+	relay.forgetUnacknowledged("host-1")
+	if _, state, _ := relay.Stats(); state.Messages != 0 {
+		t.Error("a record the centre never names waits for ever")
+	}
+
+	// A centre that does name records keeps the wait open: the record stays
+	// until its own acknowledgement arrives.
+	second := relay.keep("host-1", heartbeat(2))
+	if second == nil {
+		t.Fatal("the second message was refused")
+	}
+	relay.spool.MarkSent(second.ID)
+	relay.namedAck.Store(time.Now().UnixNano())
+	time.Sleep(relay.ackGrace() + 20*time.Millisecond)
+	relay.forgetUnacknowledged("host-1")
+	if _, state, _ := relay.Stats(); state.Messages != 1 {
+		t.Error("a record was dropped although the centre acknowledges by identifier")
 	}
 }

@@ -368,10 +368,10 @@ func TestAnExpiredRecordIsCut(t *testing.T) {
 	}
 }
 
-// TestAMessageWithoutAnEnvelopeIsConfirmedByItsIdentifier guards the
+// TestAMessageWithoutAnEnvelopeLeavesOnItsIdentifier guards the
 // compatibility with an agent from before the envelope: its message has no
-// sequence for the panel to acknowledge, and the relay confirms it by the
-func TestAMessageWithoutAnEnvelopeIsConfirmedByItsIdentifier(t *testing.T) {
+// sequence, so the panel acknowledges it by the record identifier.
+func TestAMessageWithoutAnEnvelopeLeavesOnItsIdentifier(t *testing.T) {
 	spool := open(t, t.TempDir(), Options{})
 	record := appendMessage(t, spool, "host-1", result("job-1"))
 	if record.Sequence != 0 || record.SessionID != "" {
@@ -380,11 +380,57 @@ func TestAMessageWithoutAnEnvelopeIsConfirmedByItsIdentifier(t *testing.T) {
 	if found, _ := spool.Ack("host-1", "", 0); found {
 		t.Fatal("an acknowledgement of sequence zero found the unsigned record")
 	}
-	if err := spool.Delete(record.ID); err != nil {
+	// The identifier belongs to the record of one host.
+	if found, _ := spool.AckID("host-2", record.ID); found {
+		t.Fatal("the record of one host was freed in the session of another")
+	}
+	message, err := record.Message()
+	if err != nil {
 		t.Fatal(err)
 	}
+	if message.GetRelayMessageId() != record.ID.String() {
+		t.Fatalf("the rebuilt message carries %q instead of the record identifier",
+			message.GetRelayMessageId())
+	}
+	found, err := spool.AckID("host-1", record.ID)
+	if err != nil || !found {
+		t.Fatalf("the acknowledged record was not found: %v %v", found, err)
+	}
 	if spool.Stats().Items != 0 {
-		t.Fatal("the confirmed unsigned record stayed")
+		t.Fatal("the acknowledged unsigned record stayed")
+	}
+}
+
+// TestARecordNobodyNamesIsDroppedAfterTheGrace guards the bounded wait: a
+// centre of the previous release names no record, and the relay must not hold
+// an unsigned message for ever.
+func TestARecordNobodyNamesIsDroppedAfterTheGrace(t *testing.T) {
+	now := clock
+	spool := open(t, t.TempDir(), Options{Now: func() time.Time { return now }})
+	unsigned := appendMessage(t, spool, "host-1", result("job-1"))
+	withSequence := appendMessage(t, spool, "host-1", signed(result("job-2"), "session-a", 1))
+	if _, err := spool.Next("host-1", 0); err != nil {
+		t.Fatal(err)
+	}
+	// Not yet: the grace is counted from the first delivery.
+	if dropped, _ := spool.ForgetUnacknowledged("host-1", time.Minute, time.Time{}); dropped != 0 {
+		t.Fatalf("%d records were dropped before the grace ran out", dropped)
+	}
+	now = now.Add(2 * time.Minute)
+	// An acknowledgement that named a record after the delivery means the centre
+	// can name this one too, and the wait stays open.
+	if dropped, _ := spool.ForgetUnacknowledged("host-1", time.Minute, now); dropped != 0 {
+		t.Fatalf("%d records were dropped although the centre names records", dropped)
+	}
+	dropped, err := spool.ForgetUnacknowledged("host-1", time.Minute, time.Time{})
+	if err != nil || dropped != 1 {
+		t.Fatalf("%d records were dropped after the grace (%v), expected the unsigned one", dropped, err)
+	}
+	if _, known := spool.index[unsigned.ID]; known {
+		t.Error("the unsigned record nobody named stayed in the spool")
+	}
+	if _, known := spool.index[withSequence.ID]; !known {
+		t.Error("a record with a sequence was dropped; the panel acknowledges it by sequence")
 	}
 }
 

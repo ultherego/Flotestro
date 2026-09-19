@@ -118,6 +118,9 @@ func (r *Record) Message() (*agentv1.AgentMessage, error) {
 	if err := proto.Unmarshal(r.Payload, message); err != nil {
 		return nil, err
 	}
+	// The record speaks its own identifier: that is what the panel acknowledges
+	// it under, and what a redelivery has to carry again.
+	message.RelayMessageId = r.ID.String()
 	if len(r.Envelope) > 0 {
 		envelope := &agentv1.RelayedEnvelope{}
 		if err := proto.Unmarshal(r.Envelope, envelope); err != nil {
@@ -154,6 +157,9 @@ func FromMessage(site, hostID string, message *agentv1.AgentMessage, now time.Ti
 	}
 	bare := proto.Clone(message).(*agentv1.AgentMessage)
 	bare.Envelope = nil
+	// The identifier belongs to the record, not to the payload: keeping it out
+	// leaves the hash of what the host sent the same across every delivery.
+	bare.RelayMessageId = ""
 	payload, err := proto.Marshal(bare)
 	if err != nil {
 		return nil, err

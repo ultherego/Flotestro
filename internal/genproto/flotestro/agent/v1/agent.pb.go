@@ -2626,9 +2626,12 @@ type AgentMessage struct {
 	// The host's own signature over the payload, for a session that goes
 	// through a relay. Outside the oneof: every kind of message carries it,
 	// and a relay forwards it untouched - it neither signs nor rewrites.
-	Envelope      *RelayedEnvelope `protobuf:"bytes,20,opt,name=envelope,proto3" json:"envelope,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Envelope *RelayedEnvelope `protobuf:"bytes,20,opt,name=envelope,proto3" json:"envelope,omitempty"`
+	// The relay's name for its spooled copy: the key of a message that has no
+	// signed envelope. Empty on a direct session, and a relay overwrites it.
+	RelayMessageId string `protobuf:"bytes,21,opt,name=relay_message_id,json=relayMessageId,proto3" json:"relay_message_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AgentMessage) Reset() {
@@ -2754,6 +2757,13 @@ func (x *AgentMessage) GetEnvelope() *RelayedEnvelope {
 		return x.Envelope
 	}
 	return nil
+}
+
+func (x *AgentMessage) GetRelayMessageId() string {
+	if x != nil {
+		return x.RelayMessageId
+	}
+	return ""
 }
 
 type isAgentMessage_Payload interface {
@@ -3236,12 +3246,15 @@ func (x *MetricsAck) GetReasonCode() string {
 // committed it - and a message delivered a second time after a restart of
 // the relay is answered with the same acknowledgement without effect.
 type MessageAck struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	HostId        string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
-	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
-	Sequence      uint64                 `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	HostId    string                 `protobuf:"bytes,1,opt,name=host_id,json=hostId,proto3" json:"host_id,omitempty"`
+	SessionId string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Sequence  uint64                 `protobuf:"varint,3,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// Echoed back so a message without an envelope can be acknowledged too.
+	// Empty from a panel of the previous release, which names the sequence alone.
+	RelayMessageId string `protobuf:"bytes,4,opt,name=relay_message_id,json=relayMessageId,proto3" json:"relay_message_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MessageAck) Reset() {
@@ -3293,6 +3306,13 @@ func (x *MessageAck) GetSequence() uint64 {
 		return x.Sequence
 	}
 	return 0
+}
+
+func (x *MessageAck) GetRelayMessageId() string {
+	if x != nil {
+		return x.RelayMessageId
+	}
+	return ""
 }
 
 // Hello is the first message in the stream. The gateway rejects a stream
@@ -16050,7 +16070,7 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\tos_family\x18\x02 \x01(\tR\bosFamily\x12\x1d\n" +
 	"\n" +
 	"os_version\x18\x03 \x01(\tR\tosVersion\x12\"\n" +
-	"\farchitecture\x18\x04 \x01(\tR\farchitecture\"\xb6\x05\n" +
+	"\farchitecture\x18\x04 \x01(\tR\farchitecture\"\xe0\x05\n" +
 	"\fAgentMessage\x121\n" +
 	"\x05hello\x18\x01 \x01(\v2\x19.flotestro.agent.v1.HelloH\x00R\x05hello\x12=\n" +
 	"\theartbeat\x18\x02 \x01(\v2\x1d.flotestro.agent.v1.HeartbeatH\x00R\theartbeat\x12C\n" +
@@ -16064,7 +16084,8 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"finalReady\x12>\n" +
 	"\n" +
 	"cancel_ack\x18\t \x01(\v2\x1d.flotestro.agent.v1.CancelAckH\x00R\tcancelAck\x12?\n" +
-	"\benvelope\x18\x14 \x01(\v2#.flotestro.agent.v1.RelayedEnvelopeR\benvelopeB\t\n" +
+	"\benvelope\x18\x14 \x01(\v2#.flotestro.agent.v1.RelayedEnvelopeR\benvelope\x12(\n" +
+	"\x10relay_message_id\x18\x15 \x01(\tR\x0erelayMessageIdB\t\n" +
 	"\apayload\"\xfd\x02\n" +
 	"\x0fRelayedEnvelope\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12\x19\n" +
@@ -16107,13 +16128,14 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\x10STATUS_PERSISTED\x10\x01\x12\x14\n" +
 	"\x10STATUS_DUPLICATE\x10\x02\x12\x1b\n" +
 	"\x17STATUS_REJECTED_TOO_OLD\x10\x03\x12\x1b\n" +
-	"\x17STATUS_REJECTED_INVALID\x10\x04\"`\n" +
+	"\x17STATUS_REJECTED_INVALID\x10\x04\"\x8a\x01\n" +
 	"\n" +
 	"MessageAck\x12\x17\n" +
 	"\ahost_id\x18\x01 \x01(\tR\x06hostId\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x02 \x01(\tR\tsessionId\x12\x1a\n" +
-	"\bsequence\x18\x03 \x01(\x04R\bsequence\"\xa1\x04\n" +
+	"\bsequence\x18\x03 \x01(\x04R\bsequence\x12(\n" +
+	"\x10relay_message_id\x18\x04 \x01(\tR\x0erelayMessageId\"\xa1\x04\n" +
 	"\x05Hello\x12#\n" +
 	"\ragent_version\x18\x01 \x01(\tR\fagentVersion\x12\x17\n" +
 	"\aboot_id\x18\x02 \x01(\tR\x06bootId\x12D\n" +

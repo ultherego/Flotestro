@@ -437,14 +437,14 @@ func TestARedeliveredMessageIsAcknowledgedAndNotHeldAgainstTheHost(t *testing.T)
 	}
 }
 
-// A message that carries an envelope is acknowledged over its own session, and
-// one without an envelope - a host connected directly, with no spool behind it
-// - is not.
+// A message a relay carried is acknowledged over its own session - by the
+// sequence of its envelope or by the relay's identifier - and a message from a
+// host connected directly, with no spool behind it, is not.
 func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
 	service := &AgentService{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	session := NewSession(uuid.NewString(), testHostID, "0.54.0", uuid.NewString(), "127.0.0.1:1", 4)
 
-	service.acknowledge(testHostID, session, nil)
+	service.acknowledge(testHostID, session, nil, "")
 	select {
 	case message := <-session.Outbound():
 		t.Fatalf("a direct message was acknowledged: %+v", message)
@@ -453,7 +453,7 @@ func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
 
 	service.acknowledge(testHostID, session, &agentv1.RelayedEnvelope{
 		SessionId: "a3f4b1c2-0000-4000-8000-000000000001", Sequence: 7,
-	})
+	}, "")
 	select {
 	case message := <-session.Outbound():
 		if ack := message.GetMessageAck(); ack == nil || ack.GetSequence() != 7 {
@@ -461,5 +461,19 @@ func TestOnlyARelayedMessageIsAcknowledged(t *testing.T) {
 		}
 	default:
 		t.Fatal("a relayed message was not acknowledged")
+	}
+
+	// No envelope, so no sequence: the record is named by the identifier the
+	// relay gave it, or it would never leave the spool.
+	service.acknowledge(testHostID, session, nil, "0193f0c2-0000-7000-8000-000000000002")
+	select {
+	case message := <-session.Outbound():
+		ack := message.GetMessageAck()
+		if ack == nil || ack.GetRelayMessageId() != "0193f0c2-0000-7000-8000-000000000002" ||
+			ack.GetSequence() != 0 {
+			t.Fatalf("the acknowledgement reads %+v", message)
+		}
+	default:
+		t.Fatal("a message without an envelope was not acknowledged; its record would stay in the spool")
 	}
 }

@@ -272,6 +272,9 @@ message AgentMessage {
   // through a relay. Outside the oneof: every kind of message carries it,
   // and a relay forwards it untouched - it neither signs nor rewrites.
   RelayedEnvelope envelope = 20;
+  // The relay's name for its spooled copy: the key of a message that has no
+  // signed envelope. Empty on a direct session, and a relay overwrites it.
+  string relay_message_id = 21;
 }
 
 // RelayedEnvelope is the inner identity envelope of a message that travels
@@ -375,6 +378,9 @@ message MessageAck {
   string host_id = 1;
   string session_id = 2;
   uint64 sequence = 3;
+  // Echoed back so a message without an envelope can be acknowledged too.
+  // Empty from a panel of the previous release, which names the sequence alone.
+  string relay_message_id = 4;
 }
 
 // Hello is the first message in the stream. The gateway rejects a stream

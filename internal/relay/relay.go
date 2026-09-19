@@ -83,6 +83,10 @@ type Relay struct {
 	instanceID string
 	log        *slog.Logger
 
+	// namedAck is when the centre last acknowledged a record by its identifier;
+	// a centre of the previous release never does, so that wait is bounded.
+	namedAck atomic.Int64
+
 	mu sync.RWMutex
 	// sessions hold the cancel functions.
 	sessions map[string]context.CancelFunc
@@ -425,6 +429,12 @@ func (r *Relay) forward(hostID string, message *agentv1.AgentMessage,
 	if message.GetHello() == nil && spool.Durable(spool.Classify(message)) {
 		record = r.keep(hostID, message)
 	}
+	// The identifier is the relay's own word about its spool: an agent never
+	// sets it, and whatever it did send is overwritten here.
+	message.RelayMessageId = ""
+	if record != nil {
+		message.RelayMessageId = record.ID.String()
+	}
 	if err := upstream.Send(message); err != nil {
 		r.upstream.Store(false)
 		once.Do(func() { close(lost) })
@@ -434,13 +444,9 @@ func (r *Relay) forward(hostID string, message *agentv1.AgentMessage,
 		return false
 	}
 	if record != nil {
+		// The send is not the confirmation: the record leaves the spool on the
+		// acknowledgement that names it, and on nothing else.
 		r.spool.MarkSent(record.ID)
-		if record.Sequence == 0 {
-			// A message of an agent from before the envelope has no sequence for the
-			// panel to acknowledge; the send is its confirmation, as it was before the
-			// spool.
-			_ = r.spool.Delete(record.ID)
-		}
 	}
 	return true
 }
@@ -479,6 +485,7 @@ func (r *Relay) keep(hostID string, message *agentv1.AgentMessage) *spool.Record
 func (r *Relay) flush(hostID string,
 	upstream *connect.BidiStreamForClient[agentv1.AgentMessage, agentv1.ServerMessage],
 	once *sync.Once, lost chan struct{}) {
+	r.forgetUnacknowledged(hostID)
 	sent := 0
 	for {
 		records, err := r.spool.Next(hostID, 0)
@@ -505,9 +512,6 @@ func (r *Relay) flush(hostID string,
 				r.spool.Unsend(hostID)
 				r.log.Warn("the spool was not sent back", "host_id", hostID, "err", err)
 				return
-			}
-			if record.Sequence == 0 {
-				_ = r.spool.Delete(record.ID)
 			}
 			sent++
 		}
@@ -543,11 +547,32 @@ func (r *Relay) pumpDown(ctx context.Context, hostID string,
 	}
 }
 
-// acknowledge deletes the record the panel consumed.
+// acknowledge deletes the record the panel consumed: by the identifier the
+// relay gave it, or by the sequence of the host's envelope.
 func (r *Relay) acknowledge(hostID string, ack *agentv1.MessageAck) {
 	if ack.GetHostId() != "" && ack.GetHostId() != hostID {
 		r.log.Warn("an acknowledgement named another host than the session's and was ignored",
 			"host_id", hostID, "named", ack.GetHostId())
+		return
+	}
+	if named := ack.GetRelayMessageId(); named != "" {
+		r.namedAck.Store(time.Now().UnixNano())
+		id, err := uuid.Parse(named)
+		if err != nil {
+			r.log.Warn("an acknowledgement named a record that is not an identifier",
+				"host_id", hostID, "relay_message_id", named)
+			return
+		}
+		found, err := r.spool.AckID(hostID, id)
+		if err != nil {
+			r.log.Error("the acknowledged record was not deleted", "host_id", hostID,
+				"relay_message_id", named, "err", err)
+			return
+		}
+		if !found {
+			r.log.Debug("an acknowledgement found no record", "host_id", hostID,
+				"relay_message_id", named)
+		}
 		return
 	}
 	found, err := r.spool.Ack(hostID, ack.GetSessionId(), ack.GetSequence())
@@ -561,6 +586,26 @@ func (r *Relay) acknowledge(hostID string, ack *agentv1.MessageAck) {
 		// line - or one deleted already: nothing to do, and nothing wrong.
 		r.log.Debug("an acknowledgement found no record", "host_id", hostID,
 			"session_id", ack.GetSessionId(), "sequence", ack.GetSequence())
+	}
+}
+
+// ackGrace is how long a record without a sequence waits to be named; four
+// delivery attempts tell a slow centre from one that cannot name a record.
+func (r *Relay) ackGrace() time.Duration { return 4 * r.ackTimeout() }
+
+// forgetUnacknowledged bounds that wait: past the grace the record leaves on
+// its delivery alone, as it did before, and the drop is said out loud.
+func (r *Relay) forgetUnacknowledged(hostID string) {
+	grace := r.ackGrace()
+	dropped, err := r.spool.ForgetUnacknowledged(hostID, grace, time.Unix(0, r.namedAck.Load()))
+	if err != nil {
+		r.log.Error("the records nobody acknowledged were not dropped", "host_id", hostID, "err", err)
+		return
+	}
+	if dropped > 0 {
+		r.log.Warn("the centre does not acknowledge a message by its record identifier; "+
+			"the records left the spool on their delivery alone",
+			"host_id", hostID, "records", dropped, "grace", grace.String())
 	}
 }
 
