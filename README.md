@@ -76,29 +76,26 @@ air-gapped installation, backups, upgrades — is in the
 
 ## Screenshots
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="880"></p>
-<p align="center"><em>The dashboard: what needs a decision, and the fleet at a glance.</em></p>
-
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/host-packages.png" alt="Packages of a host"></td>
-    <td width="50%"><img src="docs/screenshots/campaign.png" alt="Campaign"></td>
+    <td width="50%"><img src="docs/screenshots/dashboard.png" alt="Fleet dashboard" width="400"></td>
+    <td width="50%"><img src="docs/screenshots/host-packages.png" alt="Packages of a host" width="400"></td>
   </tr>
   <tr>
-    <td>A host's packages: the plan, its digest, and what the operator may ask for.</td>
+    <td>What needs a decision, and the fleet at a glance.</td>
+    <td>A host's packages: the plan, its digest, and what may be asked for.</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/campaign.png" alt="Campaign" width="400"></td>
+    <td width="50%"><img src="docs/screenshots/audit.png" alt="Audit" width="400"></td>
+  </tr>
+  <tr>
     <td>A campaign across the fleet: canary, waves, gates and thresholds.</td>
-  </tr>
-  <tr>
-    <td width="50%"><img src="docs/screenshots/monitoring.png" alt="Monitoring"></td>
-    <td width="50%"><img src="docs/screenshots/audit.png" alt="Audit"></td>
-  </tr>
-  <tr>
-    <td>Built-in monitoring: samples, rules, alerts and silences. No external stack.</td>
     <td>The audit trail: the actor, the request and the authentication behind it.</td>
   </tr>
 </table>
 
-<p align="center"><a href="https://ultherego.github.io/Flotestro/docs/">More of the panel in the documentation →</a></p>
+<a href="https://ultherego.github.io/Flotestro/docs/">The rest of the panel, in the documentation →</a>
 
 ## Built from
 
