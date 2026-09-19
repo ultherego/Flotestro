@@ -461,6 +461,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		listState, err := h.packages.State(ctx, description.ID)
 		if err != nil {
 			h.log.Error("the state of the package list was not read", "host_id", description.ID, "err", err)
+			h.recordFailure(ctx, description.ID, SourcePackageListState, now)
 			continue
 		}
 
@@ -485,6 +486,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			if err != nil {
 				h.log.Error("the state of the findings of the host was not read",
 					"host_id", description.ID, "err", err)
+				h.recordFailure(ctx, description.ID, SourceHostAdvisoryState, now)
 				continue
 			}
 			fromHost, collected, err := h.packages.HostAdvisories(ctx, description.ID)
@@ -493,6 +495,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 				// with nothing would say the host is clean.
 				h.log.Error("the findings of the host were not read; the previous assessment stands",
 					"host_id", description.ID, "err", err)
+				h.recordFailure(ctx, description.ID, SourceHostAdvisories, now)
 				continue
 			}
 			set = fromHost
@@ -531,6 +534,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 					// read must not assess anybody as clean.
 					h.log.Error("the findings of the feed were not read; the previous assessments stand",
 						"provider", provider, "release", description.Release, "err", err)
+					h.recordFailure(ctx, description.ID, SourceFeedAdvisories, now)
 					continue
 				}
 				feedAdvisories[key] = fetched
@@ -552,6 +556,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		pkgs, err := h.packages.Packages(ctx, description.ID)
 		if err != nil {
 			h.log.Error("the package list was not read", "host_id", description.ID, "err", err)
+			h.recordFailure(ctx, description.ID, SourcePackageList, now)
 			continue
 		}
 		input.Packages = pkgs
@@ -561,6 +566,7 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 			evaluation.Findings, evaluation.State); err != nil {
 			h.log.Error("the vulnerability assessment was not saved",
 				"host_id", description.ID, "err", err)
+			h.recordFailure(ctx, description.ID, SourceSave, now)
 			continue
 		}
 	}
@@ -569,6 +575,15 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		// looks exactly like a sweep that found nothing.
 		h.log.Info("the vulnerability assessment was recomputed", "hosts", len(descriptions),
 			"skipped_unchanged", skipped)
+	}
+}
+
+// recordFailure writes down that this pass could not be computed. The host
+// keeps its previous verdict; what changes is that the panel now says so.
+func (h *Scheduler) recordFailure(ctx context.Context, hostID, source string, at time.Time) {
+	if err := h.store.RecordEvaluationFailure(ctx, hostID, source, at); err != nil {
+		h.log.Error("the failed assessment was not recorded", "host_id", hostID,
+			"source", source, "err", err)
 	}
 }
 
@@ -600,6 +615,11 @@ func (h *Scheduler) previousStates(ctx context.Context, descriptions []HostDescr
 func (h *Scheduler) toRecalculate(previous HostState, input Input,
 	snapshot Snapshot, now time.Time) bool {
 	if previous.EvaluatedAt == nil {
+		return true
+	}
+	// The last pass could not be computed: try again, or the host stays on an
+	// old verdict until one of its digests happens to change.
+	if previous.EvaluationFailedReason != "" {
 		return true
 	}
 	// The safety net: an assessment nobody has touched for longer than the

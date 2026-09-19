@@ -52,6 +52,12 @@ type AssessmentState = {
   coverage_reason?: string;
   advisories_reason?: string;
   evaluated_at?: string;
+  /** Set when the last pass could not be computed: the numbers above are the
+   *  ones from before it. */
+  evaluation_failed_reason?: string;
+  evaluation_failed_source?: string;
+  evaluation_failed_at?: string;
+  last_successful_at?: string;
 };
 
 type PackageListState = {
@@ -310,6 +316,15 @@ export function Vulnerabilities() {
       </p>
       <Message text={message} />
 
+      {state?.evaluation_failed_reason && (
+        <p className="warning">
+          <span>
+            {t("The last assessment of this host could not be computed: reading {source} failed.", { source: state.evaluation_failed_source ?? "" })}{" "}
+            {t("What is below was computed")} <Time value={state.last_successful_at ?? state.evaluated_at} />{" "}
+            {t("and has not been refreshed since.")}
+          </span>
+        </p>
+      )}
       {state?.coverage_reason && (
         <p className="warning">
           <span>

@@ -35,6 +35,14 @@ type Item = {
    *  Missing for a verdict written before generations were recorded. */
   generation_id?: string;
   generation_at?: string;
+  /** The same judgement in one word: complete, partial, unknown or stale. */
+  status?: "complete" | "partial" | "unknown" | "stale";
+  /** Set when the last pass could not be computed at all: the numbers above
+   *  are then the ones from before it. */
+  evaluation_failed_reason?: string;
+  evaluation_failed_source?: string;
+  evaluation_failed_at?: string;
+  last_successful_at?: string;
 };
 
 type Source = {
@@ -670,6 +678,12 @@ export function FleetVulnerabilities() {
                         invisible from the date alone. */}
                     <td>
                       <Time value={item.evaluated_at} />
+                      {item.evaluation_failed_reason && (
+                        <div className="source">
+                          <span className="badge error">{t("last pass failed")}</span>{" "}
+                          {t("reading {source}", { source: item.evaluation_failed_source ?? "" })}
+                        </div>
+                      )}
                       {(() => {
                         const state = generationState(item, data.sources);
                         if (state === "current") {

@@ -67,3 +67,82 @@ func TestWeRecomputeOnlyChangedInput(t *testing.T) {
 		t.Error("a feed that had grown old did not force a recomputation")
 	}
 }
+
+// TestAHostWhoseLastPassFailedIsTriedAgain guards that a recorded failure does
+// not freeze a host on its old verdict: without this the host waits for one of
+// its digests to change, which may never happen.
+func TestAHostWhoseLastPassFailedIsTriedAgain(t *testing.T) {
+	scheduler := &Scheduler{settings: DefaultSettings()}
+	snapshot := Snapshot{
+		Provider: "debian", Digest: "s1", Releases: []string{"trixie"},
+		FetchedAt: now.Add(-time.Hour),
+	}
+	input := Input{
+		HostID: "host-1", Distribution: "debian", Release: "trixie",
+		InventoryDigest: "list-1",
+	}
+	assessed := now.Add(-time.Minute)
+	previous := HostState{
+		HostID: "host-1", Distribution: "debian", Release: "trixie",
+		Provider: "debian", SnapshotDigest: "s1", InventoryDigest: "list-1",
+		EvaluatedAt: &assessed,
+	}
+	if scheduler.toRecalculate(previous, input, snapshot, now) {
+		t.Fatal("an assessment whose input has not changed is recomputed")
+	}
+
+	previous.EvaluationFailedReason = EvaluationFailed
+	previous.EvaluationFailedSource = SourcePackageList
+	if !scheduler.toRecalculate(previous, input, snapshot, now) {
+		t.Fatal("a host whose last pass failed is not tried again")
+	}
+}
+
+// TestTheStatusSaysHowMuchOfAVerdictHolds guards the one word the panel shows
+// beside every number.
+func TestTheStatusSaysHowMuchOfAVerdictHolds(t *testing.T) {
+	assessed := now.Add(-time.Minute)
+	full := HostState{
+		EvaluatedAt: &assessed, PackagesTotal: 10, PackagesCovered: 10,
+	}
+	cases := []struct {
+		name  string
+		state HostState
+		want  EvaluationStatus
+	}{
+		{"never assessed", HostState{}, StatusUnknown},
+		{"complete", full, StatusComplete},
+		{"a package nobody could place", withUnknown(full, 1), StatusPartial},
+		{"a feed that covers part of the host", withCovered(full, 7), StatusPartial},
+		{"an obstacle that stopped the assessment",
+			withReason(full, ReasonPackageListMissing), StatusUnknown},
+		{"sources that aged", withReason(full, ReasonFeedStale), StatusStale},
+		{"a pass that could not run", withFailure(full), StatusStale},
+	}
+	for _, test := range cases {
+		if got := test.state.Status(); got != test.want {
+			t.Errorf("%s: the status is %q, expected %q", test.name, got, test.want)
+		}
+	}
+}
+
+func withUnknown(state HostState, unknown int) HostState {
+	state.Unknown = unknown
+	return state
+}
+
+func withCovered(state HostState, covered int) HostState {
+	state.PackagesCovered = covered
+	return state
+}
+
+func withReason(state HostState, reason string) HostState {
+	state.CoverageReason = reason
+	return state
+}
+
+func withFailure(state HostState) HostState {
+	state.EvaluationFailedReason = EvaluationFailed
+	state.EvaluationFailedSource = SourceFeedAdvisories
+	return state
+}

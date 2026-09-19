@@ -46,6 +46,59 @@ const (
 	OriginUnknown      = "origin_unknown"
 )
 
+// EvaluationStatus says how much of a host's verdict may be trusted. It is
+// derived from the facts of the assessment, never stored.
+type EvaluationStatus string
+
+const (
+	// StatusComplete means every package was matched against a fresh feed.
+	StatusComplete EvaluationStatus = "complete"
+	// StatusPartial means the verdict holds for part of the host only.
+	StatusPartial EvaluationStatus = "partial"
+	// StatusUnknown means nothing can be said: there is no verdict, or an
+	// obstacle stopped the assessment before it began.
+	StatusUnknown EvaluationStatus = "unknown"
+	// StatusStale means the numbers are real but were computed against
+	// something that has since aged, or the last pass could not run at all.
+	StatusStale EvaluationStatus = "stale"
+)
+
+// EvaluationFailed is the typed code of a pass the panel could not compute.
+// The numbers of such a host are the ones from before it.
+const EvaluationFailed = "evaluation_failed"
+
+// The reads that stop a pass, named on the host so an operator knows which
+// source to repair.
+const (
+	SourcePackageListState  = "package_list_state"
+	SourcePackageList       = "package_list"
+	SourceHostAdvisoryState = "host_advisory_state"
+	SourceHostAdvisories    = "host_advisories"
+	SourceFeedAdvisories    = "feed_advisories"
+	SourceSave              = "save"
+)
+
+// BlockingReason says whether the code is one that stops an assessment rather
+// than merely narrowing it.
+func BlockingReason(reason string) bool {
+	switch reason {
+	case ReasonPackageListMissing, ReasonFamilyUnsupported, ReasonFeedMissing,
+		ReasonReleaseUnsupported, ReasonHostAdvisoriesMissing,
+		ReasonHostAdvisoriesUnreadable:
+		return true
+	}
+	return false
+}
+
+// StaleReason says whether the code means the sources aged rather than failed.
+func StaleReason(reason string) bool {
+	switch reason {
+	case ReasonFeedStale, ReasonPackageListStale, ReasonHostAdvisoriesStale:
+		return true
+	}
+	return false
+}
+
 // Reason codes for an undetermined state.
 const (
 	// ReasonFeedMissing means there is no snapshot for this distribution.

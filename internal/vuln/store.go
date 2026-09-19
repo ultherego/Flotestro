@@ -550,9 +550,9 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 		                             affected_with_vendor_fix, affected_no_fix, unknown,
 		                             affected_packages, unique_advisories, unique_cves,
 		                             coverage_reason, advisories_reason, evaluated_at,
-		                             generation_id, generation_at)
+		                             generation_id, generation_at, last_successful_at)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-		        $17, $18, $19, nullif($20, '')::uuid, $21)
+		        $17, $18, $19, nullif($20, '')::uuid, $21, $19)
 		on conflict (host_id) do update set
 			generation_id = excluded.generation_id,
 			generation_at = excluded.generation_at,
@@ -570,7 +570,10 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 			unique_cves = excluded.unique_cves,
 			coverage_reason = excluded.coverage_reason,
 			advisories_reason = excluded.advisories_reason,
-			evaluated_at = excluded.evaluated_at`
+			evaluated_at = excluded.evaluated_at,
+			evaluation_failed_reason = '', evaluation_failed_source = '',
+			evaluation_failed_at = null,
+			last_successful_at = excluded.evaluated_at`
 	if _, err := tx.Exec(ctx, saveState, hostID, state.Distribution, state.Release,
 		state.Provider, state.SnapshotDigest, state.InventoryDigest, state.AdvisoryDigest,
 		state.PackagesTotal, state.PackagesCovered, state.Affected, state.AffectedWithVendorFix,
@@ -580,6 +583,22 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// RecordEvaluationFailure writes down that a pass could not be computed for
+// this host. The verdict already stored is left exactly as it was.
+func (s *Store) RecordEvaluationFailure(ctx context.Context, hostID, source string,
+	at time.Time) error {
+	const query = `
+		insert into vuln_host_state (host_id, evaluation_failed_reason,
+		                             evaluation_failed_source, evaluation_failed_at)
+		values ($1, $2, $3, $4)
+		on conflict (host_id) do update set
+			evaluation_failed_reason = excluded.evaluation_failed_reason,
+			evaluation_failed_source = excluded.evaluation_failed_source,
+			evaluation_failed_at = excluded.evaluation_failed_at`
+	_, err := s.pool.Exec(ctx, query, hostID, EvaluationFailed, source, at)
+	return err
 }
 
 // Advisories returns the findings of a host.
@@ -664,6 +683,30 @@ type HostState struct {
 	// reading the metadata must not look like a host without findings.
 	AdvisoriesReason string     `json:"advisories_reason,omitempty"`
 	EvaluatedAt      *time.Time `json:"evaluated_at,omitempty"`
+	// EvaluationFailedReason and EvaluationFailedSource say that the last pass
+	// could not be computed and which read stopped it; the numbers above are
+	// then the ones from before it.
+	EvaluationFailedReason string     `json:"evaluation_failed_reason,omitempty"`
+	EvaluationFailedSource string     `json:"evaluation_failed_source,omitempty"`
+	EvaluationFailedAt     *time.Time `json:"evaluation_failed_at,omitempty"`
+	// LastSuccessfulAt is when this verdict was last computed in full.
+	LastSuccessfulAt *time.Time `json:"last_successful_at,omitempty"`
+}
+
+// Status says how much of this verdict may be trusted. It is derived, never
+// stored: the facts it reads are the ones above.
+func (s HostState) Status() EvaluationStatus {
+	switch {
+	case s.EvaluatedAt == nil:
+		return StatusUnknown
+	case BlockingReason(s.CoverageReason):
+		return StatusUnknown
+	case s.EvaluationFailedReason != "" || StaleReason(s.CoverageReason):
+		return StatusStale
+	case s.PackagesTotal == 0 || s.PackagesCovered < s.PackagesTotal || s.Unknown > 0:
+		return StatusPartial
+	}
+	return StatusComplete
 }
 
 // FullAssessment says whether the assessment of this host is complete.
@@ -714,7 +757,8 @@ func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]Ho
 		       affected, affected_with_vendor_fix, affected_no_fix, unknown,
 		       affected_packages, unique_advisories, unique_cves, coverage_reason,
 		       advisories_reason, evaluated_at, coalesce(generation_id::text, ''),
-		       generation_at
+		       generation_at, evaluation_failed_reason, evaluation_failed_source,
+		       evaluation_failed_at, last_successful_at
 		from vuln_host_state where host_id = any($1)`
 	rows, err := s.pool.Query(ctx, query, hostIDs)
 	if err != nil {
@@ -729,7 +773,9 @@ func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]Ho
 			&state.AffectedWithVendorFix, &state.AffectedNoFix, &state.Unknown,
 			&state.AffectedPackages, &state.UniqueAdvisories, &state.UniqueCVEs,
 			&state.CoverageReason, &state.AdvisoriesReason, &state.EvaluatedAt,
-			&state.GenerationID, &state.GenerationAt); err != nil {
+			&state.GenerationID, &state.GenerationAt, &state.EvaluationFailedReason,
+			&state.EvaluationFailedSource, &state.EvaluationFailedAt,
+			&state.LastSuccessfulAt); err != nil {
 			return nil, err
 		}
 		result[state.HostID] = state

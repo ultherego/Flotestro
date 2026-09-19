@@ -46,6 +46,9 @@ type vulnerabilityReport struct {
 	// obstacle, a feed covering all the packages and not a single undetermined
 	// package.
 	FullyAssessed bool `json:"fully_assessed"`
+	// Status is the same judgement in one word: complete, partial, unknown or
+	// stale.
+	Status vuln.EvaluationStatus `json:"status"`
 	// CVEDetails are an enrichment: the CVSS score and the vulnerability
 	// description from the upstream database.
 	CVEDetails map[string]vuln.CVEDetails `json:"cve_details,omitempty"`
@@ -123,6 +126,7 @@ func (s *Server) handleHostVulnerabilities(w http.ResponseWriter, r *http.Reques
 	}
 	report.CoveragePercent = report.State.Coverage() * 100
 	report.FullyAssessed = report.State.FullAssessment()
+	report.Status = report.State.Status()
 	report.CVEDetails = s.cveDetails(r.Context(), report.Findings)
 	if report.State.Provider != "" {
 		if snapshot, err := s.vulnerabilities.ActiveSnapshot(r.Context(), report.State.Provider); err == nil {
@@ -160,6 +164,8 @@ type hostVulnerabilities struct {
 	CoveragePercent float64 `json:"coverage_percent"`
 	// FullyAssessed says whether the assessment of this host is complete.
 	FullyAssessed bool `json:"fully_assessed"`
+	// Status is the same judgement in one word.
+	Status vuln.EvaluationStatus `json:"status"`
 	// BySeverity counts the affected findings by canonical severity, so the table
 	// can say "three critical" without the operator opening the host.
 	BySeverity map[string]int `json:"by_severity"`
@@ -502,7 +508,8 @@ func (s *Server) fleetVulnerabilityRows(ctx context.Context, states []vuln.HostS
 		}
 		rows = append(rows, hostVulnerabilities{
 			HostState: state, CoveragePercent: state.Coverage() * 100,
-			FullyAssessed: state.FullAssessment(), BySeverity: bySeverity,
+			FullyAssessed: state.FullAssessment(), Status: state.Status(),
+			BySeverity: bySeverity,
 		})
 	}
 	return rows, nil
@@ -519,6 +526,10 @@ var vulnerabilitiesCSVColumns = []string{
 	// already reads: the generation that produced the verdict and when that
 	// generation was taken.
 	"generation_id", "generation_at",
+	// Likewise appended: the one-word judgement and the pass that could not be
+	// computed, so a sheet can tell a stale verdict from a fresh one.
+	"status", "evaluation_failed_reason", "evaluation_failed_source", "evaluation_failed_at",
+	"last_successful_at",
 }
 
 // writeVulnerabilitiesCSV streams the fleet assessment as a file: one row per
@@ -563,5 +574,7 @@ func hostVulnerabilitiesCSVRow(item hostVulnerabilities) []string {
 		strconv.Itoa(item.PackagesTotal), strconv.Itoa(item.PackagesCovered), csvFloat(item.CoveragePercent),
 		strconv.FormatBool(item.FullyAssessed), item.CoverageReason, item.AdvisoriesReason, item.Provider,
 		formatTime(item.EvaluatedAt), item.GenerationID, formatTime(item.GenerationAt),
+		string(item.Status), item.EvaluationFailedReason, item.EvaluationFailedSource,
+		formatTime(item.EvaluationFailedAt), formatTime(item.LastSuccessfulAt),
 	}
 }
