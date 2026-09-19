@@ -15,6 +15,14 @@ are involved:
 
 ## Signals
 
+- The relay's own health listener (`health_listen`, `127.0.0.1:8454` by default):
+  `GET /healthz` is liveness - the process serves and its listener accepts - and stays `200`
+  through an outage of the centre, because a relay whose link is down is the one process that
+  must not be restarted. `GET /readyz` is readiness and answers `503` with the reason:
+  `relay_upstream_unreachable`, `relay_spool_critical`, `relay_spool_unwritable`,
+  `relay_certificate_expired`, `relay_certificate_unknown`. Its body also carries
+  `safe_to_restart`, which is true only when nothing is waiting in the spool.
+
 - Dashboard: "Relay buffers high" (`relays_buffer_high` in `GET /api/v1/fleet/summary`): relays
   whose last heartbeat shows the buffer at 70 % or more; absent until a relay has reported
   since the panel started. `degraded_relays`: relays silent for 10 minutes.
@@ -161,4 +169,7 @@ The error guide has no relay entries; a relay incident shows on jobs as `lease_e
 `relay_upstream_unreached`, `relay_upstream_stale`, `state_dir_low_space`, `state_dir_unwritable`,
 `identity_missing`, `identity_expired`, `identity_expiring`, `listener_unavailable`) and the
 configuration loader (`relay_config_buffer_out_of_range`, `relay_config_state_dir_invalid`,
-`relay_config_gateway_missing`).
+`relay_config_gateway_missing`, `relay_config_health_listen_invalid`). The health answers of
+the relay carry their own codes, and those are in the guide: `relay_listener_unavailable`,
+`relay_upstream_unreachable`, `relay_spool_critical`, `relay_spool_unwritable`,
+`relay_certificate_expired`, `relay_certificate_unknown`.
