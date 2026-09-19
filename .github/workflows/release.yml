@@ -83,13 +83,18 @@ jobs:
         # names can be opened and read.
         #
         # The build log is not an artefact. missing-rpm.txt is a note about
-        # this machine, not something a customer installs, so it is read
-        # into the job summary and then removed from what gets published.
+        # this machine, not something a customer installs: for a pre-release it
+        # is read into the job summary and left out of what gets published, and
+        # for a stable tag it stops the release.
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
           cd dist
           rm -f provenance.json SHA256SUMS SHA256SUMS.asc
+          # A tag with a suffix - v1.2.3-rc1 - is a pre-release and may ship
+          # incomplete; a bare version may not.
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
           if [ -f missing-rpm.txt ]; then
             {
               echo "### The .rpm packages this machine could not build"
@@ -98,7 +103,36 @@ jobs:
               echo
               sed 's/^/- /' missing-rpm.txt
             } >> "$GITHUB_STEP_SUMMARY"
+            if [ "$prerelease" = false ]; then
+              echo "::error::the stable release $GITHUB_REF_NAME is missing the .rpm packages for $(tr '\n' ' ' < missing-rpm.txt)" >&2
+              echo "a stable release ships every architecture or it does not ship; tag a pre-release, or build the missing packages on a native machine" >&2
+              exit 1
+            fi
             rm -f missing-rpm.txt
+          fi
+          # The same rule without the note: a format that produced packages for
+          # one architecture and not the other is an incomplete release too, and
+          # nothing else in the pipeline would notice.
+          incomplete=""
+          for pair in "deb:amd64:arm64" "rpm:x86_64:aarch64" "pkg.tar:x86_64:aarch64"; do
+            format="${pair%%:*}"; rest="${pair#*:}"
+            first="${rest%%:*}"; second="${rest#*:}"
+            have_first=$(ls -1 *"${first}"*."${format}"* 2>/dev/null | wc -l)
+            have_second=$(ls -1 *"${second}"*."${format}"* 2>/dev/null | wc -l)
+            if [ "$have_first" -gt 0 ] && [ "$have_second" -eq 0 ]; then
+              incomplete="$incomplete ${format}/${second}"
+            fi
+            if [ "$have_second" -gt 0 ] && [ "$have_first" -eq 0 ]; then
+              incomplete="$incomplete ${format}/${first}"
+            fi
+          done
+          if [ -n "$incomplete" ]; then
+            echo "### Architectures missing from this build" >> "$GITHUB_STEP_SUMMARY"
+            echo "$incomplete" | tr ' ' '\n' | sed '/^$/d; s/^/- /' >> "$GITHUB_STEP_SUMMARY"
+            if [ "$prerelease" = false ]; then
+              echo "::error::the stable release $GITHUB_REF_NAME is missing:$incomplete" >&2
+              exit 1
+            fi
           fi
           bills="$(ls -1 *.cdx.json 2>/dev/null || true)"
           jq -n \
