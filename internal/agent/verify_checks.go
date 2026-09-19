@@ -1867,6 +1867,11 @@ func verifyCertificate(ctx context.Context, readers *hostReaders, in verifyInput
 			break
 		}
 	}
+	if found == nil && snapshot.Truncated > 0 {
+		// A list that stopped at its limit is not a host without the file.
+		return unreadable(expected, "the scan of the certificates of the host stopped before "+
+			payload.Path+": "+snapshot.TruncatedReason)
+	}
 	if found == nil || found.FingerprintSHA256 == "" {
 		return unreadable(expected, "the host did not read a certificate at "+payload.Path)
 	}
