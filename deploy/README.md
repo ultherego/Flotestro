@@ -115,24 +115,24 @@ Rotation is the same either way.
 ```
 docker buildx build -f deploy/Containerfile --target control-plane \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.59.0 \
+  --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-control-plane:0.59.0 --push .
+  -t ghcr.io/ultherego/flotestro-control-plane:0.60.0 --push .
 
 docker buildx build -f deploy/Containerfile --target relay \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.59.0 \
+  --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-relay:0.59.0 --push .
+  -t ghcr.io/ultherego/flotestro-relay:0.60.0 --push .
 
 docker buildx build -f deploy/Containerfile --target admin-tools \
   --platform linux/amd64,linux/arm64 \
-  --build-arg VERSION=0.59.0 \
+  --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-admin-tools:0.59.0 --push .
+  -t ghcr.io/ultherego/flotestro-admin-tools:0.60.0 --push .
 ```
 
 The fourth image is built from something the source tree does not contain: a
@@ -148,15 +148,15 @@ half, `flotestro-repo.asc`, which is what a host imports before it installs
 anything.
 
 ```
-packaging/build-release.sh all 0.59.0 /srv/release
-packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo 0.59.0
+packaging/build-release.sh all 0.60.0 /srv/release
+packaging/sign-repo.sh /srv/release <gpg-key-id> /srv/repo 0.60.0
 
 docker build -f deploy/Containerfile --target package-repository \
   --build-context repository=/srv/repo \
-  --build-arg VERSION=0.59.0 \
+  --build-arg VERSION=0.60.0 \
   --build-arg COMMIT="$(git rev-parse HEAD)" \
   --build-arg BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -t ghcr.io/ultherego/flotestro-package-repository:0.59.0 .
+  -t ghcr.io/ultherego/flotestro-package-repository:0.60.0 .
 ```
 
 The build refuses a context without `flotestro-repo.asc`: a tree that carries
@@ -212,12 +212,14 @@ occasions and they are deliberately different:
 | A pull request touching `deploy/`, `cmd/`, `internal/`, `db/`, `web/`, `go.mod`, `go.sum` or `.dockerignore` | The same checks and the same build for both platforms, and **nothing is pushed**: a Containerfile that no longer builds is found while there is still a branch to fix it on. |
 | `workflow_dispatch` | A dry run of the above on a branch. It pushes nothing either. |
 
-What the release publishes for each image is two tags: the full version,
-`0.56.0`, which is never rewritten, and `sha-<twelve characters of the
-commit>` for diagnostics. No moving alias - no `latest`, no `stable`, no
-`0.56` - is published: an alias that can be repointed is a convenience of a
-test bench, and the run refuses outright to build a version tag that already
-exists in the registry.
+What the release publishes for each image is the full version, `0.60.0`, and
+`sha-<twelve characters of the commit>`; neither is ever rewritten and those
+are what production pins beside the digest. A **stable** release also moves
+`latest` and the minor alias `0.60`, so that somebody who has just found the
+project can start without first learning which version is current. A
+pre-release moves neither: a host that follows `latest` is never handed one.
+The run refuses outright to build a version tag that already exists in the
+registry.
 
 Three things the run checks that an operator would otherwise find the hard
 way: that the build context carries no `.env`, no key material, no `secrets/`
@@ -232,16 +234,16 @@ The run ends by printing the three digests, and attaches a ready
 `compose.pins.yaml` to itself. The short form, for `./.env`:
 
 ```
-FLOTESTRO_VERSION=0.56.0
+FLOTESTRO_VERSION=0.60.0
 FLOTESTRO_TOOLS_DIGEST=sha256:...
 ```
 
 and the whole references, for a manifest that pins them directly:
 
 ```
-ghcr.io/ultherego/flotestro-control-plane:0.56.0@sha256:...
-ghcr.io/ultherego/flotestro-relay:0.56.0@sha256:...
-ghcr.io/ultherego/flotestro-admin-tools:0.56.0@sha256:...
+ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...
+ghcr.io/ultherego/flotestro-relay:0.60.0@sha256:...
+ghcr.io/ultherego/flotestro-admin-tools:0.60.0@sha256:...
 ```
 
 The tag stays in the reference because it is what a human reads; the digest
@@ -261,7 +263,7 @@ and none to distribute.
 cosign verify \
   --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/ultherego/flotestro-control-plane:0.56.0@sha256:...
+  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...
 ```
 
 The identity is checked, not merely the presence of a signature: an image
@@ -272,13 +274,13 @@ materials and the provenance are read the same way:
 cosign verify-attestation --type cyclonedx \
   --certificate-identity-regexp '^https://github\.com/ultherego/Flotestro/\.github/workflows/images\.yml@refs/tags/v' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  ghcr.io/ultherego/flotestro-control-plane:0.56.0@sha256:...
+  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...
 
 docker buildx imagetools inspect --format '{{ json .Provenance }}' \
-  ghcr.io/ultherego/flotestro-control-plane:0.56.0@sha256:...
+  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...
 
 docker buildx imagetools inspect --format '{{ json .SBOM }}' \
-  ghcr.io/ultherego/flotestro-control-plane:0.56.0@sha256:...
+  ghcr.io/ultherego/flotestro-control-plane:0.60.0@sha256:...
 ```
 
 A run that receives no OIDC identity publishes the image unsigned and says so
@@ -386,7 +388,7 @@ cd deploy
 
 # 1. The non-secret settings.
 cat > .env <<'SETTINGS'
-FLOTESTRO_VERSION=0.59.0
+FLOTESTRO_VERSION=0.60.0
 FLOTESTRO_GATEWAY_ID=cp-prod-01
 FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
@@ -460,7 +462,7 @@ after the crossing would be a signature checked against a transparency log the
 site cannot reach - the verification belongs where the network is.
 
 ```
-version=0.56.0
+version=0.60.0
 owner=ultherego
 images="control-plane package-repository admin-tools relay"
 
