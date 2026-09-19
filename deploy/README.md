@@ -59,6 +59,33 @@ database volume. An installation that points at an external database
 therefore cannot start a second, empty one beside it and write half of its
 truth there.
 
+## Podman
+
+The images build and run under Podman, and the published ones are ordinary OCI
+images that `podman pull` takes like any other. Two differences are worth
+knowing before an installation is planned around it.
+
+**`HEALTHCHECK` is a Docker-format extension.** Podman builds OCI-format images
+by default and says so during the build - "HEALTHCHECK is not supported for OCI
+image format and will be ignored". The image-level check is then simply not
+there. It costs nothing here, because `compose.yaml` declares the same check
+itself and Podman honours a Compose healthcheck whatever the image format; a
+deployment that runs the image with a bare `podman run` gets none and should
+either add `--health-cmd /usr/local/bin/flotestro-healthcheck` or build with
+`--format docker`.
+
+**Rootless is the sensible way to run it,** and the images are built for it:
+they run as 65532, drop every capability and write only to their volume and to
+`/tmp`. The account that runs the deployment needs subuid and subgid ranges
+(`usermod --add-subuids 200000-265535 --add-subgids 200000-265535 <account>`)
+and `loginctl enable-linger <account>`, or the panel stops with the session
+that started it. Every port the panel publishes is above 1024, so rootless
+needs no change there.
+
+The Compose files themselves need no Podman variant: `podman-compose` reads
+`secrets:`, `read_only`, `tmpfs` with `uid`/`gid`, `cap_drop`,
+`security_opt`, `pids_limit`, `ulimits` and `stop_grace_period` as written.
+
 ## Building the images
 
 ```
