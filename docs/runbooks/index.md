@@ -6,6 +6,9 @@ result, and how to go back; the codes at the end are the entries of the error gu
 (`GET /api/v1/errors`) that the procedure produces or reads. Where the product offers no
 route or command for a step, the runbook says so rather than describing one.
 
+- [Installing from nothing](install.md): the control plane from its image, the first
+  administrator, the backup pair before the fleet exists, and the first hosts from signed
+  packages.
 - [CA rotation](ca-rotation.md): prepare, activate and retire a fleet CA; the trust-anchor
   campaign for hosts' own trust stores; rollback of a prepared CA.
 - [Database restore](db-restore.md): what the database holds and what lives in

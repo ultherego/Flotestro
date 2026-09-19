@@ -374,7 +374,7 @@ cd deploy
 
 # 1. The non-secret settings.
 cat > .env <<'SETTINGS'
-FLOTESTRO_VERSION=0.54.0
+FLOTESTRO_VERSION=0.59.0
 FLOTESTRO_GATEWAY_ID=cp-prod-01
 FLOTESTRO_ADVERTISE=panel.example.org
 FLOTESTRO_PUBLIC_URL=https://panel.example.org
@@ -383,7 +383,14 @@ SETTINGS
 # 2. The database DSN, as a file and with no trailing surprises.
 mkdir -p secrets && chmod 700 secrets
 printf '%s' 'postgresql://flotestro:PASSWORD@db.example.org:5432/flotestro?sslmode=verify-full&application_name=flotestro-control-plane' > secrets/database-url
-chmod 600 secrets/database-url
+# The container runs as 65532 and a Compose secret keeps the file's ownership,
+# so the file has to be readable by that account and by nobody else. Rootless
+# Podman maps the other way round - see the Podman section.
+sudo chown 65532:65532 secrets/database-url
+chmod 400 secrets/database-url
+# On a host with SELinux, without the container label the read fails with a
+# plain "permission denied" that says nothing about SELinux.
+command -v chcon >/dev/null && sudo chcon -Rt container_file_t secrets
 
 # 3. Start. The panel migrates the schema itself before it listens.
 docker compose up -d
