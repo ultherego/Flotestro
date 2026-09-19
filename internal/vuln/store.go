@@ -153,6 +153,9 @@ func (s *Store) SaveSnapshot(ctx context.Context, snapshot Snapshot,
 			return "", fmt.Errorf("writing the findings: %w", err)
 		}
 	}
+	if err := writeReleaseDigests(ctx, tx, id); err != nil {
+		return "", err
+	}
 
 	if refusal != "" {
 		// The candidate keeps its findings and is not activated: the snapshot in
@@ -550,9 +553,10 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 		                             affected_with_vendor_fix, affected_no_fix, unknown,
 		                             affected_packages, unique_advisories, unique_cves,
 		                             coverage_reason, advisories_reason, evaluated_at,
-		                             generation_id, generation_at, last_successful_at)
+		                             generation_id, generation_at, last_successful_at,
+		                             release_digest)
 		values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-		        $17, $18, $19, nullif($20, '')::uuid, $21, $19)
+		        $17, $18, $19, nullif($20, '')::uuid, $21, $19, $22)
 		on conflict (host_id) do update set
 			generation_id = excluded.generation_id,
 			generation_at = excluded.generation_at,
@@ -573,13 +577,15 @@ func (s *Store) SaveAdvisories(ctx context.Context, hostID string,
 			evaluated_at = excluded.evaluated_at,
 			evaluation_failed_reason = '', evaluation_failed_source = '',
 			evaluation_failed_at = null,
-			last_successful_at = excluded.evaluated_at`
+			last_successful_at = excluded.evaluated_at,
+			release_digest = excluded.release_digest`
 	if _, err := tx.Exec(ctx, saveState, hostID, state.Distribution, state.Release,
 		state.Provider, state.SnapshotDigest, state.InventoryDigest, state.AdvisoryDigest,
 		state.PackagesTotal, state.PackagesCovered, state.Affected, state.AffectedWithVendorFix,
 		state.AffectedNoFix, state.Unknown, state.AffectedPackages, state.UniqueAdvisories,
 		state.UniqueCVEs, state.CoverageReason, state.AdvisoriesReason,
-		state.EvaluatedAt, state.GenerationID, state.GenerationAt); err != nil {
+		state.EvaluatedAt, state.GenerationID, state.GenerationAt,
+		state.ReleaseDigest); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -599,6 +605,55 @@ func (s *Store) RecordEvaluationFailure(ctx context.Context, hostID, source stri
 			evaluation_failed_at = excluded.evaluation_failed_at`
 	_, err := s.pool.Exec(ctx, query, hostID, EvaluationFailed, source, at)
 	return err
+}
+
+// writeReleaseDigests records one digest per release of the snapshot, over the
+// advisories of that release and nothing else.
+func writeReleaseDigests(ctx context.Context, tx pgx.Tx, snapshotID string) error {
+	// The order is fixed, so the same set of advisories gives the same digest
+	// whatever order the fetch delivered them in.
+	const query = `
+		insert into vuln_release_digests (snapshot_id, distribution, release, digest, advisories)
+		select $1::uuid, distribution, release,
+		       encode(sha256(convert_to(string_agg(
+		           advisory_id || '\x1f' || binary_package || '\x1f' ||
+		           coalesce(fixed_version, '') || '\x1f' || coalesce(status, ''),
+		           E'\n' order by advisory_id, binary_package, fixed_version, status), 'UTF8')), 'hex'),
+		       count(*)
+		from vuln_advisories
+		where snapshot_id = $1::uuid
+		group by distribution, release`
+	_, err := tx.Exec(ctx, query, snapshotID)
+	return err
+}
+
+// ReleaseDigests reads the per-release digests of a snapshot, keyed by
+// distribution and release.
+func (s *Store) ReleaseDigests(ctx context.Context, snapshotID string) (map[string]string, error) {
+	result := map[string]string{}
+	if snapshotID == "" {
+		return result, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		select distribution, release, digest from vuln_release_digests
+		where snapshot_id = $1::uuid`, snapshotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var distribution, release, digest string
+		if err := rows.Scan(&distribution, &release, &digest); err != nil {
+			return nil, err
+		}
+		result[ReleaseKey(distribution, release)] = digest
+	}
+	return result, rows.Err()
+}
+
+// ReleaseKey names one release of one distribution.
+func ReleaseKey(distribution, release string) string {
+	return distribution + "\x1f" + release
 }
 
 // Advisories returns the findings of a host.
@@ -691,6 +746,9 @@ type HostState struct {
 	EvaluationFailedAt     *time.Time `json:"evaluation_failed_at,omitempty"`
 	// LastSuccessfulAt is when this verdict was last computed in full.
 	LastSuccessfulAt *time.Time `json:"last_successful_at,omitempty"`
+	// ReleaseDigest binds the verdict to the advisories of this host's release
+	// alone; empty for a verdict written before release digests existed.
+	ReleaseDigest string `json:"release_digest,omitempty"`
 }
 
 // Status says how much of this verdict may be trusted. It is derived, never
@@ -758,7 +816,7 @@ func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]Ho
 		       affected_packages, unique_advisories, unique_cves, coverage_reason,
 		       advisories_reason, evaluated_at, coalesce(generation_id::text, ''),
 		       generation_at, evaluation_failed_reason, evaluation_failed_source,
-		       evaluation_failed_at, last_successful_at
+		       evaluation_failed_at, last_successful_at, release_digest
 		from vuln_host_state where host_id = any($1)`
 	rows, err := s.pool.Query(ctx, query, hostIDs)
 	if err != nil {
@@ -775,7 +833,7 @@ func (s *Store) HostStates(ctx context.Context, hostIDs []string) (map[string]Ho
 			&state.CoverageReason, &state.AdvisoriesReason, &state.EvaluatedAt,
 			&state.GenerationID, &state.GenerationAt, &state.EvaluationFailedReason,
 			&state.EvaluationFailedSource, &state.EvaluationFailedAt,
-			&state.LastSuccessfulAt); err != nil {
+			&state.LastSuccessfulAt, &state.ReleaseDigest); err != nil {
 			return nil, err
 		}
 		result[state.HostID] = state

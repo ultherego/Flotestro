@@ -146,3 +146,50 @@ func withFailure(state HostState) HostState {
 	state.EvaluationFailedSource = SourceFeedAdvisories
 	return state
 }
+
+// TestOnlyTheChangedReleaseIsRecomputed guards chapter 11.1: a snapshot covers
+// every release of a provider, so without a per-release digest one fetch sends
+// every host of that distribution through the evaluator again.
+func TestOnlyTheChangedReleaseIsRecomputed(t *testing.T) {
+	scheduler := &Scheduler{settings: DefaultSettings()}
+	assessed := now.Add(-time.Minute)
+	before := Snapshot{
+		Provider: "debian", Digest: "s1", Releases: []string{"trixie", "bookworm"},
+		FetchedAt: now.Add(-time.Hour),
+	}
+	// The fetch changed bookworm and left trixie exactly as it was, so the
+	// snapshot digest moves and one of the two release digests does not.
+	after := before
+	after.Digest = "s2"
+
+	host := func(release, releaseDigest string) (HostState, Input) {
+		previous := HostState{
+			HostID: "host-" + release, Distribution: "debian", Release: release,
+			Provider: "debian", SnapshotDigest: "s1", InventoryDigest: "list-1",
+			ReleaseDigest: releaseDigest, EvaluatedAt: &assessed,
+		}
+		return previous, Input{
+			HostID: previous.HostID, Distribution: "debian", Release: release,
+			InventoryDigest: "list-1", ReleaseDigest: releaseDigest,
+		}
+	}
+
+	quiet, quietInput := host("trixie", "r-trixie")
+	if scheduler.toRecalculate(quiet, quietInput, after, now) {
+		t.Fatal("a host of a release the fetch did not touch is recomputed")
+	}
+
+	moved, movedInput := host("bookworm", "r-bookworm-old")
+	movedInput.ReleaseDigest = "r-bookworm-new"
+	if !scheduler.toRecalculate(moved, movedInput, after, now) {
+		t.Fatal("a host of the release the fetch changed is not recomputed")
+	}
+
+	// A verdict written before release digests existed has none, and then the
+	// whole snapshot decides - the behaviour of before this change.
+	old, oldInput := host("trixie", "")
+	oldInput.ReleaseDigest = "r-trixie"
+	if !scheduler.toRecalculate(old, oldInput, after, now) {
+		t.Fatal("a verdict with no release digest is not recomputed on a new snapshot")
+	}
+}

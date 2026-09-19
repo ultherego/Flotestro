@@ -443,6 +443,7 @@ func sameRange(a, b []string) bool {
 // distribution.
 func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescription) {
 	snapshots := map[string]Snapshot{}
+	releaseDigests := map[string]map[string]string{}
 	feedAdvisories := map[string]map[string][]Advisory{}
 	now := time.Now().UTC()
 	previous := h.previousStates(ctx, descriptions)
@@ -454,9 +455,13 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		if !ok && provider != "" {
 			if fetched, err := h.store.ActiveSnapshot(ctx, provider); err == nil {
 				snapshot = fetched
+				if digests, err := h.store.ReleaseDigests(ctx, snapshot.ID); err == nil {
+					releaseDigests[provider] = digests
+				}
 			}
 			snapshots[provider] = snapshot
 		}
+		releaseDigest := releaseDigests[provider][ReleaseKey(description.Distribution, description.Release)]
 
 		listState, err := h.packages.State(ctx, description.ID)
 		if err != nil {
@@ -466,7 +471,8 @@ func (h *Scheduler) Recalculate(ctx context.Context, descriptions []HostDescript
 		}
 
 		input := Input{
-			HostID: description.ID, Hostname: description.Hostname,
+			ReleaseDigest: releaseDigest,
+			HostID:        description.ID, Hostname: description.Hostname,
 			Distribution: description.Distribution, Release: description.Release,
 			InventoryDigest: listState.Digest,
 			ListMissing:     listState.Digest == "" || listState.PackageCount == 0,
@@ -627,10 +633,18 @@ func (h *Scheduler) toRecalculate(previous HostState, input Input,
 	if now.Sub(*previous.EvaluatedAt) > h.settings.MaxSnapshotAge {
 		return true
 	}
+	// The feed moved for this host's release. Where both sides carry a release
+	// digest that is the whole question; where either does not - a verdict from
+	// before release digests, or a provider that has none - the whole snapshot
+	// decides, as it did before.
+	feedMoved := previous.SnapshotDigest != snapshot.Digest
+	if previous.ReleaseDigest != "" && input.ReleaseDigest != "" {
+		feedMoved = previous.ReleaseDigest != input.ReleaseDigest
+	}
 	if previous.Distribution != input.Distribution ||
 		previous.Release != input.Release ||
 		previous.Provider != snapshot.Provider ||
-		previous.SnapshotDigest != snapshot.Digest ||
+		feedMoved ||
 		// The generation is compared as well as the digest.
 		previous.GenerationID != snapshot.GenerationID ||
 		previous.InventoryDigest != input.InventoryDigest ||

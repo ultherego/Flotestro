@@ -24,6 +24,9 @@ type Input struct {
 	// list, and AdvisoryDigest - to a specific set of vendor findings.
 	InventoryDigest string
 	AdvisoryDigest  string
+	// ReleaseDigest is the digest of the advisories of this host's release
+	// alone: a feed change elsewhere in the distribution does not move it.
+	ReleaseDigest string
 	// AdvisoriesReason says why there are no vendor findings or why they are old.
 	AdvisoriesReason string
 	// ListStale means the host reports a package list digest other than the
@@ -47,6 +50,7 @@ func Evaluate(input Input, snapshot Snapshot, advisories map[string][]Advisory,
 		HostID: input.HostID, Hostname: input.Hostname,
 		Distribution: input.Distribution, Release: input.Release,
 		Provider: snapshot.Provider, SnapshotDigest: snapshot.Digest,
+		ReleaseDigest:    input.ReleaseDigest,
 		InventoryDigest:  input.InventoryDigest,
 		AdvisoryDigest:   input.AdvisoryDigest,
 		AdvisoriesReason: input.AdvisoriesReason,
