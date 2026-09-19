@@ -14,6 +14,9 @@ Requires(preun): systemd
 # The binaries are built earlier and given by directory; the spec compiles
 # no code, so that the package is made from exactly the same artefacts that
 # passed the tests.
+# rpm outside Fedora has no systemd-rpm-macros, so the macro is undefined
+# and every unit path expands to a name rpm refuses.
+%{!?_unitdir: %global _unitdir /usr/lib/systemd/system}
 %global _build_id_links none
 %global __strip /bin/true
 

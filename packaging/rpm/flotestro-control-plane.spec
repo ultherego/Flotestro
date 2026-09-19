@@ -16,6 +16,9 @@ Requires(preun): systemd
 # database gets it from the operator's own decision.
 Suggests:       postgresql-server
 
+# rpm outside Fedora has no systemd-rpm-macros, so the macro is undefined
+# and every unit path expands to a name rpm refuses.
+%{!?_unitdir: %global _unitdir /usr/lib/systemd/system}
 %global _build_id_links none
 %global __strip /bin/true
 
