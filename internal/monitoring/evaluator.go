@@ -35,6 +35,9 @@ type openAlert struct {
 	Value     float64
 	Detail    string
 	StartedAt time.Time
+	// Fired says the episode reached its firing point at some moment: it
+	// decides what a no-data episode goes back to and how it ends.
+	Fired bool
 }
 
 // Evaluate runs every enabled rule over the matching hosts once. It takes the
@@ -135,14 +138,22 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, f fence, guard func
 			if !within.covers(host.ID) {
 				continue
 			}
-			value, detail, known := measure(rule, host, now)
 			key := rule.ID + "/" + host.ID
 			episode, exists := open[key]
 			mark := alertWrite{rule: rule.ID, host: host.ID}
+			// Asked before anything is computed: past the rule's own gap the newest
+			// reading is not current, whatever a value taken from it would say.
+			if rule.Policy() != NoDataIgnore && readingsStopped(rule, host, now) {
+				if err := s.noData(ctx, f, rule, host, mark, episode, exists, now); err != nil {
+					return err
+				}
+				continue
+			}
+			value, detail, known := measure(rule, host, now)
 			if !known {
 				// Nothing can be said: the episode is not cleared - the condition may well
 				// still hold - but it is not advanced either.
-				if exists && noDataHold(episode, now) {
+				if exists && noDataHold(episode, now, rule.MaxGap()) {
 					if err := s.restart(ctx, f, mark.on(episode.ID), now); err != nil {
 						return err
 					}
@@ -151,6 +162,11 @@ func (s *Store) evaluate(ctx context.Context, now time.Time, f fence, guard func
 			}
 			holds := compare(rule.Operator, value, rule.Threshold)
 			switch {
+			case exists && episode.State == "no_data":
+				if err := s.resume(ctx, f, mark.on(episode.ID), rule, episode,
+					holds, value, detail, now); err != nil {
+					return err
+				}
 			case holds && !exists:
 				if err := s.startEpisode(ctx, f, rule, host, value, detail, now); err != nil {
 					return err
@@ -332,15 +348,17 @@ with fence_lease as (
 ),
 written as (
     insert into alerts (id, rule_id, rule_name, metric, severity, host_id, state,
-        value, detail, started_at, fired_at, fencing_token)
+        value, detail, started_at, fired_at, no_data_policy, fencing_token)
     select $3::uuid, $4::uuid, $5::text, $6::text, $7::text, $8::uuid, $9::text,
-           $10::real, $11::text, $12::timestamptz, $13::timestamptz, fence_lease.token
+           $10::real, $11::text, $12::timestamptz, $13::timestamptz, $14::text,
+           fence_lease.token
       from fence_lease
     on conflict do nothing
     returning id
 )
 select exists (select 1 from written), exists (select 1 from fence_lease)`
 
+// startEpisode opens the episode of a condition that has just been seen.
 func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostState,
 	value float64, detail string, now time.Time) error {
 	state := "pending"
@@ -349,6 +367,13 @@ func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostS
 		state = "firing"
 		firedAt = &now
 	}
+	return s.openEpisode(ctx, f, rule, host, state, value, detail, firedAt, now)
+}
+
+// openEpisode writes the row of a new episode in whichever state it starts in,
+// stamped with the policy the rule carried at the time.
+func (s *Store) openEpisode(ctx context.Context, f fence, rule Rule, host hostState,
+	state string, value float64, detail string, firedAt *time.Time, now time.Time) error {
 	mark := alertWrite{kind: "start", rule: rule.ID, host: host.ID}
 	if !f.held() {
 		return s.fenceRefused(f, mark, nil)
@@ -356,7 +381,8 @@ func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostS
 	var wrote, leased bool
 	if err := s.pool.QueryRow(ctx, fencedInsert,
 		f.Holder, f.Token, uuid.NewString(), rule.ID, rule.Name, rule.Metric, rule.Severity,
-		host.ID, state, float32(value), detail, now, firedAt).Scan(&wrote, &leased); err != nil {
+		host.ID, state, float32(value), detail, now, firedAt, rule.Policy()).
+		Scan(&wrote, &leased); err != nil {
 		return err
 	}
 	if !wrote && !leased {
@@ -367,9 +393,81 @@ func (s *Store) startEpisode(ctx context.Context, f fence, rule Rule, host hostS
 	return nil
 }
 
-// maxSampleGap is the longest hole in a host's samples that still counts as
-// one continuous run of readings: twice the sampling interval, so a single
-const maxSampleGap = 2 * SamplingInterval
+// readingsStopped says the readings the rule needs have stopped for longer than
+// it allows. A host_offline rule is never in a gap: silence is its reading.
+func readingsStopped(rule Rule, host hostState, now time.Time) bool {
+	if rule.Metric == MetricHostOffline {
+		return false
+	}
+	if host.Latest == nil {
+		return true
+	}
+	return now.Sub(host.Latest.At) > rule.MaxGap()
+}
+
+// gapDetail says how long the readings have been missing and what the rule
+// allows, in the words the episode carries.
+func gapDetail(rule Rule, host hostState, now time.Time) string {
+	allowed := formatDuration(rule.MaxGap().Seconds())
+	if host.Latest == nil {
+		return fmt.Sprintf("no reading of %s at all; the rule allows a gap of %s",
+			rule.Metric, allowed)
+	}
+	return fmt.Sprintf("no reading of %s for %s; the rule allows a gap of %s",
+		rule.Metric, formatDuration(now.Sub(host.Latest.At).Seconds()), allowed)
+}
+
+// noData is the gap the rule asked to be told about: alert raises an episode
+// where there is none, unknown only marks the open one. The value is left as
+func (s *Store) noData(ctx context.Context, f fence, rule Rule, host hostState,
+	w alertWrite, episode openAlert, exists bool, now time.Time) error {
+	detail := gapDetail(rule, host, now)
+	if !exists {
+		if rule.Policy() != NoDataAlert {
+			return nil
+		}
+		return s.openEpisode(ctx, f, rule, host, "no_data", 0, detail, nil, now)
+	}
+	if episode.State == "no_data" {
+		return nil
+	}
+	return s.write(ctx, f, w.on(episode.ID).kinded("no_data"), `
+		update alerts a
+		   set state = 'no_data', detail = $4, no_data_policy = $5,
+		       fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state in ('pending', 'firing')
+		   and `+fencePredicate+`
+		returning a.id`, detail, rule.Policy())
+}
+
+// resume takes an episode out of no_data now that the readings are back: one
+// that had fired fires again, one that had not starts its window from this
+func (s *Store) resume(ctx context.Context, f fence, w alertWrite, rule Rule,
+	episode openAlert, holds bool, value float64, detail string, now time.Time) error {
+	if !holds {
+		if episode.Fired {
+			return s.resolve(ctx, f, w, now, &value)
+		}
+		return s.discard(ctx, f, w)
+	}
+	state, startedAt := "pending", now
+	var firedAt *time.Time
+	switch {
+	case episode.Fired:
+		state, startedAt = "firing", episode.StartedAt
+	case rule.ForMinutes == 0:
+		state, firedAt = "firing", &now
+	}
+	return s.write(ctx, f, w.kinded("resume"), `
+		update alerts a
+		   set state = $4, started_at = $5,
+		       fired_at = coalesce($6::timestamptz, a.fired_at),
+		       value = $7, detail = $8, fencing_token = fence_lease.token
+		  from fence_row, fence_lease
+		 where a.id = fence_row.id and fence_row.state = 'no_data' and `+fencePredicate+`
+		returning a.id`, state, startedAt, firedAt, float32(value), detail)
+}
 
 // observedSince returns the moment from which the rule's window is counted for
 // the episode: the start of the uninterrupted run of samples that reaches now.
@@ -382,7 +480,7 @@ func (s *Store) observedSince(ctx context.Context, f fence, rule Rule, host host
 	if err != nil {
 		return time.Time{}, err
 	}
-	since := continuousSince(episode.StartedAt, samples, now, maxSampleGap)
+	since := continuousSince(episode.StartedAt, samples, now, rule.MaxGap())
 	if since.After(episode.StartedAt) {
 		mark := alertWrite{rule: rule.ID, host: host.ID, id: episode.ID}
 		if err := s.restart(ctx, f, mark, since); err != nil {
@@ -413,8 +511,8 @@ func continuousSince(started time.Time, samples []time.Time, now time.Time, gap 
 
 // noDataHold says whether a pending episode without a reading has been without
 // one long enough to have its timer restarted.
-func noDataHold(episode openAlert, now time.Time) bool {
-	return episode.State == "pending" && now.Sub(episode.StartedAt) > maxSampleGap
+func noDataHold(episode openAlert, now time.Time, gap time.Duration) bool {
+	return episode.State == "pending" && now.Sub(episode.StartedAt) > gap
 }
 
 // sampleTimes reads the moments of the host's samples since the given one,
@@ -488,7 +586,8 @@ func (s *Store) resolve(ctx context.Context, f fence, w alertWrite,
 		   set state = 'resolved', resolved_at = $4,
 		       value = coalesce($5::real, a.value), fencing_token = fence_lease.token
 		  from fence_row, fence_lease
-		 where a.id = fence_row.id and fence_row.state = 'firing' and `+fencePredicate+`
+		 where a.id = fence_row.id and fence_row.state in ('firing', 'no_data')
+		   and `+fencePredicate+`
 		returning a.id`, now, reading)
 }
 
@@ -498,7 +597,8 @@ func (s *Store) discard(ctx context.Context, f fence, w alertWrite) error {
 	return s.write(ctx, f, w.kinded("discard"), `
 		delete from alerts a
 		 using fence_row, fence_lease
-		 where a.id = fence_row.id and fence_row.state = 'pending' and `+fencePredicate+`
+		 where a.id = fence_row.id and fence_row.state in ('pending', 'no_data')
+		   and `+fencePredicate+`
 		returning a.id`)
 }
 
@@ -532,7 +632,7 @@ func (s *Store) closeOrphans(ctx context.Context, f fence, rules []Rule, scopes 
 			continue
 		}
 		mark := alertWrite{rule: ruleID, host: hostID, id: episode.ID}
-		if episode.State == "pending" {
+		if !episode.Fired {
 			if err := s.discard(ctx, f, mark); err != nil {
 				return err
 			}
@@ -764,7 +864,8 @@ func (s *Store) hostStates(ctx context.Context) ([]hostState, error) {
 // host.
 func (s *Store) openAlerts(ctx context.Context) (map[string]openAlert, error) {
 	rows, err := s.pool.Query(ctx, `
-		select id, coalesce(rule_id::text, ''), host_id, state, value, detail, started_at
+		select id, coalesce(rule_id::text, ''), host_id, state, value, detail, started_at,
+		       fired_at is not null
 		from alerts where state <> 'resolved'`)
 	if err != nil {
 		return nil, err
@@ -776,7 +877,7 @@ func (s *Store) openAlerts(ctx context.Context) (map[string]openAlert, error) {
 		var ruleID, hostID string
 		var value float32
 		if err := rows.Scan(&episode.ID, &ruleID, &hostID, &episode.State, &value,
-			&episode.Detail, &episode.StartedAt); err != nil {
+			&episode.Detail, &episode.StartedAt, &episode.Fired); err != nil {
 			return nil, err
 		}
 		episode.Value = float64(value)

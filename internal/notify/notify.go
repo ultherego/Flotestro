@@ -32,13 +32,13 @@ type Subject struct {
 
 // SubjectSecurity is the subject of the security alerts of the whole
 // installation: a duplicate identity, a helper that refused a signature, a
-// relay envelope that did not verify.
 const SubjectSecurity = "security.alert"
 
 // Subjects is the catalogue of what a channel can carry.
 var Subjects = []Subject{
 	{Name: "alert.fired", Description: "an alert rule fired on a host"},
 	{Name: "alert.resolved", Description: "a firing alert ended"},
+	{Name: "alert.no_data", Description: "a host stopped reporting the metric a rule watches"},
 	{Name: "campaign.finished", Description: "a campaign reached its end: completed, with issues, failed, expired or canceled"},
 	{Name: "campaign.awaiting_approval", Description: "a campaign waits for its approval"},
 	{Name: "job.awaiting_approval", Description: "a task on one host waits for its approval"},
@@ -52,6 +52,7 @@ var Subjects = []Subject{
 var subjectOfEvent = map[string]string{
 	"alert.fired":                    "alert.fired",
 	"alert.resolved":                 "alert.resolved",
+	"alert.no_data":                  "alert.no_data",
 	"campaign.completed":             "campaign.finished",
 	"campaign.completed_with_issues": "campaign.finished",
 	"campaign.failed":                "campaign.finished",
@@ -310,7 +311,6 @@ func (c *Channel) Validate() (any, error) {
 
 // decodeConfig reads the configuration of the kind and checks what can be
 // checked without sending: an address that parses, a port, a mailbox list that
-// reads as addresses.
 func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")
@@ -339,7 +339,6 @@ func decodeConfig(kind string, raw json.RawMessage) (any, error) {
 		config.URL = strings.TrimSpace(config.URL)
 		// An edit that says "the address is set" and types none keeps the stored
 		// address; the store checks that one is stored and refuses a channel that
-		// ends up with none.
 		if config.URL == "" && config.URLSet {
 			return config, nil
 		}
@@ -484,7 +483,6 @@ const (
 	SuppressedByMaintenance = "maintenance_window"
 	// SuppressedFireKept: the resolve of an alert whose fire the channel never
 	// got, because a silence kept it; a resolve of nothing said is nothing to
-	// say.
 	SuppressedFireKept = "fired_suppressed"
 )
 
@@ -496,7 +494,6 @@ const (
 	CodeCredentialsRejected = "channel_credentials_rejected"
 	// CodePermanentHTTP: the receiver answered a status that is neither a success
 	// nor a failure that passes - a 404, a 400 - so the address or the body is
-	// wrong for it.
 	CodePermanentHTTP = "permanent_http_error"
 	// CodePermanentSMTP: the mail relay refused the message with a
 	// permanent reply.
@@ -539,7 +536,6 @@ type Delivery struct {
 
 	// The fields below are the names of the previous release, kept for the
 	// readers that know them: status sent or failed, the code and the sentence of
-	// the failure, and the moment of the row.
 	Status    string    `json:"status"`
 	ErrorCode string    `json:"error_code"`
 	Error     string    `json:"error"`
@@ -547,7 +543,6 @@ type Delivery struct {
 
 	// aggregateID, message and channelRevision are the row's own: what the event
 	// is about, the composed message as JSON, and the revision of the channel the
-	// row was queued under.
 	aggregateID     string
 	message         []byte
 	channelRevision int64
@@ -584,7 +579,6 @@ const (
 
 // legacyStatus reads a state as the previous release's status: delivered is
 // sent, a dead letter or a wait for the next attempt is failed, and the rest -
-// queued, in hand, suppressed - has no word in that vocabulary and reads as.
 func legacyStatus(state string) string {
 	switch state {
 	case StateDelivered:

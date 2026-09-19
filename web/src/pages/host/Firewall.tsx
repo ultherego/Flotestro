@@ -36,8 +36,22 @@ type Zone = {
   ports?: string[];
 };
 
+type Drift = { reason: string; rule?: string; rule_id?: string; family?: string; table?: string; chain?: string; detail?: string };
+
+/** What restores the nftables ruleset at boot. Missing on an nftables host
+    means an agent that does not report it: unknown, not agreement. */
+type Persistence = {
+  unit?: { name?: string; load_state?: string; boot_state?: string; files?: string[] };
+  files?: string[];
+  compared?: boolean;
+  reason?: string;
+  detail?: string;
+};
+
 type Snapshot = {
   adapter?: string;
+  drift?: Drift[];
+  persistent?: Persistence;
   hash?: string;
   tables?: { family: string; name: string; source: string; owner?: string }[];
   rules?: Rule[];
@@ -190,6 +204,16 @@ export function Firewall() {
               {!snapshot.ufw.active && snapshot.ufw.reason && <span className="source"> · {snapshot.ufw.reason}</span>}
             </Fact>
           )}
+          {snapshot?.adapter === "nftables" && (
+            <Fact label={t("Restored at boot")}>
+              {!snapshot.persistent
+                ? <span className="badge unknown">{t("not reported by this agent")}</span>
+                : snapshot.persistent.compared
+                  ? <span className="hm-mono">{(snapshot.persistent.files ?? []).join(", ") || "—"}</span>
+                  : <span className="badge warn">{snapshot.persistent.reason}</span>}
+              {snapshot.persistent?.detail && <span className="source"> · {snapshot.persistent.detail}</span>}
+            </Fact>
+          )}
           {/* The fingerprint ties the plan to the rule set: a change
               requested against a different set is not the same change the
               operator looked at. */}
@@ -209,6 +233,32 @@ export function Firewall() {
           <RuleWizard fingerprint={snapshot?.hash ?? ""} onIntent={setIntent} />
         </ActionGuard>
       )}
+
+      {snapshot?.drift?.length ? (
+        <Section
+          title={t("Differences from the boot source")}
+          count={snapshot.drift.length}
+          span={12}
+          description={t("What the host filters with now against what it restores at the next boot. A rule the boot source does not carry is in force only until the machine restarts.")}
+          flush
+        >
+          <Table>
+            <thead>
+              <tr><th>{t("Reason")}</th><th>{t("Rule")}</th><th>{t("Where")}</th><th>{t("What it means")}</th></tr>
+            </thead>
+            <tbody>
+              {snapshot.drift.map((entry, index) => (
+                <tr key={index}>
+                  <td><span className="badge warn">{entry.reason}</span></td>
+                  <td className="hm-mono">{entry.rule || "—"}</td>
+                  <td className="hm-mono">{[entry.family, entry.table, entry.chain].filter(Boolean).join(" ") || "—"}</td>
+                  <td>{entry.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </Section>
+      ) : null}
 
       {snapshot?.zones?.length ? (
         <Section

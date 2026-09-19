@@ -28,6 +28,12 @@ var (
 // only operation that ends the process performing it.
 func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvelope,
 	payload *opspec.AgentUpgradePayload) *agentv1.TaskResult {
+	// A release order installs nothing: the panel confirmed the replacement and
+	// the host may drop what it kept for a return.
+	if payload.ReleaseRollback {
+		return e.releaseKeptArtefact(ctx, task, payload)
+	}
+
 	// What the host runs and what its package database holds are two different
 	// facts, and only the second one survives a restart.
 	manager, detected := detectManager()
@@ -73,7 +79,6 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 
 	// The repository metadata has to be fresh: a version released a quarter of an
 	// hour ago does not exist for a manager that last looked at the repository
-	// yesterday.
 	refresh, err := e.helper.Call(upgradeCtx, &helperv1.HelperRequest{
 		TaskId:         task.GetTaskId(),
 		TimeoutSeconds: 300,
@@ -120,7 +125,6 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 	if err != nil {
 		// A broken connection to the helper during this operation usually means the
 		// package managed to install and the restart is under way - together with
-		// the socket of the helper.
 		return &agentv1.TaskResult{
 			Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 			Message: "the installation is in flight; the return of the agent decides the result",
@@ -135,13 +139,49 @@ func (e *TaskExecutor) upgradeAgent(ctx context.Context, task *agentv1.TaskEnvel
 
 	// Even when the installation went through without a broken connection, the
 	// success is not the exit code of the package manager: the agent may fail to
-	// come up or come up in a different version.
 	return &agentv1.TaskResult{
 		Status: agentv1.TaskResult_STATUS_UNSPECIFIED, ErrorCode: StatusAfterReplacement,
 		Message: "the package was installed; waiting for the agent to come back at version " +
 			payload.TargetVersion + "; " + describeInstalled(installed, installedReason) +
 			" before the change; " + describeArtefacts(response.GetPackageResult()),
 		Detail: &agentv1.TaskResult_PackageApply{PackageApply: detail},
+	}
+}
+
+// releaseKeptArtefact tells the host to drop the artefact it kept for a
+// return. Until this order arrives the way back stays on the host, whatever
+func (e *TaskExecutor) releaseKeptArtefact(ctx context.Context, task *agentv1.TaskEnvelope,
+	payload *opspec.AgentUpgradePayload) *agentv1.TaskResult {
+	manager, detected := detectManager()
+	if detected != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorUnsupported, detected.Error())
+	}
+	name, err := agentPackage(manager.Name(), payload.TargetVersion)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_REJECTED, packages.ErrorUnsupported, err.Error())
+	}
+	timeout := timeoutOf(task, opspec.ActionAgentUpgrade)
+	response, err := e.helper.Call(ctx, &helperv1.HelperRequest{
+		TaskId:         task.GetTaskId(),
+		ExpiresAt:      task.GetExpiresAt(),
+		TimeoutSeconds: uint32(timeout.Seconds()),
+		Action: &helperv1.HelperRequest_PackageAction{
+			PackageAction: &helperv1.PackageActionRequest{
+				Operation:       helperv1.PackageActionRequest_OPERATION_INSTALL,
+				Packages:        []string{name},
+				ReleaseRollback: true,
+			},
+		},
+	}, timeout)
+	if err != nil {
+		return rejected(agentv1.TaskResult_STATUS_FAILED, RejectHelperFailed, err.Error())
+	}
+	if !response.GetAccepted() {
+		return replacementRefusal(response)
+	}
+	return &agentv1.TaskResult{
+		Status: agentv1.TaskResult_STATUS_SUCCEEDED, ExitCode: 0,
+		Message: response.GetMessage(),
 	}
 }
 
@@ -159,8 +199,11 @@ func replacementRequest(task *agentv1.TaskEnvelope, name string,
 				Packages:  []string{name},
 				// The version is given explicitly, so a downgrade is an operator decision
 				// as well - that is how the return after a failed release works.
-				AllowDowngrade:  true,
-				PackageSha256:   payload.PackageSHA256,
+				AllowDowngrade: true,
+				PackageSha256:  payload.PackageSHA256,
+				// The digest says the bytes are the ones the release published; the
+				// signer says who built them. An empty key leaves the old path.
+				PackageSigner:   payload.PackageSigner,
 				RollbackVersion: payload.RollbackVersion,
 				VerifyOnly:      verifyOnly,
 			},
@@ -172,7 +215,8 @@ func replacementRequest(task *agentv1.TaskEnvelope, name string,
 func replacementRefusal(response *helperv1.HelperResponse) *agentv1.TaskResult {
 	status := agentv1.TaskResult_STATUS_FAILED
 	switch response.GetErrorCode() {
-	case helper.ErrorArtefactDigest, helper.ErrorArtefactUnavailable, helper.ErrorRollbackUnavailable:
+	case helper.ErrorArtefactDigest, helper.ErrorArtefactUnavailable, helper.ErrorRollbackUnavailable,
+		helper.ErrorKeptArtefactInvalid, helper.ErrorSignerUnknown, helper.ErrorSignerMismatch:
 		status = agentv1.TaskResult_STATUS_REJECTED
 	}
 	return rejected(status, response.GetErrorCode(), response.GetMessage())
@@ -213,9 +257,20 @@ func describeInstalled(version, reason string) string {
 // describeArtefacts says what the host verified and what it kept, so the
 // operator knows where the return of the previous version waits.
 func describeArtefacts(result *helperv1.PackageActionResult) string {
-	parts := make([]string, 0, 2)
+	parts := make([]string, 0, 3)
 	if artefact := result.GetVerifiedArtefactPath(); artefact != "" {
-		parts = append(parts, "the verified artefact is "+artefact)
+		verified := "the verified artefact is " + artefact
+		if source := result.GetArtefactSource(); source != "" {
+			verified += " (" + source + ")"
+		}
+		parts = append(parts, verified)
+		// What the host established about the signature travels with the result:
+		// an order that named no key still says who signed what was installed.
+		if signer := result.GetArtefactSigner(); signer != "" {
+			parts = append(parts, "the artefact was signed by "+signer)
+		} else {
+			parts = append(parts, "the signer of the artefact was not established")
+		}
 	}
 	if rollback := result.GetRollbackArtefactPath(); rollback != "" {
 		parts = append(parts, "the artefact to go back to is kept at "+rollback)

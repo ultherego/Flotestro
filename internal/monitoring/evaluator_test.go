@@ -127,7 +127,6 @@ func TestCompareAppliesTheOperator(t *testing.T) {
 
 // TestSelectorTreeIsACampaignSelector: the scope of a rule is the same
 // structure a campaign selector is, so the two compile into the same host
-// query.
 func TestSelectorTreeIsACampaignSelector(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -271,7 +270,7 @@ func TestPointsCarryRatesBetweenConsecutiveSamples(t *testing.T) {
 // somebody watched.
 func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 	started := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
-	gap := maxSampleGap
+	gap := Rule{}.MaxGap()
 	// An unbroken minute-by-minute run counts from the start of the
 	// episode: ten samples, no hole, the window is the whole ten minutes.
 	var unbroken []time.Time
@@ -285,7 +284,6 @@ func TestAGapInTheSamplesRestartsTheWindow(t *testing.T) {
 
 	// The host went quiet after the third sample and came back at the eighth
 	// minute: the window counts from the reading that came back, not from the
-	// condition nobody was watching.
 	broken := []time.Time{
 		started.Add(1 * time.Minute), started.Add(2 * time.Minute), started.Add(3 * time.Minute),
 		started.Add(8 * time.Minute), started.Add(9 * time.Minute), started.Add(10 * time.Minute),
@@ -336,26 +334,25 @@ func TestARuleWithoutDataHoldsItsEpisodeRatherThanFiring(t *testing.T) {
 	pending := openAlert{ID: "a1", State: "pending", StartedAt: started}
 	// Within a gap nothing is done: the sample may simply be late, and a
 	// write on every run for every quiet host is not worth it.
-	if noDataHold(pending, started.Add(time.Minute)) {
+	gap := Rule{}.MaxGap()
+	if noDataHold(pending, started.Add(time.Minute), gap) {
 		t.Error("a late sample restarted the window")
 	}
 	// Past it the episode is held: the window restarts, so however long the host
 	// stays silent the episode cannot reach its firing point on the strength of
-	// that silence.
-	if !noDataHold(pending, started.Add(5*time.Minute)) {
+	if !noDataHold(pending, started.Add(5*time.Minute), gap) {
 		t.Error("an episode without data for five minutes was not held")
 	}
 	// A firing episode is not touched: it has fired, and the absence of
 	// readings is not the resolve of the condition either.
 	firing := openAlert{ID: "a2", State: "firing", StartedAt: started}
-	if noDataHold(firing, started.Add(time.Hour)) {
+	if noDataHold(firing, started.Add(time.Hour), gap) {
 		t.Error("a firing episode was restarted")
 	}
 }
 
 // TestTheLeaseIsAskedAboutInsideTheFleet: the interval is a number of hosts.
 // Once per rule leaves a rule over the whole fleet running on a lease that may
-// already be somebody else's; once per host is a round trip for every host.
 func TestTheLeaseIsAskedAboutInsideTheFleet(t *testing.T) {
 	if evaluatorGuardEvery <= 1 {
 		t.Fatalf("the guard is asked every %d hosts: that is every host", evaluatorGuardEvery)
@@ -378,5 +375,92 @@ func TestAWriteNamesTheRuleTheHostAndTheEpisode(t *testing.T) {
 	base := alertWrite{rule: "r1", host: "h1"}
 	if base.on("a1").id == base.on("a2").id || base.id != "" {
 		t.Fatalf("naming an episode changed the write it was taken from: %+v", base)
+	}
+}
+
+// The window is counted over the gap the rule declares, not over one the
+// package fixed for the whole fleet.
+func TestTheWindowIsCountedOverTheRulesOwnGap(t *testing.T) {
+	started := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	now := started.Add(10 * time.Minute)
+	// The host reports every five minutes, and the rule says so. The same
+	// readings are one continuous run for it and a hole for a rule that
+	slow := Rule{ExpectedCadenceSeconds: 300}
+	quick := Rule{}
+	samples := []time.Time{
+		started.Add(5 * time.Minute), started.Add(10 * time.Minute),
+	}
+	if since := continuousSince(started, samples, now, slow.MaxGap()); !since.Equal(started) {
+		t.Errorf("a five-minute cadence read its own readings as a gap at %s", since)
+	}
+	if since := continuousSince(started, samples, now, quick.MaxGap()); since.Equal(started) {
+		t.Error("a minute-by-minute rule counted five-minute holes as one continuous run")
+	}
+	// And the hold on a pending episode follows the same gap: what the rule
+	// tolerates decides when its timer is restarted.
+	pending := openAlert{ID: "a1", State: "pending", StartedAt: started}
+	if noDataHold(pending, started.Add(8*time.Minute), slow.MaxGap()) {
+		t.Error("an episode was held within the gap its own rule declares")
+	}
+	if !noDataHold(pending, started.Add(11*time.Minute), slow.MaxGap()) {
+		t.Error("an episode past the gap its own rule declares was not held")
+	}
+}
+
+// Whether the readings have stopped is a question about the rule's gap, not
+// about whether a value could be computed from the last one.
+func TestReadingsStoppedFollowsTheRulesGap(t *testing.T) {
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	at := now.Add(-4 * time.Minute)
+	host := hostState{ID: "h1", LastSampleAt: &at, Latest: &Sample{At: at, CPUPercent: 10}}
+
+	if !readingsStopped(Rule{Metric: MetricCPUPercent}, host, now) {
+		t.Error("four minutes of silence is not a gap for a rule that allows two")
+	}
+	wide := Rule{Metric: MetricCPUPercent, ExpectedCadenceSeconds: 300}
+	if readingsStopped(wide, host, now) {
+		t.Error("four minutes of silence is a gap for a rule that allows ten")
+	}
+	// A host_offline rule measures the silence, so silence is its reading and
+	// never its gap; judging it no-data would hide the thing it watches.
+	if readingsStopped(Rule{Metric: MetricHostOffline}, host, now) {
+		t.Error("a host_offline rule was judged to be without data")
+	}
+	// A host that never reported has no readings at all, whatever the gap.
+	if !readingsStopped(wide, hostState{ID: "h2"}, now) {
+		t.Error("a host that never reported was judged to have data")
+	}
+}
+
+// The ignore policy is what every rule did before the setting existed, so the
+// no-data path has to be shut for it.
+func TestOnlyTheAlertAndUnknownPoliciesReachTheNoDataPath(t *testing.T) {
+	if (Rule{}).Policy() != NoDataIgnore {
+		t.Fatal("a rule that says nothing does not ignore gaps")
+	}
+	for _, policy := range NoDataPolicies {
+		rule := Rule{Metric: MetricCPUPercent, NoDataPolicy: policy}
+		reaches := rule.Policy() != NoDataIgnore
+		if reaches != (policy != NoDataIgnore) {
+			t.Errorf("the policy %q reaches the no-data path: %v", policy, reaches)
+		}
+	}
+}
+
+// What an episode says while its readings are missing: how long they have been
+// missing and what the rule allowed, never a value.
+func TestGapDetailSaysHowLongAndWhatWasAllowed(t *testing.T) {
+	now := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	at := now.Add(-7 * time.Minute)
+	rule := Rule{Metric: MetricCPUPercent, ExpectedCadenceSeconds: 120}
+	detail := gapDetail(rule, hostState{Latest: &Sample{At: at}}, now)
+	for _, want := range []string{"cpu_percent", "7m", "4m"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("the gap reads %q and does not name %q", detail, want)
+		}
+	}
+	never := gapDetail(rule, hostState{}, now)
+	if !strings.Contains(never, "at all") {
+		t.Errorf("a host that never reported reads %q", never)
 	}
 }

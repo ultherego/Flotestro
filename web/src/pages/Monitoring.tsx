@@ -37,6 +37,28 @@ const METRIC_LABELS: Record<string, string> = {
   agent_cpu_percent: "agent CPU, percent of one core",
 };
 
+/** What each no-data policy does, in the words the rule list uses. */
+const POLICY_LABELS: Record<string, string> = {
+  alert: "alert on a gap",
+  unknown: "mark unknown",
+  ignore: "ignore gaps",
+};
+
+/** The policies the form offers, in the order the server lists them. */
+export const NO_DATA_POLICIES = ["alert", "unknown", "ignore"];
+
+/** A no-data policy in words; a rule that carries none ignores gaps. */
+export function policyLabel(policy: string | undefined): string {
+  return translate(POLICY_LABELS[policy ?? "ignore"] ?? POLICY_LABELS.ignore);
+}
+
+/** A number of seconds as the operator reads it: seconds, minutes or hours. */
+export function everySeconds(seconds: number): string {
+  if (seconds % 3600 === 0) return translate("{n} h", { n: seconds / 3600 });
+  if (seconds % 60 === 0) return translate("{n} min", { n: seconds / 60 });
+  return translate("{n} s", { n: seconds });
+}
+
 export function metricLabel(metric: string): string {
   const label = METRIC_LABELS[metric];
   return label ? translate(label) : metric;
@@ -120,6 +142,15 @@ export function AlertStateBadge({ state, silenced }: { state: AlertState; silenc
   const t = useT();
   if (state === "resolved") return <span className="badge ok">{t("resolved")}</span>;
   if (state === "pending") return <span className="badge unknown">{t("pending")}</span>;
+  // The readings stopped: the condition may well still hold, and saying it
+  // ended because the host went quiet is the one thing the panel must not do.
+  if (state === "no_data") {
+    return (
+      <span className="badge warn" title={t("The host stopped reporting the metric; the panel does not know whether the condition holds.")}>
+        {t("no data")}
+      </span>
+    );
+  }
   return silenced
     ? <span className="badge">{t("firing, silenced")}</span>
     : <span className="badge error">{t("firing")}</span>;
@@ -408,8 +439,9 @@ export function FleetMonitoring() {
             <table>
               <thead>
                 <tr>
-                  <th>{t("Rule")}</th><th>{t("Condition")}</th><th>{t("For")}</th><th>{t("Severity")}</th>
-                  <th>{t("Scope")}</th><th>{t("Enabled")}</th><th>{t("Updated")}</th>{canWrite && <th></th>}
+                  <th>{t("Rule")}</th><th>{t("Condition")}</th><th>{t("For")}</th><th>{t("No data")}</th>
+                  <th>{t("Severity")}</th><th>{t("Scope")}</th><th>{t("Enabled")}</th>
+                  <th>{t("Updated")}</th>{canWrite && <th></th>}
                 </tr>
               </thead>
               <tbody>
@@ -425,6 +457,14 @@ export function FleetMonitoring() {
                     {/* A rule that waits no minutes fires on the first
                         sample past the threshold; "0 min" reads as a gap. */}
                     <td>{rule.for_minutes > 0 ? t("{n} min", { n: rule.for_minutes }) : t("at once")}</td>
+                    {/* What the rule makes of its readings stopping, and the
+                        hole in them it still reads as one run. */}
+                    <td>
+                      <div className="fp-host-cell">
+                        <span>{policyLabel(rule.no_data_policy)}</span>
+                        <span className="source">{t("gap ≤ {gap}", { gap: everySeconds(rule.max_gap_seconds || 120) })}</span>
+                      </div>
+                    </td>
                     <td><SeverityBadge severity={rule.severity} /></td>
                     <td className="source">{describeSelector(rule.selector)}</td>
                     <td>
@@ -470,6 +510,7 @@ export function FleetMonitoring() {
                 <option value="">{t("every state")}</option>
                 <option value="firing">{t("firing")}</option>
                 <option value="pending">{t("pending")}</option>
+                <option value="no_data">{t("no data")}</option>
                 <option value="resolved">{t("resolved")}</option>
               </select>
               <select value={historyTaken} onChange={(e) => setHistoryTaken(e.target.value as FiringFilter)}>
@@ -503,7 +544,9 @@ export function FleetMonitoring() {
                     <td>{alert.rule_name}</td>
                     <td><SeverityBadge severity={alert.severity} /></td>
                     <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /> <AcknowledgedChip alert={alert} /></td>
-                    <td className="num fp-nowrap">{metricValue(alert.metric, alert.value)}</td>
+                    <td className="num fp-nowrap">
+                      {alert.state === "no_data" ? <span className="source">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
+                    </td>
                     <td className="fp-nowrap"><Time value={alert.started_at} /></td>
                     <td className="fp-nowrap">{alert.resolved_at ? <Time value={alert.resolved_at} /> : <span className="source">—</span>}</td>
                     <td className="source">{alert.note || "—"}</td>
@@ -785,8 +828,9 @@ function FiringTable({ alerts, canAcknowledge, onChanged, onMessage }: {
     <table>
       <thead>
         <tr>
-          <th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("Severity")}</th><th className="num">{t("Value")}</th>
-          <th>{t("Detail")}</th><th>{t("Since")}</th><th>{t("Silenced")}</th><th>{t("Taken")}</th><th></th>
+          <th>{t("Host")}</th><th>{t("Rule")}</th><th>{t("State")}</th><th>{t("Severity")}</th>
+          <th className="num">{t("Value")}</th><th>{t("Detail")}</th><th>{t("Since")}</th>
+          <th>{t("Silenced")}</th><th>{t("Taken")}</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -852,8 +896,13 @@ function FiringRow({ alert, open, onOpen, canAcknowledge, busy, onAcknowledge, o
             <span className="source hm-mono">{alert.metric}</span>
           </div>
         </td>
+        <td><AlertStateBadge state={alert.state} silenced={alert.silenced} /></td>
         <td><SeverityBadge severity={alert.severity} /></td>
-        <td className="num">{metricValue(alert.metric, alert.value)}</td>
+        {/* A no-data episode has no current reading; the last one it stood on
+            is not the value now, so the cell says so. */}
+        <td className="num">
+          {alert.state === "no_data" ? <span className="source">{t("unknown")}</span> : metricValue(alert.metric, alert.value)}
+        </td>
         <td className="source">
           {alert.detail}
           {alert.note && <div className="source">{t("note:")} {alert.note}</div>}
@@ -884,7 +933,7 @@ function FiringRow({ alert, open, onOpen, canAcknowledge, busy, onAcknowledge, o
       </tr>
       {open && (
         <tr>
-          <td colSpan={9}>{children}</td>
+          <td colSpan={10}>{children}</td>
         </tr>
       )}
     </>
@@ -914,6 +963,9 @@ function ruleBody(rule: RuleDraft): RuleDraft {
     severity: rule.severity,
     selector,
     enabled: rule.enabled,
+    expected_cadence_seconds: rule.expected_cadence_seconds,
+    max_gap_seconds: rule.max_gap_seconds,
+    no_data_policy: rule.no_data_policy,
   };
 }
 
@@ -932,6 +984,12 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
   const [threshold, setThreshold] = useState(rule ? String(rule.threshold) : "");
   const [forMinutes, setForMinutes] = useState(rule ? String(rule.for_minutes) : "5");
   const [severity, setSeverity] = useState<AlertSeverity>(rule?.severity ?? "warning");
+  // The defaults are the ones a rule written before these settings existed
+  // carries: the interval the agents sample at, two of them, and no word
+  // about a gap.
+  const [cadence, setCadence] = useState(String(rule?.expected_cadence_seconds || 60));
+  const [maxGap, setMaxGap] = useState(String(rule?.max_gap_seconds || 120));
+  const [noDataPolicy, setNoDataPolicy] = useState(rule?.no_data_policy || "ignore");
   const scope = rule?.selector as RuleScope | undefined;
   const [site, setSite] = useState(scope?.site ?? "");
   const [environment, setEnvironment] = useState(scope?.environment ?? "");
@@ -955,6 +1013,9 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
     threshold: Number(threshold),
     for_minutes: Number(forMinutes),
     severity,
+    expected_cadence_seconds: Number(cadence),
+    max_gap_seconds: Number(maxGap),
+    no_data_policy: noDataPolicy,
     selector: {
       site, environment, os_family: osFamily,
       tags: words(tags), groups: words(groups), owner: owner.trim(), expression: expression.trim(),
@@ -974,8 +1035,21 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
   });
 
   const thresholdNumber = Number(threshold);
+  // The same three checks the server makes, so the operator sees the
+  // contradiction before the round trip rather than as a refusal code.
+  const cadenceNumber = Number(cadence);
+  const gapNumber = Number(maxGap);
+  const cadenceError = !Number.isInteger(cadenceNumber) || cadenceNumber < 60 || cadenceNumber > 86400
+    ? t("The agents sample once a minute, so a rule expects a reading every 60 s at the soonest and every 24 h at the latest.")
+    : "";
+  const gapError = !Number.isInteger(gapNumber) || gapNumber > 86400
+    ? t("The widest gap has to be a whole number of seconds, at most 24 h.")
+    : gapNumber < cadenceNumber
+      ? t("A gap narrower than the expected cadence opens one after every reading that arrives on time.")
+      : "";
   const ready = name.trim() !== "" && metric !== "" && threshold.trim() !== "" && Number.isFinite(thresholdNumber)
     && Number.isInteger(Number(forMinutes)) && Number(forMinutes) >= 0
+    && cadenceError === "" && gapError === ""
     && (expressionCheck === undefined || expressionCheck.ok);
 
   return (
@@ -1006,6 +1080,31 @@ function RuleForm({ rule, catalogue, onDone }: { rule?: AlertRule; catalogue?: R
         <Field label={t("Severity")}>
           <select value={severity} onChange={(e) => setSeverity(e.target.value as AlertSeverity)}>
             {severities.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </Field>
+        {/* How often the rule expects a reading, how wide a hole in the
+            readings it still reads as one run, and what a wider one means. */}
+        <Field
+          label={t("Expects a reading every (seconds)")}
+          hint={cadenceError
+            ? <span className="page-error">{cadenceError}</span>
+            : t("Every {every}; the agents sample once a minute.", { every: everySeconds(cadenceNumber) })}
+        >
+          <input type="number" min={60} max={86400} step={1} value={cadence} onChange={(e) => setCadence(e.target.value)} />
+        </Field>
+        <Field
+          label={t("Widest gap (seconds)")}
+          hint={gapError
+            ? <span className="page-error">{gapError}</span>
+            : t("A hole of up to {gap} still counts as one continuous run, so “for” is not filled by silence.", { gap: everySeconds(gapNumber) })}
+        >
+          <input type="number" min={60} max={86400} step={1} value={maxGap} onChange={(e) => setMaxGap(e.target.value)} />
+        </Field>
+        <Field label={t("When the readings stop")} hint={t("Alert raises an episode and tells the channels; unknown only shows it here; ignore judges what arrives and says nothing.")}>
+          <select value={noDataPolicy} onChange={(e) => setNoDataPolicy(e.target.value as AlertRuleInput["no_data_policy"])}>
+            {NO_DATA_POLICIES.map((item) => (
+              <option key={item} value={item}>{policyLabel(item)} ({item})</option>
+            ))}
           </select>
         </Field>
         <Field label={t("Site")} hint={t("Empty: every site.")}>

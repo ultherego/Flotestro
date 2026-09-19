@@ -193,6 +193,9 @@ type alertCounts struct {
 	Silenced int `json:"silenced"`
 	// Acknowledged counts the firing alerts somebody took.
 	Acknowledged int `json:"acknowledged"`
+	// NoData counts the episodes whose readings stopped under a rule that asked
+	// to be told; they are not firing, so they are counted apart.
+	NoData int `json:"no_data"`
 	// Pending counts the episodes whose window is still filling.
 	Pending int `json:"pending"`
 }
@@ -231,6 +234,10 @@ func (s *Server) handleFleetMonitoring(w http.ResponseWriter, r *http.Request) {
 	}
 	view := fleetMonitoringView{Firing: firing, GeneratedAt: time.Now().UTC()}
 	for _, alert := range firing {
+		if alert.State == "no_data" {
+			view.Counts.NoData++
+			continue
+		}
 		if alert.Acknowledged() {
 			view.Counts.Acknowledged++
 			continue
@@ -288,6 +295,11 @@ type alertRuleRequest struct {
 	// Enabled defaults to true: a rule written down is a rule meant to
 	// run.
 	Enabled *bool `json:"enabled"`
+	// The cadence a rule declares; a request that omits them gets the defaults,
+	// which are what a rule did before they existed.
+	ExpectedCadenceSeconds int    `json:"expected_cadence_seconds"`
+	MaxGapSeconds          int    `json:"max_gap_seconds"`
+	NoDataPolicy           string `json:"no_data_policy"`
 }
 
 func (request alertRuleRequest) rule() monitoring.Rule {
@@ -299,6 +311,9 @@ func (request alertRuleRequest) rule() monitoring.Rule {
 		Name: request.Name, Metric: request.Metric, Operator: request.Operator,
 		Threshold: request.Threshold, ForMinutes: request.ForMinutes,
 		Severity: request.Severity, Selector: request.Selector, Enabled: enabled,
+		ExpectedCadenceSeconds: request.ExpectedCadenceSeconds,
+		MaxGapSeconds:          request.MaxGapSeconds,
+		NoDataPolicy:           request.NoDataPolicy,
 	}
 }
 
@@ -320,6 +335,7 @@ func (s *Server) handleListAlertRules(w http.ResponseWriter, r *http.Request) {
 		// catalogue adds the unit and a description to each metric name.
 		"metrics": monitoring.Metrics, "catalogue": monitoring.Catalogue,
 		"operators": monitoring.Operators, "severities": monitoring.Severities,
+		"no_data_policies": monitoring.NoDataPolicies,
 	})
 }
 
@@ -370,7 +386,7 @@ func (s *Server) handleCreateAlertRule(w http.ResponseWriter, r *http.Request) {
 	rule := request.rule()
 	rule.CreatedBy = principal.Subject
 	if err := rule.Validate(); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_rule", err.Error())
+		problem(w, http.StatusBadRequest, ruleRefusal(err), err.Error())
 		return
 	}
 	created, err := s.monitoring.CreateRule(r.Context(), rule)
@@ -402,7 +418,7 @@ func (s *Server) handleUpdateAlertRule(w http.ResponseWriter, r *http.Request) {
 	}
 	rule := request.rule()
 	if err := rule.Validate(); err != nil {
-		problem(w, http.StatusBadRequest, "invalid_rule", err.Error())
+		problem(w, http.StatusBadRequest, ruleRefusal(err), err.Error())
 		return
 	}
 	updated, err := s.monitoring.UpdateRule(r.Context(), id, rule)
@@ -450,6 +466,9 @@ func ruleDetail(rule monitoring.Rule) map[string]any {
 		"name": rule.Name, "metric": rule.Metric, "operator": rule.Operator,
 		"threshold": rule.Threshold, "for_minutes": rule.ForMinutes,
 		"severity": rule.Severity, "selector": rule.Selector, "enabled": rule.Enabled,
+		"expected_cadence_seconds": rule.ExpectedCadenceSeconds,
+		"max_gap_seconds":          rule.MaxGapSeconds,
+		"no_data_policy":           rule.NoDataPolicy,
 	}
 }
 
@@ -739,6 +758,14 @@ func (s *Server) refuseGlobalSilence(w http.ResponseWriter, r *http.Request,
 
 // silenceRefusal names a refused silence: a typed refusal keeps its own code,
 // and a plain validation error stays invalid_silence, as it always was.
+func ruleRefusal(err error) string {
+	var refusal *opspec.RefusalError
+	if errors.As(err, &refusal) {
+		return refusal.Code
+	}
+	return "invalid_rule"
+}
+
 func silenceRefusal(err error) string {
 	var refusal *opspec.RefusalError
 	if errors.As(err, &refusal) {

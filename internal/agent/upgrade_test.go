@@ -14,7 +14,6 @@ import (
 
 // stubManager stands in for the package adapter of the host: a replacement has
 // to be decided the same way whichever manager answers, and a unit test must
-// not depend on the one the machine running it happens to have.
 type stubManager struct{ name string }
 
 func (s stubManager) Name() string             { return s.name }
@@ -134,7 +133,6 @@ func TestAnArtefactDigestThatDoesNotMatchRefusesAndChangesNothing(t *testing.T) 
 	}
 	// A rejection rather than a failure: the host was not touched, so the
 	// operator corrects the release and orders again, and a campaign is not told
-	// the host broke.
 	if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED {
 		t.Errorf("status = %s, expected rejected", result.GetStatus())
 	}
@@ -258,5 +256,106 @@ func TestAnUnreadablePackageDatabaseGivesNoVersionAndAReason(t *testing.T) {
 	}
 	if described := describeInstalled(version, reason); !strings.Contains(described, "unknown") {
 		t.Errorf("the description %q does not say the version is unknown", described)
+	}
+}
+
+// The order carries the key the artefact must be signed with, next to the
+// digest: the digest says which bytes, the key says whose.
+func TestTheReplacementOrderCarriesTheSignerTheReleaseNames(t *testing.T) {
+	payload := &opspec.AgentUpgradePayload{
+		TargetVersion: "0.55.0",
+		PackageSHA256: strings.Repeat("3c", 32),
+		PackageSigner: "A2C794A986419D8A",
+	}
+	action := replacementRequest(upgradeEnvelope(payload), "flotestro-agent=0.55.0",
+		payload, 0, false).GetPackageAction()
+	if action.GetPackageSigner() != payload.PackageSigner {
+		t.Errorf("the order carries the signer %q, expected %q",
+			action.GetPackageSigner(), payload.PackageSigner)
+	}
+	// A panel of the previous release sends no key, and the order then carries
+	// none: the host installs as before and says what it established.
+	older := &opspec.AgentUpgradePayload{TargetVersion: "0.55.0", PackageSHA256: strings.Repeat("3c", 32)}
+	olderAction := replacementRequest(upgradeEnvelope(older), "flotestro-agent=0.55.0",
+		older, 0, false).GetPackageAction()
+	if olderAction.GetPackageSigner() != "" {
+		t.Errorf("an order of a panel that names no key carries the signer %q",
+			olderAction.GetPackageSigner())
+	}
+}
+
+// The refusals of an artefact leave the host untouched, so they are rejections
+// rather than failures: the operator corrects the release and orders again.
+func TestTheArtefactRefusalsAreRejectionsAndNotFailures(t *testing.T) {
+	for _, code := range []string{
+		helper.ErrorKeptArtefactInvalid,
+		helper.ErrorSignerUnknown,
+		helper.ErrorSignerMismatch,
+	} {
+		result := replacementRefusal(&helperv1.HelperResponse{
+			Accepted: false, ErrorCode: code, Message: "the host refused the artefact",
+		})
+		if result.GetStatus() != agentv1.TaskResult_STATUS_REJECTED {
+			t.Errorf("%s ended as %s, expected rejected", code, result.GetStatus())
+		}
+		if result.GetErrorCode() != code {
+			t.Errorf("the result carries %q, expected %q", result.GetErrorCode(), code)
+		}
+	}
+}
+
+// A release order installs nothing: it tells the host the replacement is
+// confirmed and the way back has done its job.
+func TestAReleaseOrderDropsTheKeptArtefactAndInstallsNothing(t *testing.T) {
+	withStubbedHost(t, "apt", agentDatabase("0.55.0"))
+
+	var releases, others int
+	_, client := startFakeHelper(t, func(request *helperv1.HelperRequest) *helperv1.HelperResponse {
+		action := request.GetPackageAction()
+		if !action.GetReleaseRollback() {
+			others++
+			return &helperv1.HelperResponse{Accepted: true}
+		}
+		releases++
+		return &helperv1.HelperResponse{
+			Accepted:      true,
+			Message:       "the host dropped the artefacts it kept for a return: flotestro-agent_0.54.0-1_amd64.deb",
+			PackageResult: &helperv1.PackageActionResult{Manager: "apt"},
+		}
+	})
+
+	executor := &TaskExecutor{helper: client}
+	payload := &opspec.AgentUpgradePayload{TargetVersion: "0.55.0", ReleaseRollback: true}
+	result := executor.upgradeAgent(context.Background(), upgradeEnvelope(payload), payload)
+
+	if result.GetStatus() != agentv1.TaskResult_STATUS_SUCCEEDED {
+		t.Fatalf("status = %s (%s), expected succeeded", result.GetStatus(), result.GetMessage())
+	}
+	if releases != 1 || others != 0 {
+		t.Fatalf("release orders = %d, other orders = %d, expected 1 and 0", releases, others)
+	}
+	if !strings.Contains(result.GetMessage(), "0.54.0") {
+		t.Errorf("the message %q does not say what the host dropped", result.GetMessage())
+	}
+}
+
+// What the host established about the artefact travels back to the operator:
+// where the file came from, and who signed it or that nobody could say.
+func TestTheResultSaysWhereTheArtefactCameFromAndWhoSignedIt(t *testing.T) {
+	signed := describeArtefacts(&helperv1.PackageActionResult{
+		VerifiedArtefactPath: "/var/lib/flotestro-helper/agent-upgrade/rollback/agent.deb",
+		ArtefactSource:       "kept",
+		ArtefactSigner:       "A2C794A986419D8A",
+	})
+	if !strings.Contains(signed, "kept") || !strings.Contains(signed, "A2C794A986419D8A") {
+		t.Errorf("the description %q says neither where the artefact came from nor who signed it", signed)
+	}
+	// An order that named no key is not a check that quietly did not happen.
+	unsigned := describeArtefacts(&helperv1.PackageActionResult{
+		VerifiedArtefactPath: "/var/lib/flotestro-helper/agent-upgrade/download/agent.deb",
+		ArtefactSource:       "repository",
+	})
+	if !strings.Contains(unsigned, "not established") {
+		t.Errorf("the description %q hides that the signer is unknown", unsigned)
 	}
 }

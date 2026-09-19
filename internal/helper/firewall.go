@@ -193,7 +193,6 @@ func describeFirewallPlan(plan firewall.Plan) string {
 
 // changeRules creates or removes a panel rule and rebuilds the table - or, on
 // a host where ufw holds the rules, runs the ufw commands that carry the
-// registry from the state before to the state after.
 func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallRequest) *helperv1.HelperResponse {
 	state := s.readFirewall(ctx)
 	if state.UnavailableReason != "" {
@@ -227,7 +226,6 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 		}
 		// The management channel is the one thing that must not be lost: without it
 		// the host stops answering and there is nothing left to undo the change
-		// with.
 		if !action.GetBreakGlass() {
 			if err := firewall.ProtectsManagementChannel(rule,
 				action.GetManagementAddress(), int(action.GetManagementPort())); err != nil {
@@ -261,7 +259,6 @@ func (s *Server) changeRules(ctx context.Context, action *helperv1.FirewallReque
 	if state.Adapter == firewall.AdapterUFW {
 		// ufw is changed rule by rule, so the registry is written before the first
 		// step: a change that stops halfway is then rolled back from the registry it
-		// was heading to - deleting what landed and adding back what was removed -
 		if err := saveRuleRegistry(state.Adapter, registry); err != nil {
 			return reject(ErrorExecFailed, "writing the rule registry: "+err.Error())
 		}
@@ -297,7 +294,6 @@ func (s *Server) changeZone(ctx context.Context, action *helperv1.FirewallReques
 	}
 	// A change ordered against a different rule set is not the same change the
 	// operator looked at in the plan: firewalld rewrites nftables at every zone
-	// change, so the digest of the set detects somebody else's change.
 	if expected := action.GetExpectedHash(); expected != "" {
 		if state := s.readFirewall(ctx); expected != state.Hash {
 			return reject(ErrorPreconditionFailed, fmt.Sprintf(
@@ -489,7 +485,6 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 
 	// ufw loads its rules into the tables underneath through iptables-nft, which
 	// nft reports as foreign: the rules the operator knows are the ufw ones, read
-	// in the form ufw takes them back in.
 	if ufw {
 		if response := s.readUFW(ctx, &snapshot, ruleset); response != "" {
 			snapshot.ReadOnlyReason = response
@@ -505,7 +500,28 @@ func (s *Server) readFirewall(ctx context.Context) firewall.Snapshot {
 			snapshot.Adapter = firewall.AdapterFirewalld
 		}
 	}
+
+	// Where nftables itself is the adapter, the running rules used to be the
+	// whole answer, and a rule the boot file does not carry read as enforced.
+	if snapshot.Adapter == firewall.AdapterNftables && snapshot.UnavailableReason == "" {
+		persistence, drift := s.nftPersistence(ctx, snapshot.Rules)
+		snapshot.Persistent = &persistence
+		snapshot.Drift = append(snapshot.Drift, drift...)
+	}
 	return snapshot
+}
+
+// nftPersistence compares the running ruleset with the file the host restores
+// it from at boot. The path comes from the unit of this host, not from an
+func (s *Server) nftPersistence(ctx context.Context, rules []firewall.Rule) (firewall.NftPersistence, []firewall.Drift) {
+	arguments := firewall.NftUnitArguments()
+	output, err := toolOutput(ctx, arguments[0], arguments[1:]...)
+	if err != nil {
+		// systemd did not answer, so nothing is known about what restores the
+		// ruleset - and not knowing is not agreement.
+		output = ""
+	}
+	return firewall.NftPersistentState(firewall.ParseNftUnit(output), os.DirFS("/"), rules)
 }
 
 // readUFW adds the ufw state to the snapshot. It returns the reason the
@@ -550,7 +566,6 @@ func (s *Server) readUFW(ctx context.Context, snapshot *firewall.Snapshot, rules
 	snapshot.Drift = ufwDrift(ruleset, loaded)
 	// The fingerprint covers the ufw rules together with the tables: a rule added
 	// with ufw since the plan is a changed rule set even when the operator's nft
-	// listing looks the same at a glance.
 	snapshot.Hash = firewall.Fingerprint(ruleset + "\n" + added)
 	snapshot.Writable = true
 	return ""

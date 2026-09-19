@@ -37,22 +37,48 @@ const (
 	// ErrorRollbackUnavailable means the order asked for a prepared return and
 	// the host could not keep the artefact of that version.
 	ErrorRollbackUnavailable = "agent_rollback_unavailable"
+	// ErrorKeptArtefactInvalid means the host holds an artefact of the ordered
+	// version and it is not the one the order names.
+	ErrorKeptArtefactInvalid = "agent_kept_artefact_invalid"
+	// ErrorSignerUnknown means the order names the key the artefact must carry
+	// and the host could not establish who signed the file.
+	ErrorSignerUnknown = "agent_package_signer_unknown"
+	// ErrorSignerMismatch means the artefact was signed by another key than the
+	// order names.
+	ErrorSignerMismatch = "agent_package_signer_mismatch"
+)
+
+// artefactSourceKept and artefactSourceRepository say where the file that is
+// installed came from.
+const (
+	artefactSourceKept       = "kept"
+	artefactSourceRepository = "repository"
 )
 
 // agentUpgradeDir is where the replacement keeps what it fetched: the verified
 // artefact of the new version and the artefact of the version the host can go
-// back to.
 var agentUpgradeDir = "/var/lib/flotestro-helper/agent-upgrade"
+
+// rollbackDir holds the artefacts the host can go back to, downloadDir the
+// artefact of the version being installed.
+func rollbackDir() string         { return filepath.Join(agentUpgradeDir, "rollback") }
+func downloadDir() string         { return filepath.Join(agentUpgradeDir, "download") }
+func rollbackDownloadDir() string { return filepath.Join(agentUpgradeDir, "rollback-download") }
 
 // replacementOrder is what the helper hands to the transient unit that
 // outlives it.
 type replacementOrder struct {
-	Spec                 string    `json:"spec"`
-	ArtefactPath         string    `json:"artefact_path,omitempty"`
-	ArtefactSHA256       string    `json:"artefact_sha256,omitempty"`
-	RollbackVersion      string    `json:"rollback_version,omitempty"`
-	RollbackArtefactPath string    `json:"rollback_artefact_path,omitempty"`
-	OrderedAt            time.Time `json:"ordered_at"`
+	Spec                 string `json:"spec"`
+	ArtefactPath         string `json:"artefact_path,omitempty"`
+	ArtefactSHA256       string `json:"artefact_sha256,omitempty"`
+	RollbackVersion      string `json:"rollback_version,omitempty"`
+	RollbackArtefactPath string `json:"rollback_artefact_path,omitempty"`
+	// Where the file came from, the key the order binds it to and the key the
+	// host established.
+	ArtefactSource string    `json:"artefact_source,omitempty"`
+	ExpectedSigner string    `json:"expected_signer,omitempty"`
+	ArtefactSigner string    `json:"artefact_signer,omitempty"`
+	OrderedAt      time.Time `json:"ordered_at"`
 }
 
 // agentReplacement recognizes an order in which the agent replaces itself.
@@ -87,6 +113,15 @@ func specForVersion(spec, version string) (string, bool) {
 	return packages.AgentPackage + string(rest[0]) + version, true
 }
 
+// agentVersionOfSpec reads the version out of a package specification.
+func agentVersionOfSpec(spec string) (string, bool) {
+	rest, ok := strings.CutPrefix(spec, packages.AgentPackage)
+	if !ok || len(rest) < 2 {
+		return "", false
+	}
+	return rest[1:], true
+}
+
 // orderAgentReplacement starts the installation of the agent package outside
 // the helper.
 func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Manager,
@@ -96,7 +131,14 @@ func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Man
 			"the manager "+manager.Name()+" does not support installing packages")
 	}
 
-	order := replacementOrder{Spec: spec, OrderedAt: time.Now().UTC()}
+	// A release order installs nothing: the panel confirmed the replacement and
+	// what the host kept for a return has done its job.
+	if action.GetReleaseRollback() {
+		return s.releaseAgentRollback(manager.Name())
+	}
+
+	order := replacementOrder{Spec: spec, OrderedAt: time.Now().UTC(),
+		ExpectedSigner: action.GetPackageSigner()}
 	if version := action.GetRollbackVersion(); version != "" {
 		path, err := keepRollbackArtefact(ctx, manager.Name(), spec, version)
 		if err != nil {
@@ -109,24 +151,41 @@ func (s *Server) orderAgentReplacement(ctx context.Context, manager packages.Man
 	}
 
 	if digest := action.GetPackageSha256(); digest != "" {
-		path, err := fetchArtefact(ctx, manager.Name(), spec, digest)
+		path, source, err := obtainArtefact(ctx, manager.Name(), spec, digest)
 		if err != nil {
-			code := ErrorArtefactUnavailable
-			if errors.Is(err, errDigestMismatch) {
-				code = ErrorArtefactDigest
-			}
+			code := artefactRefusalCode(err)
 			s.log.Error("the artefact of the agent release was refused",
 				"package", spec, "manager", manager.Name(), "code", code, "err", err)
 			return reject(code, err.Error())
 		}
+		identity, signerSource, signerErr := artefactSigner(ctx, manager.Name(), path)
+		if refusal := judgeSigner(action.GetPackageSigner(), identity, signerErr); refusal != nil {
+			s.log.Error("the signature of the agent release was refused",
+				"package", spec, "artefact", path, "code", refusal.GetErrorCode(),
+				"expected_signer", action.GetPackageSigner(), "err", refusal.GetMessage())
+			return refusal
+		}
 		order.ArtefactPath = path
 		order.ArtefactSHA256 = digest
+		order.ArtefactSource = source
+		order.ArtefactSigner = identity
+		s.log.Info("the artefact of the agent release was verified",
+			"package", spec, "artefact", path, "source", source,
+			"signer", identity, "signer_source", signerSource, "signer_unknown", signerErr)
+	}
+
+	// Whatever an older replacement kept is neither installed now nor promised
+	// to anybody as a way back.
+	if removed := pruneKeptArtefacts(order.ArtefactPath, order.RollbackArtefactPath); len(removed) > 0 {
+		s.log.Info("the artefacts of an older replacement were dropped", "removed", removed)
 	}
 
 	result := &helperv1.PackageActionResult{
 		Manager:              manager.Name(),
 		VerifiedArtefactPath: order.ArtefactPath,
 		RollbackArtefactPath: order.RollbackArtefactPath,
+		ArtefactSource:       order.ArtefactSource,
+		ArtefactSigner:       order.ArtefactSigner,
 	}
 
 	// An order that only proves itself stops here.
@@ -175,7 +234,6 @@ func StartAgentReplacement(ctx context.Context, spec string) error {
 		"--collect", "--quiet",
 		// Without --no-block systemd-run waits for the end of a oneshot unit, that
 		// is for the whole transaction - while standing in the helper's control
-		// group, which that transaction is about to stop.
 		"--no-block",
 		"--unit="+AgentReplacementUnit,
 		"--description=Flotestro: agent replacement",
@@ -216,6 +274,14 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 				"package", spec, "artefact", order.ArtefactPath, "err", err)
 			return err
 		}
+		// The file waited on disk between the order and this unit, so who signed
+		// it is established here again rather than taken from the order.
+		if err := confirmSigner(ctx, manager.Name(), order); err != nil {
+			log.Error("the artefact of the agent release was not installed",
+				"package", spec, "artefact", order.ArtefactPath,
+				"expected_signer", order.ExpectedSigner, "err", err)
+			return err
+		}
 		target = order.ArtefactPath
 	}
 
@@ -230,7 +296,6 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 	if target != spec && manager.Name() == packages.PacmanName {
 		// pacman installs a file with -U and a repository name with -S; the two are
 		// different commands rather than two forms of one, so the adapter's install
-		// cannot be used for a file.
 		err = installPacmanArtefact(ctx, target)
 	} else {
 		apply, err = lifecycle.Install(ctx, options)
@@ -240,16 +305,17 @@ func RunAgentReplacement(ctx context.Context, spec string, log *slog.Logger) err
 		// listening to this transaction.
 		log.Error("the agent replacement failed",
 			"package", spec, "artefact", order.ArtefactPath, "manager", manager.Name(),
-			"changed", len(apply.Applied), "rollback", order.RollbackArtefactPath, "err", err)
+			"artefact_source", order.ArtefactSource, "changed", len(apply.Applied),
+			"rollback", order.RollbackArtefactPath, "err", err)
 		return err
 	}
 
 	// What is installed is read from the package database rather than taken from
 	// the order: the transaction saying it went through is not the same statement
-	// as the host holding that version.
 	installed, reason := installedAgentVersion(ctx, manager.Name())
 	log.Info("the agent replacement was performed",
 		"package", spec, "artefact", order.ArtefactPath, "manager", manager.Name(),
+		"artefact_source", order.ArtefactSource, "artefact_signer", order.ArtefactSigner,
 		"changed", len(apply.Applied), "installed_version", installed,
 		"installed_version_unknown", reason, "rollback", order.RollbackArtefactPath)
 	return nil
@@ -272,23 +338,24 @@ func installPacmanArtefact(ctx context.Context, path string) error {
 // keepRollbackArtefact puts the artefact of the version to go back to under
 // the helper's state directory.
 func keepRollbackArtefact(ctx context.Context, managerName, spec, version string) (string, error) {
-	rollbackDir := filepath.Join(agentUpgradeDir, "rollback")
-	if err := os.MkdirAll(rollbackDir, 0o700); err != nil {
+	kept := rollbackDir()
+	if err := os.MkdirAll(kept, 0o700); err != nil {
 		return "", fmt.Errorf("the directory for the artefact to go back to: %w", err)
 	}
 	if cached, ok := findCachedArtefact(managerName, version); ok {
-		kept := filepath.Join(rollbackDir, filepath.Base(cached))
-		if err := copyFile(cached, kept); err != nil {
+		target := filepath.Join(kept, filepath.Base(cached))
+		if err := copyFile(cached, target); err != nil {
 			return "", fmt.Errorf("copying %s out of the package cache: %w", cached, err)
 		}
-		return kept, nil
+		keepSignature(cached, target)
+		return target, nil
 	}
 
 	rollbackSpec, ok := specForVersion(spec, version)
 	if !ok {
 		return "", fmt.Errorf("the version %q cannot be named in the notation of %q", version, spec)
 	}
-	download := filepath.Join(agentUpgradeDir, "rollback-download")
+	download := rollbackDownloadDir()
 	if err := os.RemoveAll(download); err != nil {
 		return "", fmt.Errorf("clearing the download directory: %w", err)
 	}
@@ -311,22 +378,84 @@ func keepRollbackArtefact(ctx context.Context, managerName, spec, version string
 	if artefact == "" {
 		return "", fmt.Errorf("the artefact of the version %s was not downloaded", version)
 	}
-	kept := filepath.Join(rollbackDir, filepath.Base(artefact))
-	if err := os.Rename(artefact, kept); err != nil {
-		if err := copyFile(artefact, kept); err != nil {
+	target := filepath.Join(kept, filepath.Base(artefact))
+	if err := os.Rename(artefact, target); err != nil {
+		if err := copyFile(artefact, target); err != nil {
 			return "", fmt.Errorf("keeping the artefact of the version %s: %w", version, err)
 		}
 	}
-	return kept, nil
+	keepSignature(artefact, target)
+	return target, nil
+}
+
+// keepSignature keeps the detached signature beside the artefact. pacman signs
+// the file itself, and a kept copy without its signature could never prove who
+func keepSignature(from, to string) {
+	if _, err := os.Stat(from + signatureSuffix); err != nil {
+		return
+	}
+	_ = copyFile(from+signatureSuffix, to+signatureSuffix)
 }
 
 // errDigestMismatch says the artefact is not the one the release published.
 var errDigestMismatch = errors.New("the artefact does not match the digest of the order")
 
+// errKeptArtefactInvalid says the host holds an artefact of the ordered version
+// that is not the one the order names.
+var errKeptArtefactInvalid = errors.New("the kept artefact is not the one the order names")
+
+// obtainArtefact returns the file the order is installed from. The copy the
+// host kept answers first: going back must not depend on the old version still
+func obtainArtefact(ctx context.Context, managerName, spec, digest string) (string, string, error) {
+	if kept, ok := keptArtefactFor(spec); ok {
+		if err := verifyDigest(kept, digest); err != nil {
+			// Fetching the version again here would turn an artefact nobody can
+			// vouch for into an ordinary upgrade, and quietly.
+			return "", "", fmt.Errorf("%w: %s kept at %s", errKeptArtefactInvalid, err, kept)
+		}
+		return kept, artefactSourceKept, nil
+	}
+	path, err := fetchArtefact(ctx, managerName, spec, digest)
+	if err != nil {
+		return "", "", err
+	}
+	return path, artefactSourceRepository, nil
+}
+
+// keptArtefactFor finds the artefact of the ordered version among the ones the
+// host kept for a return.
+func keptArtefactFor(spec string) (string, bool) {
+	version, ok := agentVersionOfSpec(spec)
+	if !ok {
+		return "", false
+	}
+	found, err := artefactsIn(rollbackDir())
+	if err != nil {
+		return "", false
+	}
+	for _, path := range found {
+		if nameCarriesVersion(filepath.Base(path), version) {
+			return path, true
+		}
+	}
+	return "", false
+}
+
+// artefactRefusalCode names the refusal an unobtainable artefact ends in.
+func artefactRefusalCode(err error) string {
+	switch {
+	case errors.Is(err, errKeptArtefactInvalid):
+		return ErrorKeptArtefactInvalid
+	case errors.Is(err, errDigestMismatch):
+		return ErrorArtefactDigest
+	}
+	return ErrorArtefactUnavailable
+}
+
 // fetchArtefact downloads the package of the ordered version and returns the
 // file whose digest is the one the order names.
 func fetchArtefact(ctx context.Context, managerName, spec, digest string) (string, error) {
-	dir := filepath.Join(agentUpgradeDir, "download")
+	dir := downloadDir()
 	if err := os.RemoveAll(dir); err != nil {
 		return "", fmt.Errorf("clearing the download directory: %w", err)
 	}
@@ -422,7 +551,6 @@ func downloadCommands(managerName, spec, dir string) []downloadCommand {
 		return []downloadCommand{
 			// The download subcommand fetches the file whether or not the version is
 			// installed, which the transaction's download mode does not; it is not on
-			// every host, and then the second form answers.
 			{tool: "dnf", args: []string{"--assumeyes", "download",
 				"--destdir=" + dir, spec}, prepare: nothing},
 			{tool: "dnf", args: []string{"--assumeyes", "install", "--downloadonly",
@@ -431,7 +559,6 @@ func downloadCommands(managerName, spec, dir string) []downloadCommand {
 	case packages.PacmanName:
 		// pacman cannot ask a repository for a version other than the one its
 		// database holds, so the bare name is fetched and the digest settles whether
-		// what the repository holds is what the release published.
 		return []downloadCommand{{tool: "pacman", args: []string{"-Sw", "--noconfirm",
 			"--noprogressbar", "--cachedir", dir, packages.AgentPackage}, prepare: nothing}}
 	}
@@ -481,7 +608,6 @@ var managerCacheDirs = map[string][]string{
 
 // findCachedArtefact looks for the artefact of a version in the manager's own
 // cache, which is where the file of the version the host runs usually still
-// is.
 func findCachedArtefact(managerName, version string) (string, bool) {
 	for _, dir := range managerCacheDirs[managerName] {
 		var match string
@@ -536,6 +662,315 @@ func verifyDigest(path, expected string) error {
 			errDigestMismatch, expected, path, sum)
 	}
 	return nil
+}
+
+// signatureSuffix is the detached signature a manager ships beside a package.
+const signatureSuffix = ".sig"
+
+// minSignerDigits is the shortest key identity worth comparing: a short key ID
+// is cheap enough to collide with that it establishes nobody.
+const minSignerDigits = 16
+
+// pacmanKeyringDir is where pacman keeps the keys it trusts.
+var pacmanKeyringDir = "/etc/pacman.d/gnupg"
+
+// errSignerUnavailable says the host could not establish who signed a file.
+var errSignerUnavailable = errors.New("the signer of the artefact could not be established")
+
+// artefactSigner names the key whose signature the host's own package tooling
+// accepted on this file. The digest proves the bytes are the ones the order
+func artefactSigner(ctx context.Context, managerName, path string) (string, string, error) {
+	switch managerName {
+	case packages.PacmanName:
+		return pacmanArtefactSigner(ctx, path)
+	case "dnf":
+		return rpmArtefactSigner(ctx, path)
+	case "apt":
+		// A .deb carries no signature of its own: what apt verifies is the signed
+		// index of the repository, and that proof does not travel with the file.
+		return "", "", fmt.Errorf("%w: a Debian package file carries no signature of its own",
+			errSignerUnavailable)
+	}
+	return "", "", fmt.Errorf("%w: the manager %s cannot check the signature of a package file",
+		errSignerUnavailable, managerName)
+}
+
+// pacmanArtefactSigner verifies the detached signature against the keyring
+// pacman itself installs from.
+func pacmanArtefactSigner(ctx context.Context, path string) (string, string, error) {
+	signature := path + signatureSuffix
+	if _, err := os.Stat(signature); err != nil {
+		return "", "", fmt.Errorf("%w: %s has no detached signature beside it",
+			errSignerUnavailable, filepath.Base(path))
+	}
+	gpg, err := exec.LookPath("gpg")
+	if err != nil {
+		return "", "", fmt.Errorf("%w: the host has no gpg", errSignerUnavailable)
+	}
+	cmd := exec.CommandContext(ctx, gpg, "--homedir", pacmanKeyringDir,
+		"--batch", "--status-fd", "1", "--verify", signature, path)
+	cmd.Env = toolEnvironment()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("%w: the keyring of pacman did not accept the signature of %s: %s",
+			errSignerUnavailable, filepath.Base(path), strings.TrimSpace(string(output)))
+	}
+	identity, ok := gpgValidSigner(string(output))
+	if !ok {
+		return "", "", fmt.Errorf("%w: gpg accepted the signature of %s without naming the key",
+			errSignerUnavailable, filepath.Base(path))
+	}
+	return identity, "pacman-keyring", nil
+}
+
+// gpgValidSigner reads the fingerprint out of gpg's status output. VALIDSIG is
+// written only for a signature that checked out against a key in the keyring.
+func gpgValidSigner(output string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		_, rest, found := strings.Cut(strings.TrimSpace(line), "[GNUPG:] VALIDSIG ")
+		if !found {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 || !isHexIdentity(fields[0]) {
+			continue
+		}
+		return strings.ToUpper(fields[0]), true
+	}
+	return "", false
+}
+
+// rpmArtefactSigner asks rpm itself whether the file carries a signature of a
+// key the host holds.
+func rpmArtefactSigner(ctx context.Context, path string) (string, string, error) {
+	rpm, err := exec.LookPath("rpm")
+	if err != nil {
+		return "", "", fmt.Errorf("%w: the host has no rpm", errSignerUnavailable)
+	}
+	cmd := exec.CommandContext(ctx, rpm, "--checksig", "--verbose", path)
+	cmd.Env = toolEnvironment()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", "", fmt.Errorf("%w: rpm did not accept the signature of %s: %s",
+			errSignerUnavailable, filepath.Base(path), strings.TrimSpace(string(output)))
+	}
+	identity, ok := rpmSigner(string(output))
+	if !ok {
+		return "", "", fmt.Errorf("%w: rpm reports no accepted signature on %s: %s",
+			errSignerUnavailable, filepath.Base(path), strings.TrimSpace(string(output)))
+	}
+	return identity, "rpm-keyring", nil
+}
+
+// rpmSigner reads the key of the signature rpm accepted. A key the host does
+// not hold is written as NOKEY rather than OK, so it is not taken for one.
+func rpmSigner(output string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if !strings.Contains(trimmed, "Signature") || !strings.HasSuffix(trimmed, ": OK") {
+			continue
+		}
+		_, rest, found := strings.Cut(trimmed, "key ID ")
+		if !found {
+			continue
+		}
+		id, _, _ := strings.Cut(rest, ":")
+		if isHexIdentity(id) {
+			return strings.ToUpper(id), true
+		}
+	}
+	return "", false
+}
+
+// isHexIdentity says whether a value is a key identity long enough to name
+// one key rather than a family of them.
+func isHexIdentity(value string) bool {
+	if len(value) < minSignerDigits {
+		return false
+	}
+	for _, char := range value {
+		switch {
+		case char >= '0' && char <= '9':
+		case char >= 'a' && char <= 'f':
+		case char >= 'A' && char <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// signerMatches compares two ways of naming one key: the fingerprint and the
+// long key ID that is its last sixteen characters.
+func signerMatches(established, expected string) bool {
+	longer := strings.ToUpper(strings.ReplaceAll(established, " ", ""))
+	shorter := strings.ToUpper(strings.ReplaceAll(expected, " ", ""))
+	if !isHexIdentity(longer) || !isHexIdentity(shorter) {
+		return false
+	}
+	if len(longer) < len(shorter) {
+		longer, shorter = shorter, longer
+	}
+	return strings.HasSuffix(longer, shorter)
+}
+
+// judgeSigner settles the signature of the artefact against the key the order
+// names. An order that names no key installs as before and the result still
+func judgeSigner(expected, established string, err error) *helperv1.HelperResponse {
+	if expected == "" {
+		return nil
+	}
+	if err != nil {
+		return reject(ErrorSignerUnknown, err.Error())
+	}
+	if !signerMatches(established, expected) {
+		return reject(ErrorSignerMismatch, "the order names the key "+expected+
+			" and the artefact was signed by "+established)
+	}
+	return nil
+}
+
+// confirmSigner repeats the signature check of the order right before the
+// package manager runs.
+func confirmSigner(ctx context.Context, managerName string, order replacementOrder) error {
+	if order.ExpectedSigner == "" {
+		return nil
+	}
+	identity, _, err := artefactSigner(ctx, managerName, order.ArtefactPath)
+	if err != nil {
+		return err
+	}
+	if !signerMatches(identity, order.ExpectedSigner) {
+		return fmt.Errorf("the order names the key %s and the artefact was signed by %s",
+			order.ExpectedSigner, identity)
+	}
+	return nil
+}
+
+// releaseAgentRollback answers the panel's confirmation that the replacement
+// is over: what the host kept for a return has done its job.
+func (s *Server) releaseAgentRollback(managerName string) *helperv1.HelperResponse {
+	released, err := releaseKeptArtefacts()
+	if err != nil {
+		return reject(ErrorSelfReplacement, err.Error())
+	}
+	s.log.Info("the artefacts kept for a return were released",
+		"manager", managerName, "released", released)
+	return &helperv1.HelperResponse{
+		Accepted:      true,
+		Message:       describeReleased(released),
+		PackageResult: &helperv1.PackageActionResult{Manager: managerName},
+	}
+}
+
+// releaseKeptArtefacts ends the life of everything a replacement kept: the
+// prepared return, the artefact that was installed and the order itself.
+func releaseKeptArtefacts() ([]string, error) {
+	kept, _ := artefactsIn(rollbackDir())
+	names := make([]string, 0, len(kept))
+	for _, path := range kept {
+		names = append(names, filepath.Base(path))
+	}
+	for _, dir := range []string{rollbackDir(), downloadDir(), rollbackDownloadDir()} {
+		if err := os.RemoveAll(dir); err != nil {
+			return nil, fmt.Errorf("removing %s: %w", dir, err)
+		}
+	}
+	if err := os.Remove(replacementOrderPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("removing the replacement order: %w", err)
+	}
+	return names, nil
+}
+
+// describeReleased says what the host dropped.
+func describeReleased(released []string) string {
+	if len(released) == 0 {
+		return "the host kept no artefact of a replacement"
+	}
+	return "the host dropped the artefacts it kept for a return: " + strings.Join(released, ", ")
+}
+
+// pruneKeptArtefacts removes what an older replacement kept. Only the file
+// this order installs from and the one it promised as a return stay.
+func pruneKeptArtefacts(keep ...string) []string {
+	wanted := make(map[string]bool, 2*len(keep))
+	for _, path := range keep {
+		if path == "" {
+			continue
+		}
+		wanted[path] = true
+		wanted[path+signatureSuffix] = true
+	}
+	entries, err := os.ReadDir(rollbackDir())
+	if err != nil {
+		return nil
+	}
+	var removed []string
+	for _, entry := range entries {
+		path := filepath.Join(rollbackDir(), entry.Name())
+		if entry.IsDir() || wanted[path] {
+			continue
+		}
+		if err := os.Remove(path); err == nil {
+			removed = append(removed, entry.Name())
+		}
+	}
+	_ = os.RemoveAll(rollbackDownloadDir())
+	return removed
+}
+
+// ReleaseSettledRollback drops what the last replacement kept once the host
+// holds the version that replacement ordered. Until then the prepared return
+func ReleaseSettledRollback(ctx context.Context, log *slog.Logger) {
+	content, err := os.ReadFile(replacementOrderPath())
+	if err != nil {
+		return
+	}
+	var order replacementOrder
+	if err := json.Unmarshal(content, &order); err != nil {
+		log.Warn("the order of the last replacement could not be read", "err", err)
+		return
+	}
+	manager, err := packages.Detect()
+	if err != nil {
+		log.Warn("the artefact kept for a return was not judged", "err", err)
+		return
+	}
+	installed, reason := installedAgentVersion(ctx, manager.Name())
+	if !keptArtefactsSettled(order, installed) {
+		// An unreadable package database is not a host that came back: unknown is
+		// not settled, and the way back stays.
+		log.Info("the artefact kept for a return stays",
+			"spec", order.Spec, "installed_version", installed,
+			"installed_version_unknown", reason, "kept", order.RollbackArtefactPath)
+		return
+	}
+	released, err := releaseKeptArtefacts()
+	if err != nil {
+		log.Warn("the artefact kept for a return was not released", "err", err)
+		return
+	}
+	log.Info("the replacement is settled and what it kept was released",
+		"spec", order.Spec, "installed_version", installed, "released", released)
+}
+
+// keptArtefactsSettled says whether the host holds the version the order
+// installed, which is when the prepared return stops being needed.
+func keptArtefactsSettled(order replacementOrder, installed string) bool {
+	target, ok := agentVersionOfSpec(order.Spec)
+	if !ok || installed == "" {
+		return false
+	}
+	return versionMatches(installed, target)
+}
+
+// versionMatches compares what the package database writes with the version an
+// order named: the epoch and the packaging revision belong to the manager.
+func versionMatches(installed, target string) bool {
+	if _, rest, found := strings.Cut(installed, ":"); found {
+		installed = rest
+	}
+	return installed == target || strings.HasPrefix(installed, target+"-")
 }
 
 // copyFile copies a file, keeping the original where it is.

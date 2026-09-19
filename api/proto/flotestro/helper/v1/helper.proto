@@ -365,6 +365,11 @@ message PackageActionRequest {
   // there. The host is already at the ordered version and only the order
   // itself is being proven; nothing is installed.
   bool verify_only = 17;
+  // The key the artefact must carry the signature of, as an OpenPGP
+  // fingerprint or a long key ID. Empty leaves the old path.
+  string package_signer = 18;
+  // Drop what the host kept so that it could go back; nothing is installed.
+  bool release_rollback = 19;
 }
 
 // PackageExactSpec is one approved element of a package plan: the exact
@@ -1694,6 +1699,10 @@ message PackageActionResult {
   // The version the package database holds, read after the operation
   // rather than taken from the order.
   string installed_version = 14;
+  // Who signed the artefact, as the manager's own tooling named the key, and
+  // whether the file came from the kept copy or from the repository.
+  string artefact_signer = 15;
+  string artefact_source = 16;
 }
 
 // PackageEffectOutcome is one expected effect of a plan after the

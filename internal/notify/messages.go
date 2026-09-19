@@ -77,6 +77,14 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 		if fields.RelayID != "" {
 			message.Link = link("/relays/" + fields.RelayID)
 		}
+	case "alert.no_data":
+		message.Severity = fields.Severity
+		message.Title = fmt.Sprintf("No data: %s on %s", fields.RuleName, host)
+		message.Text = alertText(fields)
+		message.Link = link("/hosts/" + fields.HostID + "/monitoring")
+		if fields.RelayID != "" {
+			message.Link = link("/relays/" + fields.RelayID)
+		}
 	case "campaign.finished":
 		state := strings.TrimPrefix(event.Type, "campaign.")
 		message.Title = fmt.Sprintf("Campaign %s %s", fields.Name, strings.ReplaceAll(state, "_", " "))
@@ -138,7 +146,6 @@ func Compose(event outbox.Event, publicURL string) (Message, bool) {
 
 // SummaryMessage is the one message a channel gets when a silence with
 // send_summary ends: how many messages the silence kept back and their titles,
-// so the on-call knows what happened without the flood of every one of them.
 func SummaryMessage(kept []string, until time.Time, reason string, publicURL string) Message {
 	message := Message{
 		Subject:    "alert.summary",
@@ -178,7 +185,6 @@ func alertText(fields payload) string {
 
 // ScopeHint is what the payload alone says about the scope: the site and the
 // environment when the trigger wrote them, the host to look up when it did
-// not, and the severity of an alert.
 func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 	var fields payload
 	_ = json.Unmarshal(event.Payload, &fields)
@@ -192,7 +198,6 @@ func ScopeHint(event outbox.Event) (scope Scope, hostID string) {
 
 // TestMessage is what the test button sends: a sentence that says which
 // channel it is and when it was pressed, so a receiver that shows it is known
-// to be the right one.
 func TestMessage(channel Channel, now time.Time) Message {
 	return Message{
 		Subject:    "test",

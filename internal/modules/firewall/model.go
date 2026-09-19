@@ -93,6 +93,7 @@ type Drift struct {
 	// somebody else put there.
 	RuleID string `json:"rule_id,omitempty"`
 	Family string `json:"family,omitempty"`
+	Table  string `json:"table,omitempty"`
 	Chain  string `json:"chain,omitempty"`
 	// Detail says what the difference means for the host, in one sentence.
 	Detail string `json:"detail,omitempty"`
@@ -111,11 +112,13 @@ type Snapshot struct {
 	Zones  []Zone  `json:"zones,omitempty"`
 	// UFW is the header of "ufw status" on a host where ufw holds the rules: the
 	// default policy is what a packet meets when no rule matches, and no rule
-	// list says that.
 	UFW *UFWStatus `json:"ufw,omitempty"`
 	// Drift lists the differences between what the host filters with and what it
 	// keeps for its next start.
 	Drift []Drift `json:"drift,omitempty"`
+	// Persistent is what the host restores its nftables ruleset from at the next
+	// boot. No value means the question was not asked here: ufw keeps its own
+	Persistent *NftPersistence `json:"persistent,omitempty"`
 	// Writable says whether the panel can change anything here and why not.
 	Writable       bool      `json:"writable"`
 	ReadOnlyReason string    `json:"read_only_reason,omitempty"`

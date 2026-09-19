@@ -104,7 +104,6 @@ func run() error {
 	if !activated {
 		// The mode without socket activation serves the tests; the helper then
 		// watches over the permissions of the socket itself so that it is not
-		// available to the whole system.
 		_ = os.Remove(*socketPath)
 		if err := os.MkdirAll(dirOf(*socketPath), 0o755); err != nil {
 			return err
@@ -136,6 +135,10 @@ func run() error {
 	} else if released {
 		log.Info("the abandoned hold on the agent package was released")
 	}
+
+	// What the last replacement kept so that the host could go back is dropped
+	// once the package database holds the version that replacement ordered. The
+	helper.ReleaseSettledRollback(ctx, log)
 
 	// The helper finishes its work after a period of idleness. With the fleet at
 	// rest not a single root process runs.

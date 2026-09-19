@@ -1135,7 +1135,7 @@ export type HostMetrics = {
 };
 
 export type AlertSeverity = "critical" | "warning" | "info";
-export type AlertState = "pending" | "firing" | "resolved";
+export type AlertState = "pending" | "firing" | "no_data" | "resolved";
 
 export type Alert = {
   id: string;
@@ -1202,6 +1202,12 @@ export type AlertRule = {
   severity: AlertSeverity;
   selector: RuleSelector;
   enabled: boolean;
+  /** How often the rule expects a reading of its metric. */
+  expected_cadence_seconds: number;
+  /** The widest hole in the readings that still counts as one continuous run. */
+  max_gap_seconds: number;
+  /** What a wider hole means: alert, unknown or ignore. */
+  no_data_policy: "alert" | "unknown" | "ignore";
   created_by: string;
   created_at: string;
   updated_at: string;
@@ -1216,6 +1222,12 @@ export type AlertRuleInput = {
   severity: AlertSeverity;
   selector: RuleSelector;
   enabled: boolean;
+  /** How often the rule expects a reading of its metric. */
+  expected_cadence_seconds: number;
+  /** The widest hole in the readings that still counts as one continuous run. */
+  max_gap_seconds: number;
+  /** What a wider hole means: alert, unknown or ignore. */
+  no_data_policy: "alert" | "unknown" | "ignore";
 };
 
 /** One metric a rule may watch: its unit decides how a threshold reads. */
@@ -1233,6 +1245,7 @@ export type RuleCatalogue = {
   catalogue?: MetricInfo[];
   operators: string[];
   severities: string[];
+  no_data_policies?: string[];
 };
 
 export type HostMonitoring = {

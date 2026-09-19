@@ -99,7 +99,6 @@ func (sel Selector) Narrows() bool {
 
 // Tree renders the selector as the campaign selector package reads it, the
 // host list aside: every set field is one condition and all of them hold at
-// once.
 func (sel Selector) Tree() (*selector.Expression, error) {
 	var all []selector.Expression
 	if sel.Site != "" {
@@ -145,7 +144,6 @@ func (sel Selector) Tree() (*selector.Expression, error) {
 
 // validate checks the selector as the operator wrote it: the shape of every
 // field, and the whole as one selector, so that a scope the campaign page
-// would refuse is refused here in the same words.
 func (sel Selector) validate() error {
 	for _, tag := range sel.Tags {
 		if !selector.TagPattern.MatchString(tag) {
@@ -177,6 +175,48 @@ func (sel Selector) validate() error {
 	return nil
 }
 
+// The no-data policies of a rule: what the evaluator makes of the readings
+// stopping.
+const (
+	// NoDataAlert raises an episode on the gap and tells the notification
+	// queue; for such a rule the silence is itself the news.
+	NoDataAlert = "alert"
+	// NoDataUnknown marks an open episode no_data, so the panel stops standing
+	// on a value nobody can see any more, and tells nobody.
+	NoDataUnknown = "unknown"
+	// NoDataIgnore says nothing about a gap beyond restarting the window,
+	// which is what every rule did before the setting existed.
+	NoDataIgnore = "ignore"
+)
+
+// NoDataPolicies lists the policies in the order the panel offers them.
+var NoDataPolicies = []string{NoDataAlert, NoDataUnknown, NoDataIgnore}
+
+// The bounds of the cadence a rule declares.
+const (
+	// MaxCadence bounds both settings: a gap wider than a day says nothing
+	// about a day of silence.
+	MaxCadence = 24 * time.Hour
+	// DefaultMaxGapFactor is how many cadences wide the gap of a rule that does
+	// not say is: one lost reading is a lost reading, two in a row are a gap.
+	DefaultMaxGapFactor = 2
+)
+
+// The refusals of the cadence settings. A code, not a sentence: the panel and
+// the integrations branch on it.
+const (
+	// RefusalRuleCadenceTooFast: a rule that expects readings more often than
+	// the agents take them stands in a gap between every two of them.
+	RefusalRuleCadenceTooFast = "rule_cadence_too_fast"
+	// RefusalRuleCadenceTooSlow: a cadence or a gap beyond a day.
+	RefusalRuleCadenceTooSlow = "rule_cadence_too_slow"
+	// RefusalRuleGapBelowCadence: a gap narrower than the cadence opens a hole
+	// after every reading that arrives on time.
+	RefusalRuleGapBelowCadence = "rule_gap_below_cadence"
+	// RefusalRuleNoDataPolicyUnknown: a policy that is none of the three.
+	RefusalRuleNoDataPolicyUnknown = "rule_no_data_policy_unknown"
+)
+
 // Rule is one alert rule.
 type Rule struct {
 	ID         string    `json:"id"`
@@ -191,6 +231,79 @@ type Rule struct {
 	CreatedBy  string    `json:"created_by"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	// ExpectedCadenceSeconds is how often the rule expects a reading of its
+	// metric; zero is the interval the agents sample at.
+	ExpectedCadenceSeconds int `json:"expected_cadence_seconds"`
+	// MaxGapSeconds is the widest hole in the readings that still counts as one
+	// continuous run of them; zero is twice the cadence.
+	MaxGapSeconds int `json:"max_gap_seconds"`
+	// NoDataPolicy says what the evaluator does when the readings stop: alert,
+	// unknown or ignore. Empty is ignore, as every rule behaved before the
+	NoDataPolicy string `json:"no_data_policy"`
+}
+
+// Cadence is how often the rule expects a reading of its metric.
+func (r Rule) Cadence() time.Duration {
+	if r.ExpectedCadenceSeconds == 0 {
+		return SamplingInterval
+	}
+	return time.Duration(r.ExpectedCadenceSeconds) * time.Second
+}
+
+// MaxGap is the widest hole in the readings that still counts as one
+// continuous run of them.
+func (r Rule) MaxGap() time.Duration {
+	if r.MaxGapSeconds == 0 {
+		return DefaultMaxGapFactor * r.Cadence()
+	}
+	return time.Duration(r.MaxGapSeconds) * time.Second
+}
+
+// Policy is the rule's no-data policy; a rule that does not say ignores gaps.
+func (r Rule) Policy() string {
+	if r.NoDataPolicy == "" {
+		return NoDataIgnore
+	}
+	return r.NoDataPolicy
+}
+
+// settled fills in the settings the caller left out, so the row says what the
+// evaluator will do instead of leaving it to a default read elsewhere.
+func (r Rule) settled() Rule {
+	r.ExpectedCadenceSeconds = int(r.Cadence() / time.Second)
+	r.MaxGapSeconds = int(r.MaxGap() / time.Second)
+	r.NoDataPolicy = r.Policy()
+	return r
+}
+
+// validateCadence checks the three settings against each other and against the
+// interval the agents sample at.
+func (r Rule) validateCadence() error {
+	cadence, gap := r.Cadence(), r.MaxGap()
+	if cadence < SamplingInterval {
+		return &opspec.RefusalError{Code: RefusalRuleCadenceTooFast, Err: fmt.Errorf(
+			"the agents sample every %s; a rule cannot expect a reading every %s",
+			SamplingInterval, cadence)}
+	}
+	if cadence > MaxCadence {
+		return &opspec.RefusalError{Code: RefusalRuleCadenceTooSlow, Err: fmt.Errorf(
+			"the expected cadence %s is longer than %s", cadence, MaxCadence)}
+	}
+	if gap < cadence {
+		return &opspec.RefusalError{Code: RefusalRuleGapBelowCadence, Err: fmt.Errorf(
+			"a gap of %s is narrower than the expected cadence %s, so a reading that "+
+				"arrives on time opens one", gap, cadence)}
+	}
+	if gap > MaxCadence {
+		return &opspec.RefusalError{Code: RefusalRuleCadenceTooSlow, Err: fmt.Errorf(
+			"the widest gap %s is longer than %s", gap, MaxCadence)}
+	}
+	if !contains(NoDataPolicies, r.Policy()) {
+		return &opspec.RefusalError{Code: RefusalRuleNoDataPolicyUnknown, Err: fmt.Errorf(
+			"unknown no-data policy %q; use %s", r.NoDataPolicy,
+			strings.Join(NoDataPolicies, ", "))}
+	}
+	return nil
 }
 
 // Validate checks the rule as the operator wrote it.
@@ -213,6 +326,9 @@ func (r Rule) Validate() error {
 	if r.ForMinutes < 0 || r.ForMinutes > 24*60 {
 		return errors.New("for_minutes has to be between 0 and 1440")
 	}
+	if err := r.validateCadence(); err != nil {
+		return err
+	}
 	return r.Selector.validate()
 }
 
@@ -225,11 +341,16 @@ func contains(list []string, value string) bool {
 	return false
 }
 
+// ruleColumns is the projection both rule queries share.
+const ruleColumns = `
+	id, name, metric, operator, threshold, for_minutes, severity, selector,
+	enabled, created_by, created_at, updated_at,
+	expected_cadence_seconds, max_gap_seconds, no_data_policy`
+
 // ListRules returns every rule, the enabled ones first, by name.
 func (s *Store) ListRules(ctx context.Context) ([]Rule, error) {
 	rows, err := s.pool.Query(ctx, `
-		select id, name, metric, operator, threshold, for_minutes, severity, selector,
-		       enabled, created_by, created_at, updated_at
+		select `+ruleColumns+`
 		from alert_rules
 		order by enabled desc, name, id`)
 	if err != nil {
@@ -253,8 +374,7 @@ func (s *Store) GetRule(ctx context.Context, id string) (*Rule, error) {
 		return nil, ErrNotFound
 	}
 	rows, err := s.pool.Query(ctx, `
-		select id, name, metric, operator, threshold, for_minutes, severity, selector,
-		       enabled, created_by, created_at, updated_at
+		select `+ruleColumns+`
 		from alert_rules where id = $1`, id)
 	if err != nil {
 		return nil, err
@@ -278,7 +398,8 @@ func scanRule(rows pgx.Rows) (Rule, error) {
 	var selector []byte
 	if err := rows.Scan(&rule.ID, &rule.Name, &rule.Metric, &rule.Operator, &rule.Threshold,
 		&rule.ForMinutes, &rule.Severity, &selector, &rule.Enabled, &rule.CreatedBy,
-		&rule.CreatedAt, &rule.UpdatedAt); err != nil {
+		&rule.CreatedAt, &rule.UpdatedAt, &rule.ExpectedCadenceSeconds, &rule.MaxGapSeconds,
+		&rule.NoDataPolicy); err != nil {
 		return Rule{}, err
 	}
 	if len(selector) > 0 {
@@ -319,12 +440,16 @@ func (s *Store) CreateRule(ctx context.Context, rule Rule) (*Rule, error) {
 		return nil, err
 	}
 	id := uuid.NewString()
+	settled := rule.settled()
 	if _, err := s.pool.Exec(ctx, `
 		insert into alert_rules (id, name, metric, operator, threshold, for_minutes,
-		    severity, selector, enabled, created_by)
-		values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10)`,
+		    severity, selector, enabled, created_by,
+		    expected_cadence_seconds, max_gap_seconds, no_data_policy)
+		values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)`,
 		id, strings.TrimSpace(rule.Name), rule.Metric, rule.Operator, rule.Threshold,
-		rule.ForMinutes, rule.Severity, encoded, rule.Enabled, rule.CreatedBy); err != nil {
+		rule.ForMinutes, rule.Severity, encoded, rule.Enabled, rule.CreatedBy,
+		settled.ExpectedCadenceSeconds, settled.MaxGapSeconds,
+		settled.NoDataPolicy); err != nil {
 		return nil, err
 	}
 	return s.GetRule(ctx, id)
@@ -352,13 +477,17 @@ func (s *Store) UpdateRule(ctx context.Context, id string, rule Rule) (*Rule, er
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	settled := rule.settled()
 	if _, err := tx.Exec(ctx, `
 		update alert_rules
 		set name = $2, metric = $3, operator = $4, threshold = $5, for_minutes = $6,
-		    severity = $7, selector = $8::jsonb, enabled = $9, updated_at = now()
+		    severity = $7, selector = $8::jsonb, enabled = $9, updated_at = now(),
+		    expected_cadence_seconds = $10, max_gap_seconds = $11, no_data_policy = $12
 		where id = $1`,
 		id, strings.TrimSpace(rule.Name), rule.Metric, rule.Operator, rule.Threshold,
-		rule.ForMinutes, rule.Severity, encoded, rule.Enabled); err != nil {
+		rule.ForMinutes, rule.Severity, encoded, rule.Enabled,
+		settled.ExpectedCadenceSeconds, settled.MaxGapSeconds,
+		settled.NoDataPolicy); err != nil {
 		return nil, err
 	}
 	conditionChanged := current.Metric != rule.Metric || current.Operator != rule.Operator ||
@@ -398,16 +527,18 @@ func (s *Store) DeleteRule(ctx context.Context, id string) error {
 	return tx.Commit(ctx)
 }
 
-// closeOpenAlerts ends the episodes of a rule: a pending one vanishes, a
-// firing one resolves.
+// closeOpenAlerts ends the episodes of a rule: one that never fired vanishes,
+// one that did resolves. A no-data episode is closed on the same terms, or a
 func closeOpenAlerts(ctx context.Context, tx pgx.Tx, ruleID string) error {
-	if _, err := tx.Exec(ctx,
-		`delete from alerts where rule_id = $1 and state = 'pending'`, ruleID); err != nil {
+	if _, err := tx.Exec(ctx, `
+		delete from alerts
+		where rule_id = $1 and fired_at is null and state in ('pending', 'no_data')`,
+		ruleID); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `
 		update alerts set state = 'resolved', resolved_at = now()
-		where rule_id = $1 and state = 'firing'`, ruleID)
+		where rule_id = $1 and state in ('firing', 'no_data')`, ruleID)
 	return err
 }
 
@@ -418,7 +549,8 @@ type Alert struct {
 	RuleName string `json:"rule_name"`
 	Metric   string `json:"metric"`
 	Severity string `json:"severity"`
-	// State is pending, firing or resolved.
+	// State is pending, firing, no_data or resolved. A no_data episode is one
+	// whose readings stopped under a rule that asked to be told.
 	State      string     `json:"state"`
 	Value      float64    `json:"value"`
 	Detail     string     `json:"detail"`
@@ -516,8 +648,8 @@ func (s *Store) ListAlerts(ctx context.Context, filter AlertFilter) ([]Alert, er
 		limit $`+fmt.Sprint(len(args)), args...)
 }
 
-// Firing reads the firing alerts of the visible hosts: the ones nobody took
-// first, then the most severe, then the oldest, as on-call reads them.
+// Firing reads what is somebody's business now on the visible hosts: the firing
+// alerts and the episodes whose readings stopped under a rule that asked to be
 func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, error) {
 	condition, args := authz.ScopeSQL(scopes, "h.site", "h.environment", 0)
 	if condition == "" {
@@ -526,24 +658,25 @@ func (s *Store) Firing(ctx context.Context, scopes []authz.Scope) ([]Alert, erro
 	return s.queryAlerts(ctx, `
 		select `+alertColumns+`
 		from alerts a join hosts h on h.id = a.host_id
-		where a.state = 'firing' and `+condition+`
+		where a.state in ('firing', 'no_data') and `+condition+`
 		order by a.acknowledged_at is not null,
 		         case a.severity when 'critical' then 0 when 'warning' then 1 else 2 end,
-		         a.fired_at, a.id`, args...)
+		         coalesce(a.fired_at, a.started_at), a.id`, args...)
 }
 
-// ErrNotFiring says the alert is not firing, so it cannot be taken: a
-// pending one is not yet an alert, a resolved one is history.
+// ErrNotFiring says the alert is not open on the board, so it cannot be taken:
+// a pending one is not yet an alert, a resolved one is history.
 var ErrNotFiring = errors.New("the alert is not firing")
 
-// Acknowledge marks a firing alert as taken by somebody, with what they wrote.
+// Acknowledge marks an alert on the on-call board as taken by somebody, with
+// what they wrote. A no-data episode is on that board, so it can be taken too.
 func (s *Store) Acknowledge(ctx context.Context, id, by, note string) (*Alert, error) {
 	if _, err := uuid.Parse(id); err != nil {
 		return nil, ErrNotFound
 	}
 	tag, err := s.pool.Exec(ctx, `
 		update alerts set acknowledged_by = $2, acknowledged_at = now(), note = $3
-		where id = $1 and state = 'firing'`, id, by, strings.TrimSpace(note))
+		where id = $1 and state in ('firing', 'no_data')`, id, by, strings.TrimSpace(note))
 	if err != nil {
 		return nil, err
 	}
@@ -552,7 +685,7 @@ func (s *Store) Acknowledge(ctx context.Context, id, by, note string) (*Alert, e
 		if err != nil {
 			return nil, err
 		}
-		if alert.State != "firing" {
+		if alert.State != "firing" && alert.State != "no_data" {
 			return nil, ErrNotFiring
 		}
 		return nil, ErrNotFound
@@ -663,7 +796,6 @@ func (s *Store) RulesMatching(ctx context.Context, hostID string) (int, error) {
 
 // compileSelector renders a selector that narrows as one SQL condition over
 // the alias h of the hosts table, group references resolved and the host list
-// included.
 func (s *Store) compileSelector(ctx context.Context, sel Selector, offset int) (string, []any, error) {
 	var conditions []string
 	var args []any

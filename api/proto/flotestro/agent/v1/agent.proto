@@ -931,6 +931,11 @@ message AgentUpgrade {
   // The version to go back to when the host does not come back with the new
   // one. Empty means no prepared rollback.
   string rollback_version = 3;
+  // The key the artefact must carry the signature of. Every field of the
+  // payload travels in the envelope, or the payload hash differs.
+  string package_signer = 4;
+  // Release what the host kept for a return. Nothing is installed.
+  bool release_rollback = 5;
 }
 
 // Preconditions are checked locally right before execution. The base state

@@ -6432,6 +6432,11 @@ type AgentUpgrade struct {
 	// The version to go back to when the host does not come back with the new
 	// one. Empty means no prepared rollback.
 	RollbackVersion string `protobuf:"bytes,3,opt,name=rollback_version,json=rollbackVersion,proto3" json:"rollback_version,omitempty"`
+	// The key the artefact must carry the signature of. Every field of the
+	// payload travels in the envelope, or the payload hash differs.
+	PackageSigner string `protobuf:"bytes,4,opt,name=package_signer,json=packageSigner,proto3" json:"package_signer,omitempty"`
+	// Release what the host kept for a return. Nothing is installed.
+	ReleaseRollback bool `protobuf:"varint,5,opt,name=release_rollback,json=releaseRollback,proto3" json:"release_rollback,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -6485,6 +6490,20 @@ func (x *AgentUpgrade) GetRollbackVersion() string {
 		return x.RollbackVersion
 	}
 	return ""
+}
+
+func (x *AgentUpgrade) GetPackageSigner() string {
+	if x != nil {
+		return x.PackageSigner
+	}
+	return ""
+}
+
+func (x *AgentUpgrade) GetReleaseRollback() bool {
+	if x != nil {
+		return x.ReleaseRollback
+	}
+	return false
 }
 
 // Preconditions are checked locally right before execution. The base state
@@ -16445,11 +16464,13 @@ const file_flotestro_agent_v1_agent_proto_rawDesc = "" +
 	"\apayload\x18\x01 \x01(\fR\apayload\x12-\n" +
 	"\x12unavailable_reason\x18\x02 \x01(\tR\x11unavailableReason\",\n" +
 	"\x10RefreshInventory\x12\x18\n" +
-	"\amodules\x18\x01 \x03(\tR\amodules\"\x87\x01\n" +
+	"\amodules\x18\x01 \x03(\tR\amodules\"\xd9\x01\n" +
 	"\fAgentUpgrade\x12%\n" +
 	"\x0etarget_version\x18\x01 \x01(\tR\rtargetVersion\x12%\n" +
 	"\x0epackage_sha256\x18\x02 \x01(\tR\rpackageSha256\x12)\n" +
-	"\x10rollback_version\x18\x03 \x01(\tR\x0frollbackVersion\"\x8b\x01\n" +
+	"\x10rollback_version\x18\x03 \x01(\tR\x0frollbackVersion\x12%\n" +
+	"\x0epackage_signer\x18\x04 \x01(\tR\rpackageSigner\x12)\n" +
+	"\x10release_rollback\x18\x05 \x01(\bR\x0freleaseRollback\"\x8b\x01\n" +
 	"\rPreconditions\x12\x1b\n" +
 	"\tos_family\x18\x01 \x01(\tR\bosFamily\x123\n" +
 	"\x15required_capabilities\x18\x02 \x03(\tR\x14requiredCapabilities\x12(\n" +

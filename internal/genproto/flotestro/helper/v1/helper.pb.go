@@ -3288,9 +3288,14 @@ type PackageActionRequest struct {
 	// Fetch the artefact, check it and keep the prepared return - and stop
 	// there. The host is already at the ordered version and only the order
 	// itself is being proven; nothing is installed.
-	VerifyOnly    bool `protobuf:"varint,17,opt,name=verify_only,json=verifyOnly,proto3" json:"verify_only,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	VerifyOnly bool `protobuf:"varint,17,opt,name=verify_only,json=verifyOnly,proto3" json:"verify_only,omitempty"`
+	// The key the artefact must carry the signature of, as an OpenPGP
+	// fingerprint or a long key ID. Empty leaves the old path.
+	PackageSigner string `protobuf:"bytes,18,opt,name=package_signer,json=packageSigner,proto3" json:"package_signer,omitempty"`
+	// Drop what the host kept so that it could go back; nothing is installed.
+	ReleaseRollback bool `protobuf:"varint,19,opt,name=release_rollback,json=releaseRollback,proto3" json:"release_rollback,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PackageActionRequest) Reset() {
@@ -3438,6 +3443,20 @@ func (x *PackageActionRequest) GetRollbackVersion() string {
 func (x *PackageActionRequest) GetVerifyOnly() bool {
 	if x != nil {
 		return x.VerifyOnly
+	}
+	return false
+}
+
+func (x *PackageActionRequest) GetPackageSigner() string {
+	if x != nil {
+		return x.PackageSigner
+	}
+	return ""
+}
+
+func (x *PackageActionRequest) GetReleaseRollback() bool {
+	if x != nil {
+		return x.ReleaseRollback
 	}
 	return false
 }
@@ -9789,8 +9808,12 @@ type PackageActionResult struct {
 	// The version the package database holds, read after the operation
 	// rather than taken from the order.
 	InstalledVersion string `protobuf:"bytes,14,opt,name=installed_version,json=installedVersion,proto3" json:"installed_version,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Who signed the artefact, as the manager's own tooling named the key, and
+	// whether the file came from the kept copy or from the repository.
+	ArtefactSigner string `protobuf:"bytes,15,opt,name=artefact_signer,json=artefactSigner,proto3" json:"artefact_signer,omitempty"`
+	ArtefactSource string `protobuf:"bytes,16,opt,name=artefact_source,json=artefactSource,proto3" json:"artefact_source,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PackageActionResult) Reset() {
@@ -9917,6 +9940,20 @@ func (x *PackageActionResult) GetVerifiedArtefactPath() string {
 func (x *PackageActionResult) GetInstalledVersion() string {
 	if x != nil {
 		return x.InstalledVersion
+	}
+	return ""
+}
+
+func (x *PackageActionResult) GetArtefactSigner() string {
+	if x != nil {
+		return x.ArtefactSigner
+	}
+	return ""
+}
+
+func (x *PackageActionResult) GetArtefactSource() string {
+	if x != nil {
+		return x.ArtefactSource
 	}
 	return ""
 }
@@ -10623,7 +10660,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\n" +
 	"inhibitors\x18\x03 \x01(\fR\n" +
 	"inhibitors\x12!\n" +
-	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\x9e\a\n" +
+	"\fscheduled_at\x18\x04 \x01(\tR\vscheduledAt\"\xf0\a\n" +
 	"\x14PackageActionRequest\x12Q\n" +
 	"\toperation\x18\x01 \x01(\x0e23.flotestro.helper.v1.PackageActionRequest.OperationR\toperation\x12\x1a\n" +
 	"\bpackages\x18\x02 \x03(\tR\bpackages\x12#\n" +
@@ -10645,7 +10682,9 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x0epackage_sha256\x18\x0f \x01(\tR\rpackageSha256\x12)\n" +
 	"\x10rollback_version\x18\x10 \x01(\tR\x0frollbackVersion\x12\x1f\n" +
 	"\vverify_only\x18\x11 \x01(\bR\n" +
-	"verifyOnly\"\x95\x01\n" +
+	"verifyOnly\x12%\n" +
+	"\x0epackage_signer\x18\x12 \x01(\tR\rpackageSigner\x12)\n" +
+	"\x10release_rollback\x18\x13 \x01(\bR\x0freleaseRollback\"\x95\x01\n" +
 	"\tOperation\x12\x19\n" +
 	"\x15OPERATION_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11OPERATION_REFRESH\x10\x01\x12\x15\n" +
@@ -11412,7 +11451,7 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x12_cache_credentialsB&\n" +
 	"$_offline_credentials_expiration_daysB\x1e\n" +
 	"\x1c_entry_cache_timeout_secondsB!\n" +
-	"\x1f_krb5_store_password_if_offline\"\xf2\x05\n" +
+	"\x1f_krb5_store_password_if_offline\"\xc4\x06\n" +
 	"\x13PackageActionResult\x12\x18\n" +
 	"\amanager\x18\x01 \x01(\tR\amanager\x12C\n" +
 	"\aapplied\x18\x02 \x03(\v2).flotestro.helper.v1.PackageVersionChangeR\aapplied\x12'\n" +
@@ -11429,7 +11468,9 @@ const file_flotestro_helper_v1_helper_proto_rawDesc = "" +
 	"\x0eeffects_missed\x18\v \x03(\v2).flotestro.helper.v1.PackageEffectOutcomeR\reffectsMissed\x124\n" +
 	"\x16rollback_artefact_path\x18\f \x01(\tR\x14rollbackArtefactPath\x124\n" +
 	"\x16verified_artefact_path\x18\r \x01(\tR\x14verifiedArtefactPath\x12+\n" +
-	"\x11installed_version\x18\x0e \x01(\tR\x10installedVersion\"\x98\x01\n" +
+	"\x11installed_version\x18\x0e \x01(\tR\x10installedVersion\x12'\n" +
+	"\x0fartefact_signer\x18\x0f \x01(\tR\x0eartefactSigner\x12'\n" +
+	"\x0fartefact_source\x18\x10 \x01(\tR\x0eartefactSource\"\x98\x01\n" +
 	"\x14PackageEffectOutcome\x12\x12\n" +
 	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x18\n" +
 	"\asubject\x18\x02 \x01(\tR\asubject\x12\x1a\n" +

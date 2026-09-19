@@ -27,7 +27,6 @@ type ErrorGuide struct {
 	Code string `json:"code"`
 	// Stage is where the code arises: materialize, preflight, planning,
 	// admission, dispatch, agent, helper, verify, reconcile, approval, cancel,
-	// startup for the states the panel refuses to start in, notification for the.
 	Stage string      `json:"stage"`
 	Retry RetryPolicy `json:"retry"`
 	// What happened, in one sentence.
@@ -39,7 +38,6 @@ type ErrorGuide struct {
 	CountsAsFailure bool `json:"counts_as_failure"`
 	// Alias is the code the panel really puts on a job or a target when this
 	// entry is one of the names the campaigns document uses for the same
-	// condition.
 	Alias string `json:"alias,omitempty"`
 }
 
@@ -324,7 +322,6 @@ var reportedGuides = []ErrorGuide{
 		Action:  "Check the host out of band. A host that comes back later reconnects on its own; the job stays failed, because nobody saw the return in time.", CountsAsFailure: true},
 	// The gate in front of a vulnerability feed: a fetch that lost most of what
 	// the snapshot in force holds is a source in trouble far more often than a
-	// fleet that became safe overnight.
 	{Code: "feed_shrank", Stage: "startup", Retry: RetryAfterChange,
 		Meaning: "A fetch of a vulnerability feed carried far fewer findings than the snapshot in force, so it was not activated.",
 		Action:  "Compare the two counts on the Vulnerabilities screen; accept the fetch there if the vendor really retired the findings, otherwise fix the source. The previous snapshot stays in force and ages into stale."},
@@ -685,6 +682,21 @@ var reportedGuides = []ErrorGuide{
 		Meaning: "A global silence - the one that may keep back the security alerts of the installation - was ordered by an identity that manages the notification channels of one site at most. Nothing was written and no alert was kept back.",
 		Action:  "Silence the host or the rule instead, or have somebody who manages the notification channels of the whole installation order the global silence and say in its reason why the security alerts are being kept back."},
 
+	// The cadence a rule declares and what it makes of the readings stopping
+	// (security remediation, chapter 12. 3).
+	{Code: "rule_cadence_too_fast", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The rule expects a reading of its metric more often than the agents take one. Such a rule stands in a gap between every two readings that arrive exactly on time, so its window would never fill and its no-data policy would fire for ever. Nothing was written.",
+		Action:  "Set the expected cadence to the sampling interval or longer. A rule cannot read faster than the fleet reports; raising the sampling rate is a setting of the monitoring, not of one rule."},
+	{Code: "rule_cadence_too_slow", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The expected cadence or the widest gap of the rule is longer than a day. A rule that tolerates more than a day of silence says nothing about a day of silence, which is the case somebody wrote it for. Nothing was written.",
+		Action:  "Bring both settings within a day. A host that may legitimately be quiet for longer belongs outside the rule's selector, not inside it with the gap opened up."},
+	{Code: "rule_gap_below_cadence", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The widest gap the rule tolerates is narrower than the cadence it expects, so every reading that arrives exactly on time opens a gap. The rule would report no data on a host that reports perfectly. Nothing was written.",
+		Action:  "Set the widest gap to at least the expected cadence; twice it is the default and leaves room for one lost reading."},
+	{Code: "rule_no_data_policy_unknown", Stage: "admission", Retry: RetryAfterChange,
+		Meaning: "The no-data policy of the rule is none of alert, unknown or ignore. The panel does not guess what silence means for a rule somebody else will be woken by. Nothing was written.",
+		Action:  "Use alert to be told when the readings stop, unknown to see it on the screen without being told, or ignore to judge only what arrives."},
+
 	// The lifecycle orders that travel between the instances of the control plane
 	// (security remediation, chapter 6).
 	{Code: "lifecycle_handover_pending", Stage: "reconcile", Retry: RetryReadState,
@@ -711,6 +723,15 @@ var reportedGuides = []ErrorGuide{
 	{Code: "agent_rollback_unavailable", Stage: "helper", Retry: RetryAfterChange,
 		Meaning: "The order named a version to go back to and the host could not keep its package file: it is neither in the package cache nor in the repository. The upgrade was not started, because a prepared return that does not exist is worse than an upgrade postponed.",
 		Action:  "Put the named version back into the repository the host uses, or order the upgrade without a version to go back to and accept that a return would then depend on the repository.", CountsAsFailure: true},
+	{Code: "agent_kept_artefact_invalid", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The host holds a package file of the ordered version, kept from an earlier replacement so that it could go back without the repository, and that file is not the one the order names. The host did not download the version again: an artefact nobody can vouch for must not turn into an ordinary upgrade. Nothing was installed.",
+		Action:  "Compare the digest on the release with the one the order carried. If the release is the right one, order the upgrade again after the host has dropped what it kept - a confirmed replacement releases it - and the host will fetch the file from the repository.", CountsAsFailure: true},
+	{Code: "agent_package_signer_unknown", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The order named the key the artefact must carry the signature of and the host could not establish who signed the file: the package carries no signature of its own, the key is not in the manager's keyring, or the tool that checks it is missing. Nothing was installed.",
+		Action:  "Check that the release signs the package file itself and that the host trusts the release key - rpm and pacman verify the file, while a Debian package file carries no signature and is covered by the signed repository index instead. Order without a signer only if the repository signature is the proof you accept.", CountsAsFailure: true},
+	{Code: "agent_package_signer_mismatch", Stage: "helper", Retry: RetryAfterChange,
+		Meaning: "The package file hashes to the digest the order names and was signed by a different key than the order names. A correct digest from the wrong signer is what this check exists for. Nothing was installed.",
+		Action:  "Do not order the upgrade again. Find out which key signed the artefact on the host and compare it with the release key; a mirror serving a rebuild and a compromised build machine both look like this.", CountsAsFailure: true},
 
 	// The phases of a directory change (security remediation, chapter 14. 3).
 	{Code: "directory_moddn_unsupported", Stage: "preflight", Retry: RetryAfterChange,
@@ -783,6 +804,27 @@ var reportedGuides = []ErrorGuide{
 	{Code: "management_channel_unproved", Stage: "agent", Retry: RetryReadState,
 		Meaning: "After the change the host could not prove it still talks to the panel: the call it made with its own identity was not acknowledged. The rescue plan was not disarmed, so the host returns on its own to the state from before the change. A connection that merely opens is not the proof - a rule can admit the handshake and still end every management session.",
 		Action:  "Wait for the rollback, read the state of the host, and order the change again only with a rule that leaves the management channel working - or, deliberately, with break-glass consent.", CountsAsFailure: true},
+
+	// What a firewall adapter says about its own persistent state (security
+	// remediation, chapter 14.4). None of these is a failure of a change: they
+	{Code: "nft_rule_not_persisted", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The kernel filters with this rule and the file the host loads at boot does not carry it. The rule is in force today and gone after the next reboot, which is exactly how a firewall reads as compliant and stops being one.",
+		Action:  "Write the rule into the file the host restores from - the panel names it next to the adapter - or accept it as temporary and say so. The panel's own table is rebuilt from its registry on the next change, not at boot."},
+	{Code: "nft_rule_not_loaded", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The file the host loads at boot carries this rule and the kernel is not filtering with it. It was edited without being loaded, or something flushed the ruleset afterwards.",
+		Action:  "Load the ruleset again on the host, or remove the rule from the file if it was left there by mistake. Until then nothing on this host enforces it."},
+	{Code: "nft_rule_not_comparable", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The rule is written with a variable, a service name or a construct the two views do not spell alike, so the panel cannot say whether the running rule and the stored one are the same rule. It is not reported as agreeing, because nobody checked it.",
+		Action:  "Write the rule in the boot file the way nft prints it - numbers instead of service names, the value instead of the define - or check that one rule by hand."},
+	{Code: "nft_persistent_source_unreadable", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The host names the file it restores its ruleset from and that file could not be read, so there is no second view to compare the running rules with. The state of the firewall after a reboot is unknown, not proven.",
+		Action:  "Check the path the panel names: a file deleted, an include pointing nowhere, or permissions on the directory. The agent reads it as root through the helper."},
+	{Code: "nft_persistent_source_unknown", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "Nothing on this host says what would restore its nftables ruleset at boot: there is no nftables unit, or the unit hands nft no file. Every rule in force now is in force only until the machine restarts.",
+		Action:  "Install and enable the distribution's nftables unit, or record deliberately that this host's rules are built by something else - a container runtime, a configuration tool - which the panel does not read."},
+	{Code: "nft_persistent_source_inactive", Stage: "inventory", Retry: RetryAfterChange,
+		Meaning: "The file with the rules is there and the unit that would load it is disabled or masked, so the file restores nothing. A ruleset matching that file to the letter still does not survive a reboot.",
+		Action:  "Enable the nftables unit on the host, or move the rules to whatever does load them there."},
 }
 
 // RefusalError is a validation refusal with a code of its own.

@@ -43,7 +43,6 @@ const StageInProgress = "in_progress"
 const (
 	// StageAccepted says the agent holds the task and will carry it out: the
 	// checks that refuse a task without touching the host are behind, and the
-	// task queues for the resources of the host.
 	StageAccepted = "accepted"
 	// StageAwaitingLock says the task waits for a resource another task of
 	// this host holds; the message names the blocker.
@@ -69,7 +68,6 @@ const (
 	RejectInvalidRequest = "invalid_request"
 	// RejectPreconditionChanged marks a task whose preconditions held when it was
 	// accepted and no longer do after its wait for a resource of the host: the
-	// host rebooted, or changed under the plan, while another operation held the.
 	RejectPreconditionChanged = "precondition_changed"
 	// RejectUnsupported marks an agent that by design performs no tasks.
 	RejectUnsupported = "unsupported"
@@ -78,7 +76,6 @@ const (
 	RejectInternalError = "agent_internal_error"
 	// RejectJournalUnavailable marks a mutation the agent did not start because
 	// its journal could not take the in-flight marker - a full or read-only state
-	// directory, most often.
 	RejectJournalUnavailable = "journal_unavailable"
 	// RejectNetworkUnreachable marks a network change after which the host lost
 	// its route to the panel.
@@ -93,11 +90,9 @@ const (
 	RejectOutcomeUnknown = "outcome_unknown"
 	// RejectHelperRejected marks a request the root helper refused at its own
 	// check of the contract, before running anything: a shape it does not read, a
-	// protocol it does not speak, an action it does not know.
 	RejectHelperRejected = "helper_rejected"
 	// RejectCanceledBeforeStart marks a task a cancel reached before the host
 	// touched anything: while it went through its checks, waited for a resource
-	// of the host, or before it was even delivered.
 	RejectCanceledBeforeStart = "canceled_before_start"
 )
 
@@ -112,7 +107,6 @@ type TaskExecutor struct {
 	progress func(*agentv1.TaskProgress)
 	// admit waits for the resources of the host a task needs - the locks of its
 	// claims first, a budget slot second - and returns the function that gives
-	// them back.
 	admit func(ctx context.Context, task *agentv1.TaskEnvelope, claims []opspec.ResourceClaim,
 		waiting func(blocker string)) (release func(), reason string)
 	// logLines passes on the journal preview. Nil means there is no session, and
@@ -122,7 +116,6 @@ type TaskExecutor struct {
 	cancels *cancellations
 	// phases records where every attempt handed to this process stands, so that a
 	// cancel is answered by what it finds rather than by a guess: not started,
-	// interrupted, not interruptible, already done.
 	phases *taskPhases
 	// secrets fetches the value of a secret for the duration of one operation.
 	secrets SecretFetch
@@ -137,7 +130,6 @@ type TaskExecutor struct {
 	hostID string
 	// running holds the keys of the tasks inside Execute right now, so that a
 	// redelivery of a task still in progress is acknowledged as alive rather than
-	// judged by the marker it left on disk.
 	running *runningKeys
 	// packageState reads what the package adapter can say cheaply about the host.
 	packageState PackageStateProbe
@@ -146,7 +138,6 @@ type TaskExecutor struct {
 	verifyReaders *hostReaders
 	// taskSecrets holds what a running task has fetched, so the read before the
 	// change, the change and the verification after it share the one lease the
-	// panel issued.
 	secretsMu   sync.Mutex
 	taskSecrets map[string][]byte
 }
@@ -187,7 +178,6 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 
 	// A delivery of a task this process is still working on has neither a result
 	// to replay nor a restart to report, and it is not a failure either: the work
-	// is under way.
 	if current, claimed := e.running.claim(idempotencyKey, taskID, started); !claimed {
 		e.acknowledgeRunning(task, current)
 		return inProgress(task)
@@ -195,13 +185,11 @@ func (e *TaskExecutor) Execute(ctx context.Context, task *agentv1.TaskEnvelope) 
 	defer e.running.release(idempotencyKey)
 	// Whatever this task fetched from the secret store is forgotten with it,
 	// whichever way it ends, and the pages it needed go back to the host rather
-	// than waiting for the next sample.
 	defer e.forgetTaskSecrets(taskID)
 	defer releaseAfterTask()
 
 	// The task runs under a context of its own, which a cancel that arrives
 	// before the start closes: the checks and the wait for the host's resources
-	// end at once, and the task is refused rather than started.
 	taskCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	if e.phases.enter(taskID, idempotencyKey, stop) {
@@ -300,7 +288,6 @@ func (c *cancellations) lookup(taskID string) (context.CancelFunc, bool) {
 
 // CancelTask answers a cancel request for an attempt: the outcome and the
 // phase for the acknowledgement, the hash of the result when the task is done,
-// and the interruption to carry out once the acknowledgement went out - nil.
 func (e *TaskExecutor) CancelTask(taskID string) (outcome agentv1.CancelAck_Outcome,
 	phase string, resultHash []byte, interrupt func()) {
 	if e == nil {
@@ -335,7 +322,6 @@ func (e *TaskExecutor) reportStage(task *agentv1.TaskEnvelope, stage, message st
 
 // Redelivered answers a delivery of a key this process is still executing,
 // before the session queues the task behind the locks and the budget of the
-// host.
 func (e *TaskExecutor) Redelivered(task *agentv1.TaskEnvelope) bool {
 	current, running := e.running.redeliver(task.GetIdempotencyKey(), task.GetTaskId())
 	if !running {
@@ -376,7 +362,6 @@ func inProgress(task *agentv1.TaskEnvelope) *agentv1.TaskResult {
 
 // RedeliveredCopy returns the copy of a final result owed to the attempt the
 // panel redelivered while the result was being computed, addressed to that
-// attempt.
 func (e *TaskExecutor) RedeliveredCopy(result *agentv1.TaskResult) *agentv1.TaskResult {
 	// An agent without an executor - the simulator - runs nothing, so it
 	// owes nothing.
@@ -499,7 +484,6 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 
 	// From here on the host may change, so the journal has to say so before the
 	// helper is asked: an agent that dies past this point and comes back without
-	// the marker would carry the change out again.
 	if err := e.markInFlight(task, action, payload, now); err != nil {
 		// Not knowing is allowed; a silent second execution is not. A host
 		// whose journal cannot take the marker performs no mutation.
@@ -517,7 +501,6 @@ func (e *TaskExecutor) run(ctx context.Context, task *agentv1.TaskEnvelope, now 
 
 	// The state the host is in before the change: the verifier compares against
 	// it where the promise is relative - a key that must differ, a volume that
-	// must have grown.
 	before := e.observeBaseline(ctx, task, action, payload)
 	result := e.perform(ctx, task, action, payload)
 	// The change is done; now the host is read again and the result says
@@ -661,13 +644,11 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 
 	// The full list of units is a separate path: systemd is not asked about each
 	// of them separately, because a host sometimes has hundreds of them and every
-	// query is a separate process.
 	if payload.All {
 		return e.listUnits(statusCtx, task)
 	}
 	// The full picture of a few units is a separate path as well: it starts
 	// several processes per unit and reads files, and its result is not a listing
-	// of the host.
 	if payload.Detail {
 		return e.detailUnits(statusCtx, task, payload.Units)
 	}
@@ -712,7 +693,6 @@ func (e *TaskExecutor) readUnitStatus(ctx context.Context, task *agentv1.TaskEnv
 
 // detailUnits reads the full picture of a few units: the dependencies, the
 // drop-ins with their content, the last journal lines and the cursor to
-// continue from.
 func (e *TaskExecutor) detailUnits(ctx context.Context, task *agentv1.TaskEnvelope,
 	units []string) *agentv1.TaskResult {
 	details := make([]systemd.UnitDetail, 0, len(units))
@@ -996,7 +976,9 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			AgentUpgrade: &opspec.AgentUpgradePayload{
 				TargetVersion:   request.GetTargetVersion(),
 				PackageSHA256:   request.GetPackageSha256(),
+				PackageSigner:   request.GetPackageSigner(),
 				RollbackVersion: request.GetRollbackVersion(),
+				ReleaseRollback: request.GetReleaseRollback(),
 			},
 		}, nil
 
@@ -1043,7 +1025,6 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 	case *agentv1.TaskEnvelope_PackagesRepair:
 		// An empty list and a missing list have to give the same payload: the hash
 		// of the plan is computed from the JSON, and an empty array is written
-		// differently than a missing one.
 		var answers []opspec.DebconfAnswer
 		for _, answer := range action.PackagesRepair.GetAnswers() {
 			answers = append(answers, opspec.DebconfAnswer{
@@ -1560,7 +1541,6 @@ func decodeAction(task *agentv1.TaskEnvelope) (opspec.ActionType, opspec.Payload
 			RollbackID:      network.GetRollbackId(),
 			// The second family and the layering are read back exactly as they were
 			// built, so that the digest the host computes over the payload is the
-			// digest the panel signed.
 			Method6:    network.GetMethod6(),
 			Addresses6: network.GetAddresses6(),
 			Gateway6:   network.GetGateway6(),

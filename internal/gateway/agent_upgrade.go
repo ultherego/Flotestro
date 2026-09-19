@@ -38,6 +38,40 @@ func (s *AgentService) settleAgentUpgrade(ctx context.Context,
 		}
 		s.closeUpgrade(ctx, hostID, job, jobs.StateSucceeded, "",
 			"the agent came back in version "+version, fence)
+		// The replacement is confirmed, so the host may drop what it kept for
+		// a return. Until this order runs, the way back stays.
+		s.releaseKeptArtefact(ctx, hostID, version, job.JobID)
+	}
+}
+
+// releaseKeptArtefact orders the host to drop the package file it kept so that
+// it could go back. Nothing is installed and nothing is fetched.
+func (s *AgentService) releaseKeptArtefact(ctx context.Context, hostID, version, jobID string) {
+	tx, err := s.jobs.Pool().Begin(ctx)
+	if err != nil {
+		s.log.Error("the release of the kept artefact was not ordered",
+			"host_id", hostID, "job_id", jobID, "err", err)
+		return
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := s.jobs.Create(ctx, tx, jobs.Spec{
+		HostID: hostID,
+		Action: opspec.ActionAgentUpgrade,
+		Payload: opspec.Payload{AgentUpgrade: &opspec.AgentUpgradePayload{
+			TargetVersion: version, ReleaseRollback: true,
+		}},
+		// The key binds the order to the replacement it closes: a second pass of
+		// the settlement does not create a second task.
+		IdempotencyKey: "agent-upgrade-release:" + jobID,
+		CreatedBy:      "system",
+	}); err != nil {
+		s.log.Error("the release of the kept artefact was not ordered",
+			"host_id", hostID, "job_id", jobID, "err", err)
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		s.log.Error("the release of the kept artefact was not ordered",
+			"host_id", hostID, "job_id", jobID, "err", err)
 	}
 }
 

@@ -31,6 +31,9 @@ func ParseRuleset(output string) Snapshot {
 
 	var table *Table
 	var chain *Chain
+	// other counts the braces of a block that is neither a table nor a chain -
+	// a named set, a map, a flowtable - whose closing brace would otherwise be
+	other := 0
 
 	for _, raw := range strings.Split(output, "\n") {
 		line := strings.TrimSpace(raw)
@@ -44,6 +47,10 @@ func ParseRuleset(output string) Snapshot {
 			continue
 		}
 		if strings.HasPrefix(line, "#") {
+			continue
+		}
+		if other > 0 {
+			other += nftBraces(line)
 			continue
 		}
 		if line == "}" {
@@ -79,6 +86,9 @@ func ParseRuleset(output string) Snapshot {
 			continue
 		}
 		if chain == nil {
+			if depth := nftBraces(line); depth > 0 {
+				other = depth
+			}
 			continue
 		}
 
@@ -124,19 +134,29 @@ func ruleFromLine(line string, chain Chain) Rule {
 	return rule
 }
 
+// tableOrigin says who a table belongs to by its name alone. It is what the
+// panel knows about a table nft did not warn about - and the only thing it
+func tableOrigin(family, name string) string {
+	if family == FlotestroFamily && name == FlotestroTable {
+		return SourceManaged
+	}
+	if name == "firewalld" || strings.HasPrefix(name, "docker") {
+		return SourceForeign
+	}
+	return SourceManual
+}
+
 // markOrigin separates the panel rules from foreign ones.
 func markOrigin(snapshot *Snapshot, owners map[string]string) {
 	origin := func(family, name string) (string, string) {
 		if owner, foreign := owners[family+" "+name]; foreign {
 			return SourceForeign, owner
 		}
-		if family == FlotestroFamily && name == FlotestroTable {
-			return SourceManaged, ""
+		source := tableOrigin(family, name)
+		if source == SourceForeign {
+			return source, name
 		}
-		if name == "firewalld" || strings.HasPrefix(name, "docker") {
-			return SourceForeign, name
-		}
-		return SourceManual, ""
+		return source, ""
 	}
 
 	for i := range snapshot.Tables {
