@@ -240,9 +240,18 @@ It answers with the commit, the workflow and the run. The GPG signature over
 what built it. A run that receives no OIDC identity publishes without an
 attestation and says so in the checks list rather than inventing one.
 
-**The key is not on the machine that built.** The release runs as two jobs.
-`Packages` compiles, packs, writes the checksums and makes the attestation; it
-holds no signing secret. `Sign and publish` runs in the protected environment
+**Each package is built on a machine of its own architecture.** `rpmbuild`
+refuses a foreign architecture, so the release is four jobs, not one: `Panel`
+builds the web bundle once, `Packages` runs twice in parallel - amd64 on
+`ubuntu-latest`, arm64 on `ubuntu-24.04-arm` - each packing natively with the
+same panel bundle, `The release as a whole` joins both, writes the manifest and
+the checksums and makes the attestation, and `Sign and publish` signs and
+publishes. The completeness check in the third job is what says both
+architectures really arrived.
+
+**The key is not on the machine that built.** The signing runs in its own job.
+`Panel`, `Packages` and `The release as a whole` compile, pack, write the
+checksums and make the attestation; none of them holds a signing secret. `Sign and publish` runs in the protected environment
 `release-signing`, downloads what the first job produced, re-checks every file
 against `SHA256SUMS` before it signs anything, signs, and uploads. A compromise
 of the build job is then not a compromise of the release signature, and the

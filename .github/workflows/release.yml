@@ -40,17 +40,12 @@ env:
   PAGES_BRANCH: gh-pages
 
 jobs:
-  packages:
-    name: Packages
+  panel:
+    name: Panel
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 20
     permissions:
       contents: read
-      # The identity the build provenance is made with, and the store it is
-      # written to. Granting them is not the same as receiving them: a run
-      # that gets no OIDC token says so and publishes without an attestation.
-      id-token: write
-      attestations: write
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -98,6 +93,52 @@ jobs:
             echo "\`$GITHUB_REF_NAME\` carries no signature this runner can verify. The release is built anyway; the artefacts are covered by \`SHA256SUMS\` and its signature." >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Panel
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: panel
+          path: web/dist
+          if-no-files-found: error
+
+  packages:
+    name: Packages (${{ matrix.arch }})
+    needs: panel
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          # The provenance carries "git describe": it needs the tags, not
+          # only the commit.
+          fetch-depth: 0
+      - uses: actions/setup-go@v5.2.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+      - uses: actions/setup-node@v4.1.0
+        with:
+          # The version the laboratory installs on the panel machine
+          # (Vagrant/provision/control-plane.sh).
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
       - name: Packaging tools
         # dpkg-deb packs the .deb for any architecture; rpmbuild builds
         # only for the machine it runs on, so the arm64 .rpm is left to an
@@ -112,18 +153,55 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             dpkg-dev rpm makepkg fakeroot libarchive-tools zstd binutils file
 
-      - name: Panel
-        working-directory: web
-        run: |
-          npm ci
-          npm run build
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          name: panel
+          path: web/dist
 
       - name: Build
         env:
           FLOTESTRO_WEB: ${{ github.workspace }}/web/dist
         run: |
           version="${GITHUB_REF_NAME#v}"
-          packaging/build-release.sh all "$version" dist
+          packaging/build-release.sh all "$version" dist "${{ matrix.arch }}"
+
+      - uses: actions/upload-artifact@v4.4.3
+        with:
+          name: dist-${{ matrix.arch }}
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.pkg.tar.*
+            dist/*.cdx.json
+            dist/modules-*.txt
+            dist/missing-rpm.txt
+          if-no-files-found: error
+
+  collect:
+    name: The release as a whole
+    needs: packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # The identity the build provenance is made with, and the store it is
+      # written to. Granting them is not the same as receiving them.
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          # The provenance carries "git describe": it needs the tags, not
+          # only the commit.
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4.1.8
+        with:
+          # Both architectures land in one directory; the completeness check
+          # below is what says whether both really arrived.
+          pattern: dist-*
+          merge-multiple: true
+          path: dist
 
       - name: The manifest of the run
         # The provenance is written here, from what this run knows about
@@ -269,7 +347,7 @@ jobs:
 
   sign:
     name: Sign and publish
-    needs: packages
+    needs: collect
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # The protected environment is the point of this job. The build runner
